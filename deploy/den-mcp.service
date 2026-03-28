@@ -1,0 +1,18 @@
+[Unit]
+Description=den-mcp — centralized MCP server for task management, agent messaging, and document storage
+After=network.target
+
+[Service]
+Type=notify
+User=patch
+WorkingDirectory=/home/patch
+ExecStart=/usr/bin/dotnet /opt/den-mcp/DenMcp.Server.dll
+Restart=on-failure
+RestartSec=5
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=DenMcp__ListenUrl=http://localhost:5199
+# Uncomment to override database path:
+# Environment=DenMcp__DatabasePath=/home/patch/.den-mcp/den.db
+
+[Install]
+WantedBy=multi-user.target

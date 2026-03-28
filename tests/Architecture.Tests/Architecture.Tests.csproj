@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\DenMcp.Core\DenMcp.Core.csproj" />
+    <ProjectReference Include="..\..\src\DenMcp.Server\DenMcp.Server.csproj" />
+    <ProjectReference Include="..\..\src\DenMcp.Cli\DenMcp.Cli.csproj" />
+  </ItemGroup>
+
+</Project>
