@@ -19,3 +19,9 @@ public enum DocType
     Reference,
     Note
 }
+
+public enum AgentSessionStatus
+{
+    Active,
+    Inactive
+}

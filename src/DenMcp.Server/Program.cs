@@ -41,6 +41,7 @@ builder.Services.AddSingleton<IProjectRepository, ProjectRepository>();
 builder.Services.AddSingleton<ITaskRepository, TaskRepository>();
 builder.Services.AddSingleton<IMessageRepository, MessageRepository>();
 builder.Services.AddSingleton<IDocumentRepository, DocumentRepository>();
+builder.Services.AddSingleton<IAgentSessionRepository, AgentSessionRepository>();
 
 // MCP
 builder.Services.AddMcpServer()
@@ -60,6 +61,7 @@ app.MapProjectRoutes();
 app.MapTaskRoutes();
 app.MapMessageRoutes();
 app.MapDocumentRoutes();
+app.MapAgentRoutes();
 
 // MCP endpoint
 app.MapMcp();

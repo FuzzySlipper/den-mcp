@@ -45,4 +45,18 @@ public static class EnumExtensions
         "note" => DocType.Note,
         _ => throw new ArgumentException($"Unknown doc type: {value}", nameof(value))
     };
+
+    public static string ToDbValue(this AgentSessionStatus status) => status switch
+    {
+        AgentSessionStatus.Active => "active",
+        AgentSessionStatus.Inactive => "inactive",
+        _ => throw new ArgumentOutOfRangeException(nameof(status), status, null)
+    };
+
+    public static AgentSessionStatus ParseAgentSessionStatus(string value) => value switch
+    {
+        "active" => AgentSessionStatus.Active,
+        "inactive" => AgentSessionStatus.Inactive,
+        _ => throw new ArgumentException($"Unknown agent session status: {value}", nameof(value))
+    };
 }

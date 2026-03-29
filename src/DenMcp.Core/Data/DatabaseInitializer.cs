@@ -189,5 +189,22 @@ public sealed class DatabaseInitializer
             INSERT INTO documents_fts(rowid, title, content, tags)
             VALUES (new.id, new.title, new.content, new.tags);
         END;
+
+        ------------------------------------------------------------
+        -- AGENT SESSIONS
+        ------------------------------------------------------------
+        CREATE TABLE IF NOT EXISTS agent_sessions (
+            agent           TEXT NOT NULL,
+            project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            status          TEXT NOT NULL DEFAULT 'active'
+                            CHECK (status IN ('active', 'inactive')),
+            checked_in_at   TEXT NOT NULL DEFAULT (datetime('now')),
+            last_heartbeat  TEXT NOT NULL DEFAULT (datetime('now')),
+            metadata        TEXT,
+            PRIMARY KEY (agent, project_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_agent_sessions_project_status
+            ON agent_sessions(project_id, status);
         """;
 }

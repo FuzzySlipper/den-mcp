@@ -1,5 +1,6 @@
 using DenMcp.Core.Models;
 using Terminal.Gui;
+using Terminal.Gui.Trees;
 using TaskStatus = DenMcp.Core.Models.TaskStatus;
 
 namespace DenMcp.Cli.Commands;
@@ -26,6 +27,43 @@ public static class DashboardCommand
     }
 }
 
+internal sealed class TaskNode
+{
+    public TaskSummary Summary { get; }
+    public List<TaskNode> Children { get; set; } = [];
+    public bool ChildrenLoaded { get; set; }
+
+    public TaskNode(TaskSummary summary) => Summary = summary;
+
+    public override string ToString()
+    {
+        var prio = Summary.Priority switch { 1 => "!!", 2 => "! ", _ => "  " };
+        var icon = Summary.Status switch
+        {
+            TaskStatus.Planned => "[ ]",
+            TaskStatus.InProgress => "[>]",
+            TaskStatus.Review => "[?]",
+            TaskStatus.Blocked => "[!]",
+            TaskStatus.Done => "[x]",
+            TaskStatus.Cancelled => "[-]",
+            _ => "[ ]"
+        };
+        var subs = Summary.SubtaskCount > 0 && !ChildrenLoaded
+            ? $" (+{Summary.SubtaskCount})"
+            : "";
+        return $"{prio}{icon} #{Summary.Id,-4} {Summary.Title}{subs}";
+    }
+}
+
+internal sealed class TaskTreeBuilder : ITreeBuilder<TaskNode>
+{
+    public bool SupportsCanExpand => true;
+
+    public bool CanExpand(TaskNode node) => node.Summary.SubtaskCount > 0;
+
+    public IEnumerable<TaskNode> GetChildren(TaskNode node) => node.Children;
+}
+
 internal sealed class DashboardView : Toplevel
 {
     private readonly DenApiClient _client;
@@ -33,16 +71,22 @@ internal sealed class DashboardView : Toplevel
     private string? _currentProject;
     private readonly FrameView _projectFrame;
     private readonly ListView _projectList;
+    private readonly FrameView _agentFrame;
+    private readonly ListView _agentList;
     private readonly FrameView _taskFrame;
-    private readonly ListView _taskList;
+    private readonly TreeView<TaskNode> _taskTree;
     private readonly FrameView _messageFrame;
     private readonly ListView _messageList;
     private readonly StatusBar _statusBar;
     private readonly CancellationTokenSource _cts = new();
 
     private List<Project> _projects = [];
-    private List<TaskSummary> _tasks = [];
+    private List<TaskNode> _rootNodes = [];
     private List<Message> _messages = [];
+    private List<AgentSession> _activeAgents = [];
+
+    // Status filter: null = show all
+    private string? _statusFilter;
 
     public DashboardView(DenApiClient client, string? initialProject)
     {
@@ -63,19 +107,38 @@ internal sealed class DashboardView : Toplevel
         {
             X = 0, Y = 0,
             Width = 22,
-            Height = Dim.Percent(50)
+            Height = Dim.Percent(35)
         };
         _projectFrame.Add(_projectList);
 
-        // Task list (main area)
-        _taskList = new ListView
+        // Active agents (below projects)
+        _agentList = new ListView
         {
             X = 0, Y = 0,
             Width = Dim.Fill(),
             Height = Dim.Fill(),
             AllowsMarking = false
         };
-        _taskList.OpenSelectedItem += OnTaskSelected;
+
+        _agentFrame = new FrameView("Agents")
+        {
+            X = 0, Y = Pos.Percent(35),
+            Width = 22,
+            Height = Dim.Percent(15)
+        };
+        _agentFrame.Add(_agentList);
+
+        // Task tree (main area)
+        _taskTree = new TreeView<TaskNode>
+        {
+            X = 0, Y = 0,
+            Width = Dim.Fill(),
+            Height = Dim.Fill(),
+            TreeBuilder = new TaskTreeBuilder(),
+            MultiSelect = false
+        };
+        _taskTree.ObjectActivated += OnTaskActivated;
+        _taskTree.SelectionChanged += OnTaskSelectionChanged;
 
         _taskFrame = new FrameView("Tasks")
         {
@@ -83,7 +146,7 @@ internal sealed class DashboardView : Toplevel
             Width = Dim.Fill(),
             Height = Dim.Percent(60)
         };
-        _taskFrame.Add(_taskList);
+        _taskFrame.Add(_taskTree);
 
         // Message feed (bottom)
         _messageList = new ListView
@@ -109,10 +172,11 @@ internal sealed class DashboardView : Toplevel
             new(Key.R, "~R~ Refresh", () => _ = RefreshData()),
             new(Key.S, "~S~ Status", OnChangeStatus),
             new(Key.N, "~N~ Next", OnShowNext),
-            new(Key.Tab, "~Tab~ Switch", () => CycleFocus())
+            new(Key.F, "~F~ Filter", OnFilterStatus),
+            new(Key.Tab, "~Tab~ Switch", CycleFocus)
         });
 
-        Add(_projectFrame, _taskFrame, _messageFrame, _statusBar);
+        Add(_projectFrame, _agentFrame, _taskFrame, _messageFrame, _statusBar);
     }
 
     public async Task StartPolling()
@@ -143,7 +207,6 @@ internal sealed class DashboardView : Toplevel
             var projectNames = _projects.Select(p => p.Id).ToList();
             _projectList.SetSource(projectNames);
 
-            // Select initial or current project
             if (_currentProject is null && _initialProject is not null)
                 _currentProject = _initialProject;
 
@@ -171,15 +234,31 @@ internal sealed class DashboardView : Toplevel
 
         try
         {
-            _tasks = await _client.ListTasksAsync(_currentProject);
-            var taskLines = _tasks.Select(t =>
+            var tasks = await _client.ListTasksAsync(_currentProject, status: _statusFilter);
+
+            _rootNodes = [];
+            foreach (var t in tasks)
             {
-                var icon = StatusIcon(t.Status);
-                var prio = t.Priority switch { 1 => "!!", 2 => "! ", _ => "  " };
-                return $"{prio}{icon} #{t.Id,-4} {Truncate(t.Title, 40)}";
-            }).ToList();
-            _taskList.SetSource(taskLines);
-            _taskFrame.Title = $"Tasks — {_currentProject} ({_tasks.Count})";
+                var node = new TaskNode(t);
+                if (t.SubtaskCount > 0)
+                {
+                    // Pre-fetch subtasks so tree can expand
+                    await LoadChildrenAsync(node);
+                }
+                _rootNodes.Add(node);
+            }
+
+            // Rebuild tree preserving expansion state
+            var expandedIds = CollectExpandedIds();
+            _taskTree.ClearObjects();
+            foreach (var node in _rootNodes)
+                _taskTree.AddObject(node);
+
+            // Re-expand previously expanded nodes
+            RestoreExpansion(_rootNodes, expandedIds);
+
+            var filterLabel = _statusFilter is not null ? $" [{_statusFilter}]" : "";
+            _taskFrame.Title = $"Tasks — {_currentProject} ({CountAll(_rootNodes)}){filterLabel}";
 
             _messages = await _client.GetMessagesAsync(_currentProject, limit: 15);
             var msgLines = _messages.Select(m =>
@@ -189,8 +268,75 @@ internal sealed class DashboardView : Toplevel
             }).ToList();
             _messageList.SetSource(msgLines);
             _messageFrame.Title = $"Messages — {_currentProject} ({_messages.Count})";
+
+            // Active agents
+            _activeAgents = await _client.ListActiveAgentsAsync(_currentProject);
+            var agentLines = _activeAgents.Select(a =>
+            {
+                var ago = FormatShortTime(a.LastHeartbeat);
+                return $" {Truncate(a.Agent, 14)} ({ago})";
+            }).ToList();
+            _agentList.SetSource(agentLines.Count > 0 ? agentLines : new List<string> { " (none)" });
+            _agentFrame.Title = $"Agents ({_activeAgents.Count})";
         }
         catch { /* ignore refresh errors */ }
+    }
+
+    private async Task LoadChildrenAsync(TaskNode parent)
+    {
+        if (parent.ChildrenLoaded) return;
+        try
+        {
+            var subtasks = await _client.ListTasksAsync(
+                parent.Summary.ProjectId, status: _statusFilter, parentId: parent.Summary.Id);
+            parent.Children = [];
+            foreach (var st in subtasks)
+            {
+                var child = new TaskNode(st);
+                if (st.SubtaskCount > 0)
+                    await LoadChildrenAsync(child);
+                parent.Children.Add(child);
+            }
+            parent.ChildrenLoaded = true;
+        }
+        catch { /* ignore */ }
+    }
+
+    private HashSet<int> CollectExpandedIds()
+    {
+        var ids = new HashSet<int>();
+        CollectExpanded(_rootNodes, ids);
+        return ids;
+    }
+
+    private void CollectExpanded(List<TaskNode> nodes, HashSet<int> ids)
+    {
+        foreach (var node in nodes)
+        {
+            if (_taskTree.IsExpanded(node))
+                ids.Add(node.Summary.Id);
+            if (node.ChildrenLoaded)
+                CollectExpanded(node.Children, ids);
+        }
+    }
+
+    private void RestoreExpansion(List<TaskNode> nodes, HashSet<int> expandedIds)
+    {
+        foreach (var node in nodes)
+        {
+            if (expandedIds.Contains(node.Summary.Id) && node.Summary.SubtaskCount > 0)
+                _taskTree.Expand(node);
+            if (node.ChildrenLoaded)
+                RestoreExpansion(node.Children, expandedIds);
+        }
+    }
+
+    private static int CountAll(List<TaskNode> nodes)
+    {
+        var count = nodes.Count;
+        foreach (var n in nodes)
+            if (n.ChildrenLoaded) count += CountAll(n.Children);
+        return count;
     }
 
     private void OnProjectSelected(ListViewItemEventArgs args)
@@ -202,36 +348,78 @@ internal sealed class DashboardView : Toplevel
         }
     }
 
-    private void OnTaskSelected(ListViewItemEventArgs args)
+    private void OnTaskActivated(ObjectActivatedEventArgs<TaskNode> args)
     {
-        if (args.Item < 0 || args.Item >= _tasks.Count || _currentProject is null) return;
-        var task = _tasks[args.Item];
+        var node = args.ActivatedObject;
+        if (node is null || _currentProject is null) return;
 
-        // Show task detail dialog
-        var dlg = new Dialog("Task Detail", 60, 16);
-        var content = $"""
-            #{task.Id}: {task.Title}
-            Status:   {task.Status}
-            Priority: {task.Priority}
-            Assigned: {task.AssignedTo ?? "(none)"}
-            Deps:     {task.DependencyCount}
-            Subtasks: {task.SubtaskCount}
-            """;
-        dlg.Add(new Label(content) { X = 1, Y = 1, Width = Dim.Fill(1), Height = Dim.Fill(1) });
+        ShowTaskDetail(node);
+    }
+
+    private void OnTaskSelectionChanged(object? sender, SelectionChangedEventArgs<TaskNode> args)
+    {
+        // Could be used for a preview pane in the future
+    }
+
+    private void ShowTaskDetail(TaskNode node)
+    {
+        var task = node.Summary;
+        var dlg = new Dialog("Task Detail", 65, 20);
+
+        var lines = new List<string>
+        {
+            $"#{task.Id}: {task.Title}",
+            "",
+            $"  Status:   {task.Status}",
+            $"  Priority: P{task.Priority}",
+            $"  Assigned: {task.AssignedTo ?? "(none)"}",
+            $"  Deps:     {task.DependencyCount}",
+            $"  Subtasks: {task.SubtaskCount}"
+        };
+
+        if (task.Tags is { Count: > 0 })
+            lines.Add($"  Tags:     {string.Join(", ", task.Tags)}");
+
+        var label = new Label(string.Join("\n", lines))
+        {
+            X = 1, Y = 1,
+            Width = Dim.Fill(1),
+            Height = Dim.Fill(2)
+        };
+        dlg.Add(label);
+
+        var statusBtn = new Button("Set Status");
+        statusBtn.Clicked += () =>
+        {
+            Application.RequestStop();
+            ChangeStatusForTask(node);
+        };
+        dlg.AddButton(statusBtn);
+
         var close = new Button("Close") { IsDefault = true };
         close.Clicked += () => Application.RequestStop();
         dlg.AddButton(close);
+
         Application.Run(dlg);
     }
 
-    private async void OnChangeStatus()
+    private void ChangeStatusForTask(TaskNode node)
     {
-        if (_taskList.SelectedItem < 0 || _taskList.SelectedItem >= _tasks.Count || _currentProject is null) return;
-        var task = _tasks[_taskList.SelectedItem];
-
+        var task = node.Summary;
         var statuses = new[] { "planned", "in_progress", "review", "blocked", "done", "cancelled" };
-        var dlg = new Dialog("Set Status", 35, 12);
-        var list = new ListView(statuses) { X = 1, Y = 1, Width = Dim.Fill(1), Height = Dim.Fill(2) };
+
+        // Pre-select current status
+        var currentIdx = Array.IndexOf(statuses, task.Status.ToDbValue());
+        if (currentIdx < 0) currentIdx = 0;
+
+        var dlg = new Dialog($"Set Status — #{task.Id}", 35, 12);
+        var list = new ListView(statuses)
+        {
+            X = 1, Y = 1,
+            Width = Dim.Fill(1),
+            Height = Dim.Fill(2),
+            SelectedItem = currentIdx
+        };
         dlg.Add(list);
 
         list.OpenSelectedItem += async (e) =>
@@ -239,7 +427,7 @@ internal sealed class DashboardView : Toplevel
             var newStatus = statuses[e.Item];
             try
             {
-                await _client.UpdateTaskAsync(_currentProject, task.Id, "user",
+                await _client.UpdateTaskAsync(_currentProject!, task.Id, "user",
                     new Dictionary<string, object?> { ["status"] = newStatus });
                 Application.RequestStop();
                 await RefreshProjectData();
@@ -251,6 +439,13 @@ internal sealed class DashboardView : Toplevel
         cancel.Clicked += () => Application.RequestStop();
         dlg.AddButton(cancel);
         Application.Run(dlg);
+    }
+
+    private async void OnChangeStatus()
+    {
+        var selected = _taskTree.SelectedObject;
+        if (selected is null || _currentProject is null) return;
+        ChangeStatusForTask(selected);
     }
 
     private async void OnShowNext()
@@ -270,9 +465,45 @@ internal sealed class DashboardView : Toplevel
         }
     }
 
+    private void OnFilterStatus()
+    {
+        var options = new[] { "(all)", "planned", "in_progress", "review", "blocked", "done", "cancelled" };
+
+        var currentIdx = 0;
+        if (_statusFilter is not null)
+        {
+            var idx = Array.IndexOf(options, _statusFilter);
+            if (idx >= 0) currentIdx = idx;
+        }
+
+        var dlg = new Dialog("Filter by Status", 30, 13);
+        var list = new ListView(options)
+        {
+            X = 1, Y = 1,
+            Width = Dim.Fill(1),
+            Height = Dim.Fill(2),
+            SelectedItem = currentIdx
+        };
+        dlg.Add(list);
+
+        list.OpenSelectedItem += (e) =>
+        {
+            _statusFilter = e.Item == 0 ? null : options[e.Item];
+            Application.RequestStop();
+            _ = RefreshProjectData();
+        };
+
+        var cancel = new Button("Cancel");
+        cancel.Clicked += () => Application.RequestStop();
+        dlg.AddButton(cancel);
+        Application.Run(dlg);
+    }
+
     private void CycleFocus()
     {
         if (_projectFrame.HasFocus)
+            _agentFrame.SetFocus();
+        else if (_agentFrame.HasFocus)
             _taskFrame.SetFocus();
         else if (_taskFrame.HasFocus)
             _messageFrame.SetFocus();
@@ -289,17 +520,6 @@ internal sealed class DashboardView : Toplevel
         }
         base.Dispose(disposing);
     }
-
-    private static string StatusIcon(TaskStatus status) => status switch
-    {
-        TaskStatus.Planned => "[ ]",
-        TaskStatus.InProgress => "[>]",
-        TaskStatus.Review => "[?]",
-        TaskStatus.Blocked => "[!]",
-        TaskStatus.Done => "[x]",
-        TaskStatus.Cancelled => "[-]",
-        _ => "[ ]"
-    };
 
     private static string FormatShortTime(DateTime dt)
     {

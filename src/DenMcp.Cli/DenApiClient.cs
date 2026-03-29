@@ -149,6 +149,13 @@ public sealed class DenApiClient : IDisposable
             $"api/documents/search?query={Uri.EscapeDataString(query)}");
     }
 
+    // Agents
+    public async Task<List<AgentSession>> ListActiveAgentsAsync(string? projectId = null)
+    {
+        var query = projectId is not null ? $"?projectId={Uri.EscapeDataString(projectId)}" : "";
+        return await GetAsync<List<AgentSession>>($"api/agents/active{query}");
+    }
+
     // Helpers
     private async Task<T> GetAsync<T>(string url) =>
         await _http.GetFromJsonAsync<T>(url, JsonOpts)
