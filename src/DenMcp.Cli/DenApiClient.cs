@@ -156,6 +156,12 @@ public sealed class DenApiClient : IDisposable
         return await GetAsync<List<AgentSession>>($"api/agents/active{query}");
     }
 
+    public async Task CheckOutBySessionAsync(string sessionId)
+    {
+        var body = new { agent = "", project_id = "", session_id = sessionId };
+        await PostAsync<object>($"api/agents/checkout", body);
+    }
+
     // Helpers
     private async Task<T> GetAsync<T>(string url) =>
         await _http.GetFromJsonAsync<T>(url, JsonOpts)

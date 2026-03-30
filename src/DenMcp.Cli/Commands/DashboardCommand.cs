@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Text.Json;
 using DenMcp.Core.Models;
 using Terminal.Gui;
 using Terminal.Gui.Trees;
@@ -269,12 +271,18 @@ internal sealed class DashboardView : Toplevel
             _messageList.SetSource(msgLines);
             _messageFrame.Title = $"Messages — {_currentProject} ({_messages.Count})";
 
-            // Active agents
-            _activeAgents = await _client.ListActiveAgentsAsync(_currentProject);
+            // Clean up sessions for dead CC processes
+            await CleanupDeadSessionsAsync();
+
+            // Active agents — _global shows all agents across projects
+            var isGlobal = _currentProject == "_global";
+            _activeAgents = await _client.ListActiveAgentsAsync(isGlobal ? null : _currentProject);
             var agentLines = _activeAgents.Select(a =>
             {
                 var ago = FormatShortTime(a.LastHeartbeat);
-                return $" {Truncate(a.Agent, 14)} ({ago})";
+                return isGlobal
+                    ? $" {Truncate(a.Agent, 9)}@{Truncate(a.ProjectId, 6)} ({ago})"
+                    : $" {Truncate(a.Agent, 14)} ({ago})";
             }).ToList();
             _agentList.SetSource(agentLines.Count > 0 ? agentLines : new List<string> { " (none)" });
             _agentFrame.Title = $"Agents ({_activeAgents.Count})";
@@ -361,32 +369,92 @@ internal sealed class DashboardView : Toplevel
         // Could be used for a preview pane in the future
     }
 
-    private void ShowTaskDetail(TaskNode node)
+    private async void ShowTaskDetail(TaskNode node)
     {
         var task = node.Summary;
-        var dlg = new Dialog("Task Detail", 65, 20);
+
+        // Fetch full detail from API
+        TaskDetail? detail = null;
+        try
+        {
+            detail = await _client.GetTaskAsync(_currentProject!, task.Id);
+        }
+        catch { /* fall back to summary-only view */ }
+
+        var dlg = new Dialog($"Task #{task.Id}", 78, 30);
 
         var lines = new List<string>
         {
-            $"#{task.Id}: {task.Title}",
+            task.Title,
+            new string('─', Math.Min(task.Title.Length, 74)),
             "",
-            $"  Status:   {task.Status}",
-            $"  Priority: P{task.Priority}",
-            $"  Assigned: {task.AssignedTo ?? "(none)"}",
-            $"  Deps:     {task.DependencyCount}",
-            $"  Subtasks: {task.SubtaskCount}"
+            $"  Status:   {task.Status.ToDbValue(),-14} Priority: P{task.Priority}",
+            $"  Assigned: {task.AssignedTo ?? "(none)"}"
         };
 
         if (task.Tags is { Count: > 0 })
             lines.Add($"  Tags:     {string.Join(", ", task.Tags)}");
 
-        var label = new Label(string.Join("\n", lines))
+        // Dependencies
+        if (detail?.Dependencies is { Count: > 0 })
         {
-            X = 1, Y = 1,
+            lines.Add("");
+            lines.Add("  Dependencies:");
+            foreach (var dep in detail.Dependencies)
+                lines.Add($"    #{dep.TaskId,-4} [{dep.Status.ToDbValue()}] {Truncate(dep.Title, 55)}");
+        }
+
+        // Subtasks
+        if (detail?.Subtasks is { Count: > 0 })
+        {
+            lines.Add("");
+            lines.Add("  Subtasks:");
+            foreach (var sub in detail.Subtasks)
+            {
+                var icon = sub.Status switch
+                {
+                    TaskStatus.Done => "x",
+                    TaskStatus.InProgress => ">",
+                    TaskStatus.Blocked => "!",
+                    _ => " "
+                };
+                lines.Add($"    [{icon}] #{sub.Id,-4} {Truncate(sub.Title, 55)}");
+            }
+        }
+
+        // Description
+        var desc = detail?.Task.Description ?? null;
+        if (desc is not null)
+        {
+            lines.Add("");
+            lines.Add("  ──────────────────────────────────────");
+            foreach (var line in desc.Split('\n'))
+                lines.Add($"  {line}");
+        }
+
+        // Recent messages
+        if (detail?.RecentMessages is { Count: > 0 })
+        {
+            lines.Add("");
+            lines.Add("  Recent Messages:");
+            foreach (var msg in detail.RecentMessages)
+            {
+                var ago = FormatShortTime(msg.CreatedAt);
+                lines.Add($"    [{ago}] {msg.Sender}: {Truncate(msg.Content.ReplaceLineEndings(" "), 50)}");
+            }
+        }
+
+        var content = string.Join("\n", lines);
+        var textView = new TextView
+        {
+            X = 1, Y = 0,
             Width = Dim.Fill(1),
-            Height = Dim.Fill(2)
+            Height = Dim.Fill(1),
+            ReadOnly = true,
+            WordWrap = true,
+            Text = content
         };
-        dlg.Add(label);
+        dlg.Add(textView);
 
         var statusBtn = new Button("Set Status");
         statusBtn.Clicked += () =>
@@ -531,4 +599,68 @@ internal sealed class DashboardView : Toplevel
 
     private static string Truncate(string s, int max) =>
         s.Length <= max ? s : s[..(max - 3)] + "...";
+
+    /// <summary>
+    /// Reads Claude Code PID files from ~/.claude/sessions/*.json,
+    /// checks which PIDs are alive, and checks out dead sessions.
+    /// </summary>
+    private async Task CleanupDeadSessionsAsync()
+    {
+        try
+        {
+            var sessionsDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".claude", "sessions");
+
+            if (!Directory.Exists(sessionsDir)) return;
+
+            // Collect live session IDs from PID files
+            var liveSessionIds = new HashSet<string>();
+            foreach (var file in Directory.GetFiles(sessionsDir, "*.json"))
+            {
+                try
+                {
+                    var json = await File.ReadAllTextAsync(file);
+                    using var doc = JsonDocument.Parse(json);
+                    var root = doc.RootElement;
+
+                    if (!root.TryGetProperty("pid", out var pidProp) ||
+                        !root.TryGetProperty("sessionId", out var sidProp))
+                        continue;
+
+                    var pid = pidProp.GetInt32();
+                    var sessionId = sidProp.GetString();
+                    if (sessionId is null) continue;
+
+                    try
+                    {
+                        Process.GetProcessById(pid);
+                        liveSessionIds.Add(sessionId);
+                    }
+                    catch (ArgumentException)
+                    {
+                        // PID doesn't exist — this session is dead
+                    }
+                }
+                catch { /* skip malformed files */ }
+            }
+
+            // Check active den sessions against live PIDs
+            if (_activeAgents.Count == 0) return;
+
+            foreach (var agent in _activeAgents)
+            {
+                if (agent.SessionId is not null && !liveSessionIds.Contains(agent.SessionId))
+                {
+                    // Session is tracked in den but the CC process is dead — check it out
+                    try
+                    {
+                        await _client.CheckOutBySessionAsync(agent.SessionId);
+                    }
+                    catch { /* ignore */ }
+                }
+            }
+        }
+        catch { /* ignore cleanup errors entirely */ }
+    }
 }

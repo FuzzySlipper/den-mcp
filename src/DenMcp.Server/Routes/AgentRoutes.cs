@@ -10,7 +10,7 @@ public static class AgentRoutes
 
         group.MapPost("/checkin", async (IAgentSessionRepository repo, CheckInRequest req) =>
         {
-            var session = await repo.CheckInAsync(req.Agent, req.ProjectId, req.Metadata);
+            var session = await repo.CheckInAsync(req.Agent, req.ProjectId, req.SessionId, req.Metadata);
             return Results.Ok(session);
         });
 
@@ -24,7 +24,11 @@ public static class AgentRoutes
 
         group.MapPost("/checkout", async (IAgentSessionRepository repo, CheckOutRequest req) =>
         {
-            var ok = await repo.CheckOutAsync(req.Agent, req.ProjectId);
+            bool ok;
+            if (req.SessionId is not null)
+                ok = await repo.CheckOutBySessionAsync(req.SessionId);
+            else
+                ok = await repo.CheckOutAsync(req.Agent, req.ProjectId);
             return ok
                 ? Results.Ok(new { status = "checked_out" })
                 : Results.NotFound(new { error = "No active session found." });
@@ -38,6 +42,6 @@ public static class AgentRoutes
     }
 }
 
-public record CheckInRequest(string Agent, string ProjectId, string? Metadata = null);
+public record CheckInRequest(string Agent, string ProjectId, string? SessionId = null, string? Metadata = null);
 public record HeartbeatRequest(string Agent, string ProjectId);
-public record CheckOutRequest(string Agent, string ProjectId);
+public record CheckOutRequest(string Agent, string ProjectId, string? SessionId = null);

@@ -33,6 +33,9 @@ public sealed class DatabaseInitializer
         schemaCmd.CommandText = Schema;
         await schemaCmd.ExecuteNonQueryAsync();
 
+        // Migrations for existing databases
+        await RunMigrationsAsync(connection);
+
         _logger.LogInformation("Database initialized at {ConnectionString}", _connectionString);
     }
 
@@ -196,6 +199,7 @@ public sealed class DatabaseInitializer
         CREATE TABLE IF NOT EXISTS agent_sessions (
             agent           TEXT NOT NULL,
             project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            session_id      TEXT,
             status          TEXT NOT NULL DEFAULT 'active'
                             CHECK (status IN ('active', 'inactive')),
             checked_in_at   TEXT NOT NULL DEFAULT (datetime('now')),
@@ -207,4 +211,29 @@ public sealed class DatabaseInitializer
         CREATE INDEX IF NOT EXISTS idx_agent_sessions_project_status
             ON agent_sessions(project_id, status);
         """;
+
+    private static async Task RunMigrationsAsync(SqliteConnection connection)
+    {
+        // Add session_id column to agent_sessions if it doesn't exist.
+        // SQLite has no ALTER TABLE ... ADD COLUMN IF NOT EXISTS,
+        // so we check via PRAGMA table_info.
+        await TryAddColumnAsync(connection, "agent_sessions", "session_id", "TEXT");
+    }
+
+    private static async Task TryAddColumnAsync(SqliteConnection connection, string table, string column, string type)
+    {
+        await using var checkCmd = connection.CreateCommand();
+        checkCmd.CommandText = $"PRAGMA table_info({table})";
+        await using var reader = await checkCmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            if (reader.GetString(1) == column)
+                return; // column already exists
+        }
+        await reader.CloseAsync();
+
+        await using var alterCmd = connection.CreateCommand();
+        alterCmd.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {type}";
+        await alterCmd.ExecuteNonQueryAsync();
+    }
 }
