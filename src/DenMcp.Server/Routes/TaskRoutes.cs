@@ -41,6 +41,8 @@ public static class TaskRoutes
             try
             {
                 var detail = await repo.GetDetailAsync(taskId);
+                if (detail.Task.ProjectId != projectId)
+                    return Results.NotFound(new { error = $"Task {taskId} not found" });
                 return Results.Ok(detail);
             }
             catch (KeyNotFoundException)
@@ -51,6 +53,10 @@ public static class TaskRoutes
 
         group.MapPut("/{taskId:int}", async (ITaskRepository repo, string projectId, int taskId, UpdateTaskRequest req) =>
         {
+            var task = await repo.GetByIdAsync(taskId);
+            if (task is null || task.ProjectId != projectId)
+                return Results.NotFound(new { error = $"Task {taskId} not found" });
+
             var changes = new Dictionary<string, object?>();
             if (req.Title is not null) changes["title"] = req.Title;
             if (req.Description is not null) changes["description"] = req.Description;
@@ -79,8 +85,15 @@ public static class TaskRoutes
                 : Results.Ok(new { message = "No unblocked tasks available." });
         });
 
-        group.MapPost("/{taskId:int}/dependencies", async (ITaskRepository repo, int taskId, AddDependencyRequest req) =>
+        group.MapPost("/{taskId:int}/dependencies", async (ITaskRepository repo, string projectId, int taskId, AddDependencyRequest req) =>
         {
+            var task = await repo.GetByIdAsync(taskId);
+            if (task is null || task.ProjectId != projectId)
+                return Results.NotFound(new { error = $"Task {taskId} not found" });
+            var dep = await repo.GetByIdAsync(req.DependsOn);
+            if (dep is null || dep.ProjectId != projectId)
+                return Results.BadRequest(new { error = $"Dependency target task {req.DependsOn} not found in project {projectId}." });
+
             try
             {
                 await repo.AddDependencyAsync(taskId, req.DependsOn);
@@ -92,8 +105,12 @@ public static class TaskRoutes
             }
         });
 
-        group.MapDelete("/{taskId:int}/dependencies/{dependsOn:int}", async (ITaskRepository repo, int taskId, int dependsOn) =>
+        group.MapDelete("/{taskId:int}/dependencies/{dependsOn:int}", async (ITaskRepository repo, string projectId, int taskId, int dependsOn) =>
         {
+            var task = await repo.GetByIdAsync(taskId);
+            if (task is null || task.ProjectId != projectId)
+                return Results.NotFound(new { error = $"Task {taskId} not found" });
+
             await repo.RemoveDependencyAsync(taskId, dependsOn);
             return Results.Ok(new { message = $"Removed dependency." });
         });

@@ -198,7 +198,7 @@ public sealed class TaskRepository : ITaskRepository
             for (var i = 0; i < tags.Length; i++)
             {
                 var p = $"@tag{i}";
-                where.Add($"EXISTS (SELECT 1 WHERE t.tags LIKE '%' || {p} || '%')");
+                where.Add($"EXISTS (SELECT 1 FROM json_each(t.tags) WHERE json_each.value = {p})");
                 cmd.Parameters.AddWithValue(p, tags[i]);
             }
         }

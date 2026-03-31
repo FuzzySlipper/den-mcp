@@ -153,4 +153,41 @@ public class TaskRepositoryTests : IAsyncLifetime
         var next = await _repo.GetNextTaskAsync("proj");
         Assert.Null(next);
     }
+
+    [Fact]
+    public async Task ListTasks_TagFilter_DoesNotMatchSubstrings()
+    {
+        await _repo.CreateAsync(new ProjectTask
+        {
+            ProjectId = "proj", Title = "CLI task",
+            Tags = ["cli"]
+        });
+        await _repo.CreateAsync(new ProjectTask
+        {
+            ProjectId = "proj", Title = "Client task",
+            Tags = ["client"]
+        });
+
+        var cliTasks = await _repo.ListAsync("proj", tags: ["cli"]);
+        Assert.Single(cliTasks);
+        Assert.Equal("CLI task", cliTasks[0].Title);
+
+        var clientTasks = await _repo.ListAsync("proj", tags: ["client"]);
+        Assert.Single(clientTasks);
+        Assert.Equal("Client task", clientTasks[0].Title);
+    }
+
+    [Fact]
+    public async Task ListTasks_DoesNotReturnTasksFromOtherProject()
+    {
+        var projRepo = new ProjectRepository(_testDb.Db);
+        await projRepo.CreateAsync(new Project { Id = "other", Name = "Other" });
+
+        await _repo.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Mine" });
+        await _repo.CreateAsync(new ProjectTask { ProjectId = "other", Title = "Theirs" });
+
+        var mine = await _repo.ListAsync("proj");
+        Assert.Single(mine);
+        Assert.Equal("Mine", mine[0].Title);
+    }
 }

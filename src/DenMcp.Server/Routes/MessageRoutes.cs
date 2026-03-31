@@ -33,11 +33,13 @@ public static class MessageRoutes
             return Results.Ok(messages);
         });
 
-        group.MapGet("/thread/{threadId:int}", async (IMessageRepository repo, int threadId) =>
+        group.MapGet("/thread/{threadId:int}", async (IMessageRepository repo, string projectId, int threadId) =>
         {
             try
             {
                 var thread = await repo.GetThreadAsync(threadId);
+                if (thread.Root.ProjectId != projectId)
+                    return Results.NotFound(new { error = $"Message {threadId} not found" });
                 return Results.Ok(thread);
             }
             catch (KeyNotFoundException)

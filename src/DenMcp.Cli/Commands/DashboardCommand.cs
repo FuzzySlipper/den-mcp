@@ -603,6 +603,8 @@ internal sealed class DashboardView : Toplevel
     /// <summary>
     /// Reads Claude Code PID files from ~/.claude/sessions/*.json,
     /// checks which PIDs are alive, and checks out dead sessions.
+    /// Only checks out sessions that have a local PID file with a dead process —
+    /// never touches sessions from other machines or non-Claude agents.
     /// </summary>
     private async Task CleanupDeadSessionsAsync()
     {
@@ -614,8 +616,8 @@ internal sealed class DashboardView : Toplevel
 
             if (!Directory.Exists(sessionsDir)) return;
 
-            // Collect live session IDs from PID files
-            var liveSessionIds = new HashSet<string>();
+            // Collect session IDs whose local PID is confirmed dead
+            var deadSessionIds = new HashSet<string>();
             foreach (var file in Directory.GetFiles(sessionsDir, "*.json"))
             {
                 try
@@ -635,30 +637,25 @@ internal sealed class DashboardView : Toplevel
                     try
                     {
                         Process.GetProcessById(pid);
-                        liveSessionIds.Add(sessionId);
+                        // PID is alive — skip
                     }
                     catch (ArgumentException)
                     {
-                        // PID doesn't exist — this session is dead
+                        // PID doesn't exist — this local session is dead
+                        deadSessionIds.Add(sessionId);
                     }
                 }
                 catch { /* skip malformed files */ }
             }
 
-            // Check active den sessions against live PIDs
-            if (_activeAgents.Count == 0) return;
-
-            foreach (var agent in _activeAgents)
+            // Only check out sessions we can positively prove are dead locally
+            foreach (var sessionId in deadSessionIds)
             {
-                if (agent.SessionId is not null && !liveSessionIds.Contains(agent.SessionId))
+                try
                 {
-                    // Session is tracked in den but the CC process is dead — check it out
-                    try
-                    {
-                        await _client.CheckOutBySessionAsync(agent.SessionId);
-                    }
-                    catch { /* ignore */ }
+                    await _client.CheckOutBySessionAsync(sessionId);
                 }
+                catch { /* ignore */ }
             }
         }
         catch { /* ignore cleanup errors entirely */ }

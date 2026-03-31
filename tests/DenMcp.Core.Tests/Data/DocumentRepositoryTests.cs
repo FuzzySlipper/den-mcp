@@ -142,4 +142,27 @@ public class DocumentRepositoryTests : IAsyncLifetime
         var deleted = await _repo.DeleteAsync("proj", "nonexistent");
         Assert.False(deleted);
     }
+
+    [Fact]
+    public async Task List_TagFilter_DoesNotMatchSubstrings()
+    {
+        await _repo.UpsertAsync(new Document
+        {
+            ProjectId = "proj", Slug = "cli-doc", Title = "CLI Doc",
+            Content = "x", Tags = ["cli"]
+        });
+        await _repo.UpsertAsync(new Document
+        {
+            ProjectId = "proj", Slug = "client-doc", Title = "Client Doc",
+            Content = "x", Tags = ["client"]
+        });
+
+        var cliDocs = await _repo.ListAsync("proj", tags: ["cli"]);
+        Assert.Single(cliDocs);
+        Assert.Equal("CLI Doc", cliDocs[0].Title);
+
+        var clientDocs = await _repo.ListAsync("proj", tags: ["client"]);
+        Assert.Single(clientDocs);
+        Assert.Equal("Client Doc", clientDocs[0].Title);
+    }
 }
