@@ -11,7 +11,8 @@ public interface ITaskRepository
     Task<ProjectTask?> GetByIdAsync(int id);
     Task<TaskDetail> GetDetailAsync(int id);
     Task<List<TaskSummary>> ListAsync(string projectId, TaskStatus[]? statuses = null,
-        string? assignedTo = null, string[]? tags = null, int? maxPriority = null, int? parentId = null);
+        string? assignedTo = null, string[]? tags = null, int? maxPriority = null, int? parentId = null,
+        bool includeAll = false);
     Task<ProjectTask> UpdateAsync(int id, Dictionary<string, object?> changes, string agent);
     Task AddDependencyAsync(int taskId, int dependsOn);
     Task RemoveDependencyAsync(int taskId, int dependsOn);
@@ -150,7 +151,8 @@ public sealed class TaskRepository : ITaskRepository
     }
 
     public async Task<List<TaskSummary>> ListAsync(string projectId, TaskStatus[]? statuses = null,
-        string? assignedTo = null, string[]? tags = null, int? maxPriority = null, int? parentId = null)
+        string? assignedTo = null, string[]? tags = null, int? maxPriority = null, int? parentId = null,
+        bool includeAll = false)
     {
         await using var conn = await _db.CreateConnectionAsync();
         await using var cmd = conn.CreateCommand();
@@ -187,7 +189,7 @@ public sealed class TaskRepository : ITaskRepository
             where.Add("t.parent_id = @parentId");
             cmd.Parameters.AddWithValue("@parentId", parentId.Value);
         }
-        else
+        else if (!includeAll)
         {
             where.Add("t.parent_id IS NULL");
         }

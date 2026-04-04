@@ -80,3 +80,11 @@ build/
 # Task files
 # tasks.json
 # tasks/ 
+
+# Web frontend build output + deps
+src/DenMcp.Server/wwwroot/
+src/DenMcp.Server/ClientApp/node_modules/
+
+# Agent guidance files (local-only, not committed)
+AGENTS.md
+CLAUDE.md

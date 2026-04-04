@@ -27,12 +27,13 @@ public static class TaskRoutes
         });
 
         group.MapGet("/", async (ITaskRepository repo, string projectId,
-            string? status, string? assignedTo, string? tags, int? priority, int? parentId) =>
+            string? status, string? assignedTo, string? tags, int? priority, int? parentId, bool? tree) =>
         {
             var statuses = status?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Select(EnumExtensions.ParseTaskStatus).ToArray();
             var tagList = tags?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            var tasks = await repo.ListAsync(projectId, statuses, assignedTo, tagList, priority, parentId);
+            var tasks = await repo.ListAsync(projectId, statuses, assignedTo, tagList, priority, parentId,
+                includeAll: tree == true && parentId is null);
             return Results.Ok(tasks);
         });
 

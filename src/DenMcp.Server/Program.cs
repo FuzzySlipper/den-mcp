@@ -53,6 +53,10 @@ var app = builder.Build();
 // Initialize database on startup
 await initializer.InitializeAsync();
 
+// Static files (web frontend)
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
 // Health check
 app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
 
@@ -64,6 +68,9 @@ app.MapDocumentRoutes();
 app.MapAgentRoutes();
 
 // MCP endpoint
-app.MapMcp();
+app.MapMcp("/mcp");
+
+// SPA fallback — serves index.html for unmatched routes
+app.MapFallbackToFile("index.html");
 
 app.Run();

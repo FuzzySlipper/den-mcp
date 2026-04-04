@@ -4,6 +4,16 @@
     <AllowMissingPrunePackageData>true</AllowMissingPrunePackageData>
   </PropertyGroup>
 
+  <!-- Build frontend when node_modules exists (dev has run npm install) -->
+  <Target Name="BuildClientApp" BeforeTargets="Build" Condition="Exists('ClientApp/node_modules')">
+    <Exec Command="npm run build" WorkingDirectory="ClientApp" />
+  </Target>
+
+  <!-- Always build frontend on publish -->
+  <Target Name="PublishClientApp" BeforeTargets="Publish">
+    <Exec Command="npm ci &amp;&amp; npm run build" WorkingDirectory="ClientApp" />
+  </Target>
+
   <ItemGroup>
     <ProjectReference Include="..\DenMcp.Core\DenMcp.Core.csproj" />
   </ItemGroup>
