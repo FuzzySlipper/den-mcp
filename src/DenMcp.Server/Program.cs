@@ -1,6 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DenMcp.Core.Data;
+using DenMcp.Core.Llm;
+using DenMcp.Core.Models;
 using DenMcp.Server;
 using DenMcp.Server.Routes;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -19,6 +21,18 @@ if (builder.Configuration["db-path"] is { } dbPathOverride)
     options.DatabasePath = dbPathOverride;
 
 builder.Services.AddSingleton(options);
+
+// LLM (librarian)
+var llmConfig = new LlmConfig();
+builder.Configuration.GetSection("DenMcp:Llm").Bind(llmConfig);
+if (builder.Configuration["llm-endpoint"] is { } llmEndpoint)
+    llmConfig.Endpoint = llmEndpoint;
+if (builder.Configuration["llm-api-key"] is { } llmApiKey)
+    llmConfig.ApiKey = llmApiKey;
+if (builder.Configuration["llm-model"] is { } llmModel)
+    llmConfig.Model = llmModel;
+builder.Services.AddSingleton(llmConfig);
+builder.Services.AddSingleton<ILlmClient, OpenAiCompatibleLlmClient>();
 
 // Kestrel
 builder.WebHost.UseUrls(options.ListenUrl);
