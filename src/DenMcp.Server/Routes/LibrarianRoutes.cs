@@ -15,8 +15,19 @@ public static class LibrarianRoutes
             if (string.IsNullOrEmpty(llmConfig.Endpoint))
                 return Results.BadRequest(new { error = "Librarian is not configured. Set DenMcp:Llm:Endpoint in appsettings.json or pass --llm-endpoint." });
 
-            var response = await librarian.QueryAsync(projectId, req.Query, req.TaskId, req.IncludeGlobal);
-            return Results.Ok(response);
+            try
+            {
+                var response = await librarian.QueryAsync(projectId, req.Query, req.TaskId, req.IncludeGlobal);
+                return Results.Ok(response);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { error = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
         });
     }
 }

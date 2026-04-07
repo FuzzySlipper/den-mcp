@@ -31,6 +31,12 @@ if (builder.Configuration["llm-api-key"] is { } llmApiKey)
     llmConfig.ApiKey = llmApiKey;
 if (builder.Configuration["llm-model"] is { } llmModel)
     llmConfig.Model = llmModel;
+if (builder.Configuration["llm-max-tokens"] is { } llmMaxTokens &&
+    int.TryParse(llmMaxTokens, out var parsedMaxTokens))
+    llmConfig.MaxTokens = parsedMaxTokens;
+if (builder.Configuration["llm-context-token-budget"] is { } llmContextTokenBudget &&
+    int.TryParse(llmContextTokenBudget, out var parsedContextTokenBudget))
+    llmConfig.ContextTokenBudget = parsedContextTokenBudget;
 builder.Services.AddSingleton(llmConfig);
 builder.Services.AddSingleton<ILlmClient, OpenAiCompatibleLlmClient>();
 
@@ -93,3 +99,5 @@ app.MapMcp("/mcp");
 app.MapFallbackToFile("index.html");
 
 app.Run();
+
+public partial class Program;

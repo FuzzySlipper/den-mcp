@@ -120,6 +120,22 @@ public class LibrarianParsingTests
     }
 
     [Fact]
+    public void ParseResponse_MissingConfidence_DefaultsToLow()
+    {
+        var json = """
+            {
+              "relevant_items": [],
+              "recommendations": ["follow up on the spec"]
+            }
+            """;
+
+        var result = LibrarianService.ParseResponse(json);
+
+        Assert.Equal(LibrarianConfidence.Low, result.Confidence);
+        Assert.Single(result.Recommendations);
+    }
+
+    [Fact]
     public void ParseResponse_MissingSnippet_IsNull()
     {
         var json = """

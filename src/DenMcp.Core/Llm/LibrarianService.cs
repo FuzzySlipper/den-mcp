@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using DenMcp.Core.Data;
 using DenMcp.Core.Models;
 using Microsoft.Extensions.Logging;
 
@@ -9,6 +10,7 @@ namespace DenMcp.Core.Llm;
 public sealed partial class LibrarianService
 {
     private readonly LibrarianGatherer _gatherer;
+    private readonly ITaskRepository _tasks;
     private readonly ILlmClient _llm;
     private readonly LlmConfig _config;
     private readonly ILogger<LibrarianService> _logger;
@@ -22,11 +24,13 @@ public sealed partial class LibrarianService
 
     public LibrarianService(
         LibrarianGatherer gatherer,
+        ITaskRepository tasks,
         ILlmClient llm,
         LlmConfig config,
         ILogger<LibrarianService> logger)
     {
         _gatherer = gatherer;
+        _tasks = tasks;
         _llm = llm;
         _config = config;
         _logger = logger;
@@ -39,7 +43,22 @@ public sealed partial class LibrarianService
         bool includeGlobal = true,
         CancellationToken ct = default)
     {
-        var context = await _gatherer.GatherAsync(projectId, query, taskId, includeGlobal, _config.MaxTokens);
+        if (taskId is { } requestedTaskId)
+        {
+            var task = await _tasks.GetByIdAsync(requestedTaskId);
+            if (task is null)
+                throw new KeyNotFoundException($"Task {requestedTaskId} not found");
+
+            if (!string.Equals(task.ProjectId, projectId, StringComparison.Ordinal))
+                throw new InvalidOperationException($"Task {requestedTaskId} does not belong to project {projectId}");
+        }
+
+        var context = await _gatherer.GatherAsync(
+            projectId,
+            query,
+            taskId,
+            includeGlobal,
+            _config.ContextTokenBudget);
 
         if (string.IsNullOrWhiteSpace(context.FormattedText))
         {

@@ -26,7 +26,18 @@ public sealed class LibrarianTools
                 new { error = "Librarian is not configured. Set DenMcp:Llm:Endpoint in appsettings.json or pass --llm-endpoint." },
                 JsonOpts.Default);
 
-        var response = await librarian.QueryAsync(project_id, query, task_id, include_global);
-        return JsonSerializer.Serialize(response, JsonOpts.Default);
+        try
+        {
+            var response = await librarian.QueryAsync(project_id, query, task_id, include_global);
+            return JsonSerializer.Serialize(response, JsonOpts.Default);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, JsonOpts.Default);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, JsonOpts.Default);
+        }
     }
 }

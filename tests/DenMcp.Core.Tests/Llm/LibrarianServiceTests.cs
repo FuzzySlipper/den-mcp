@@ -39,8 +39,14 @@ public class LibrarianServiceTests : IAsyncLifetime
 
         var gatherer = new LibrarianGatherer(taskRepo, docRepo, msgRepo);
         _llmClient = new StubLlmClient();
-        var config = new LlmConfig { Endpoint = "http://test", Model = "test", MaxTokens = 4096 };
-        _service = new LibrarianService(gatherer, _llmClient, config, NullLogger<LibrarianService>.Instance);
+        var config = new LlmConfig
+        {
+            Endpoint = "http://test",
+            Model = "test",
+            MaxTokens = 512,
+            ContextTokenBudget = 4096
+        };
+        _service = new LibrarianService(gatherer, taskRepo, _llmClient, config, NullLogger<LibrarianService>.Instance);
     }
 
     public Task DisposeAsync() => _testDb.DisposeAsync();
@@ -109,6 +115,35 @@ public class LibrarianServiceTests : IAsyncLifetime
         Assert.Empty(result.RelevantItems);
         Assert.Single(result.Recommendations);
         Assert.Contains("sorry", result.Recommendations[0]);
+    }
+
+    [Fact]
+    public async Task QueryAsync_MissingTask_ThrowsKeyNotFound()
+    {
+        var ex = await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            _service.QueryAsync("proj", "testing", taskId: 99999));
+
+        Assert.Equal("Task 99999 not found", ex.Message);
+        Assert.Null(_llmClient.LastUserMessage);
+    }
+
+    [Fact]
+    public async Task QueryAsync_TaskFromDifferentProject_ThrowsInvalidOperation()
+    {
+        var taskRepo = new TaskRepository(_testDb.Db);
+        var projRepo = new ProjectRepository(_testDb.Db);
+        await projRepo.CreateAsync(new Project { Id = "other", Name = "Other" });
+        var otherTask = await taskRepo.CreateAsync(new ProjectTask
+        {
+            ProjectId = "other",
+            Title = "Other project task"
+        });
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _service.QueryAsync("proj", "testing", taskId: otherTask.Id));
+
+        Assert.Equal($"Task {otherTask.Id} does not belong to project proj", ex.Message);
+        Assert.Null(_llmClient.LastUserMessage);
     }
 
     private sealed class StubLlmClient : ILlmClient
