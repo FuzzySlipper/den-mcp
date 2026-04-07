@@ -84,6 +84,7 @@ app.MapTaskRoutes();
 app.MapMessageRoutes();
 app.MapDocumentRoutes();
 app.MapAgentRoutes();
+app.MapLibrarianRoutes();
 
 // MCP endpoint
 app.MapMcp("/mcp");

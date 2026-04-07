@@ -149,6 +149,14 @@ public sealed class DenApiClient : IDisposable
             $"api/documents/search?query={Uri.EscapeDataString(query)}");
     }
 
+    // Librarian
+    public async Task<LibrarianResponse> QueryLibrarianAsync(string projectId, string query,
+        int? taskId = null, bool includeGlobal = true)
+    {
+        var body = new { query, task_id = taskId, include_global = includeGlobal };
+        return await PostAsync<LibrarianResponse>($"api/projects/{Esc(projectId)}/librarian/query", body);
+    }
+
     // Agents
     public async Task<List<AgentSession>> ListActiveAgentsAsync(string? projectId = null)
     {
