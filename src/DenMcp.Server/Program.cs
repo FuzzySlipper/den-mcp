@@ -57,6 +57,9 @@ builder.Services.AddSingleton<IMessageRepository, MessageRepository>();
 builder.Services.AddSingleton<IDocumentRepository, DocumentRepository>();
 builder.Services.AddSingleton<IAgentSessionRepository, AgentSessionRepository>();
 
+// Librarian
+builder.Services.AddSingleton<LibrarianGatherer>();
+
 // MCP
 builder.Services.AddMcpServer()
     .WithHttpTransport()
