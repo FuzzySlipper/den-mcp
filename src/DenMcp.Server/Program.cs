@@ -59,6 +59,7 @@ builder.Services.AddSingleton<IAgentSessionRepository, AgentSessionRepository>()
 
 // Librarian
 builder.Services.AddSingleton<LibrarianGatherer>();
+builder.Services.AddSingleton<LibrarianService>();
 
 // MCP
 builder.Services.AddMcpServer()
