@@ -28,6 +28,18 @@ public class RoutingServiceTests : IAsyncLifetime
         WriteIndented = true
     };
 
+    private async Task StoreRoutingDoc(RoutingConfig config)
+    {
+        await _docs.UpsertAsync(new Document
+        {
+            ProjectId = "proj",
+            Slug = "dispatch-routing",
+            Title = "Dispatch Routing",
+            Content = JsonSerializer.Serialize(config, JsonOptions),
+            DocType = DocType.Convention
+        });
+    }
+
     #region GetRoutingConfigAsync
 
     [Fact]
@@ -101,6 +113,63 @@ public class RoutingServiceTests : IAsyncLifetime
         await _service.GetRoutingConfigAsync("proj");
         var doc = await _docs.GetAsync("proj", "dispatch-routing");
         Assert.Null(doc);
+    }
+
+    [Fact]
+    public async Task GetRoutingConfig_UnknownTriggerEvent_ReturnsInvalid()
+    {
+        var config = new RoutingConfig
+        {
+            Roles = new Dictionary<string, string> { ["dev"] = "agent" },
+            Triggers = [new RoutingTrigger { Event = "bogus_event", DispatchTo = "dev" }]
+        };
+        await StoreRoutingDoc(config);
+
+        var result = await _service.GetRoutingConfigAsync("proj");
+        Assert.False(result.IsValid);
+        Assert.Contains("unknown event", result.ValidationError);
+    }
+
+    [Fact]
+    public async Task GetRoutingConfig_BlankDispatchTo_ReturnsInvalid()
+    {
+        var config = new RoutingConfig
+        {
+            Triggers = [new RoutingTrigger { Event = DispatchEvent.TaskStatusChanged, DispatchTo = "  " }]
+        };
+        await StoreRoutingDoc(config);
+
+        var result = await _service.GetRoutingConfigAsync("proj");
+        Assert.False(result.IsValid);
+        Assert.Contains("dispatch_to", result.ValidationError);
+    }
+
+    [Fact]
+    public async Task GetRoutingConfig_ZeroExpiryMinutes_ReturnsInvalid()
+    {
+        var config = new RoutingConfig
+        {
+            Defaults = new RoutingDefaults { ExpiryMinutes = 0 }
+        };
+        await StoreRoutingDoc(config);
+
+        var result = await _service.GetRoutingConfigAsync("proj");
+        Assert.False(result.IsValid);
+        Assert.Contains("expiry_minutes", result.ValidationError);
+    }
+
+    [Fact]
+    public async Task GetRoutingConfig_BlankRoleAgent_ReturnsInvalid()
+    {
+        var config = new RoutingConfig
+        {
+            Roles = new Dictionary<string, string> { ["reviewer"] = "" }
+        };
+        await StoreRoutingDoc(config);
+
+        var result = await _service.GetRoutingConfigAsync("proj");
+        Assert.False(result.IsValid);
+        Assert.Contains("blank", result.ValidationError);
     }
 
     [Fact]

@@ -78,6 +78,14 @@ public sealed class RoutingService : IRoutingService
                     ValidationError = "Routing document deserialized to null"
                 };
 
+            var validationError = Validate(config);
+            if (validationError is not null)
+                return new RoutingConfigResult
+                {
+                    Config = CreateDefaultConfig(),
+                    ValidationError = validationError
+                };
+
             return new RoutingConfigResult { Config = config };
         }
         catch (JsonException ex)
@@ -128,6 +136,47 @@ public sealed class RoutingService : IRoutingService
             .Replace("{message_type}", evt.MessageType ?? "")
             .Replace("{to_status}", evt.ToStatus ?? "")
             .Replace("{from_status}", evt.FromStatus ?? "");
+    }
+
+    private static readonly HashSet<string> ValidEvents = new(StringComparer.OrdinalIgnoreCase)
+    {
+        DispatchEvent.TaskStatusChanged,
+        DispatchEvent.MessageReceived
+    };
+
+    /// <summary>
+    /// Semantic validation of a deserialized routing config.
+    /// Returns null if valid, or an error message describing the first problem.
+    /// </summary>
+    internal static string? Validate(RoutingConfig config)
+    {
+        // Validate roles
+        foreach (var (role, agent) in config.Roles)
+        {
+            if (string.IsNullOrWhiteSpace(role))
+                return "Role name cannot be blank";
+            if (string.IsNullOrWhiteSpace(agent))
+                return $"Agent identity for role '{role}' cannot be blank";
+        }
+
+        // Validate triggers
+        for (var i = 0; i < config.Triggers.Count; i++)
+        {
+            var trigger = config.Triggers[i];
+            var prefix = $"Trigger [{i}]";
+
+            if (!ValidEvents.Contains(trigger.Event))
+                return $"{prefix}: unknown event '{trigger.Event}' (expected: {string.Join(", ", ValidEvents)})";
+
+            if (string.IsNullOrWhiteSpace(trigger.DispatchTo))
+                return $"{prefix}: dispatch_to cannot be blank";
+        }
+
+        // Validate defaults
+        if (config.Defaults.ExpiryMinutes <= 0)
+            return $"defaults.expiry_minutes must be positive, got {config.Defaults.ExpiryMinutes}";
+
+        return null;
     }
 
     private static bool Matches(RoutingTrigger trigger, DispatchEvent evt)
