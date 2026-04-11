@@ -62,6 +62,7 @@ builder.Services.AddSingleton<ITaskRepository, TaskRepository>();
 builder.Services.AddSingleton<IMessageRepository, MessageRepository>();
 builder.Services.AddSingleton<IDocumentRepository, DocumentRepository>();
 builder.Services.AddSingleton<IAgentSessionRepository, AgentSessionRepository>();
+builder.Services.AddSingleton<IDispatchRepository, DispatchRepository>();
 
 // Librarian
 builder.Services.AddSingleton<LibrarianGatherer>();
@@ -91,6 +92,7 @@ app.MapTaskRoutes();
 app.MapMessageRoutes();
 app.MapDocumentRoutes();
 app.MapAgentRoutes();
+app.MapDispatchRoutes();
 app.MapLibrarianRoutes();
 
 // MCP endpoint
