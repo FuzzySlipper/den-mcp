@@ -4,13 +4,33 @@ using DenMcp.Core.Models;
 
 namespace DenMcp.Core.Services;
 
+/// <summary>
+/// Result of loading a routing config. Distinguishes "no document" (use fallback)
+/// from "document exists but is malformed" (skip dispatch, report error).
+/// </summary>
+public sealed class RoutingConfigResult
+{
+    public required RoutingConfig Config { get; init; }
+
+    /// <summary>True when the config came from the built-in fallback (no document existed).</summary>
+    public bool IsFallback { get; init; }
+
+    /// <summary>Non-null when a routing document exists but failed validation/parsing.</summary>
+    public string? ValidationError { get; init; }
+
+    public bool IsValid => ValidationError is null;
+}
+
 public interface IRoutingService
 {
     /// <summary>
-    /// Load the routing config for a project. Returns in-memory fallback if no document exists.
+    /// Load the routing config for a project. Returns a result that distinguishes:
+    /// - Valid config from a document
+    /// - Fallback config (no document exists)
+    /// - Invalid config (document exists but is malformed — ValidationError set)
     /// Never creates or modifies documents as a side effect.
     /// </summary>
-    Task<RoutingConfig> GetRoutingConfigAsync(string projectId);
+    Task<RoutingConfigResult> GetRoutingConfigAsync(string projectId);
 
     /// <summary>
     /// Find the first trigger that matches a dispatch event, or null if none match.
@@ -41,21 +61,33 @@ public sealed class RoutingService : IRoutingService
 
     public RoutingService(IDocumentRepository docs) => _docs = docs;
 
-    public async Task<RoutingConfig> GetRoutingConfigAsync(string projectId)
+    public async Task<RoutingConfigResult> GetRoutingConfigAsync(string projectId)
     {
         var doc = await _docs.GetAsync(projectId, "dispatch-routing");
         if (doc is null)
-            return DefaultConfig;
+            return new RoutingConfigResult { Config = CreateDefaultConfig(), IsFallback = true };
 
         try
         {
-            return JsonSerializer.Deserialize<RoutingConfig>(doc.Content, JsonOptions)
-                   ?? DefaultConfig;
+            var config = JsonSerializer.Deserialize<RoutingConfig>(doc.Content, JsonOptions);
+            if (config is null)
+                return new RoutingConfigResult
+                {
+                    Config = CreateDefaultConfig(),
+                    IsFallback = true,
+                    ValidationError = "Routing document deserialized to null"
+                };
+
+            return new RoutingConfigResult { Config = config };
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
-            // Malformed document — return fallback rather than crashing dispatch detection
-            return DefaultConfig;
+            // Document exists but is malformed — fail closed, report the error
+            return new RoutingConfigResult
+            {
+                Config = CreateDefaultConfig(),
+                ValidationError = $"Malformed dispatch-routing document: {ex.Message}"
+            };
         }
     }
 
@@ -126,10 +158,10 @@ public sealed class RoutingService : IRoutingService
     }
 
     /// <summary>
-    /// Built-in fallback config covering the standard review/feedback cycle.
-    /// Used when a project has no dispatch-routing document.
+    /// Creates a fresh default config instance each time.
+    /// Never returns a shared reference — safe from cross-caller mutation.
     /// </summary>
-    internal static readonly RoutingConfig DefaultConfig = new()
+    internal static RoutingConfig CreateDefaultConfig() => new()
     {
         Roles = new Dictionary<string, string>
         {

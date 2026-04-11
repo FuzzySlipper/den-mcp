@@ -33,11 +33,12 @@ public class RoutingServiceTests : IAsyncLifetime
     [Fact]
     public async Task GetRoutingConfig_NoDocument_ReturnsFallback()
     {
-        var config = await _service.GetRoutingConfigAsync("proj");
-        Assert.NotNull(config);
-        Assert.Contains("implementer", config.Roles.Keys);
-        Assert.Contains("reviewer", config.Roles.Keys);
-        Assert.True(config.Triggers.Count >= 3);
+        var result = await _service.GetRoutingConfigAsync("proj");
+        Assert.True(result.IsValid);
+        Assert.True(result.IsFallback);
+        Assert.Contains("implementer", result.Config.Roles.Keys);
+        Assert.Contains("reviewer", result.Config.Roles.Keys);
+        Assert.True(result.Config.Triggers.Count >= 3);
     }
 
     [Fact]
@@ -67,15 +68,17 @@ public class RoutingServiceTests : IAsyncLifetime
             DocType = DocType.Convention
         });
 
-        var config = await _service.GetRoutingConfigAsync("proj");
-        Assert.Single(config.Roles);
-        Assert.Equal("my-agent", config.Roles["dev"]);
-        Assert.Single(config.Triggers);
-        Assert.Equal(60, config.Defaults.ExpiryMinutes);
+        var result = await _service.GetRoutingConfigAsync("proj");
+        Assert.True(result.IsValid);
+        Assert.False(result.IsFallback);
+        Assert.Single(result.Config.Roles);
+        Assert.Equal("my-agent", result.Config.Roles["dev"]);
+        Assert.Single(result.Config.Triggers);
+        Assert.Equal(60, result.Config.Defaults.ExpiryMinutes);
     }
 
     [Fact]
-    public async Task GetRoutingConfig_MalformedDocument_ReturnsFallback()
+    public async Task GetRoutingConfig_MalformedDocument_ReturnsInvalidWithError()
     {
         await _docs.UpsertAsync(new Document
         {
@@ -86,18 +89,31 @@ public class RoutingServiceTests : IAsyncLifetime
             DocType = DocType.Convention
         });
 
-        var config = await _service.GetRoutingConfigAsync("proj");
-        // Should return fallback, not throw
-        Assert.Contains("implementer", config.Roles.Keys);
+        var result = await _service.GetRoutingConfigAsync("proj");
+        Assert.False(result.IsValid);
+        Assert.NotNull(result.ValidationError);
+        Assert.Contains("Malformed", result.ValidationError);
     }
 
     [Fact]
     public async Task GetRoutingConfig_DoesNotCreateDocument()
     {
-        // Reading config for a project with no routing doc should NOT create one
         await _service.GetRoutingConfigAsync("proj");
         var doc = await _docs.GetAsync("proj", "dispatch-routing");
         Assert.Null(doc);
+    }
+
+    [Fact]
+    public async Task GetRoutingConfig_FallbackIsNotSharedMutable()
+    {
+        var result1 = await _service.GetRoutingConfigAsync("proj");
+        result1.Config.Roles["hacked"] = "evil-agent";
+        result1.Config.Triggers.Clear();
+
+        var result2 = await _service.GetRoutingConfigAsync("proj");
+        // Second call should be unaffected by mutations to the first
+        Assert.DoesNotContain("hacked", result2.Config.Roles.Keys);
+        Assert.True(result2.Config.Triggers.Count >= 3);
     }
 
     #endregion
@@ -107,7 +123,7 @@ public class RoutingServiceTests : IAsyncLifetime
     [Fact]
     public void MatchTrigger_TaskStatusChanged_MatchesToStatus()
     {
-        var config = RoutingService.DefaultConfig;
+        var config = RoutingService.CreateDefaultConfig();
         var evt = new DispatchEvent
         {
             EventKind = DispatchEvent.TaskStatusChanged,
@@ -125,7 +141,7 @@ public class RoutingServiceTests : IAsyncLifetime
     [Fact]
     public void MatchTrigger_TaskStatusChanged_MatchesFromAndToStatus()
     {
-        var config = RoutingService.DefaultConfig;
+        var config = RoutingService.CreateDefaultConfig();
         var evt = new DispatchEvent
         {
             EventKind = DispatchEvent.TaskStatusChanged,
@@ -143,7 +159,7 @@ public class RoutingServiceTests : IAsyncLifetime
     [Fact]
     public void MatchTrigger_TaskStatusChanged_NoMatchWhenStatusDiffers()
     {
-        var config = RoutingService.DefaultConfig;
+        var config = RoutingService.CreateDefaultConfig();
         var evt = new DispatchEvent
         {
             EventKind = DispatchEvent.TaskStatusChanged,
@@ -154,13 +170,13 @@ public class RoutingServiceTests : IAsyncLifetime
         };
 
         var trigger = _service.MatchTrigger(config, evt);
-        Assert.Null(trigger); // No trigger for review→done in default config
+        Assert.Null(trigger);
     }
 
     [Fact]
     public void MatchTrigger_MessageReceived_MatchesWithRecipient()
     {
-        var config = RoutingService.DefaultConfig;
+        var config = RoutingService.CreateDefaultConfig();
         var evt = new DispatchEvent
         {
             EventKind = DispatchEvent.MessageReceived,
@@ -179,18 +195,17 @@ public class RoutingServiceTests : IAsyncLifetime
     [Fact]
     public void MatchTrigger_MessageReceived_NoMatchWithoutRecipient()
     {
-        var config = RoutingService.DefaultConfig;
+        var config = RoutingService.CreateDefaultConfig();
         var evt = new DispatchEvent
         {
             EventKind = DispatchEvent.MessageReceived,
             ProjectId = "proj",
-            Recipient = null, // No recipient
+            Recipient = null,
             Sender = "codex",
             MessageType = "review_feedback",
             MessageId = 100
         };
 
-        // The default has_recipient=true trigger should not match
         var trigger = _service.MatchTrigger(config, evt);
         Assert.Null(trigger);
     }
@@ -276,7 +291,7 @@ public class RoutingServiceTests : IAsyncLifetime
     [Fact]
     public void MatchTrigger_CaseInsensitive()
     {
-        var config = RoutingService.DefaultConfig;
+        var config = RoutingService.CreateDefaultConfig();
         var evt = new DispatchEvent
         {
             EventKind = "TASK_STATUS_CHANGED",
@@ -295,7 +310,7 @@ public class RoutingServiceTests : IAsyncLifetime
     [Fact]
     public void ResolveAgent_RoleLookup()
     {
-        var config = RoutingService.DefaultConfig;
+        var config = RoutingService.CreateDefaultConfig();
         var trigger = new RoutingTrigger { Event = "x", DispatchTo = "reviewer" };
         var evt = new DispatchEvent { EventKind = "x", ProjectId = "proj" };
 
@@ -305,7 +320,7 @@ public class RoutingServiceTests : IAsyncLifetime
     [Fact]
     public void ResolveAgent_RecipientInterpolation()
     {
-        var config = RoutingService.DefaultConfig;
+        var config = RoutingService.CreateDefaultConfig();
         var trigger = new RoutingTrigger { Event = "x", DispatchTo = "{recipient}" };
         var evt = new DispatchEvent
         {
@@ -320,7 +335,7 @@ public class RoutingServiceTests : IAsyncLifetime
     [Fact]
     public void ResolveAgent_RecipientNull_ReturnsNull()
     {
-        var config = RoutingService.DefaultConfig;
+        var config = RoutingService.CreateDefaultConfig();
         var trigger = new RoutingTrigger { Event = "x", DispatchTo = "{recipient}" };
         var evt = new DispatchEvent { EventKind = "x", ProjectId = "proj", Recipient = null };
 
@@ -369,7 +384,7 @@ public class RoutingServiceTests : IAsyncLifetime
             EventKind = DispatchEvent.TaskStatusChanged,
             ProjectId = "proj",
             TaskId = 42,
-            Branch = null // No explicit branch
+            Branch = null
         };
 
         var result = _service.InterpolateTemplate(template, evt);
