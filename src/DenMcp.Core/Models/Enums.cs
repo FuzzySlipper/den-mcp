@@ -25,3 +25,18 @@ public enum AgentSessionStatus
     Active,
     Inactive
 }
+
+public enum DispatchStatus
+{
+    Pending,
+    Approved,
+    Rejected,
+    Completed,
+    Expired
+}
+
+public enum DispatchTriggerType
+{
+    Message,
+    TaskStatus
+}
