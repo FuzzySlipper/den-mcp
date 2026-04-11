@@ -50,6 +50,8 @@ public sealed class PromptGenerationService : IPromptGenerationService
                 => await BuildFeedbackPrompt(evt, config, customOpener),
             DispatchEvent.TaskStatusChanged
                 => await BuildTaskTransitionPrompt(evt, config, customOpener),
+            DispatchEvent.MessageReceived when (evt.MessageType is "planning_summary" or "planning")
+                => await BuildPlanningPrompt(evt, config, customOpener),
             DispatchEvent.MessageReceived
                 => await BuildMessagePrompt(evt, config, customOpener),
             _ => BuildFallbackPrompt(evt, customOpener)
@@ -133,6 +135,27 @@ public sealed class PromptGenerationService : IPromptGenerationService
         };
     }
 
+    private async Task<PromptResult> BuildPlanningPrompt(DispatchEvent evt, RoutingConfig config, string? customOpener)
+    {
+        var sb = new StringBuilder();
+
+        sb.AppendLine(customOpener ?? $"You have a planning handoff on {evt.ProjectId} from {evt.Sender}.");
+        sb.AppendLine();
+
+        AppendTriggeringMessage(sb, evt);
+        await AppendTaskAndMessages(sb, evt);
+
+        sb.AppendLine();
+        sb.AppendLine("Review the planning context and proceed with the outlined work.");
+
+        var summaryTask = evt.TaskId.HasValue ? $" on #{evt.TaskId}" : "";
+        return new PromptResult
+        {
+            Summary = $"{evt.Sender} sent planning context{summaryTask} on {evt.ProjectId}",
+            ContextPrompt = sb.ToString().TrimEnd()
+        };
+    }
+
     private async Task<PromptResult> BuildMessagePrompt(DispatchEvent evt, RoutingConfig config, string? customOpener)
     {
         var sb = new StringBuilder();
@@ -140,18 +163,8 @@ public sealed class PromptGenerationService : IPromptGenerationService
         sb.AppendLine(customOpener ?? $"You have a message on {evt.ProjectId} from {evt.Sender}.");
         sb.AppendLine();
 
-        // If it's task-attached, include task context
-        if (evt.TaskId.HasValue)
-        {
-            var task = await _tasks.GetByIdAsync(evt.TaskId.Value);
-            if (task is not null)
-            {
-                sb.AppendLine($"**Task #{task.Id}**: {task.Title} (status: {task.Status.ToDbValue()})");
-                sb.AppendLine();
-            }
-        }
-
-        await AppendRecentMessages(sb, evt);
+        AppendTriggeringMessage(sb, evt);
+        await AppendTaskAndMessages(sb, evt);
 
         sb.AppendLine();
         sb.AppendLine("Read the messages and take appropriate action.");
@@ -172,6 +185,45 @@ public sealed class PromptGenerationService : IPromptGenerationService
             Summary = $"Dispatch on {evt.ProjectId}",
             ContextPrompt = customOpener ?? $"You have pending work on {evt.ProjectId}. Check your tasks and messages."
         };
+    }
+
+    /// <summary>
+    /// Include the triggering message body when no task-thread messages will cover it.
+    /// Used for project-level / taskless messages where AppendRecentMessages would skip.
+    /// </summary>
+    private static void AppendTriggeringMessage(StringBuilder sb, DispatchEvent evt)
+    {
+        if (evt.MessageContent is null) return;
+
+        // If task-attached, the recent messages section will include it — skip here to avoid duplication
+        if (evt.TaskId.HasValue) return;
+
+        sb.AppendLine($"**Message from {evt.Sender}:**");
+        sb.AppendLine("---");
+        var content = evt.MessageContent.Length > 1000
+            ? evt.MessageContent[..1000] + "\n... (truncated)"
+            : evt.MessageContent;
+        sb.AppendLine(content);
+        sb.AppendLine("---");
+        sb.AppendLine();
+    }
+
+    /// <summary>
+    /// Include task context and recent messages if the event is task-attached.
+    /// </summary>
+    private async Task AppendTaskAndMessages(StringBuilder sb, DispatchEvent evt)
+    {
+        if (evt.TaskId.HasValue)
+        {
+            var task = await _tasks.GetByIdAsync(evt.TaskId.Value);
+            if (task is not null)
+            {
+                sb.AppendLine($"**Task #{task.Id}**: {task.Title} (status: {task.Status.ToDbValue()})");
+                sb.AppendLine();
+            }
+        }
+
+        await AppendRecentMessages(sb, evt);
     }
 
     private async Task AppendRecentMessages(StringBuilder sb, DispatchEvent evt)

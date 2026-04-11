@@ -159,7 +159,7 @@ public class PromptGenerationServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task MessagePrompt_WithoutTask_StillWorks()
+    public async Task MessagePrompt_WithoutTask_IncludesTriggeringMessage()
     {
         var evt = new DispatchEvent
         {
@@ -167,8 +167,30 @@ public class PromptGenerationServiceTests : IAsyncLifetime
             ProjectId = "proj",
             Recipient = "claude-code",
             Sender = "codex",
-            MessageType = "planning_summary",
-            MessageId = 1
+            MessageType = "review_feedback",
+            MessageId = 1,
+            MessageContent = "Please fix the null check issue I flagged."
+        };
+
+        var trigger = _routing.MatchTrigger(DefaultConfig, evt)!;
+        var result = await _service.GenerateAsync(evt, trigger, DefaultConfig);
+
+        Assert.Contains("null check issue", result.ContextPrompt);
+        Assert.DoesNotContain("Task #", result.ContextPrompt);
+    }
+
+    [Fact]
+    public async Task MessagePrompt_WithoutTaskOrContent_StillWorks()
+    {
+        var evt = new DispatchEvent
+        {
+            EventKind = DispatchEvent.MessageReceived,
+            ProjectId = "proj",
+            Recipient = "claude-code",
+            Sender = "codex",
+            MessageType = "follow_up",
+            MessageId = 1,
+            MessageContent = null
         };
 
         var trigger = _routing.MatchTrigger(DefaultConfig, evt)!;
@@ -176,7 +198,58 @@ public class PromptGenerationServiceTests : IAsyncLifetime
 
         Assert.Contains("proj", result.ContextPrompt);
         Assert.Contains("codex", result.ContextPrompt);
-        Assert.DoesNotContain("Task #", result.ContextPrompt); // No task context
+    }
+
+    #endregion
+
+    #region Planning prompt
+
+    [Fact]
+    public async Task PlanningPrompt_IncludesMessageContent()
+    {
+        var evt = new DispatchEvent
+        {
+            EventKind = DispatchEvent.MessageReceived,
+            ProjectId = "proj",
+            Recipient = "codex",
+            Sender = "claude-code",
+            MessageType = "planning_summary",
+            MessageId = 1,
+            MessageContent = "Here's the plan for the dispatch system: three phases covering core, kitty, and wrapper."
+        };
+
+        var trigger = _routing.MatchTrigger(DefaultConfig, evt)!;
+        var result = await _service.GenerateAsync(evt, trigger, DefaultConfig);
+
+        // The planning-specific prompt includes the message body and planning next-action
+        Assert.Contains("three phases", result.ContextPrompt);
+        Assert.Contains("proceed with the outlined work", result.ContextPrompt);
+        Assert.Contains("planning context", result.Summary);
+    }
+
+    [Fact]
+    public async Task PlanningPrompt_WithTask_IncludesTaskContext()
+    {
+        var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Dispatch epic" });
+
+        var evt = new DispatchEvent
+        {
+            EventKind = DispatchEvent.MessageReceived,
+            ProjectId = "proj",
+            Recipient = "codex",
+            Sender = "claude-code",
+            MessageType = "planning_summary",
+            MessageId = 1,
+            TaskId = task.Id,
+            MessageContent = "Planning summary for the task."
+        };
+
+        var trigger = _routing.MatchTrigger(DefaultConfig, evt)!;
+        var result = await _service.GenerateAsync(evt, trigger, DefaultConfig);
+
+        Assert.Contains("Dispatch epic", result.ContextPrompt);
+        // Task-attached: triggering message NOT duplicated (recent messages covers it)
+        Assert.DoesNotContain("Message from claude-code", result.ContextPrompt);
     }
 
     #endregion
