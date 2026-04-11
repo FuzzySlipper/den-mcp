@@ -218,6 +218,44 @@ public class DispatchApiTests : IAsyncLifetime
 
     #endregion
 
+    #region Not found vs bad transition
+
+    [Fact]
+    public async Task Approve_NonexistentId_Returns404()
+    {
+        var response = await _client.PostAsJsonAsync("/api/dispatch/9999/approve", new { decided_by = "user" });
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Reject_NonexistentId_Returns404()
+    {
+        var response = await _client.PostAsJsonAsync("/api/dispatch/9999/reject", new { decided_by = "user" });
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Complete_NonexistentId_Returns404()
+    {
+        var response = await _client.PostAsJsonAsync("/api/dispatch/9999/complete", new { completed_by = "agent" });
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    #endregion
+
+    #region Invalid status filter
+
+    [Fact]
+    public async Task List_InvalidStatusFilter_Returns400()
+    {
+        var response = await _client.GetAsync("/api/dispatch?status=pendng");
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var json = await response.Content.ReadAsStringAsync();
+        Assert.Contains("error", json);
+    }
+
+    #endregion
+
     #region Snake case JSON
 
     [Fact]

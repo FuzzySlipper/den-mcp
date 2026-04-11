@@ -16,8 +16,16 @@ public sealed class DispatchTools
         [Description("Filter by target agent identity.")] string? target_agent = null,
         [Description("Filter by statuses (comma-separated): pending,approved,rejected,completed,expired.")] string? status = null)
     {
-        var statuses = status?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(EnumExtensions.ParseDispatchStatus).ToArray();
+        DispatchStatus[]? statuses;
+        try
+        {
+            statuses = status?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(EnumExtensions.ParseDispatchStatus).ToArray();
+        }
+        catch (ArgumentException ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, JsonOpts.Default);
+        }
         var entries = await repo.ListAsync(project_id, target_agent, statuses);
         return JsonSerializer.Serialize(entries, JsonOpts.Default);
     }
