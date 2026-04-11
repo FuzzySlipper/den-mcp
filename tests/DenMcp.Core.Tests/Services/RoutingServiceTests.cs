@@ -1,0 +1,396 @@
+using System.Text.Json;
+using DenMcp.Core.Data;
+using DenMcp.Core.Models;
+using DenMcp.Core.Services;
+
+namespace DenMcp.Core.Tests.Services;
+
+public class RoutingServiceTests : IAsyncLifetime
+{
+    private readonly TestDb _testDb = new();
+    private RoutingService _service = null!;
+    private DocumentRepository _docs = null!;
+
+    public async Task InitializeAsync()
+    {
+        await _testDb.InitializeAsync();
+        _docs = new DocumentRepository(_testDb.Db);
+        _service = new RoutingService(_docs);
+        var projRepo = new ProjectRepository(_testDb.Db);
+        await projRepo.CreateAsync(new Project { Id = "proj", Name = "Test" });
+    }
+
+    public Task DisposeAsync() => _testDb.DisposeAsync();
+
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        WriteIndented = true
+    };
+
+    #region GetRoutingConfigAsync
+
+    [Fact]
+    public async Task GetRoutingConfig_NoDocument_ReturnsFallback()
+    {
+        var config = await _service.GetRoutingConfigAsync("proj");
+        Assert.NotNull(config);
+        Assert.Contains("implementer", config.Roles.Keys);
+        Assert.Contains("reviewer", config.Roles.Keys);
+        Assert.True(config.Triggers.Count >= 3);
+    }
+
+    [Fact]
+    public async Task GetRoutingConfig_WithDocument_ParsesConfig()
+    {
+        var custom = new RoutingConfig
+        {
+            Roles = new Dictionary<string, string> { ["dev"] = "my-agent" },
+            Triggers =
+            [
+                new RoutingTrigger
+                {
+                    Event = DispatchEvent.TaskStatusChanged,
+                    ToStatus = "review",
+                    DispatchTo = "dev"
+                }
+            ],
+            Defaults = new RoutingDefaults { ExpiryMinutes = 60 }
+        };
+
+        await _docs.UpsertAsync(new Document
+        {
+            ProjectId = "proj",
+            Slug = "dispatch-routing",
+            Title = "Dispatch Routing",
+            Content = JsonSerializer.Serialize(custom, JsonOptions),
+            DocType = DocType.Convention
+        });
+
+        var config = await _service.GetRoutingConfigAsync("proj");
+        Assert.Single(config.Roles);
+        Assert.Equal("my-agent", config.Roles["dev"]);
+        Assert.Single(config.Triggers);
+        Assert.Equal(60, config.Defaults.ExpiryMinutes);
+    }
+
+    [Fact]
+    public async Task GetRoutingConfig_MalformedDocument_ReturnsFallback()
+    {
+        await _docs.UpsertAsync(new Document
+        {
+            ProjectId = "proj",
+            Slug = "dispatch-routing",
+            Title = "Dispatch Routing",
+            Content = "this is not valid json {{{",
+            DocType = DocType.Convention
+        });
+
+        var config = await _service.GetRoutingConfigAsync("proj");
+        // Should return fallback, not throw
+        Assert.Contains("implementer", config.Roles.Keys);
+    }
+
+    [Fact]
+    public async Task GetRoutingConfig_DoesNotCreateDocument()
+    {
+        // Reading config for a project with no routing doc should NOT create one
+        await _service.GetRoutingConfigAsync("proj");
+        var doc = await _docs.GetAsync("proj", "dispatch-routing");
+        Assert.Null(doc);
+    }
+
+    #endregion
+
+    #region MatchTrigger
+
+    [Fact]
+    public void MatchTrigger_TaskStatusChanged_MatchesToStatus()
+    {
+        var config = RoutingService.DefaultConfig;
+        var evt = new DispatchEvent
+        {
+            EventKind = DispatchEvent.TaskStatusChanged,
+            ProjectId = "proj",
+            ToStatus = "review",
+            FromStatus = "in_progress",
+            TaskId = 42
+        };
+
+        var trigger = _service.MatchTrigger(config, evt);
+        Assert.NotNull(trigger);
+        Assert.Equal("reviewer", trigger.DispatchTo);
+    }
+
+    [Fact]
+    public void MatchTrigger_TaskStatusChanged_MatchesFromAndToStatus()
+    {
+        var config = RoutingService.DefaultConfig;
+        var evt = new DispatchEvent
+        {
+            EventKind = DispatchEvent.TaskStatusChanged,
+            ProjectId = "proj",
+            ToStatus = "planned",
+            FromStatus = "review",
+            TaskId = 42
+        };
+
+        var trigger = _service.MatchTrigger(config, evt);
+        Assert.NotNull(trigger);
+        Assert.Equal("implementer", trigger.DispatchTo);
+    }
+
+    [Fact]
+    public void MatchTrigger_TaskStatusChanged_NoMatchWhenStatusDiffers()
+    {
+        var config = RoutingService.DefaultConfig;
+        var evt = new DispatchEvent
+        {
+            EventKind = DispatchEvent.TaskStatusChanged,
+            ProjectId = "proj",
+            ToStatus = "done",
+            FromStatus = "review",
+            TaskId = 42
+        };
+
+        var trigger = _service.MatchTrigger(config, evt);
+        Assert.Null(trigger); // No trigger for review→done in default config
+    }
+
+    [Fact]
+    public void MatchTrigger_MessageReceived_MatchesWithRecipient()
+    {
+        var config = RoutingService.DefaultConfig;
+        var evt = new DispatchEvent
+        {
+            EventKind = DispatchEvent.MessageReceived,
+            ProjectId = "proj",
+            Recipient = "claude-code",
+            Sender = "codex",
+            MessageType = "review_feedback",
+            MessageId = 100
+        };
+
+        var trigger = _service.MatchTrigger(config, evt);
+        Assert.NotNull(trigger);
+        Assert.Equal("{recipient}", trigger.DispatchTo);
+    }
+
+    [Fact]
+    public void MatchTrigger_MessageReceived_NoMatchWithoutRecipient()
+    {
+        var config = RoutingService.DefaultConfig;
+        var evt = new DispatchEvent
+        {
+            EventKind = DispatchEvent.MessageReceived,
+            ProjectId = "proj",
+            Recipient = null, // No recipient
+            Sender = "codex",
+            MessageType = "review_feedback",
+            MessageId = 100
+        };
+
+        // The default has_recipient=true trigger should not match
+        var trigger = _service.MatchTrigger(config, evt);
+        Assert.Null(trigger);
+    }
+
+    [Fact]
+    public void MatchTrigger_CustomMessageType()
+    {
+        var config = new RoutingConfig
+        {
+            Roles = new Dictionary<string, string> { ["planner"] = "codex" },
+            Triggers =
+            [
+                new RoutingTrigger
+                {
+                    Event = DispatchEvent.MessageReceived,
+                    MessageType = "planning_summary",
+                    HasRecipient = true,
+                    DispatchTo = "{recipient}"
+                }
+            ]
+        };
+
+        var match = new DispatchEvent
+        {
+            EventKind = DispatchEvent.MessageReceived,
+            ProjectId = "proj",
+            MessageType = "planning_summary",
+            Recipient = "codex",
+            Sender = "claude-code",
+            MessageId = 1
+        };
+
+        var noMatch = new DispatchEvent
+        {
+            EventKind = DispatchEvent.MessageReceived,
+            ProjectId = "proj",
+            MessageType = "review_request",
+            Recipient = "codex",
+            Sender = "claude-code",
+            MessageId = 2
+        };
+
+        Assert.NotNull(_service.MatchTrigger(config, match));
+        Assert.Null(_service.MatchTrigger(config, noMatch));
+    }
+
+    [Fact]
+    public void MatchTrigger_FirstMatchWins()
+    {
+        var config = new RoutingConfig
+        {
+            Roles = new Dictionary<string, string>(),
+            Triggers =
+            [
+                new RoutingTrigger
+                {
+                    Event = DispatchEvent.TaskStatusChanged,
+                    ToStatus = "review",
+                    DispatchTo = "first-agent",
+                    PromptTemplate = "first"
+                },
+                new RoutingTrigger
+                {
+                    Event = DispatchEvent.TaskStatusChanged,
+                    ToStatus = "review",
+                    DispatchTo = "second-agent",
+                    PromptTemplate = "second"
+                }
+            ]
+        };
+
+        var evt = new DispatchEvent
+        {
+            EventKind = DispatchEvent.TaskStatusChanged,
+            ProjectId = "proj",
+            ToStatus = "review"
+        };
+
+        var trigger = _service.MatchTrigger(config, evt);
+        Assert.Equal("first-agent", trigger!.DispatchTo);
+    }
+
+    [Fact]
+    public void MatchTrigger_CaseInsensitive()
+    {
+        var config = RoutingService.DefaultConfig;
+        var evt = new DispatchEvent
+        {
+            EventKind = "TASK_STATUS_CHANGED",
+            ProjectId = "proj",
+            ToStatus = "REVIEW"
+        };
+
+        var trigger = _service.MatchTrigger(config, evt);
+        Assert.NotNull(trigger);
+    }
+
+    #endregion
+
+    #region ResolveAgent
+
+    [Fact]
+    public void ResolveAgent_RoleLookup()
+    {
+        var config = RoutingService.DefaultConfig;
+        var trigger = new RoutingTrigger { Event = "x", DispatchTo = "reviewer" };
+        var evt = new DispatchEvent { EventKind = "x", ProjectId = "proj" };
+
+        Assert.Equal("codex", _service.ResolveAgent(config, trigger, evt));
+    }
+
+    [Fact]
+    public void ResolveAgent_RecipientInterpolation()
+    {
+        var config = RoutingService.DefaultConfig;
+        var trigger = new RoutingTrigger { Event = "x", DispatchTo = "{recipient}" };
+        var evt = new DispatchEvent
+        {
+            EventKind = "x",
+            ProjectId = "proj",
+            Recipient = "claude-code"
+        };
+
+        Assert.Equal("claude-code", _service.ResolveAgent(config, trigger, evt));
+    }
+
+    [Fact]
+    public void ResolveAgent_RecipientNull_ReturnsNull()
+    {
+        var config = RoutingService.DefaultConfig;
+        var trigger = new RoutingTrigger { Event = "x", DispatchTo = "{recipient}" };
+        var evt = new DispatchEvent { EventKind = "x", ProjectId = "proj", Recipient = null };
+
+        Assert.Null(_service.ResolveAgent(config, trigger, evt));
+    }
+
+    [Fact]
+    public void ResolveAgent_LiteralAgent()
+    {
+        var config = new RoutingConfig { Roles = new Dictionary<string, string>() };
+        var trigger = new RoutingTrigger { Event = "x", DispatchTo = "my-custom-agent" };
+        var evt = new DispatchEvent { EventKind = "x", ProjectId = "proj" };
+
+        Assert.Equal("my-custom-agent", _service.ResolveAgent(config, trigger, evt));
+    }
+
+    #endregion
+
+    #region InterpolateTemplate
+
+    [Fact]
+    public void InterpolateTemplate_AllPlaceholders()
+    {
+        var template = "Review task #{task_id} ({task_title}) on {branch} in {project_id}. From {sender}, type: {message_type}.";
+        var evt = new DispatchEvent
+        {
+            EventKind = DispatchEvent.TaskStatusChanged,
+            ProjectId = "quillforge",
+            TaskId = 546,
+            TaskTitle = "forge-stats lore accounting",
+            Branch = "task/546-forge-stats",
+            Sender = "codex",
+            MessageType = "review_feedback"
+        };
+
+        var result = _service.InterpolateTemplate(template, evt);
+        Assert.Equal("Review task #546 (forge-stats lore accounting) on task/546-forge-stats in quillforge. From codex, type: review_feedback.", result);
+    }
+
+    [Fact]
+    public void InterpolateTemplate_MissingValues_FallbackBranch()
+    {
+        var template = "Work on branch {branch}";
+        var evt = new DispatchEvent
+        {
+            EventKind = DispatchEvent.TaskStatusChanged,
+            ProjectId = "proj",
+            TaskId = 42,
+            Branch = null // No explicit branch
+        };
+
+        var result = _service.InterpolateTemplate(template, evt);
+        Assert.Equal("Work on branch task/42-*", result);
+    }
+
+    [Fact]
+    public void InterpolateTemplate_StatusPlaceholders()
+    {
+        var template = "Task moved from {from_status} to {to_status}";
+        var evt = new DispatchEvent
+        {
+            EventKind = DispatchEvent.TaskStatusChanged,
+            ProjectId = "proj",
+            FromStatus = "review",
+            ToStatus = "planned"
+        };
+
+        var result = _service.InterpolateTemplate(template, evt);
+        Assert.Equal("Task moved from review to planned", result);
+    }
+
+    #endregion
+}
