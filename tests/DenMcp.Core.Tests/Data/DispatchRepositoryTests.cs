@@ -1,5 +1,6 @@
 using DenMcp.Core.Data;
 using DenMcp.Core.Models;
+using Microsoft.Data.Sqlite;
 
 namespace DenMcp.Core.Tests.Data;
 
@@ -218,6 +219,29 @@ public class DispatchRepositoryTests : IAsyncLifetime
         Assert.Equal(2, await _repo.GetPendingCountAsync());
         Assert.Equal(2, await _repo.GetPendingCountAsync("proj"));
         Assert.Equal(0, await _repo.GetPendingCountAsync("nonexistent"));
+    }
+
+    [Fact]
+    public async Task CreateIfAbsent_NonDedupConstraintViolation_Throws()
+    {
+        // A bad project_id FK should propagate as SqliteException, not be swallowed as dedup
+        var entry = MakeEntry();
+        entry.ProjectId = "nonexistent-project";
+        entry.DedupKey = DispatchEntry.BuildDedupKey(entry.TriggerType, entry.TriggerId, entry.TargetAgent);
+
+        await Assert.ThrowsAsync<SqliteException>(
+            () => _repo.CreateIfAbsentAsync(entry));
+    }
+
+    [Fact]
+    public async Task Complete_PreservesApproverAndCompleter()
+    {
+        var (entry, _) = await _repo.CreateIfAbsentAsync(MakeEntry());
+        await _repo.ApproveAsync(entry.Id, "george");
+        var completed = await _repo.CompleteAsync(entry.Id, "claude-code");
+
+        Assert.Equal("george", completed.DecidedBy);
+        Assert.Equal("claude-code", completed.CompletedBy);
     }
 
     [Fact]

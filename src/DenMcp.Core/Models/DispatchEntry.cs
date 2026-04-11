@@ -23,6 +23,7 @@ public sealed class DispatchEntry
     public DateTime? DecidedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
     public string? DecidedBy { get; set; }
+    public string? CompletedBy { get; set; }
 
     /// <summary>
     /// Build a deterministic dedup key from the dispatch trigger.

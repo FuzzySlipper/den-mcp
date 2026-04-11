@@ -237,7 +237,8 @@ public sealed class DatabaseInitializer
             expires_at      TEXT NOT NULL,
             decided_at      TEXT,
             completed_at    TEXT,
-            decided_by      TEXT
+            decided_by      TEXT,
+            completed_by    TEXT
         );
 
         CREATE INDEX IF NOT EXISTS idx_dispatch_status

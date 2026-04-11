@@ -42,7 +42,7 @@ public sealed class DispatchRepository : IDispatchRepository
                  @summary, @contextPrompt, @dedupKey, @expiresAt)
             RETURNING id, project_id, target_agent, status, trigger_type, trigger_id,
                       task_id, summary, context_prompt, dedup_key,
-                      created_at, expires_at, decided_at, completed_at, decided_by
+                      created_at, expires_at, decided_at, completed_at, decided_by, completed_by
             """;
         AddCreateParams(insertCmd, entry);
 
@@ -54,9 +54,12 @@ public sealed class DispatchRepository : IDispatchRepository
         }
         catch (SqliteException ex) when (ex.SqliteErrorCode == 19) // SQLITE_CONSTRAINT
         {
-            // Dedup hit — return the existing pending entry
+            // Only treat as dedup if a pending entry with this key actually exists.
+            // Other constraint violations (FK on project_id, task_id, etc.) should propagate.
             var existing = await GetByDedupKeyAsync(conn, entry.DedupKey);
-            return (existing!, false);
+            if (existing is null)
+                throw; // Not a dedup hit — rethrow the real constraint error
+            return (existing, false);
         }
     }
 
@@ -125,11 +128,11 @@ public sealed class DispatchRepository : IDispatchRepository
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             UPDATE dispatch_entries
-            SET status = @newStatus, completed_at = datetime('now'), decided_by = COALESCE(@completedBy, decided_by)
+            SET status = @newStatus, completed_at = datetime('now'), completed_by = @completedBy
             WHERE id = @id AND status = @requiredStatus
             RETURNING id, project_id, target_agent, status, trigger_type, trigger_id,
                       task_id, summary, context_prompt, dedup_key,
-                      created_at, expires_at, decided_at, completed_at, decided_by
+                      created_at, expires_at, decided_at, completed_at, decided_by, completed_by, completed_by
             """;
         cmd.Parameters.AddWithValue("@id", id);
         cmd.Parameters.AddWithValue("@newStatus", DispatchStatus.Completed.ToDbValue());
@@ -185,7 +188,7 @@ public sealed class DispatchRepository : IDispatchRepository
             WHERE id = @id AND status = @requiredStatus
             RETURNING id, project_id, target_agent, status, trigger_type, trigger_id,
                       task_id, summary, context_prompt, dedup_key,
-                      created_at, expires_at, decided_at, completed_at, decided_by
+                      created_at, expires_at, decided_at, completed_at, decided_by, completed_by
             """;
         cmd.Parameters.AddWithValue("@id", id);
         cmd.Parameters.AddWithValue("@newStatus", to.ToDbValue());
@@ -226,7 +229,7 @@ public sealed class DispatchRepository : IDispatchRepository
     private const string SelectColumns = """
         SELECT id, project_id, target_agent, status, trigger_type, trigger_id,
                task_id, summary, context_prompt, dedup_key,
-               created_at, expires_at, decided_at, completed_at, decided_by
+               created_at, expires_at, decided_at, completed_at, decided_by, completed_by
         FROM dispatch_entries
         """;
 
@@ -248,7 +251,8 @@ public sealed class DispatchRepository : IDispatchRepository
             ExpiresAt = DateTime.Parse(reader.GetString(11)),
             DecidedAt = reader.IsDBNull(12) ? null : DateTime.Parse(reader.GetString(12)),
             CompletedAt = reader.IsDBNull(13) ? null : DateTime.Parse(reader.GetString(13)),
-            DecidedBy = reader.IsDBNull(14) ? null : reader.GetString(14)
+            DecidedBy = reader.IsDBNull(14) ? null : reader.GetString(14),
+            CompletedBy = reader.IsDBNull(15) ? null : reader.GetString(15)
         };
     }
 }
