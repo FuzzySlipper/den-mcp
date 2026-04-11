@@ -84,7 +84,7 @@ build/
 # Web frontend build output + deps
 src/DenMcp.Server/wwwroot/
 src/DenMcp.Server/ClientApp/node_modules/
-
+.codex/
 # Agent guidance files (local-only, not committed)
 AGENTS.md
 CLAUDE.md

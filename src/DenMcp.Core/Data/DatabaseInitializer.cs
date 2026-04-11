@@ -210,6 +210,43 @@ public sealed class DatabaseInitializer
 
         CREATE INDEX IF NOT EXISTS idx_agent_sessions_project_status
             ON agent_sessions(project_id, status);
+
+        ------------------------------------------------------------
+        -- DISPATCH ENTRIES
+        ------------------------------------------------------------
+        CREATE TABLE IF NOT EXISTS dispatch_entries (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            target_agent    TEXT NOT NULL,
+            status          TEXT NOT NULL DEFAULT 'pending'
+                            CHECK (status IN (
+                                'pending',
+                                'approved',
+                                'rejected',
+                                'completed',
+                                'expired'
+                            )),
+            trigger_type    TEXT NOT NULL
+                            CHECK (trigger_type IN ('message', 'task_status')),
+            trigger_id      INTEGER NOT NULL,
+            task_id         INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+            summary         TEXT,
+            context_prompt  TEXT,
+            dedup_key       TEXT NOT NULL,
+            created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+            expires_at      TEXT NOT NULL,
+            decided_at      TEXT,
+            completed_at    TEXT,
+            decided_by      TEXT,
+            completed_by    TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_dispatch_status
+            ON dispatch_entries(status);
+        CREATE INDEX IF NOT EXISTS idx_dispatch_project_status
+            ON dispatch_entries(project_id, status);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_dispatch_dedup
+            ON dispatch_entries(dedup_key) WHERE status = 'pending';
         """;
 
     private static async Task RunMigrationsAsync(SqliteConnection connection)

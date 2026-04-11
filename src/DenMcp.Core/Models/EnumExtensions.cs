@@ -59,4 +59,38 @@ public static class EnumExtensions
         "inactive" => AgentSessionStatus.Inactive,
         _ => throw new ArgumentException($"Unknown agent session status: {value}", nameof(value))
     };
+
+    public static string ToDbValue(this DispatchStatus status) => status switch
+    {
+        DispatchStatus.Pending => "pending",
+        DispatchStatus.Approved => "approved",
+        DispatchStatus.Rejected => "rejected",
+        DispatchStatus.Completed => "completed",
+        DispatchStatus.Expired => "expired",
+        _ => throw new ArgumentOutOfRangeException(nameof(status), status, null)
+    };
+
+    public static DispatchStatus ParseDispatchStatus(string value) => value switch
+    {
+        "pending" => DispatchStatus.Pending,
+        "approved" => DispatchStatus.Approved,
+        "rejected" => DispatchStatus.Rejected,
+        "completed" => DispatchStatus.Completed,
+        "expired" => DispatchStatus.Expired,
+        _ => throw new ArgumentException($"Unknown dispatch status: {value}", nameof(value))
+    };
+
+    public static string ToDbValue(this DispatchTriggerType type) => type switch
+    {
+        DispatchTriggerType.Message => "message",
+        DispatchTriggerType.TaskStatus => "task_status",
+        _ => throw new ArgumentOutOfRangeException(nameof(type), type, null)
+    };
+
+    public static DispatchTriggerType ParseDispatchTriggerType(string value) => value switch
+    {
+        "message" => DispatchTriggerType.Message,
+        "task_status" => DispatchTriggerType.TaskStatus,
+        _ => throw new ArgumentException($"Unknown dispatch trigger type: {value}", nameof(value))
+    };
 }

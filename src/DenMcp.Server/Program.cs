@@ -82,7 +82,8 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 
 // Health check
-app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
+var version = typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "unknown";
+app.MapGet("/health", () => Results.Ok(new { status = "healthy", version }));
 
 // REST API
 app.MapProjectRoutes();

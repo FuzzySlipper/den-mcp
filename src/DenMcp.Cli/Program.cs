@@ -24,6 +24,7 @@ try
         "doc" => await DocumentCommands.Get(client, router),
         "search" => await DocumentCommands.Search(client, router),
         "dashboard" or "watch" => await DashboardCommand.Run(client, router),
+        "--version" or "-v" => ShowVersion(),
         "help" or "--help" or "-h" or null => ShowHelp(),
         _ => ShowUnknown(router.Command!)
     };
@@ -36,6 +37,13 @@ catch (HttpRequestException ex)
     Console.Error.WriteLine($"  {ex.Message}");
     Console.ResetColor();
     return 1;
+}
+
+static int ShowVersion()
+{
+    var version = typeof(CliConfig).Assembly.GetName().Version?.ToString(3) ?? "unknown";
+    Console.WriteLine($"den-mcp {version}");
+    return 0;
 }
 
 static int ShowHelp()
