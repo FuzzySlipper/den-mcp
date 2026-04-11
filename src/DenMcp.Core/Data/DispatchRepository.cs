@@ -132,7 +132,7 @@ public sealed class DispatchRepository : IDispatchRepository
             WHERE id = @id AND status = @requiredStatus
             RETURNING id, project_id, target_agent, status, trigger_type, trigger_id,
                       task_id, summary, context_prompt, dedup_key,
-                      created_at, expires_at, decided_at, completed_at, decided_by, completed_by, completed_by
+                      created_at, expires_at, decided_at, completed_at, decided_by, completed_by
             """;
         cmd.Parameters.AddWithValue("@id", id);
         cmd.Parameters.AddWithValue("@newStatus", DispatchStatus.Completed.ToDbValue());
