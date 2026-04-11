@@ -1,0 +1,208 @@
+using System.Text;
+using DenMcp.Core.Data;
+using DenMcp.Core.Models;
+
+namespace DenMcp.Core.Services;
+
+public interface IPromptGenerationService
+{
+    /// <summary>
+    /// Generate a contextual prompt for an agent based on the dispatch event and routing config.
+    /// Returns both a short summary (for notifications/UI) and a full context prompt.
+    /// </summary>
+    Task<PromptResult> GenerateAsync(DispatchEvent evt, RoutingTrigger trigger, RoutingConfig config);
+}
+
+public sealed class PromptResult
+{
+    /// <summary>Short one-line summary for notifications and queue UIs.</summary>
+    public required string Summary { get; init; }
+
+    /// <summary>Full contextual prompt for the agent.</summary>
+    public required string ContextPrompt { get; init; }
+}
+
+public sealed class PromptGenerationService : IPromptGenerationService
+{
+    private readonly ITaskRepository _tasks;
+    private readonly IMessageRepository _messages;
+    private readonly IRoutingService _routing;
+
+    public PromptGenerationService(ITaskRepository tasks, IMessageRepository messages, IRoutingService routing)
+    {
+        _tasks = tasks;
+        _messages = messages;
+        _routing = routing;
+    }
+
+    public async Task<PromptResult> GenerateAsync(DispatchEvent evt, RoutingTrigger trigger, RoutingConfig config)
+    {
+        // If the trigger has a custom template, use it for the opening line
+        string? customOpener = null;
+        if (trigger.PromptTemplate is not null)
+            customOpener = _routing.InterpolateTemplate(trigger.PromptTemplate, evt);
+
+        return evt.EventKind switch
+        {
+            DispatchEvent.TaskStatusChanged when evt.ToStatus is "review"
+                => await BuildReviewPrompt(evt, config, customOpener),
+            DispatchEvent.TaskStatusChanged when evt.FromStatus is "review"
+                => await BuildFeedbackPrompt(evt, config, customOpener),
+            DispatchEvent.TaskStatusChanged
+                => await BuildTaskTransitionPrompt(evt, config, customOpener),
+            DispatchEvent.MessageReceived
+                => await BuildMessagePrompt(evt, config, customOpener),
+            _ => BuildFallbackPrompt(evt, customOpener)
+        };
+    }
+
+    private async Task<PromptResult> BuildReviewPrompt(DispatchEvent evt, RoutingConfig config, string? customOpener)
+    {
+        var sb = new StringBuilder();
+        var role = ResolveRoleName(config, "reviewer");
+        var branch = evt.Branch ?? $"task/{evt.TaskId}-*";
+
+        sb.AppendLine(customOpener ?? $"Review task #{evt.TaskId} ({evt.TaskTitle}) on branch {branch}.");
+        sb.AppendLine();
+        sb.AppendLine($"You are the {role} for {evt.ProjectId}.");
+        sb.AppendLine();
+        sb.AppendLine($"**Task #{evt.TaskId}**: {evt.TaskTitle}");
+        sb.AppendLine($"**Branch**: {branch}");
+        sb.AppendLine($"**Status**: review");
+        sb.AppendLine();
+        sb.AppendLine("Review the changes: `git diff main...HEAD`");
+
+        await AppendRecentMessages(sb, evt);
+
+        sb.AppendLine();
+        sb.AppendLine("Post your review findings as a message to the task.");
+        sb.AppendLine("If changes needed: set task status back to planned.");
+        sb.AppendLine("If approved: merge to main and set task status to done.");
+
+        return new PromptResult
+        {
+            Summary = $"{evt.Sender} requested review on #{evt.TaskId} ({evt.TaskTitle})",
+            ContextPrompt = sb.ToString().TrimEnd()
+        };
+    }
+
+    private async Task<PromptResult> BuildFeedbackPrompt(DispatchEvent evt, RoutingConfig config, string? customOpener)
+    {
+        var sb = new StringBuilder();
+        var role = ResolveRoleName(config, "implementer");
+        var branch = evt.Branch ?? $"task/{evt.TaskId}-*";
+
+        sb.AppendLine(customOpener ?? $"Task #{evt.TaskId} ({evt.TaskTitle}) has review feedback. Address the findings on branch {branch}.");
+        sb.AppendLine();
+        sb.AppendLine($"You are the {role} for {evt.ProjectId}.");
+        sb.AppendLine();
+        sb.AppendLine($"**Task #{evt.TaskId}**: {evt.TaskTitle}");
+        sb.AppendLine($"**Branch**: {branch}");
+        sb.AppendLine($"**Status**: planned (returned from review)");
+
+        await AppendRecentMessages(sb, evt);
+
+        sb.AppendLine();
+        sb.AppendLine("Address the review feedback, then set task status to review when ready.");
+
+        return new PromptResult
+        {
+            Summary = $"Review feedback on #{evt.TaskId} ({evt.TaskTitle})",
+            ContextPrompt = sb.ToString().TrimEnd()
+        };
+    }
+
+    private async Task<PromptResult> BuildTaskTransitionPrompt(DispatchEvent evt, RoutingConfig config, string? customOpener)
+    {
+        var sb = new StringBuilder();
+        var branch = evt.Branch ?? (evt.TaskId.HasValue ? $"task/{evt.TaskId}-*" : null);
+
+        sb.AppendLine(customOpener ?? $"Task #{evt.TaskId} ({evt.TaskTitle}) moved to {evt.ToStatus}.");
+        sb.AppendLine();
+        sb.AppendLine($"**Task #{evt.TaskId}**: {evt.TaskTitle}");
+        if (branch is not null)
+            sb.AppendLine($"**Branch**: {branch}");
+        sb.AppendLine($"**Status**: {evt.ToStatus} (was: {evt.FromStatus})");
+
+        await AppendRecentMessages(sb, evt);
+
+        return new PromptResult
+        {
+            Summary = $"Task #{evt.TaskId} ({evt.TaskTitle}) moved to {evt.ToStatus}",
+            ContextPrompt = sb.ToString().TrimEnd()
+        };
+    }
+
+    private async Task<PromptResult> BuildMessagePrompt(DispatchEvent evt, RoutingConfig config, string? customOpener)
+    {
+        var sb = new StringBuilder();
+
+        sb.AppendLine(customOpener ?? $"You have a message on {evt.ProjectId} from {evt.Sender}.");
+        sb.AppendLine();
+
+        // If it's task-attached, include task context
+        if (evt.TaskId.HasValue)
+        {
+            var task = await _tasks.GetByIdAsync(evt.TaskId.Value);
+            if (task is not null)
+            {
+                sb.AppendLine($"**Task #{task.Id}**: {task.Title} (status: {task.Status.ToDbValue()})");
+                sb.AppendLine();
+            }
+        }
+
+        await AppendRecentMessages(sb, evt);
+
+        sb.AppendLine();
+        sb.AppendLine("Read the messages and take appropriate action.");
+
+        var summaryType = evt.MessageType is not null ? $" ({evt.MessageType})" : "";
+        var summaryTask = evt.TaskId.HasValue ? $" on #{evt.TaskId}" : "";
+        return new PromptResult
+        {
+            Summary = $"{evt.Sender} sent{summaryType}{summaryTask} on {evt.ProjectId}",
+            ContextPrompt = sb.ToString().TrimEnd()
+        };
+    }
+
+    private static PromptResult BuildFallbackPrompt(DispatchEvent evt, string? customOpener)
+    {
+        return new PromptResult
+        {
+            Summary = $"Dispatch on {evt.ProjectId}",
+            ContextPrompt = customOpener ?? $"You have pending work on {evt.ProjectId}. Check your tasks and messages."
+        };
+    }
+
+    private async Task AppendRecentMessages(StringBuilder sb, DispatchEvent evt)
+    {
+        if (!evt.TaskId.HasValue) return;
+
+        var messages = await _messages.GetMessagesAsync(evt.ProjectId, taskId: evt.TaskId, limit: 5);
+        if (messages.Count == 0) return;
+
+        sb.AppendLine();
+        sb.AppendLine("**Recent messages on this task:**");
+        sb.AppendLine("---");
+        // Messages come back newest-first; reverse for chronological display
+        foreach (var msg in messages.AsEnumerable().Reverse())
+        {
+            sb.AppendLine($"**{msg.Sender}** ({msg.CreatedAt:yyyy-MM-dd HH:mm}):");
+            // Truncate very long messages to keep the prompt focused
+            var content = msg.Content.Length > 1000
+                ? msg.Content[..1000] + "\n... (truncated)"
+                : msg.Content;
+            sb.AppendLine(content);
+            sb.AppendLine();
+        }
+        sb.AppendLine("---");
+    }
+
+    /// <summary>
+    /// Find the human-readable role name for the target agent, or fall back to a generic label.
+    /// </summary>
+    private static string ResolveRoleName(RoutingConfig config, string defaultRole)
+    {
+        return config.Roles.ContainsKey(defaultRole) ? defaultRole : "assigned agent";
+    }
+}
