@@ -1,0 +1,75 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace DenMcp.Core.Models;
+
+/// <summary>
+/// Per-project routing configuration. Stored as a den document
+/// (doc_type: convention, slug: dispatch-routing). Defines which agents
+/// fill which roles and which events trigger dispatches.
+/// </summary>
+public sealed class RoutingConfig
+{
+    /// <summary>
+    /// Maps role names to agent identities. E.g. "implementer" → "claude-code", "reviewer" → "codex".
+    /// </summary>
+    [JsonPropertyName("roles")]
+    public Dictionary<string, string> Roles { get; set; } = new();
+
+    [JsonPropertyName("triggers")]
+    public List<RoutingTrigger> Triggers { get; set; } = [];
+
+    [JsonPropertyName("defaults")]
+    public RoutingDefaults Defaults { get; set; } = new();
+}
+
+/// <summary>
+/// A single routing trigger rule. Matches against normalized dispatch events.
+/// </summary>
+public sealed class RoutingTrigger
+{
+    /// <summary>
+    /// The event kind to match: "task_status_changed" or "message_received".
+    /// </summary>
+    [JsonPropertyName("event")]
+    public required string Event { get; set; }
+
+    /// <summary>Task status the event transitions TO. Null means any.</summary>
+    [JsonPropertyName("to_status")]
+    public string? ToStatus { get; set; }
+
+    /// <summary>Task status the event transitions FROM. Null means any.</summary>
+    [JsonPropertyName("from_status")]
+    public string? FromStatus { get; set; }
+
+    /// <summary>Message metadata "type" value to match. Null means any.</summary>
+    [JsonPropertyName("message_type")]
+    public string? MessageType { get; set; }
+
+    /// <summary>If true, only matches messages with an explicit recipient in metadata.</summary>
+    [JsonPropertyName("has_recipient")]
+    public bool? HasRecipient { get; set; }
+
+    /// <summary>
+    /// Dispatch target: a role name (looked up in Roles) or a literal agent identity.
+    /// Supports "{recipient}" to use the message metadata's recipient value.
+    /// </summary>
+    [JsonPropertyName("dispatch_to")]
+    public required string DispatchTo { get; set; }
+
+    /// <summary>
+    /// Prompt template with interpolation placeholders.
+    /// Supported: {project_id}, {task_id}, {task_title}, {branch}, {sender}, {message_type}
+    /// </summary>
+    [JsonPropertyName("prompt_template")]
+    public string? PromptTemplate { get; set; }
+}
+
+public sealed class RoutingDefaults
+{
+    [JsonPropertyName("auto_approve")]
+    public bool AutoApprove { get; set; } = false;
+
+    [JsonPropertyName("expiry_minutes")]
+    public int ExpiryMinutes { get; set; } = 1440; // 24 hours
+}
