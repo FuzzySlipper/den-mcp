@@ -76,11 +76,41 @@ export interface ReviewRound {
   commits_since_last_review: number | null;
   tests_run: string[] | null;
   notes: string | null;
+  preferred_diff_base_ref: string | null;
+  preferred_diff_base_commit: string | null;
+  preferred_diff_head_ref: string | null;
+  preferred_diff_head_commit: string | null;
+  alternate_diff_base_ref: string | null;
+  alternate_diff_base_commit: string | null;
+  alternate_diff_head_ref: string | null;
+  alternate_diff_head_commit: string | null;
+  delta_base_commit: string | null;
+  inherited_commit_count: number | null;
+  task_local_commit_count: number | null;
   verdict: ReviewVerdict | null;
   verdict_by: string | null;
   verdict_notes: string | null;
   requested_at: string;
   verdict_at: string | null;
+  preferred_diff: ReviewDiffRange;
+  alternate_diff: ReviewDiffRange | null;
+  delta_diff: ReviewDiffRange | null;
+  branch_composition: ReviewBranchComposition;
+  is_stacked_branch_review: boolean;
+}
+
+export interface ReviewDiffRange {
+  base_ref: string;
+  base_commit: string | null;
+  head_ref: string;
+  head_commit: string;
+}
+
+export interface ReviewBranchComposition {
+  inherited_commit_count: number | null;
+  task_local_commit_count: number | null;
+  has_inherited_changes: boolean | null;
+  has_task_local_changes: boolean | null;
 }
 
 export interface ReviewFinding {

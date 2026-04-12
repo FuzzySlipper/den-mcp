@@ -95,4 +95,55 @@ public class DatabaseInitializerTests : IDisposable
 
         Assert.Equal(1, count);
     }
+
+    [Fact]
+    public async Task InitializeAsync_AddsReviewRoundDiffMetadataColumnsToExistingDatabase()
+    {
+        await using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                CREATE TABLE review_rounds (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL REFERENCES tasks(id),
+                    round_number INTEGER NOT NULL,
+                    requested_by TEXT NOT NULL,
+                    branch TEXT NOT NULL,
+                    base_branch TEXT NOT NULL,
+                    base_commit TEXT NOT NULL,
+                    head_commit TEXT NOT NULL,
+                    last_reviewed_head_commit TEXT,
+                    commits_since_last_review INTEGER,
+                    tests_run TEXT,
+                    notes TEXT,
+                    verdict TEXT,
+                    verdict_by TEXT,
+                    verdict_notes TEXT,
+                    requested_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    verdict_at TEXT
+                );
+                """;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var initializer = new DatabaseInitializer(_dbPath, NullLogger<DatabaseInitializer>.Instance);
+        await initializer.InitializeAsync();
+
+        await using var verify = new SqliteConnection(initializer.ConnectionString);
+        await verify.OpenAsync();
+
+        var columns = new List<string>();
+        await using var checkCmd = verify.CreateCommand();
+        checkCmd.CommandText = "PRAGMA table_info(review_rounds)";
+        await using var reader = await checkCmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            columns.Add(reader.GetString(1));
+
+        Assert.Contains("preferred_diff_base_ref", columns);
+        Assert.Contains("alternate_diff_base_ref", columns);
+        Assert.Contains("delta_base_commit", columns);
+        Assert.Contains("inherited_commit_count", columns);
+        Assert.Contains("task_local_commit_count", columns);
+    }
 }

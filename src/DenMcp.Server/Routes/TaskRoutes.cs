@@ -128,7 +128,18 @@ public static class TaskRoutes
                     LastReviewedHeadCommit = req.LastReviewedHeadCommit,
                     CommitsSinceLastReview = req.CommitsSinceLastReview,
                     TestsRun = req.TestsRun,
-                    Notes = req.Notes
+                    Notes = req.Notes,
+                    PreferredDiffBaseRef = req.PreferredDiffBaseRef,
+                    PreferredDiffBaseCommit = req.PreferredDiffBaseCommit,
+                    PreferredDiffHeadRef = req.PreferredDiffHeadRef,
+                    PreferredDiffHeadCommit = req.PreferredDiffHeadCommit,
+                    AlternateDiffBaseRef = req.AlternateDiffBaseRef,
+                    AlternateDiffBaseCommit = req.AlternateDiffBaseCommit,
+                    AlternateDiffHeadRef = req.AlternateDiffHeadRef,
+                    AlternateDiffHeadCommit = req.AlternateDiffHeadCommit,
+                    DeltaBaseCommit = req.DeltaBaseCommit,
+                    InheritedCommitCount = req.InheritedCommitCount,
+                    TaskLocalCommitCount = req.TaskLocalCommitCount
                 });
                 return Results.Created($"/api/projects/{projectId}/tasks/{taskId}/review-rounds/{round.Id}", round);
             }
@@ -369,7 +380,18 @@ public record CreateReviewRoundRequest(
     string? LastReviewedHeadCommit = null,
     int? CommitsSinceLastReview = null,
     List<string>? TestsRun = null,
-    string? Notes = null);
+    string? Notes = null,
+    string? PreferredDiffBaseRef = null,
+    string? PreferredDiffBaseCommit = null,
+    string? PreferredDiffHeadRef = null,
+    string? PreferredDiffHeadCommit = null,
+    string? AlternateDiffBaseRef = null,
+    string? AlternateDiffBaseCommit = null,
+    string? AlternateDiffHeadRef = null,
+    string? AlternateDiffHeadCommit = null,
+    string? DeltaBaseCommit = null,
+    int? InheritedCommitCount = null,
+    int? TaskLocalCommitCount = null);
 
 public record SetReviewVerdictRequest(
     string Verdict,

@@ -64,6 +64,17 @@ public class ReviewRoundApiTests : IAsyncLifetime
             base_branch = "main",
             base_commit = "abc123",
             head_commit = "def456",
+            preferred_diff_base_ref = "task/593-parent",
+            preferred_diff_base_commit = "bbb222",
+            preferred_diff_head_ref = "task/594-review-rounds-sha-metadata",
+            preferred_diff_head_commit = "def456",
+            alternate_diff_base_ref = "main",
+            alternate_diff_base_commit = "abc123",
+            alternate_diff_head_ref = "task/594-review-rounds-sha-metadata",
+            alternate_diff_head_commit = "def456",
+            delta_base_commit = "ccc333",
+            inherited_commit_count = 4,
+            task_local_commit_count = 1,
             tests_run = new[] { "dotnet test den-mcp.slnx --filter ReviewRoundApiTests" },
             notes = "Ready for review"
         });
@@ -73,6 +84,13 @@ public class ReviewRoundApiTests : IAsyncLifetime
         Assert.Equal(1, round!.RoundNumber);
         Assert.Equal("def456", round.HeadCommit);
         Assert.Single(round.TestsRun!);
+        Assert.Equal("task/593-parent", round.PreferredDiff.BaseRef);
+        Assert.NotNull(round.AlternateDiff);
+        Assert.Equal("main", round.AlternateDiff!.BaseRef);
+        Assert.Equal("ccc333", round.DeltaDiff!.BaseCommit);
+        Assert.True(round.IsStackedBranchReview);
+        Assert.Equal(4, round.BranchComposition.InheritedCommitCount);
+        Assert.Equal(1, round.BranchComposition.TaskLocalCommitCount);
     }
 
     [Fact]
@@ -135,7 +153,11 @@ public class ReviewRoundApiTests : IAsyncLifetime
             branch = "task/594-review-rounds-sha-metadata",
             base_branch = "main",
             base_commit = "abc123",
-            head_commit = "def456"
+            head_commit = "def456",
+            preferred_diff_base_ref = "task/593-parent",
+            alternate_diff_base_ref = "main",
+            inherited_commit_count = 2,
+            task_local_commit_count = 1
         });
 
         var response = await _client.GetAsync($"/api/projects/{ProjectId}/tasks/{task.Id}");
@@ -144,6 +166,8 @@ public class ReviewRoundApiTests : IAsyncLifetime
         var detail = await response.Content.ReadFromJsonAsync<TaskDetail>(JsonOpts);
         Assert.Single(detail!.ReviewRounds);
         Assert.Equal("def456", detail.ReviewRounds[0].HeadCommit);
+        Assert.True(detail.ReviewRounds[0].IsStackedBranchReview);
+        Assert.Equal(2, detail.ReviewRounds[0].BranchComposition.InheritedCommitCount);
     }
 
     private sealed class ReviewRoundAppFactory : WebApplicationFactory<Program>
