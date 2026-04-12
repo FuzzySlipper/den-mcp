@@ -158,13 +158,42 @@ public sealed class TaskRepository : ITaskRepository
             reviewRounds.Add(ReviewRoundRepository.ReadReviewRound(reviewReader));
         await reviewReader.CloseAsync();
 
+        // Review findings
+        await using var findingCmd = conn.CreateCommand();
+        findingCmd.CommandText = """
+            SELECT rf.id, rf.finding_key, rf.task_id, rf.review_round_id, rf.finding_number, rf.created_by,
+                   rf.category, rf.summary, rf.notes, rf.file_references, rf.test_commands, rf.status,
+                   rf.status_updated_by, rf.status_notes, rf.status_updated_at, rf.response_by,
+                   rf.response_notes, rf.response_at, rf.follow_up_task_id, rf.created_at, rf.updated_at,
+                   rr.round_number
+            FROM review_findings rf
+            JOIN review_rounds rr ON rr.id = rf.review_round_id
+            WHERE rf.task_id = @id
+            ORDER BY rf.finding_number ASC
+            """;
+        findingCmd.Parameters.AddWithValue("@id", id);
+        var openReviewFindings = new List<ReviewFinding>();
+        var resolvedReviewFindings = new List<ReviewFinding>();
+        await using var findingReader = await findingCmd.ExecuteReaderAsync();
+        while (await findingReader.ReadAsync())
+        {
+            var finding = ReviewFindingRepository.ReadReviewFinding(findingReader);
+            if (finding.Status.IsResolved())
+                resolvedReviewFindings.Add(finding);
+            else
+                openReviewFindings.Add(finding);
+        }
+        await findingReader.CloseAsync();
+
         return new TaskDetail
         {
             Task = task,
             Dependencies = deps,
             Subtasks = subtasks,
             RecentMessages = messages,
-            ReviewRounds = reviewRounds
+            ReviewRounds = reviewRounds,
+            OpenReviewFindings = openReviewFindings,
+            ResolvedReviewFindings = resolvedReviewFindings
         };
     }
 

@@ -2,6 +2,8 @@ export type TaskStatus = 'planned' | 'in_progress' | 'review' | 'blocked' | 'don
 export type DocType = 'prd' | 'spec' | 'adr' | 'convention' | 'reference' | 'note';
 export type AgentSessionStatus = 'active' | 'inactive';
 export type ReviewVerdict = 'changes_requested' | 'looks_good' | 'follow_up_needed' | 'blocked_by_dependency';
+export type ReviewFindingCategory = 'blocking_bug' | 'acceptance_gap' | 'test_weakness' | 'follow_up_candidate';
+export type ReviewFindingStatus = 'open' | 'claimed_fixed' | 'verified_fixed' | 'not_fixed' | 'superseded' | 'split_to_follow_up';
 
 export interface Project {
   id: string;
@@ -57,6 +59,8 @@ export interface TaskDetail {
   subtasks: TaskSummary[];
   recent_messages: Message[];
   review_rounds: ReviewRound[];
+  open_review_findings: ReviewFinding[];
+  resolved_review_findings: ReviewFinding[];
 }
 
 export interface ReviewRound {
@@ -77,6 +81,31 @@ export interface ReviewRound {
   verdict_notes: string | null;
   requested_at: string;
   verdict_at: string | null;
+}
+
+export interface ReviewFinding {
+  id: number;
+  finding_key: string;
+  task_id: number;
+  review_round_id: number;
+  review_round_number: number;
+  finding_number: number;
+  created_by: string;
+  category: ReviewFindingCategory;
+  summary: string;
+  notes: string | null;
+  file_references: string[] | null;
+  test_commands: string[] | null;
+  status: ReviewFindingStatus;
+  status_updated_by: string | null;
+  status_notes: string | null;
+  status_updated_at: string | null;
+  response_by: string | null;
+  response_notes: string | null;
+  response_at: string | null;
+  follow_up_task_id: number | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Message {

@@ -170,6 +170,103 @@ public sealed class TaskTools
         return JsonSerializer.Serialize(updated, JsonOpts.Default);
     }
 
+    [McpServerTool(Name = "create_review_finding"), Description("Create a structured finding for a review round.")]
+    public static async Task<string> CreateReviewFinding(
+        IReviewFindingRepository repo,
+        [Description("Review round ID.")] int review_round_id,
+        [Description("Agent or reviewer creating the finding.")] string created_by,
+        [Description("Category: blocking_bug, acceptance_gap, test_weakness, follow_up_candidate.")] string category,
+        [Description("Short finding summary.")] string summary,
+        [Description("Optional detailed reviewer notes.")] string? notes = null,
+        [Description("Optional JSON array of file refs such as [\"src/Foo.cs:42\"].")] string? file_references = null,
+        [Description("Optional JSON array of test commands relevant to the finding.")] string? test_commands = null)
+    {
+        var parsedFileRefs = file_references is not null ? JsonSerializer.Deserialize<List<string>>(file_references) : null;
+        var parsedTestCommands = test_commands is not null ? JsonSerializer.Deserialize<List<string>>(test_commands) : null;
+        var finding = await repo.CreateAsync(new CreateReviewFindingInput
+        {
+            ReviewRoundId = review_round_id,
+            CreatedBy = created_by,
+            Category = EnumExtensions.ParseReviewFindingCategory(category),
+            Summary = summary,
+            Notes = notes,
+            FileReferences = parsedFileRefs,
+            TestCommands = parsedTestCommands
+        });
+        return JsonSerializer.Serialize(finding, JsonOpts.Default);
+    }
+
+    [McpServerTool(Name = "list_review_findings"), Description("List review findings for a task or a specific review round.")]
+    public static async Task<string> ListReviewFindings(
+        IReviewFindingRepository repo,
+        IReviewRoundRepository reviewRoundRepo,
+        [Description("Task ID.")] int task_id,
+        [Description("Optional review round ID filter.")] int? review_round_id = null,
+        [Description("Optional statuses (comma-separated): open, claimed_fixed, verified_fixed, not_fixed, superseded, split_to_follow_up.")] string? status = null,
+        [Description("Optional resolved filter. True = resolved/history, false = unresolved only.")] bool? resolved = null)
+    {
+        var statuses = EnumExtensions.GetReviewFindingStatuses(status, resolved);
+
+        if (review_round_id is not null)
+        {
+            var round = await reviewRoundRepo.GetByIdAsync(review_round_id.Value);
+            if (round is null || round.TaskId != task_id)
+                throw new KeyNotFoundException($"Review round {review_round_id.Value} not found for task {task_id}");
+
+            var roundFindings = await repo.ListByReviewRoundAsync(review_round_id.Value, statuses);
+            return JsonSerializer.Serialize(roundFindings, JsonOpts.Default);
+        }
+
+        var findings = await repo.ListByTaskAsync(task_id, statuses);
+        return JsonSerializer.Serialize(findings, JsonOpts.Default);
+    }
+
+    [McpServerTool(Name = "respond_to_review_finding"), Description("Add implementer response notes to a review finding and optionally mark it claimed_fixed or otherwise update status.")]
+    public static async Task<string> RespondToReviewFinding(
+        IReviewFindingRepository repo,
+        ITaskRepository taskRepo,
+        [Description("Review finding ID.")] int review_finding_id,
+        [Description("Agent or user responding to the finding.")] string responded_by,
+        [Description("Optional implementer response notes.")] string? response_notes = null,
+        [Description("Optional status update: open, claimed_fixed, verified_fixed, not_fixed, superseded, split_to_follow_up.")] string? status = null,
+        [Description("Optional notes explaining the status update.")] string? status_notes = null,
+        [Description("Optional follow-up task ID when the finding is split out.")] int? follow_up_task_id = null)
+    {
+        await ValidateFollowUpTaskProjectAsync(repo, taskRepo, review_finding_id, follow_up_task_id);
+
+        var updated = await repo.RespondAsync(review_finding_id, new RespondToReviewFindingInput
+        {
+            RespondedBy = responded_by,
+            ResponseNotes = response_notes,
+            Status = status is not null ? EnumExtensions.ParseReviewFindingStatus(status) : null,
+            StatusNotes = status_notes,
+            FollowUpTaskId = follow_up_task_id
+        });
+        return JsonSerializer.Serialize(updated, JsonOpts.Default);
+    }
+
+    [McpServerTool(Name = "set_review_finding_status"), Description("Update the status for a review finding.")]
+    public static async Task<string> SetReviewFindingStatus(
+        IReviewFindingRepository repo,
+        ITaskRepository taskRepo,
+        [Description("Review finding ID.")] int review_finding_id,
+        [Description("New status: open, claimed_fixed, verified_fixed, not_fixed, superseded, split_to_follow_up.")] string status,
+        [Description("Agent or user updating the finding status.")] string updated_by,
+        [Description("Optional status notes.")] string? notes = null,
+        [Description("Optional follow-up task ID when the finding is split out.")] int? follow_up_task_id = null)
+    {
+        await ValidateFollowUpTaskProjectAsync(repo, taskRepo, review_finding_id, follow_up_task_id);
+
+        var updated = await repo.SetStatusAsync(review_finding_id, new UpdateReviewFindingStatusInput
+        {
+            Status = EnumExtensions.ParseReviewFindingStatus(status),
+            UpdatedBy = updated_by,
+            Notes = notes,
+            FollowUpTaskId = follow_up_task_id
+        });
+        return JsonSerializer.Serialize(updated, JsonOpts.Default);
+    }
+
     [McpServerTool(Name = "next_task"), Description("Get the next unblocked task to work on. Checks subtasks of in-progress parents first, then top-level planned tasks. Ranks by priority, then fewer dependencies, then lower ID.")]
     public static async Task<string> NextTask(
         ITaskRepository repo,
@@ -200,5 +297,28 @@ public sealed class TaskTools
     {
         await repo.RemoveDependencyAsync(task_id, depends_on);
         return JsonSerializer.Serialize(new { message = $"Removed dependency: task {task_id} no longer depends on task {depends_on}." }, JsonOpts.Default);
+    }
+
+    private static async Task ValidateFollowUpTaskProjectAsync(
+        IReviewFindingRepository findingRepo,
+        ITaskRepository taskRepo,
+        int reviewFindingId,
+        int? followUpTaskId)
+    {
+        if (followUpTaskId is null)
+            return;
+
+        var finding = await findingRepo.GetByIdAsync(reviewFindingId)
+            ?? throw new KeyNotFoundException($"Review finding {reviewFindingId} not found");
+        var findingTask = await taskRepo.GetByIdAsync(finding.TaskId)
+            ?? throw new KeyNotFoundException($"Owning task {finding.TaskId} not found for review finding {reviewFindingId}");
+        var followUpTask = await taskRepo.GetByIdAsync(followUpTaskId.Value)
+            ?? throw new KeyNotFoundException($"Follow-up task {followUpTaskId.Value} not found");
+
+        if (!string.Equals(findingTask.ProjectId, followUpTask.ProjectId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Follow-up task {followUpTaskId.Value} must be in the same project as review finding {reviewFindingId}.");
+        }
     }
 }
