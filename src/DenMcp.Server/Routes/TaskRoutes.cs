@@ -1,6 +1,8 @@
 using System.Text.Json;
 using DenMcp.Core.Data;
 using DenMcp.Core.Models;
+using DenMcp.Core.Services;
+using Microsoft.Extensions.Logging;
 using TaskStatus = DenMcp.Core.Models.TaskStatus;
 
 namespace DenMcp.Server.Routes;
@@ -52,11 +54,14 @@ public static class TaskRoutes
             }
         });
 
-        group.MapPut("/{taskId:int}", async (ITaskRepository repo, string projectId, int taskId, UpdateTaskRequest req) =>
+        group.MapPut("/{taskId:int}", async (ITaskRepository repo, IDispatchDetectionService detection,
+            ILoggerFactory loggers, string projectId, int taskId, UpdateTaskRequest req) =>
         {
             var task = await repo.GetByIdAsync(taskId);
             if (task is null || task.ProjectId != projectId)
                 return Results.NotFound(new { error = $"Task {taskId} not found" });
+
+            var oldStatus = task.Status.ToDbValue();
 
             var changes = new Dictionary<string, object?>();
             if (req.Title is not null) changes["title"] = req.Title;
@@ -70,6 +75,20 @@ public static class TaskRoutes
             try
             {
                 var updated = await repo.UpdateAsync(taskId, changes, req.Agent);
+
+                if (req.Status is not null && req.Status != oldStatus)
+                {
+                    try
+                    {
+                        await detection.OnTaskStatusChangedAsync(updated, oldStatus, req.Status, req.Agent);
+                    }
+                    catch (Exception ex)
+                    {
+                        loggers.CreateLogger("DispatchDetection")
+                            .LogError(ex, "Dispatch detection failed for task {TaskId}", taskId);
+                    }
+                }
+
                 return Results.Ok(updated);
             }
             catch (KeyNotFoundException)

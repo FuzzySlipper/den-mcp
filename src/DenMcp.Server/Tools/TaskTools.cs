@@ -2,6 +2,8 @@ using System.ComponentModel;
 using System.Text.Json;
 using DenMcp.Core.Data;
 using DenMcp.Core.Models;
+using DenMcp.Core.Services;
+using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using TaskStatus = DenMcp.Core.Models.TaskStatus;
 
@@ -15,7 +17,8 @@ public sealed class TaskTools
         ITaskRepository repo,
         [Description("Project ID.")] string project_id,
         [Description("Task title.")] string title,
-        [Description("Detailed description / acceptance criteria (markdown).")] string? description = null,
+        [Description("Detailed description / acceptance criteria (markdown).")]
+        string? description = null,
         [Description("Priority 1 (critical) to 5 (backlog). Default 3.")] int priority = 3,
         [Description("JSON array of string tags, e.g. [\"core\",\"api\"].")] string? tags = null,
         [Description("Agent identity to assign this task to.")] string? assigned_to = null,
@@ -43,8 +46,11 @@ public sealed class TaskTools
     [McpServerTool(Name = "update_task"), Description("Update a task's fields. Records changes in audit history.")]
     public static async Task<string> UpdateTask(
         ITaskRepository repo,
+        IDispatchDetectionService detection,
+        ILogger<TaskTools> logger,
         [Description("Task ID to update.")] int task_id,
-        [Description("Your agent identity (required for audit trail).")] string agent,
+        [Description("Your agent identity (required for audit trail).")]
+        string agent,
         [Description("New title.")] string? title = null,
         [Description("New description.")] string? description = null,
         [Description("New status: planned, in_progress, review, blocked, done, cancelled.")] string? status = null,
@@ -53,6 +59,9 @@ public sealed class TaskTools
         [Description("JSON array of string tags.")] string? tags = null,
         [Description("New parent task ID.")] int? parent_id = null)
     {
+        var current = await repo.GetByIdAsync(task_id);
+        var oldStatus = current?.Status.ToDbValue();
+
         var changes = new Dictionary<string, object?>();
         if (title is not null) changes["title"] = title;
         if (description is not null) changes["description"] = description;
@@ -63,6 +72,19 @@ public sealed class TaskTools
         if (parent_id is not null) changes["parent_id"] = parent_id.Value;
 
         var updated = await repo.UpdateAsync(task_id, changes, agent);
+
+        if (status is not null && status != oldStatus)
+        {
+            try
+            {
+                await detection.OnTaskStatusChangedAsync(updated, oldStatus!, status, agent);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Dispatch detection failed for task {TaskId}", task_id);
+            }
+        }
+
         return JsonSerializer.Serialize(updated, JsonOpts.Default);
     }
 
@@ -79,11 +101,14 @@ public sealed class TaskTools
     public static async Task<string> ListTasks(
         ITaskRepository repo,
         [Description("Project ID.")] string project_id,
-        [Description("Filter by statuses (comma-separated): planned,in_progress,review,blocked,done,cancelled.")] string? status = null,
+        [Description("Filter by statuses (comma-separated): planned,in_progress,review,blocked,done,cancelled.")]
+        string? status = null,
         [Description("Filter by assigned agent.")] string? assigned_to = null,
         [Description("Filter by tags (comma-separated). Task must have ALL specified tags.")] string? tags = null,
-        [Description("Filter: tasks at this priority or higher (lower number = higher priority).")] int? priority = null,
-        [Description("Filter by parent task ID to list subtasks. Omit for top-level tasks.")] int? parent_id = null)
+        [Description("Filter: tasks at this priority or higher (lower number = higher priority).")]
+        int? priority = null,
+        [Description("Filter by parent task ID to list subtasks. Omit for top-level tasks.")]
+        int? parent_id = null)
     {
         var statuses = status?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(EnumExtensions.ParseTaskStatus).ToArray();

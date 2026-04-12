@@ -1,6 +1,8 @@
 using System.Text.Json;
 using DenMcp.Core.Data;
 using DenMcp.Core.Models;
+using DenMcp.Core.Services;
+using Microsoft.Extensions.Logging;
 
 namespace DenMcp.Server.Routes;
 
@@ -10,7 +12,8 @@ public static class MessageRoutes
     {
         var group = app.MapGroup("/api/projects/{projectId}/messages");
 
-        group.MapPost("/", async (IMessageRepository repo, string projectId, SendMessageRequest req) =>
+        group.MapPost("/", async (IMessageRepository repo, IDispatchDetectionService detection,
+            ILoggerFactory loggers, string projectId, SendMessageRequest req) =>
         {
             var msg = new Message
             {
@@ -22,6 +25,15 @@ public static class MessageRoutes
                 Metadata = req.Metadata is not null ? JsonSerializer.Deserialize<JsonElement>(req.Metadata) : null
             };
             var created = await repo.CreateAsync(msg);
+            try
+            {
+                await detection.OnMessageCreatedAsync(created);
+            }
+            catch (Exception ex)
+            {
+                loggers.CreateLogger("DispatchDetection")
+                    .LogError(ex, "Dispatch detection failed for message {MessageId}", created.Id);
+            }
             return Results.Created($"/api/projects/{projectId}/messages/{created.Id}", created);
         });
 
