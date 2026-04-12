@@ -22,7 +22,7 @@ printf '\033]1337;SetUserVar=%s=%s\007' "$key" "$encoded_value"
 
 Values must be base64-encoded without trailing newlines.
 
-The helper for wrappers lives at [den-signal.sh](/home/patch/dev/den-mcp/kitty/den-signal.sh).
+The helper for wrappers lives at [den-signal.sh](./den-signal.sh).
 
 ## Variables
 
