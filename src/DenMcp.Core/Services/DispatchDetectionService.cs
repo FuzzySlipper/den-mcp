@@ -23,17 +23,20 @@ public sealed class DispatchDetectionService : IDispatchDetectionService
     private readonly IRoutingService _routing;
     private readonly IDispatchRepository _dispatches;
     private readonly IPromptGenerationService _prompts;
+    private readonly INotificationChannel _notifications;
     private readonly ILogger<DispatchDetectionService> _logger;
 
     public DispatchDetectionService(
         IRoutingService routing,
         IDispatchRepository dispatches,
         IPromptGenerationService prompts,
+        INotificationChannel notifications,
         ILogger<DispatchDetectionService> logger)
     {
         _routing = routing;
         _dispatches = dispatches;
         _prompts = prompts;
+        _notifications = notifications;
         _logger = logger;
     }
 
@@ -143,6 +146,17 @@ public sealed class DispatchDetectionService : IDispatchDetectionService
         {
             _logger.LogInformation("Created dispatch #{DispatchId}: {Summary}",
                 dispatch.Id, dispatch.Summary);
+
+            try
+            {
+                await _notifications.SendDispatchNotificationAsync(
+                    dispatch,
+                    promptResult.Summary ?? dispatch.Summary ?? "Pending dispatch awaiting approval.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send notification for dispatch {DispatchId}", dispatch.Id);
+            }
         }
     }
 }

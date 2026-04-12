@@ -5,6 +5,7 @@ using DenMcp.Core.Llm;
 using DenMcp.Core.Models;
 using DenMcp.Core.Services;
 using DenMcp.Server;
+using DenMcp.Server.Notifications;
 using DenMcp.Server.Routes;
 using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol;
@@ -66,12 +67,22 @@ builder.Services.AddSingleton<IMessageRepository, MessageRepository>();
 builder.Services.AddSingleton<IDocumentRepository, DocumentRepository>();
 builder.Services.AddSingleton<IAgentSessionRepository, AgentSessionRepository>();
 builder.Services.AddSingleton<IDispatchRepository, DispatchRepository>();
+builder.Services.AddSingleton<INotificationMessageRepository, NotificationMessageRepository>();
 builder.Services.AddSingleton<IReviewWorkflowService, ReviewWorkflowService>();
 
 // Dispatch
 builder.Services.AddSingleton<IRoutingService, RoutingService>();
 builder.Services.AddSingleton<IPromptGenerationService, PromptGenerationService>();
 builder.Services.AddSingleton<IDispatchDetectionService, DispatchDetectionService>();
+builder.Services.AddHttpClient("signal-daemon", (services, client) =>
+{
+    var denOptions = services.GetRequiredService<DenMcpOptions>();
+    client.BaseAddress = new Uri(denOptions.Signal.GetBaseUrl());
+    client.Timeout = TimeSpan.FromSeconds(10);
+});
+builder.Services.AddSingleton<SignalNotificationChannel>();
+builder.Services.AddSingleton<INotificationChannel>(services => services.GetRequiredService<SignalNotificationChannel>());
+builder.Services.AddHostedService<NotificationListenerHostedService>();
 
 // Librarian
 builder.Services.AddSingleton<LibrarianGatherer>();

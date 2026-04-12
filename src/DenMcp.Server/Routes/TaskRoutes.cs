@@ -55,7 +55,7 @@ public static class TaskRoutes
         });
 
         group.MapPut("/{taskId:int}", async (ITaskRepository repo, IDispatchDetectionService detection,
-            ILoggerFactory loggers, string projectId, int taskId, UpdateTaskRequest req) =>
+            INotificationChannel notifications, ILoggerFactory loggers, string projectId, int taskId, UpdateTaskRequest req) =>
         {
             var task = await repo.GetByIdAsync(taskId);
             if (task is null || task.ProjectId != projectId)
@@ -86,6 +86,16 @@ public static class TaskRoutes
                     {
                         loggers.CreateLogger("DispatchDetection")
                             .LogError(ex, "Dispatch detection failed for task {TaskId}", taskId);
+                    }
+
+                    try
+                    {
+                        await notifications.SendAgentStatusAsync(projectId, req.Agent, req.Status, taskId);
+                    }
+                    catch (Exception ex)
+                    {
+                        loggers.CreateLogger("Notifications")
+                            .LogError(ex, "Task status notification failed for task {TaskId}", taskId);
                     }
                 }
 
