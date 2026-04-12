@@ -36,6 +36,9 @@ public sealed class DispatchEvent
     /// <summary>The message ID that triggered this event (for message events).</summary>
     public int? MessageId { get; set; }
 
+    /// <summary>The triggering message content, for inclusion in prompts.</summary>
+    public string? MessageContent { get; set; }
+
     /// <summary>Branch name from message metadata, if present.</summary>
     public string? Branch { get; set; }
 
