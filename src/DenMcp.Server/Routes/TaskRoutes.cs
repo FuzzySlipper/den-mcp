@@ -157,6 +157,149 @@ public static class TaskRoutes
             return Results.Ok(updated);
         });
 
+        group.MapGet("/{taskId:int}/review-findings", async (ITaskRepository taskRepo, IReviewRoundRepository reviewRepo,
+            IReviewFindingRepository findingRepo, string projectId, int taskId, string? status, int? roundId, bool? resolved) =>
+        {
+            var task = await taskRepo.GetByIdAsync(taskId);
+            if (task is null || task.ProjectId != projectId)
+                return Results.NotFound(new { error = $"Task {taskId} not found" });
+
+            try
+            {
+                var statuses = GetFindingStatuses(status, resolved);
+
+                if (roundId is not null)
+                {
+                    var round = await reviewRepo.GetByIdAsync(roundId.Value);
+                    if (round is null || round.TaskId != taskId)
+                        return Results.NotFound(new { error = $"Review round {roundId.Value} not found" });
+
+                    var roundFindings = await findingRepo.ListByReviewRoundAsync(roundId.Value, statuses);
+                    return Results.Ok(roundFindings);
+                }
+
+                var findings = await findingRepo.ListByTaskAsync(taskId, statuses);
+                return Results.Ok(findings);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+
+        group.MapPost("/{taskId:int}/review-rounds/{roundId:int}/findings", async (ITaskRepository taskRepo,
+            IReviewRoundRepository reviewRepo, IReviewFindingRepository findingRepo,
+            string projectId, int taskId, int roundId, CreateReviewFindingRequest req) =>
+        {
+            var task = await taskRepo.GetByIdAsync(taskId);
+            if (task is null || task.ProjectId != projectId)
+                return Results.NotFound(new { error = $"Task {taskId} not found" });
+
+            var round = await reviewRepo.GetByIdAsync(roundId);
+            if (round is null || round.TaskId != taskId)
+                return Results.NotFound(new { error = $"Review round {roundId} not found" });
+
+            try
+            {
+                var finding = await findingRepo.CreateAsync(new CreateReviewFindingInput
+                {
+                    ReviewRoundId = roundId,
+                    CreatedBy = req.CreatedBy,
+                    Category = EnumExtensions.ParseReviewFindingCategory(req.Category),
+                    Summary = req.Summary,
+                    Notes = req.Notes,
+                    FileReferences = req.FileReferences,
+                    TestCommands = req.TestCommands
+                });
+                return Results.Created($"/api/projects/{projectId}/tasks/{taskId}/review-findings/{finding.Id}", finding);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+
+        group.MapPost("/{taskId:int}/review-findings/{findingId:int}/response", async (ITaskRepository taskRepo,
+            IReviewFindingRepository findingRepo, string projectId, int taskId, int findingId,
+            RespondToReviewFindingRequest req) =>
+        {
+            var task = await taskRepo.GetByIdAsync(taskId);
+            if (task is null || task.ProjectId != projectId)
+                return Results.NotFound(new { error = $"Task {taskId} not found" });
+
+            var finding = await findingRepo.GetByIdAsync(findingId);
+            if (finding is null || finding.TaskId != taskId)
+                return Results.NotFound(new { error = $"Review finding {findingId} not found" });
+
+            if (req.FollowUpTaskId is not null)
+            {
+                var followUp = await taskRepo.GetByIdAsync(req.FollowUpTaskId.Value);
+                if (followUp is null || followUp.ProjectId != projectId)
+                    return Results.BadRequest(new { error = $"Follow-up task {req.FollowUpTaskId.Value} not found in project {projectId}." });
+            }
+
+            try
+            {
+                var updated = await findingRepo.RespondAsync(findingId, new RespondToReviewFindingInput
+                {
+                    RespondedBy = req.RespondedBy,
+                    ResponseNotes = req.ResponseNotes,
+                    Status = req.Status is not null ? EnumExtensions.ParseReviewFindingStatus(req.Status) : null,
+                    StatusNotes = req.StatusNotes,
+                    FollowUpTaskId = req.FollowUpTaskId
+                });
+                return Results.Ok(updated);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+
+        group.MapPost("/{taskId:int}/review-findings/{findingId:int}/status", async (ITaskRepository taskRepo,
+            IReviewFindingRepository findingRepo, string projectId, int taskId, int findingId,
+            SetReviewFindingStatusRequest req) =>
+        {
+            var task = await taskRepo.GetByIdAsync(taskId);
+            if (task is null || task.ProjectId != projectId)
+                return Results.NotFound(new { error = $"Task {taskId} not found" });
+
+            var finding = await findingRepo.GetByIdAsync(findingId);
+            if (finding is null || finding.TaskId != taskId)
+                return Results.NotFound(new { error = $"Review finding {findingId} not found" });
+
+            if (req.FollowUpTaskId is not null)
+            {
+                var followUp = await taskRepo.GetByIdAsync(req.FollowUpTaskId.Value);
+                if (followUp is null || followUp.ProjectId != projectId)
+                    return Results.BadRequest(new { error = $"Follow-up task {req.FollowUpTaskId.Value} not found in project {projectId}." });
+            }
+
+            try
+            {
+                var updated = await findingRepo.SetStatusAsync(findingId, new UpdateReviewFindingStatusInput
+                {
+                    Status = EnumExtensions.ParseReviewFindingStatus(req.Status),
+                    UpdatedBy = req.UpdatedBy,
+                    Notes = req.Notes,
+                    FollowUpTaskId = req.FollowUpTaskId
+                });
+                return Results.Ok(updated);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+
         group.MapGet("/next", async (ITaskRepository repo, string projectId, string? assignedTo) =>
         {
             var next = await repo.GetNextTaskAsync(projectId, assignedTo);
@@ -195,6 +338,33 @@ public static class TaskRoutes
             return Results.Ok(new { message = "Removed dependency." });
         });
     }
+
+    private static ReviewFindingStatus[]? GetFindingStatuses(string? status, bool? resolved)
+    {
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            return status.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(EnumExtensions.ParseReviewFindingStatus)
+                .ToArray();
+        }
+
+        return resolved switch
+        {
+            true =>
+            [
+                ReviewFindingStatus.VerifiedFixed,
+                ReviewFindingStatus.Superseded,
+                ReviewFindingStatus.SplitToFollowUp
+            ],
+            false =>
+            [
+                ReviewFindingStatus.Open,
+                ReviewFindingStatus.ClaimedFixed,
+                ReviewFindingStatus.NotFixed
+            ],
+            _ => null
+        };
+    }
 }
 
 public record CreateTaskRequest(
@@ -231,5 +401,26 @@ public record SetReviewVerdictRequest(
     string Verdict,
     string DecidedBy,
     string? Notes = null);
+
+public record CreateReviewFindingRequest(
+    string CreatedBy,
+    string Category,
+    string Summary,
+    string? Notes = null,
+    List<string>? FileReferences = null,
+    List<string>? TestCommands = null);
+
+public record RespondToReviewFindingRequest(
+    string RespondedBy,
+    string? ResponseNotes = null,
+    string? Status = null,
+    string? StatusNotes = null,
+    int? FollowUpTaskId = null);
+
+public record SetReviewFindingStatusRequest(
+    string Status,
+    string UpdatedBy,
+    string? Notes = null,
+    int? FollowUpTaskId = null);
 
 public record AddDependencyRequest(int DependsOn);

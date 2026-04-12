@@ -61,6 +61,7 @@ builder.Services.AddSingleton(new DbConnectionFactory(initializer.ConnectionStri
 builder.Services.AddSingleton<IProjectRepository, ProjectRepository>();
 builder.Services.AddSingleton<ITaskRepository, TaskRepository>();
 builder.Services.AddSingleton<IReviewRoundRepository, ReviewRoundRepository>();
+builder.Services.AddSingleton<IReviewFindingRepository, ReviewFindingRepository>();
 builder.Services.AddSingleton<IMessageRepository, MessageRepository>();
 builder.Services.AddSingleton<IDocumentRepository, DocumentRepository>();
 builder.Services.AddSingleton<IAgentSessionRepository, AgentSessionRepository>();

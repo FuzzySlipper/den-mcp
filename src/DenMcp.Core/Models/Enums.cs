@@ -48,3 +48,21 @@ public enum ReviewVerdict
     FollowUpNeeded,
     BlockedByDependency
 }
+
+public enum ReviewFindingCategory
+{
+    BlockingBug,
+    AcceptanceGap,
+    TestWeakness,
+    FollowUpCandidate
+}
+
+public enum ReviewFindingStatus
+{
+    Open,
+    ClaimedFixed,
+    VerifiedFixed,
+    NotFixed,
+    Superseded,
+    SplitToFollowUp
+}

@@ -111,4 +111,52 @@ public static class EnumExtensions
         "blocked_by_dependency" => ReviewVerdict.BlockedByDependency,
         _ => throw new ArgumentException($"Unknown review verdict: {value}", nameof(value))
     };
+
+    public static string ToDbValue(this ReviewFindingCategory category) => category switch
+    {
+        ReviewFindingCategory.BlockingBug => "blocking_bug",
+        ReviewFindingCategory.AcceptanceGap => "acceptance_gap",
+        ReviewFindingCategory.TestWeakness => "test_weakness",
+        ReviewFindingCategory.FollowUpCandidate => "follow_up_candidate",
+        _ => throw new ArgumentOutOfRangeException(nameof(category), category, null)
+    };
+
+    public static ReviewFindingCategory ParseReviewFindingCategory(string value) => value switch
+    {
+        "blocking_bug" => ReviewFindingCategory.BlockingBug,
+        "acceptance_gap" => ReviewFindingCategory.AcceptanceGap,
+        "test_weakness" => ReviewFindingCategory.TestWeakness,
+        "follow_up_candidate" => ReviewFindingCategory.FollowUpCandidate,
+        _ => throw new ArgumentException($"Unknown review finding category: {value}", nameof(value))
+    };
+
+    public static string ToDbValue(this ReviewFindingStatus status) => status switch
+    {
+        ReviewFindingStatus.Open => "open",
+        ReviewFindingStatus.ClaimedFixed => "claimed_fixed",
+        ReviewFindingStatus.VerifiedFixed => "verified_fixed",
+        ReviewFindingStatus.NotFixed => "not_fixed",
+        ReviewFindingStatus.Superseded => "superseded",
+        ReviewFindingStatus.SplitToFollowUp => "split_to_follow_up",
+        _ => throw new ArgumentOutOfRangeException(nameof(status), status, null)
+    };
+
+    public static ReviewFindingStatus ParseReviewFindingStatus(string value) => value switch
+    {
+        "open" => ReviewFindingStatus.Open,
+        "claimed_fixed" => ReviewFindingStatus.ClaimedFixed,
+        "verified_fixed" => ReviewFindingStatus.VerifiedFixed,
+        "not_fixed" => ReviewFindingStatus.NotFixed,
+        "superseded" => ReviewFindingStatus.Superseded,
+        "split_to_follow_up" => ReviewFindingStatus.SplitToFollowUp,
+        _ => throw new ArgumentException($"Unknown review finding status: {value}", nameof(value))
+    };
+
+    public static bool IsResolved(this ReviewFindingStatus status) => status switch
+    {
+        ReviewFindingStatus.VerifiedFixed => true,
+        ReviewFindingStatus.Superseded => true,
+        ReviewFindingStatus.SplitToFollowUp => true,
+        _ => false
+    };
 }

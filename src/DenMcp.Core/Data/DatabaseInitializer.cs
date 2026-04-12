@@ -245,6 +245,53 @@ public sealed class DatabaseInitializer
             ON review_rounds(task_id, round_number);
 
         ------------------------------------------------------------
+        -- REVIEW FINDINGS
+        ------------------------------------------------------------
+        CREATE TABLE IF NOT EXISTS review_findings (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            finding_key         TEXT NOT NULL UNIQUE,
+            task_id             INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            review_round_id     INTEGER NOT NULL REFERENCES review_rounds(id) ON DELETE CASCADE,
+            finding_number      INTEGER NOT NULL,
+            created_by          TEXT NOT NULL,
+            category            TEXT NOT NULL
+                                CHECK (category IN (
+                                    'blocking_bug',
+                                    'acceptance_gap',
+                                    'test_weakness',
+                                    'follow_up_candidate'
+                                )),
+            summary             TEXT NOT NULL,
+            notes               TEXT,
+            file_references     TEXT,
+            test_commands       TEXT,
+            status              TEXT NOT NULL DEFAULT 'open'
+                                CHECK (status IN (
+                                    'open',
+                                    'claimed_fixed',
+                                    'verified_fixed',
+                                    'not_fixed',
+                                    'superseded',
+                                    'split_to_follow_up'
+                                )),
+            status_updated_by   TEXT,
+            status_notes        TEXT,
+            status_updated_at   TEXT,
+            response_by         TEXT,
+            response_notes      TEXT,
+            response_at         TEXT,
+            follow_up_task_id   INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+            created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(task_id, finding_number)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_review_findings_task_status
+            ON review_findings(task_id, status, finding_number);
+        CREATE INDEX IF NOT EXISTS idx_review_findings_round
+            ON review_findings(review_round_id, finding_number);
+
+        ------------------------------------------------------------
         -- DISPATCH ENTRIES
         ------------------------------------------------------------
         CREATE TABLE IF NOT EXISTS dispatch_entries (
