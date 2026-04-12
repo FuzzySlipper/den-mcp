@@ -809,7 +809,10 @@ def wrap_text_for_width(text: str, width: int) -> list[str]:
 
 
 def load_details_text(details_file: str) -> str:
-    path = pathlib.Path(details_file)
+    path = pathlib.Path(details_file).resolve()
+    tempdir = pathlib.Path(tempfile.gettempdir()).resolve()
+    if not path.is_relative_to(tempdir) or not path.name.startswith("den-dispatch-"):
+        raise ValueError(f"--details-file must be a den-dispatch temp file, got: {details_file}")
     try:
         return path.read_text(encoding="utf-8")
     finally:

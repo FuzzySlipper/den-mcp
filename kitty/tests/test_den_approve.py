@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import pathlib
 import sys
+import tempfile
 import unittest
 
 
@@ -238,6 +239,39 @@ class DenApproveTests(unittest.TestCase):
         self.assertEqual((0, 3), den_approve.compute_visible_window(5, 0, 3))
         self.assertEqual((1, 4), den_approve.compute_visible_window(5, 3, 3))
         self.assertEqual((2, 5), den_approve.compute_visible_window(5, 4, 3))
+
+    def test_load_details_text_only_deletes_den_dispatch_tempfiles(self) -> None:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            delete=False,
+            encoding="utf-8",
+            prefix="den-dispatch-",
+            suffix=".txt",
+        ) as handle:
+            handle.write("detail text")
+            safe_path = pathlib.Path(handle.name)
+
+        loaded = den_approve.load_details_text(str(safe_path))
+
+        self.assertEqual("detail text", loaded)
+        self.assertFalse(safe_path.exists())
+
+    def test_load_details_text_rejects_non_dispatch_paths_without_deleting_them(self) -> None:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            delete=False,
+            encoding="utf-8",
+            prefix="notes-",
+            suffix=".txt",
+        ) as handle:
+            handle.write("keep me")
+            unsafe_path = pathlib.Path(handle.name)
+
+        with self.assertRaisesRegex(ValueError, "--details-file must be a den-dispatch temp file"):
+            den_approve.load_details_text(str(unsafe_path))
+
+        self.assertTrue(unsafe_path.exists())
+        unsafe_path.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
