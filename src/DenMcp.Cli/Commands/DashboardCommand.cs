@@ -66,6 +66,13 @@ internal sealed class TaskTreeBuilder : ITreeBuilder<TaskNode>
     public IEnumerable<TaskNode> GetChildren(TaskNode node) => node.Children;
 }
 
+internal enum DashboardPaneMode
+{
+    Tasks,
+    Documents,
+    Dispatches
+}
+
 internal sealed class DashboardView : Toplevel
 {
     private readonly DenApiClient _client;
@@ -83,9 +90,11 @@ internal sealed class DashboardView : Toplevel
     private readonly CancellationTokenSource _cts = new();
 
     // Documents mode
+    private readonly ListView _dispatchList;
     private readonly ListView _docList;
-    private bool _showDocuments;
+    private DashboardPaneMode _paneMode;
     private List<DocumentSummary> _documents = [];
+    private List<DispatchEntry> _dispatches = [];
 
     private List<Project> _projects = [];
     private List<TaskNode> _rootNodes = [];
@@ -94,6 +103,7 @@ internal sealed class DashboardView : Toplevel
 
     // Preserve selected task ID across refreshes
     private int? _selectedTaskId;
+    private int? _selectedDispatchId;
 
     // Status filter: null = show all
     private string? _statusFilter;
@@ -191,6 +201,17 @@ internal sealed class DashboardView : Toplevel
         };
         _docList.OpenSelectedItem += OnDocumentActivated;
 
+        _dispatchList = new ListView
+        {
+            X = 0, Y = 0,
+            Width = Dim.Fill(),
+            Height = Dim.Fill(),
+            AllowsMarking = false,
+            Visible = false
+        };
+        _dispatchList.OpenSelectedItem += OnDispatchActivated;
+        _dispatchList.SelectedItemChanged += OnDispatchSelected;
+
         _taskFrame = new FrameView("Tasks")
         {
             X = 22, Y = Pos.Percent(45),
@@ -199,6 +220,7 @@ internal sealed class DashboardView : Toplevel
         };
         _taskFrame.Add(_taskTree);
         _taskFrame.Add(_docList);
+        _taskFrame.Add(_dispatchList);
 
         // Status bar
         _statusBar = new StatusBar(new StatusItem[]
@@ -209,27 +231,49 @@ internal sealed class DashboardView : Toplevel
             new(Key.N, "~N~ Next", OnShowNext),
             new(Key.F, "~F~ Filter", OnFilterStatus),
             new(Key.O, "~O~ Sort", OnChangeSort),
-            new(Key.D, "~D~ Docs/Tasks", ToggleDocsMode),
+            new(Key.V, "~V~ View", CyclePaneMode),
+            new(Key.A, "~A~ Approve", ApproveSelectedDispatch),
+            new(Key.X, "~X~ Reject", RejectSelectedDispatch),
             new(Key.Tab, "~Tab~ Switch", CycleFocus)
         });
 
         Add(_messageFrame, _agentFrame, _projectFrame, _taskFrame, _statusBar);
+        ApplyPaneMode();
     }
 
-    private void ToggleDocsMode()
+    private void CyclePaneMode()
     {
-        _showDocuments = !_showDocuments;
-        _taskTree.Visible = !_showDocuments;
-        _docList.Visible = _showDocuments;
+        _paneMode = _paneMode switch
+        {
+            DashboardPaneMode.Tasks => DashboardPaneMode.Documents,
+            DashboardPaneMode.Documents => DashboardPaneMode.Dispatches,
+            _ => DashboardPaneMode.Tasks
+        };
 
-        if (_showDocuments)
+        ApplyPaneMode();
+
+        if (_currentProject is null)
+            return;
+
+        switch (_paneMode)
         {
-            _ = RefreshDocuments();
+            case DashboardPaneMode.Documents:
+                _ = RefreshDocuments();
+                break;
+            case DashboardPaneMode.Dispatches:
+                _ = RefreshDispatches();
+                break;
+            default:
+                _ = RefreshProjectData();
+                break;
         }
-        else
-        {
-            _ = RefreshProjectData();
-        }
+    }
+
+    private void ApplyPaneMode()
+    {
+        _taskTree.Visible = _paneMode == DashboardPaneMode.Tasks;
+        _docList.Visible = _paneMode == DashboardPaneMode.Documents;
+        _dispatchList.Visible = _paneMode == DashboardPaneMode.Dispatches;
     }
 
     public async Task StartPolling()
@@ -278,10 +322,18 @@ internal sealed class DashboardView : Toplevel
 
             if (_currentProject is not null)
             {
-                if (_showDocuments)
-                    await RefreshDocuments();
-                else
-                    await RefreshProjectData();
+                switch (_paneMode)
+                {
+                    case DashboardPaneMode.Documents:
+                        await RefreshDocuments();
+                        break;
+                    case DashboardPaneMode.Dispatches:
+                        await RefreshDispatches();
+                        break;
+                    default:
+                        await RefreshProjectData();
+                        break;
+                }
             }
         }
         catch
@@ -344,31 +396,7 @@ internal sealed class DashboardView : Toplevel
             var filterLabel = _statusFilter is not null ? $" [{_statusFilter}]" : "";
             var sortLabel = _sortMode != "priority" ? $" ↕{_sortMode}" : "";
             _taskFrame.Title = $"Tasks — {_currentProject} ({CountAll(_rootNodes)}){filterLabel}{sortLabel}";
-
-            _messages = await _client.GetMessagesAsync(_currentProject, limit: 15);
-            var msgLines = _messages.Select(m =>
-            {
-                var time = FormatShortTime(m.CreatedAt);
-                var projectTag = isGlobal ? $"[{Truncate(m.ProjectId, 12)}] " : "";
-                return $"[{time}] {projectTag}{m.Sender}: {Truncate(m.Content.ReplaceLineEndings(" "), 50)}";
-            }).ToList();
-            _messageList.SetSource(msgLines);
-            _messageFrame.Title = $"Messages — {_currentProject} ({_messages.Count})";
-
-            // Clean up sessions for dead CC processes
-            await CleanupDeadSessionsAsync();
-
-            // Active agents — _global shows all agents across projects
-            _activeAgents = await _client.ListActiveAgentsAsync(isGlobal ? null : _currentProject);
-            var agentLines = _activeAgents.Select(a =>
-            {
-                var ago = FormatShortTime(a.LastHeartbeat);
-                return isGlobal
-                    ? $" {Truncate(a.Agent, 9)}@{Truncate(a.ProjectId, 6)} ({ago})"
-                    : $" {Truncate(a.Agent, 14)} ({ago})";
-            }).ToList();
-            _agentList.SetSource(agentLines.Count > 0 ? agentLines : new List<string> { " (none)" });
-            _agentFrame.Title = $"Agents ({_activeAgents.Count})";
+            await RefreshMessagesAndAgents(isGlobal);
         }
         catch { /* ignore refresh errors */ }
         finally { _refreshing = false; }
@@ -396,31 +424,76 @@ internal sealed class DashboardView : Toplevel
 
             _docList.SetSource(docLines.Count > 0 ? docLines : new List<string> { " (no documents)" });
             _taskFrame.Title = $"Documents — {_currentProject} ({_documents.Count})";
-
-            // Also refresh messages and agents
-            var messages = await _client.GetMessagesAsync(_currentProject, limit: 15);
-            _messages = messages;
-            var msgLines = _messages.Select(m =>
-            {
-                var time = FormatShortTime(m.CreatedAt);
-                var projectTag = isGlobal ? $"[{Truncate(m.ProjectId, 12)}] " : "";
-                return $"[{time}] {projectTag}{m.Sender}: {Truncate(m.Content.ReplaceLineEndings(" "), 50)}";
-            }).ToList();
-            _messageList.SetSource(msgLines);
-            _messageFrame.Title = $"Messages — {_currentProject} ({_messages.Count})";
-
-            _activeAgents = await _client.ListActiveAgentsAsync(isGlobal ? null : _currentProject);
-            var agentLines = _activeAgents.Select(a =>
-            {
-                var ago = FormatShortTime(a.LastHeartbeat);
-                return isGlobal
-                    ? $" {Truncate(a.Agent, 9)}@{Truncate(a.ProjectId, 6)} ({ago})"
-                    : $" {Truncate(a.Agent, 14)} ({ago})";
-            }).ToList();
-            _agentList.SetSource(agentLines.Count > 0 ? agentLines : new List<string> { " (none)" });
-            _agentFrame.Title = $"Agents ({_activeAgents.Count})";
+            await RefreshMessagesAndAgents(isGlobal);
         }
         catch { /* ignore refresh errors */ }
+    }
+
+    private async Task RefreshDispatches()
+    {
+        if (_currentProject is null) return;
+        if (_refreshing) return;
+        _refreshing = true;
+
+        try
+        {
+            var isGlobal = _currentProject == "_global";
+            if (_dispatchList.SelectedItem >= 0 && _dispatchList.SelectedItem < _dispatches.Count)
+                _selectedDispatchId = _dispatches[_dispatchList.SelectedItem].Id;
+
+            _dispatches = await _client.ListDispatchesAsync(isGlobal ? null : _currentProject, status: "pending");
+
+            var dispatchLines = _dispatches
+                .Select(dispatch => FormatDispatchLine(dispatch, isGlobal))
+                .ToList();
+            _dispatchList.SetSource(dispatchLines.Count > 0 ? dispatchLines : new List<string> { " (no pending dispatches)" });
+            _taskFrame.Title = $"Dispatches — {_currentProject} ({_dispatches.Count})";
+
+            if (_selectedDispatchId is not null)
+            {
+                var index = _dispatches.FindIndex(dispatch => dispatch.Id == _selectedDispatchId.Value);
+                if (index >= 0)
+                    _dispatchList.SelectedItem = index;
+                else if (_dispatches.Count > 0)
+                    _dispatchList.SelectedItem = 0;
+            }
+            else if (_dispatches.Count > 0)
+            {
+                _dispatchList.SelectedItem = 0;
+            }
+
+            await RefreshMessagesAndAgents(isGlobal);
+        }
+        catch { /* ignore refresh errors */ }
+        finally { _refreshing = false; }
+    }
+
+    private async Task RefreshMessagesAndAgents(bool isGlobal)
+    {
+        if (_currentProject is null) return;
+
+        _messages = await _client.GetMessagesAsync(_currentProject, limit: 15);
+        var msgLines = _messages.Select(m =>
+        {
+            var time = FormatShortTime(m.CreatedAt);
+            var projectTag = isGlobal ? $"[{Truncate(m.ProjectId, 12)}] " : "";
+            return $"[{time}] {projectTag}{m.Sender}: {Truncate(m.Content.ReplaceLineEndings(" "), 50)}";
+        }).ToList();
+        _messageList.SetSource(msgLines);
+        _messageFrame.Title = $"Messages — {_currentProject} ({_messages.Count})";
+
+        await CleanupDeadSessionsAsync();
+
+        _activeAgents = await _client.ListActiveAgentsAsync(isGlobal ? null : _currentProject);
+        var agentLines = _activeAgents.Select(a =>
+        {
+            var ago = FormatShortTime(a.LastHeartbeat);
+            return isGlobal
+                ? $" {Truncate(a.Agent, 9)}@{Truncate(a.ProjectId, 6)} ({ago})"
+                : $" {Truncate(a.Agent, 14)} ({ago})";
+        }).ToList();
+        _agentList.SetSource(agentLines.Count > 0 ? agentLines : new List<string> { " (none)" });
+        _agentFrame.Title = $"Agents ({_activeAgents.Count})";
     }
 
     private void OnDocumentActivated(ListViewItemEventArgs args)
@@ -428,6 +501,18 @@ internal sealed class DashboardView : Toplevel
         if (args.Item < 0 || args.Item >= _documents.Count) return;
         var doc = _documents[args.Item];
         ShowDocumentDetail(doc);
+    }
+
+    private void OnDispatchActivated(ListViewItemEventArgs args)
+    {
+        if (args.Item < 0 || args.Item >= _dispatches.Count) return;
+        ShowDispatchDetail(_dispatches[args.Item]);
+    }
+
+    private void OnDispatchSelected(ListViewItemEventArgs args)
+    {
+        if (args.Item >= 0 && args.Item < _dispatches.Count)
+            _selectedDispatchId = _dispatches[args.Item].Id;
     }
 
     private async void ShowDocumentDetail(DocumentSummary summary)
@@ -474,6 +559,90 @@ internal sealed class DashboardView : Toplevel
             Text = content
         };
         dlg.Add(textView);
+
+        var close = new Button("Close") { IsDefault = true };
+        close.Clicked += () => Application.RequestStop();
+        dlg.AddButton(close);
+
+        Application.Run(dlg);
+    }
+
+    private async void ShowDispatchDetail(DispatchEntry summary)
+    {
+        DispatchEntry dispatch = summary;
+        try
+        {
+            dispatch = await _client.GetDispatchAsync(summary.Id);
+        }
+        catch { /* fall back to list summary */ }
+
+        var dlg = new Dialog($"Dispatch #{dispatch.Id}", 84, 28);
+
+        var lines = new List<string>
+        {
+            $"  Status:   {dispatch.Status.ToDbValue()}",
+            $"  Project:  {dispatch.ProjectId}",
+            $"  Agent:    {dispatch.TargetAgent}",
+            $"  Trigger:  {dispatch.TriggerType.ToDbValue()} #{dispatch.TriggerId}",
+            $"  Task:     {(dispatch.TaskId is not null ? $"#{dispatch.TaskId}" : "(none)")}",
+            $"  Created:  {dispatch.CreatedAt:yyyy-MM-dd HH:mm:ss} UTC",
+            $"  Expires:  {dispatch.ExpiresAt:yyyy-MM-dd HH:mm:ss} UTC"
+        };
+
+        if (dispatch.DecidedAt is not null)
+            lines.Add($"  Decided:  {dispatch.DecidedAt:yyyy-MM-dd HH:mm:ss} UTC by {dispatch.DecidedBy ?? "unknown"}");
+        if (dispatch.CompletedAt is not null)
+            lines.Add($"  Complete: {dispatch.CompletedAt:yyyy-MM-dd HH:mm:ss} UTC by {dispatch.CompletedBy ?? "unknown"}");
+
+        if (!string.IsNullOrWhiteSpace(dispatch.Summary))
+        {
+            lines.Add("");
+            lines.Add("  Summary:");
+            foreach (var line in dispatch.Summary.Split('\n'))
+                lines.Add($"    {line}");
+        }
+
+        lines.Add("");
+        lines.Add("  Prompt:");
+        if (!string.IsNullOrWhiteSpace(dispatch.ContextPrompt))
+        {
+            foreach (var line in dispatch.ContextPrompt.Split('\n'))
+                lines.Add($"    {line}");
+        }
+        else
+        {
+            lines.Add("    (none stored)");
+        }
+
+        var textView = new TextView
+        {
+            X = 1, Y = 0,
+            Width = Dim.Fill(1),
+            Height = Dim.Fill(1),
+            ReadOnly = true,
+            WordWrap = true,
+            Text = string.Join("\n", lines)
+        };
+        dlg.Add(textView);
+
+        if (dispatch.Status == DispatchStatus.Pending)
+        {
+            var approve = new Button("Approve");
+            approve.Clicked += () =>
+            {
+                Application.RequestStop();
+                ApproveDispatch(dispatch);
+            };
+            dlg.AddButton(approve);
+
+            var reject = new Button("Reject");
+            reject.Clicked += () =>
+            {
+                Application.RequestStop();
+                RejectDispatch(dispatch);
+            };
+            dlg.AddButton(reject);
+        }
 
         var close = new Button("Close") { IsDefault = true };
         close.Clicked += () => Application.RequestStop();
@@ -560,10 +729,19 @@ internal sealed class DashboardView : Toplevel
         {
             _currentProject = _projects[args.Item].Id;
             _selectedTaskId = null; // Reset selection on project change
-            if (_showDocuments)
-                _ = RefreshDocuments();
-            else
-                _ = RefreshProjectData();
+            _selectedDispatchId = null;
+            switch (_paneMode)
+            {
+                case DashboardPaneMode.Documents:
+                    _ = RefreshDocuments();
+                    break;
+                case DashboardPaneMode.Dispatches:
+                    _ = RefreshDispatches();
+                    break;
+                default:
+                    _ = RefreshProjectData();
+                    break;
+            }
         }
     }
 
@@ -779,6 +957,8 @@ internal sealed class DashboardView : Toplevel
 
     private async void OnChangeStatus()
     {
+        if (_paneMode != DashboardPaneMode.Tasks)
+            return;
         var selected = _taskTree.SelectedObject;
         if (selected is null || _currentProject is null) return;
         ChangeStatusForTask(selected);
@@ -801,8 +981,65 @@ internal sealed class DashboardView : Toplevel
         }
     }
 
+    private void ApproveSelectedDispatch()
+    {
+        if (_paneMode != DashboardPaneMode.Dispatches) return;
+        if (_dispatchList.SelectedItem < 0 || _dispatchList.SelectedItem >= _dispatches.Count) return;
+        ApproveDispatch(_dispatches[_dispatchList.SelectedItem]);
+    }
+
+    private void RejectSelectedDispatch()
+    {
+        if (_paneMode != DashboardPaneMode.Dispatches) return;
+        if (_dispatchList.SelectedItem < 0 || _dispatchList.SelectedItem >= _dispatches.Count) return;
+        RejectDispatch(_dispatches[_dispatchList.SelectedItem]);
+    }
+
+    private async void ApproveDispatch(DispatchEntry dispatch)
+    {
+        var confirmed = MessageBox.Query(
+            "Approve Dispatch",
+            $"Approve dispatch #{dispatch.Id} for {dispatch.TargetAgent} on {dispatch.ProjectId}?",
+            "Approve",
+            "Cancel");
+        if (confirmed != 0) return;
+
+        try
+        {
+            await _client.ApproveDispatchAsync(dispatch.Id, "user");
+            await RefreshDispatches();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Query("Error", ex.Message, "OK");
+        }
+    }
+
+    private async void RejectDispatch(DispatchEntry dispatch)
+    {
+        var confirmed = MessageBox.Query(
+            "Reject Dispatch",
+            $"Reject dispatch #{dispatch.Id} for {dispatch.TargetAgent} on {dispatch.ProjectId}?",
+            "Reject",
+            "Cancel");
+        if (confirmed != 0) return;
+
+        try
+        {
+            await _client.RejectDispatchAsync(dispatch.Id, "user");
+            await RefreshDispatches();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Query("Error", ex.Message, "OK");
+        }
+    }
+
     private void OnChangeSort()
     {
+        if (_paneMode != DashboardPaneMode.Tasks)
+            return;
+
         var options = new[] { "priority", "id", "status", "title" };
         var currentIdx = Array.IndexOf(options, _sortMode);
         if (currentIdx < 0) currentIdx = 0;
@@ -821,8 +1058,7 @@ internal sealed class DashboardView : Toplevel
         {
             _sortMode = options[e.Item];
             Application.RequestStop();
-            if (!_showDocuments)
-                _ = RefreshProjectData();
+            _ = RefreshProjectData();
         };
 
         var cancel = new Button("Cancel");
@@ -848,6 +1084,9 @@ internal sealed class DashboardView : Toplevel
 
     private void OnFilterStatus()
     {
+        if (_paneMode != DashboardPaneMode.Tasks)
+            return;
+
         var options = new[] { "(all)", "planned", "in_progress", "review", "blocked", "done", "cancelled" };
 
         var currentIdx = 0;
@@ -892,7 +1131,9 @@ internal sealed class DashboardView : Toplevel
                 case 'n': OnShowNext(); return true;
                 case 'f': OnFilterStatus(); return true;
                 case 'o': OnChangeSort(); return true;
-                case 'd': ToggleDocsMode(); return true;
+                case 'v': CyclePaneMode(); return true;
+                case 'a': ApproveSelectedDispatch(); return true;
+                case 'x': RejectSelectedDispatch(); return true;
             }
         }
         return base.ProcessKey(kb);
@@ -1020,6 +1261,15 @@ internal sealed class DashboardView : Toplevel
 
     private static string CollapseWhitespace(string value) =>
         value.ReplaceLineEndings(" ").Trim();
+
+    private static string FormatDispatchLine(DispatchEntry dispatch, bool isGlobal)
+    {
+        var age = FormatShortTime(dispatch.CreatedAt);
+        var projectTag = isGlobal ? $"[{Truncate(dispatch.ProjectId, 12)}] " : $"[{Truncate(dispatch.ProjectId, 12)}] ";
+        var taskTag = dispatch.TaskId is not null ? $" #{dispatch.TaskId}" : "";
+        var summary = dispatch.Summary ?? $"{dispatch.TriggerType.ToDbValue()} #{dispatch.TriggerId}";
+        return $"[{age}] {projectTag}{dispatch.TargetAgent}{taskTag}: {Truncate(summary.ReplaceLineEndings(" "), 52)}";
+    }
 
     private static string Truncate(string s, int max) =>
         s.Length <= max ? s : s[..(max - 3)] + "...";

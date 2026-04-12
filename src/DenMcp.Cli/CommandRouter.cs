@@ -13,9 +13,37 @@ public sealed class CommandRouter
 
     public string? GetPositional(int index)
     {
-        // Positional args after the command, skipping flags
-        var positionals = _args.Skip(1).Where(a => !a.StartsWith('-')).ToList();
+        var positionals = GetPositionals();
         return index < positionals.Count ? positionals[index] : null;
+    }
+
+    public IReadOnlyList<string> GetPositionals(params string[] booleanFlags)
+    {
+        var boolSet = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var flag in booleanFlags)
+        {
+            boolSet.Add($"--{flag}");
+            boolSet.Add($"-{flag[0]}");
+        }
+
+        var positionals = new List<string>();
+        for (var i = 1; i < _args.Length; i++)
+        {
+            var arg = _args[i];
+            if (!arg.StartsWith('-'))
+            {
+                positionals.Add(arg);
+                continue;
+            }
+
+            if (boolSet.Contains(arg))
+                continue;
+
+            if (i + 1 < _args.Length && !_args[i + 1].StartsWith('-'))
+                i++;
+        }
+
+        return positionals;
     }
 
     public string? GetFlag(string name)

@@ -15,6 +15,7 @@ try
         "project" => await ProjectCommands.Get(client, router),
         "tasks" => await TaskCommands.List(client, router),
         "task" => await TaskCommands.Get(client, router),
+        "dispatch" => await DispatchCommands.Run(client, router),
         "next" => await TaskCommands.Next(client, router),
         "create-task" => await TaskCommands.Create(client, router),
         "status" => await TaskCommands.SetStatus(client, router),
@@ -58,6 +59,7 @@ static int ShowHelp()
           project [id]                   Show project details with stats
           tasks                          List tasks (top-level)
           task <id>                      Show task details
+          dispatch                       List or act on dispatches
           next                           Get next unblocked task
           create-task --title <title>    Create a new task
           status <id> <status>           Update task status
