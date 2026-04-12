@@ -3,6 +3,7 @@ using System.Text.Json;
 using DenMcp.Core.Data;
 using DenMcp.Core.Models;
 using DenMcp.Core.Services;
+using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 
 namespace DenMcp.Server.Tools;
@@ -14,6 +15,7 @@ public sealed class MessageTools
     public static async Task<string> SendMessage(
         IMessageRepository repo,
         IDispatchDetectionService detection,
+        ILogger<MessageTools> logger,
         [Description("Project ID.")] string project_id,
         [Description("Your agent identity, e.g. 'claude-code'.")] string sender,
         [Description("Message body (markdown).")] string content,
@@ -32,7 +34,14 @@ public sealed class MessageTools
         };
 
         var created = await repo.CreateAsync(msg);
-        await detection.OnMessageCreatedAsync(created);
+        try
+        {
+            await detection.OnMessageCreatedAsync(created);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Dispatch detection failed for message {MessageId}", created.Id);
+        }
         return JsonSerializer.Serialize(created, JsonOpts.Default);
     }
 
