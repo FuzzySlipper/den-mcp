@@ -60,7 +60,7 @@ class AgentWindowState:
 
     @property
     def is_managed(self) -> bool:
-        return bool(self.agent or self.project)
+        return bool(self.agent and self.project)
 
 
 class DenWatcher:
@@ -100,10 +100,15 @@ class DenWatcher:
 
         self._apply_presentation(boss, window, updated, pending_dispatch_count)
 
-        if updated.project and key in {"den_project", "den_status", "den_dispatch"}:
+        if updated.is_managed and updated.project and key in {"den_agent", "den_project", "den_status", "den_dispatch"}:
             self._schedule_pending_dispatch_refresh(updated.project)
 
-        if updated.status and updated.status != previous_status and updated.status in NOTIFY_STATUSES:
+        if (
+            updated.is_managed
+            and updated.status
+            and updated.status != previous_status
+            and updated.status in NOTIFY_STATUSES
+        ):
             self._schedule_notification(updated, pending_dispatch_count)
 
     def on_close(self, boss: Boss, window: Window, data: dict[str, Any]) -> None:
@@ -181,7 +186,7 @@ class DenWatcher:
 
         with self._lock:
             self._project_fetches_in_flight.discard(project)
-            if count is not None:
+            if count is not None and any(state.project == project for state in self._window_states.values()):
                 self._project_pending_counts[project] = count
                 _trim_mapping(self._project_pending_counts, 64)
 

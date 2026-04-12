@@ -59,6 +59,16 @@ class DenWatcherTests(unittest.TestCase):
         self.fetches.append(project)
         return 3
 
+    def test_partial_state_does_not_render_or_fetch(self) -> None:
+        self.watcher.on_set_user_var(self.boss, self.window, {"key": "den_agent", "value": "codex"})
+        self.assertEqual([], self.boss.commands)
+        self.assertEqual([], self.fetches)
+
+        other_window = FakeWindow(8)
+        self.watcher.on_set_user_var(self.boss, other_window, {"key": "den_project", "value": "den-mcp"})
+        self.assertEqual([], self.boss.commands)
+        self.assertEqual([], self.fetches)
+
     def test_on_set_user_var_updates_titles_and_colors(self) -> None:
         self.watcher.on_set_user_var(self.boss, self.window, {"key": "den_agent", "value": "codex"})
         self.watcher.on_set_user_var(self.boss, self.window, {"key": "den_project", "value": "den-mcp"})
@@ -84,6 +94,7 @@ class DenWatcherTests(unittest.TestCase):
         self.assertIn("task #560", body)
 
     def test_project_fetch_is_scheduled_for_dispatch_related_updates(self) -> None:
+        self.watcher.on_set_user_var(self.boss, self.window, {"key": "den_agent", "value": "codex"})
         self.watcher.on_set_user_var(self.boss, self.window, {"key": "den_project", "value": "den-mcp"})
         self.watcher.on_set_user_var(self.boss, self.window, {"key": "den_status", "value": "waiting"})
 
@@ -91,6 +102,7 @@ class DenWatcherTests(unittest.TestCase):
         self.assertEqual(3, self.watcher._project_pending_counts["den-mcp"])
 
     def test_on_close_clears_project_cache_when_last_window_closes(self) -> None:
+        self.watcher.on_set_user_var(self.boss, self.window, {"key": "den_agent", "value": "codex"})
         self.watcher.on_set_user_var(self.boss, self.window, {"key": "den_project", "value": "den-mcp"})
         self.assertEqual(3, self.watcher._project_pending_counts["den-mcp"])
 
