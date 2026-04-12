@@ -130,6 +130,7 @@ class DenLayoutTests(unittest.TestCase):
     def test_render_session_outputs_split_layout_and_wrapper_commands(self) -> None:
         api = self.make_api()
         layout = den_layout.build_project_layout("den-mcp", api)
+        expected_wrapper = str(den_layout.repo_root() / "bin" / "den-agent")
 
         session_text = den_layout.render_session([layout])
 
@@ -137,7 +138,7 @@ class DenLayoutTests(unittest.TestCase):
         self.assertIn("layout splits", session_text)
         self.assertIn("launch --title claude-code --var den_project=den-mcp --var den_agent=claude-code --cwd /workspace/den-mcp", session_text)
         self.assertIn("launch --location=vsplit --title codex", session_text)
-        self.assertIn("/home/patch/dev/den-mcp/bin/den-agent claude --project den-mcp", session_text)
+        self.assertIn(f"{expected_wrapper} claude --project den-mcp", session_text)
 
     def test_apply_layout_reuses_existing_managed_window_and_only_launches_missing_agent(self) -> None:
         api = self.make_api()
