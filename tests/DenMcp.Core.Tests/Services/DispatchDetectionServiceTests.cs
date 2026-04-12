@@ -23,7 +23,7 @@ public class DispatchDetectionServiceTests : IAsyncLifetime
         var docs = new DocumentRepository(_testDb.Db);
         var routing = new RoutingService(docs);
         var prompts = new PromptGenerationService(_tasks, _messages, routing);
-        _detection = new DispatchDetectionService(routing, _dispatches, prompts,
+        _detection = new DispatchDetectionService(routing, _dispatches, prompts, NoOpNotifications.Instance,
             NullLogger<DispatchDetectionService>.Instance);
 
         var projRepo = new ProjectRepository(_testDb.Db);
@@ -31,6 +31,25 @@ public class DispatchDetectionServiceTests : IAsyncLifetime
     }
 
     public Task DisposeAsync() => _testDb.DisposeAsync();
+
+    private sealed class NoOpNotifications : INotificationChannel
+    {
+        public static NoOpNotifications Instance { get; } = new();
+
+        public Task SendDispatchNotificationAsync(
+            DispatchEntry dispatch,
+            string summary,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task SendAgentStatusAsync(
+            string projectId,
+            string agent,
+            string status,
+            int? taskId = null,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task StartListeningAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
 
     #region Task status change dispatch
 
