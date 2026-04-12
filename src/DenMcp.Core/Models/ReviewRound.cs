@@ -74,7 +74,7 @@ public sealed class ReviewRound
 
     public bool IsStackedBranchReview =>
         AlternateDiffBaseRef is not null &&
-        !string.Equals(PreferredDiff.BaseRef, AlternateDiffBaseRef, StringComparison.OrdinalIgnoreCase);
+        !string.Equals(PreferredDiff.BaseRef, AlternateDiffBaseRef, StringComparison.Ordinal);
 }
 
 public sealed class CreateReviewRoundInput

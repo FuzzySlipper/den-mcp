@@ -145,5 +145,24 @@ public class DatabaseInitializerTests : IDisposable
         Assert.Contains("delta_base_commit", columns);
         Assert.Contains("inherited_commit_count", columns);
         Assert.Contains("task_local_commit_count", columns);
+
+        await using var seedProject = verify.CreateCommand();
+        seedProject.CommandText = "INSERT INTO projects (id, name) VALUES ('proj', 'Test')";
+        await seedProject.ExecuteNonQueryAsync();
+
+        await using var seedTask = verify.CreateCommand();
+        seedTask.CommandText = "INSERT INTO tasks (project_id, title) VALUES ('proj', 'Review target')";
+        await seedTask.ExecuteNonQueryAsync();
+
+        await using var invalidInsert = verify.CreateCommand();
+        invalidInsert.CommandText = """
+            INSERT INTO review_rounds (
+                task_id, round_number, requested_by, branch, base_branch, base_commit, head_commit,
+                inherited_commit_count
+            )
+            VALUES (1, 1, 'codex', 'task/596', 'main', 'abc123', 'def456', -1)
+            """;
+
+        await Assert.ThrowsAsync<SqliteException>(() => invalidInsert.ExecuteNonQueryAsync());
     }
 }

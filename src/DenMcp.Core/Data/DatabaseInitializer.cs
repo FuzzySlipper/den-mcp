@@ -357,11 +357,13 @@ public sealed class DatabaseInitializer
         await TryAddColumnAsync(connection, "review_rounds", "alternate_diff_head_ref", "TEXT");
         await TryAddColumnAsync(connection, "review_rounds", "alternate_diff_head_commit", "TEXT");
         await TryAddColumnAsync(connection, "review_rounds", "delta_base_commit", "TEXT");
-        await TryAddColumnAsync(connection, "review_rounds", "inherited_commit_count", "INTEGER");
-        await TryAddColumnAsync(connection, "review_rounds", "task_local_commit_count", "INTEGER");
+        await TryAddColumnAsync(connection, "review_rounds", "inherited_commit_count",
+            "INTEGER CHECK (inherited_commit_count IS NULL OR inherited_commit_count >= 0)");
+        await TryAddColumnAsync(connection, "review_rounds", "task_local_commit_count",
+            "INTEGER CHECK (task_local_commit_count IS NULL OR task_local_commit_count >= 0)");
     }
 
-    private static async Task TryAddColumnAsync(SqliteConnection connection, string table, string column, string type)
+    private static async Task TryAddColumnAsync(SqliteConnection connection, string table, string column, string columnDefinition)
     {
         await using var checkCmd = connection.CreateCommand();
         checkCmd.CommandText = $"PRAGMA table_info({table})";
@@ -374,7 +376,7 @@ public sealed class DatabaseInitializer
         await reader.CloseAsync();
 
         await using var alterCmd = connection.CreateCommand();
-        alterCmd.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {type}";
+        alterCmd.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {columnDefinition}";
         await alterCmd.ExecuteNonQueryAsync();
     }
 }

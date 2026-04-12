@@ -166,4 +166,38 @@ public class ReviewRoundRepositoryTests : IAsyncLifetime
         Assert.True(round.BranchComposition.HasInheritedChanges);
         Assert.True(round.BranchComposition.HasTaskLocalChanges);
     }
+
+    [Fact]
+    public async Task CreateAsync_AlternateDiffWithoutBaseRef_Throws()
+    {
+        var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Invalid alternate diff" });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _repo.CreateAsync(new CreateReviewRoundInput
+        {
+            TaskId = task.Id,
+            RequestedBy = "claude-code",
+            Branch = "task/596",
+            BaseBranch = "main",
+            BaseCommit = "abc123",
+            HeadCommit = "def456",
+            AlternateDiffHeadRef = "task/596"
+        }));
+    }
+
+    [Fact]
+    public async Task CreateAsync_NegativeCommitCounts_Throws()
+    {
+        var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Invalid counts" });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _repo.CreateAsync(new CreateReviewRoundInput
+        {
+            TaskId = task.Id,
+            RequestedBy = "claude-code",
+            Branch = "task/596",
+            BaseBranch = "main",
+            BaseCommit = "abc123",
+            HeadCommit = "def456",
+            InheritedCommitCount = -1
+        }));
+    }
 }
