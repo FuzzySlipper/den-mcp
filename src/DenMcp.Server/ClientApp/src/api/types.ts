@@ -4,6 +4,7 @@ export type AgentSessionStatus = 'active' | 'inactive';
 export type ReviewVerdict = 'changes_requested' | 'looks_good' | 'follow_up_needed' | 'blocked_by_dependency';
 export type ReviewFindingCategory = 'blocking_bug' | 'acceptance_gap' | 'test_weakness' | 'follow_up_candidate';
 export type ReviewFindingStatus = 'open' | 'claimed_fixed' | 'verified_fixed' | 'not_fixed' | 'superseded' | 'split_to_follow_up';
+export type ReviewPacketKind = 'review_request' | 'rereview_request' | 'review_findings';
 
 export interface Project {
   id: string;
@@ -61,6 +62,7 @@ export interface TaskDetail {
   review_rounds: ReviewRound[];
   open_review_findings: ReviewFinding[];
   resolved_review_findings: ReviewFinding[];
+  review_workflow: ReviewWorkflowSummary;
 }
 
 export interface ReviewRound {
@@ -136,6 +138,50 @@ export interface ReviewFinding {
   follow_up_task_id: number | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface ReviewWorkflowSummary {
+  current_round: ReviewRound | null;
+  current_verdict: ReviewVerdict | null;
+  review_round_count: number;
+  unresolved_finding_count: number;
+  resolved_finding_count: number;
+  addressed_finding_count: number;
+  timeline: ReviewTimelineEntry[];
+}
+
+export interface ReviewTimelineEntry {
+  review_round_id: number;
+  review_round_number: number;
+  branch: string;
+  requested_by: string;
+  requested_at: string;
+  head_commit: string | null;
+  last_reviewed_head_commit: string | null;
+  commits_since_last_review: number | null;
+  verdict: ReviewVerdict | null;
+  verdict_by: string | null;
+  verdict_at: string | null;
+  total_finding_count: number;
+  open_finding_count: number;
+  addressed_finding_count: number;
+  claimed_fixed_finding_count: number;
+  resolved_finding_count: number;
+}
+
+export interface ReviewPacket {
+  kind: ReviewPacketKind;
+  title: string;
+  content: string;
+}
+
+export interface ReviewPacketResult {
+  review_round: ReviewRound | null;
+  message: Message;
+  packet: ReviewPacket;
+  findings_addressed: string[];
+  open_findings: string[];
+  test_commands: string[];
 }
 
 export interface Message {

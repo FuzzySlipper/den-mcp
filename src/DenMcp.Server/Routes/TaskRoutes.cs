@@ -311,6 +311,81 @@ public static class TaskRoutes
             }
         });
 
+        group.MapPost("/{taskId:int}/review/request", async (ITaskRepository taskRepo,
+            IReviewWorkflowService workflow, string projectId, int taskId, RequestReviewPacketRequest req) =>
+        {
+            var task = await taskRepo.GetByIdAsync(taskId);
+            if (task is null || task.ProjectId != projectId)
+                return Results.NotFound(new { error = $"Task {taskId} not found" });
+
+            try
+            {
+                var result = await workflow.RequestReviewAsync(projectId, new RequestReviewInput
+                {
+                    TaskId = taskId,
+                    RequestedBy = req.RequestedBy,
+                    Branch = req.Branch,
+                    BaseBranch = req.BaseBranch,
+                    BaseCommit = req.BaseCommit,
+                    HeadCommit = req.HeadCommit,
+                    LastReviewedHeadCommit = req.LastReviewedHeadCommit,
+                    CommitsSinceLastReview = req.CommitsSinceLastReview,
+                    TestsRun = req.TestsRun,
+                    Notes = req.Notes,
+                    PreferredDiffBaseRef = req.PreferredDiffBaseRef,
+                    PreferredDiffBaseCommit = req.PreferredDiffBaseCommit,
+                    PreferredDiffHeadRef = req.PreferredDiffHeadRef,
+                    PreferredDiffHeadCommit = req.PreferredDiffHeadCommit,
+                    AlternateDiffBaseRef = req.AlternateDiffBaseRef,
+                    AlternateDiffBaseCommit = req.AlternateDiffBaseCommit,
+                    AlternateDiffHeadRef = req.AlternateDiffHeadRef,
+                    AlternateDiffHeadCommit = req.AlternateDiffHeadCommit,
+                    DeltaBaseCommit = req.DeltaBaseCommit,
+                    InheritedCommitCount = req.InheritedCommitCount,
+                    TaskLocalCommitCount = req.TaskLocalCommitCount,
+                    ThreadId = req.ThreadId
+                });
+                return Results.Created($"/api/projects/{projectId}/messages/{result.Message.Id}", result);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { error = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+
+        group.MapPost("/{taskId:int}/review/findings/post", async (ITaskRepository taskRepo,
+            IReviewWorkflowService workflow, string projectId, int taskId, PostReviewFindingsPacketRequest req) =>
+        {
+            var task = await taskRepo.GetByIdAsync(taskId);
+            if (task is null || task.ProjectId != projectId)
+                return Results.NotFound(new { error = $"Task {taskId} not found" });
+
+            try
+            {
+                var result = await workflow.PostReviewFindingsAsync(projectId, new PostReviewFindingsInput
+                {
+                    TaskId = taskId,
+                    ReviewRoundId = req.ReviewRoundId,
+                    Sender = req.Sender,
+                    ThreadId = req.ThreadId,
+                    Notes = req.Notes
+                });
+                return Results.Created($"/api/projects/{projectId}/messages/{result.Message.Id}", result);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { error = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+
         group.MapGet("/next", async (ITaskRepository repo, string projectId, string? assignedTo) =>
         {
             var next = await repo.GetNextTaskAsync(projectId, assignedTo);
@@ -418,5 +493,34 @@ public record SetReviewFindingStatusRequest(
     string UpdatedBy,
     string? Notes = null,
     int? FollowUpTaskId = null);
+
+public record RequestReviewPacketRequest(
+    string RequestedBy,
+    string Branch,
+    string BaseBranch,
+    string BaseCommit,
+    string HeadCommit,
+    string? LastReviewedHeadCommit = null,
+    int? CommitsSinceLastReview = null,
+    List<string>? TestsRun = null,
+    string? Notes = null,
+    string? PreferredDiffBaseRef = null,
+    string? PreferredDiffBaseCommit = null,
+    string? PreferredDiffHeadRef = null,
+    string? PreferredDiffHeadCommit = null,
+    string? AlternateDiffBaseRef = null,
+    string? AlternateDiffBaseCommit = null,
+    string? AlternateDiffHeadRef = null,
+    string? AlternateDiffHeadCommit = null,
+    string? DeltaBaseCommit = null,
+    int? InheritedCommitCount = null,
+    int? TaskLocalCommitCount = null,
+    int? ThreadId = null);
+
+public record PostReviewFindingsPacketRequest(
+    int ReviewRoundId,
+    string Sender,
+    int? ThreadId = null,
+    string? Notes = null);
 
 public record AddDependencyRequest(int DependsOn);

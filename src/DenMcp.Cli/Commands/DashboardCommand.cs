@@ -608,6 +608,61 @@ internal sealed class DashboardView : Toplevel
         if (task.Tags is { Count: > 0 })
             lines.Add($"  Tags:     {string.Join(", ", task.Tags)}");
 
+        if (detail?.ReviewWorkflow.ReviewRoundCount > 0 && detail.ReviewWorkflow.CurrentRound is not null)
+        {
+            var currentRound = detail.ReviewWorkflow.CurrentRound;
+            var verdict = detail.ReviewWorkflow.CurrentVerdict?.ToDbValue() ?? "pending";
+            var diff = $"{currentRound.PreferredDiff.BaseRef}...{currentRound.PreferredDiff.HeadRef}";
+            var delta = currentRound.DeltaDiff?.BaseCommit is not null
+                ? $"{currentRound.DeltaDiff.BaseCommit}..{currentRound.HeadCommit}"
+                : "(initial review)";
+
+            lines.Add("");
+            lines.Add("  Review Workflow:");
+            lines.Add($"    Current:   R{currentRound.RoundNumber} [{verdict}] {Truncate(currentRound.Branch, 42)}");
+            lines.Add($"    Diff:      {Truncate(diff, 55)}");
+            lines.Add($"    Delta:     {Truncate(delta, 55)}");
+            lines.Add($"    Findings:  {detail.ReviewWorkflow.UnresolvedFindingCount} open / {detail.ReviewWorkflow.ResolvedFindingCount} resolved");
+        }
+
+        if (detail?.OpenReviewFindings is { Count: > 0 })
+        {
+            lines.Add("");
+            lines.Add("  Open Review Findings:");
+            foreach (var finding in detail.OpenReviewFindings.Take(6))
+            {
+                lines.Add($"    {Truncate(FormatFindingHeader(finding), 70)}");
+
+                var metaParts = new List<string>();
+                if (finding.FileReferences is { Count: > 0 })
+                    metaParts.Add($"files {JoinPreview(finding.FileReferences, 2)}");
+                if (finding.TestCommands is { Count: > 0 })
+                    metaParts.Add($"tests {JoinPreview(finding.TestCommands, 1)}");
+                if (!string.IsNullOrWhiteSpace(finding.StatusNotes))
+                    metaParts.Add(CollapseWhitespace(finding.StatusNotes));
+                else if (!string.IsNullOrWhiteSpace(finding.ResponseNotes))
+                    metaParts.Add(CollapseWhitespace(finding.ResponseNotes));
+
+                if (metaParts.Count > 0)
+                    lines.Add($"      {Truncate(string.Join(" | ", metaParts), 68)}");
+            }
+
+            if (detail.OpenReviewFindings.Count > 6)
+                lines.Add($"    ... {detail.OpenReviewFindings.Count - 6} more");
+        }
+
+        if (detail?.ReviewWorkflow.Timeline is { Count: > 0 })
+        {
+            lines.Add("");
+            lines.Add("  Review Timeline:");
+            foreach (var entry in detail.ReviewWorkflow.Timeline.Take(6))
+            {
+                var verdict = entry.Verdict?.ToDbValue() ?? "pending";
+                lines.Add($"    R{entry.ReviewRoundNumber} [{verdict}] {Truncate(entry.Branch, 28)} ({FormatShortTime(entry.RequestedAt)})");
+                lines.Add($"      {Truncate(FormatTimelineSummary(entry), 66)}");
+            }
+        }
+
         // Dependencies
         if (detail?.Dependencies is { Count: > 0 })
         {
@@ -938,6 +993,33 @@ internal sealed class DashboardView : Toplevel
         if (diff.TotalHours < 24) return $"{(int)diff.TotalHours}h";
         return $"{(int)diff.TotalDays}d";
     }
+
+    private static string FormatFindingHeader(ReviewFinding finding) =>
+        $"{finding.FindingKey} [{finding.Category.ToDbValue()}/{finding.Status.ToDbValue()}] {finding.Summary}";
+
+    private static string FormatTimelineSummary(ReviewTimelineEntry entry)
+    {
+        var parts = new List<string> { $"{entry.TotalFindingCount} findings" };
+        if (entry.OpenFindingCount > 0)
+            parts.Add($"{entry.OpenFindingCount} open");
+        if (entry.AddressedFindingCount > 0)
+            parts.Add($"{entry.AddressedFindingCount} addressed");
+        if (entry.ResolvedFindingCount > 0)
+            parts.Add($"{entry.ResolvedFindingCount} resolved");
+        if (entry.CommitsSinceLastReview is not null)
+            parts.Add($"{entry.CommitsSinceLastReview.Value} new commits");
+        return string.Join(" | ", parts);
+    }
+
+    private static string JoinPreview(IReadOnlyList<string> values, int maxItems)
+    {
+        var visible = values.Take(maxItems).ToList();
+        var suffix = values.Count > maxItems ? $" +{values.Count - maxItems} more" : "";
+        return string.Join(", ", visible) + suffix;
+    }
+
+    private static string CollapseWhitespace(string value) =>
+        value.ReplaceLineEndings(" ").Trim();
 
     private static string Truncate(string s, int max) =>
         s.Length <= max ? s : s[..(max - 3)] + "...";

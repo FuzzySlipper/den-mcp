@@ -10,6 +10,7 @@ import type {
   Document,
   DocumentSearchResult,
   AgentSession,
+  ReviewPacketResult,
 } from './types';
 
 async function get<T>(url: string): Promise<T> {
@@ -25,6 +26,16 @@ async function put<T>(url: string, body: unknown): Promise<T> {
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`PUT ${url}: ${res.status}`);
+  return res.json();
+}
+
+async function post<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`POST ${url}: ${res.status}`);
   return res.json();
 }
 
@@ -84,6 +95,22 @@ export function updateTask(
   changes: Record<string, unknown>,
 ): Promise<ProjectTask> {
   return put(`/api/projects/${esc(projectId)}/tasks/${taskId}`, { agent, ...changes });
+}
+
+export function requestReview(
+  projectId: string,
+  taskId: number,
+  body: Record<string, unknown>,
+): Promise<ReviewPacketResult> {
+  return post(`/api/projects/${esc(projectId)}/tasks/${taskId}/review/request`, body);
+}
+
+export function postReviewFindings(
+  projectId: string,
+  taskId: number,
+  body: Record<string, unknown>,
+): Promise<ReviewPacketResult> {
+  return post(`/api/projects/${esc(projectId)}/tasks/${taskId}/review/findings/post`, body);
 }
 
 export function getNextTask(projectId: string, assignedTo?: string): Promise<ProjectTask | null> {

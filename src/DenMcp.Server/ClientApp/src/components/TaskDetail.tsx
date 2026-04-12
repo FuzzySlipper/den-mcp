@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react';
-import type { TaskDetail as TaskDetailType, TaskStatus } from '../api/types';
+import type {
+  ReviewFinding,
+  ReviewTimelineEntry,
+  ReviewVerdict,
+  TaskDetail as TaskDetailType,
+  TaskStatus,
+} from '../api/types';
 import { getTask, updateTask } from '../api/client';
 import { formatTimeAgo } from '../utils';
 
@@ -10,6 +16,36 @@ interface Props {
 }
 
 const STATUSES: TaskStatus[] = ['planned', 'in_progress', 'review', 'blocked', 'done', 'cancelled'];
+
+function formatLabel(value: string): string {
+  return value.replace(/_/g, ' ');
+}
+
+function formatVerdict(verdict: ReviewVerdict | null): string {
+  return verdict ? formatLabel(verdict) : 'pending';
+}
+
+function formatDelta(detail: TaskDetailType): string {
+  const delta = detail.review_workflow.current_round?.delta_diff;
+  return delta?.base_commit ? `${delta.base_commit}..${delta.head_commit}` : '(initial review)';
+}
+
+function formatTimeline(entry: ReviewTimelineEntry): string {
+  const parts = [`${entry.total_finding_count} findings`];
+  if (entry.open_finding_count > 0) parts.push(`${entry.open_finding_count} open`);
+  if (entry.addressed_finding_count > 0) parts.push(`${entry.addressed_finding_count} addressed`);
+  if (entry.resolved_finding_count > 0) parts.push(`${entry.resolved_finding_count} resolved`);
+  return parts.join(' · ');
+}
+
+function renderFindingMeta(finding: ReviewFinding): string[] {
+  const parts: string[] = [];
+  if (finding.file_references?.length) parts.push(`Files: ${finding.file_references.join(', ')}`);
+  if (finding.test_commands?.length) parts.push(`Tests: ${finding.test_commands.join(', ')}`);
+  if (finding.status_notes) parts.push(`Status note: ${finding.status_notes}`);
+  else if (finding.response_notes) parts.push(`Response: ${finding.response_notes}`);
+  return parts;
+}
 
 export function TaskDetail({ projectId, taskId, onClose }: Props) {
   const [detail, setDetail] = useState<TaskDetailType | null>(null);
@@ -57,6 +93,7 @@ export function TaskDetail({ projectId, taskId, onClose }: Props) {
   }
 
   const { task } = detail;
+  const currentRound = detail.review_workflow.current_round;
 
   return (
     <div className="detail-overlay">
@@ -89,6 +126,72 @@ export function TaskDetail({ projectId, taskId, onClose }: Props) {
             )}
           </dl>
         </div>
+
+        {detail.review_workflow.review_round_count > 0 && currentRound && (
+          <div className="detail-section">
+            <h3>Review Workflow</h3>
+            <dl className="detail-meta">
+              <dt>Current Round</dt>
+              <dd>R{currentRound.round_number} on <code>{currentRound.branch}</code></dd>
+              <dt>Verdict</dt>
+              <dd>
+                <span className={`review-pill review-pill-${detail.review_workflow.current_verdict ?? 'pending'}`}>
+                  {formatVerdict(detail.review_workflow.current_verdict)}
+                </span>
+              </dd>
+              <dt>Reviewed Diff</dt>
+              <dd><code>{currentRound.preferred_diff.base_ref}...{currentRound.preferred_diff.head_ref}</code></dd>
+              <dt>Delta</dt>
+              <dd><code>{formatDelta(detail)}</code></dd>
+              <dt>Open Findings</dt>
+              <dd>{detail.review_workflow.unresolved_finding_count}</dd>
+            </dl>
+          </div>
+        )}
+
+        {detail.open_review_findings.length > 0 && (
+          <div className="detail-section">
+            <h3>Open Review Findings</h3>
+            {detail.open_review_findings.map(finding => (
+              <div key={finding.id} className="review-card">
+                <div className="review-card-head">
+                  <strong>{finding.finding_key}</strong>
+                  <div className="review-pill-row">
+                    <span className={`review-pill review-pill-${finding.category}`}>{formatLabel(finding.category)}</span>
+                    <span className={`review-pill review-pill-${finding.status}`}>{formatLabel(finding.status)}</span>
+                  </div>
+                </div>
+                <div className="review-summary">{finding.summary}</div>
+                {renderFindingMeta(finding).map(line => (
+                  <div key={line} className="review-subtle">{line}</div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {detail.review_workflow.timeline.length > 0 && (
+          <div className="detail-section">
+            <h3>Review Timeline</h3>
+            {detail.review_workflow.timeline.map(entry => (
+              <div key={entry.review_round_id} className="review-card">
+                <div className="review-card-head">
+                  <strong>R{entry.review_round_number}</strong>
+                  <span className={`review-pill review-pill-${entry.verdict ?? 'pending'}`}>
+                    {formatVerdict(entry.verdict)}
+                  </span>
+                </div>
+                <div className="review-summary">
+                  <code>{entry.branch}</code> · {formatTimeline(entry)}
+                </div>
+                <div className="review-subtle">
+                  Requested by {entry.requested_by} {formatTimeAgo(entry.requested_at)}
+                  {entry.verdict_at ? ` · verdict ${formatTimeAgo(entry.verdict_at)}` : ''}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {detail.dependencies.length > 0 && (
           <div className="detail-section">

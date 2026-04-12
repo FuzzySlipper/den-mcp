@@ -197,7 +197,11 @@ public sealed class TaskRepository : ITaskRepository
             RecentMessages = messages,
             ReviewRounds = reviewRounds,
             OpenReviewFindings = openReviewFindings,
-            ResolvedReviewFindings = resolvedReviewFindings
+            ResolvedReviewFindings = resolvedReviewFindings,
+            ReviewWorkflow = ReviewWorkflowSummaryBuilder.Build(
+                reviewRounds,
+                openReviewFindings,
+                resolvedReviewFindings)
         };
     }
 

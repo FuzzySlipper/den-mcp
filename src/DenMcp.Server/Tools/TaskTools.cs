@@ -289,6 +289,83 @@ public sealed class TaskTools
         return JsonSerializer.Serialize(updated, JsonOpts.Default);
     }
 
+    [McpServerTool(Name = "request_review"), Description("Create a review round and post a standardized review request or rereview packet to the task thread.")]
+    public static async Task<string> RequestReview(
+        IReviewWorkflowService workflow,
+        [Description("Project ID.")] string project_id,
+        [Description("Task ID.")] int task_id,
+        [Description("Agent or user requesting review.")] string requested_by,
+        [Description("Head branch under review, e.g. task/597-review-packet-ux.")] string branch,
+        [Description("Base branch for the intended diff, e.g. main or task/596-parent.")] string base_branch,
+        [Description("Base commit SHA for the review diff.")] string base_commit,
+        [Description("Head commit SHA being reviewed.")] string head_commit,
+        [Description("Optional last reviewed head SHA. Defaults to the previous round's head when omitted.")] string? last_reviewed_head_commit = null,
+        [Description("Optional number of commits since the last review round.")] int? commits_since_last_review = null,
+        [Description("Optional JSON array of test commands run by the implementer.")] string? tests_run = null,
+        [Description("Optional scope notes or rereview notes.")] string? notes = null,
+        [Description("Optional preferred diff base ref for stacked reviews, e.g. task/596-parent. Defaults to base_branch.")] string? preferred_diff_base_ref = null,
+        [Description("Optional preferred diff base commit. Defaults to base_commit.")] string? preferred_diff_base_commit = null,
+        [Description("Optional preferred diff head ref. Defaults to branch.")] string? preferred_diff_head_ref = null,
+        [Description("Optional preferred diff head commit. Defaults to head_commit.")] string? preferred_diff_head_commit = null,
+        [Description("Optional alternate/global diff base ref, e.g. main.")] string? alternate_diff_base_ref = null,
+        [Description("Optional alternate/global diff base commit.")] string? alternate_diff_base_commit = null,
+        [Description("Optional alternate/global diff head ref. Defaults to branch when alternate diff is provided.")] string? alternate_diff_head_ref = null,
+        [Description("Optional alternate/global diff head commit. Defaults to head_commit when alternate diff is provided.")] string? alternate_diff_head_commit = null,
+        [Description("Optional explicit delta base commit. Defaults to last_reviewed_head_commit or the previous round's head.")] string? delta_base_commit = null,
+        [Description("Optional count of inherited commits from unmerged parent work.")] int? inherited_commit_count = null,
+        [Description("Optional count of task-local commits on top of inherited work.")] int? task_local_commit_count = null,
+        [Description("Optional task-thread message to reply to.")] int? thread_id = null)
+    {
+        var parsedTests = tests_run is not null ? JsonSerializer.Deserialize<List<string>>(tests_run) : null;
+        var result = await workflow.RequestReviewAsync(project_id, new RequestReviewInput
+        {
+            TaskId = task_id,
+            RequestedBy = requested_by,
+            Branch = branch,
+            BaseBranch = base_branch,
+            BaseCommit = base_commit,
+            HeadCommit = head_commit,
+            LastReviewedHeadCommit = last_reviewed_head_commit,
+            CommitsSinceLastReview = commits_since_last_review,
+            TestsRun = parsedTests,
+            Notes = notes,
+            PreferredDiffBaseRef = preferred_diff_base_ref,
+            PreferredDiffBaseCommit = preferred_diff_base_commit,
+            PreferredDiffHeadRef = preferred_diff_head_ref,
+            PreferredDiffHeadCommit = preferred_diff_head_commit,
+            AlternateDiffBaseRef = alternate_diff_base_ref,
+            AlternateDiffBaseCommit = alternate_diff_base_commit,
+            AlternateDiffHeadRef = alternate_diff_head_ref,
+            AlternateDiffHeadCommit = alternate_diff_head_commit,
+            DeltaBaseCommit = delta_base_commit,
+            InheritedCommitCount = inherited_commit_count,
+            TaskLocalCommitCount = task_local_commit_count,
+            ThreadId = thread_id
+        });
+        return JsonSerializer.Serialize(result, JsonOpts.Default);
+    }
+
+    [McpServerTool(Name = "post_review_findings"), Description("Post a standardized reviewer findings packet for a review round back to the task thread.")]
+    public static async Task<string> PostReviewFindings(
+        IReviewWorkflowService workflow,
+        [Description("Project ID.")] string project_id,
+        [Description("Task ID.")] int task_id,
+        [Description("Review round ID.")] int review_round_id,
+        [Description("Agent or user posting the findings packet.")] string sender,
+        [Description("Optional task-thread message to reply to.")] int? thread_id = null,
+        [Description("Optional summary note to append to the packet.")] string? notes = null)
+    {
+        var result = await workflow.PostReviewFindingsAsync(project_id, new PostReviewFindingsInput
+        {
+            TaskId = task_id,
+            ReviewRoundId = review_round_id,
+            Sender = sender,
+            ThreadId = thread_id,
+            Notes = notes
+        });
+        return JsonSerializer.Serialize(result, JsonOpts.Default);
+    }
+
     [McpServerTool(Name = "next_task"), Description("Get the next unblocked task to work on. Checks subtasks of in-progress parents first, then top-level planned tasks. Ranks by priority, then fewer dependencies, then lower ID.")]
     public static async Task<string> NextTask(
         ITaskRepository repo,
