@@ -1,0 +1,657 @@
+#!/usr/bin/env bash
+
+set -uo pipefail
+
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(CDPATH='' cd -- "${SCRIPT_DIR}/.." && pwd)"
+DEN_SIGNAL_HELPER="${REPO_ROOT}/kitty/den-signal.sh"
+
+CURL_BIN="${DEN_AGENT_CURL_BIN:-curl}"
+JQ_BIN="${DEN_AGENT_JQ_BIN:-jq}"
+PYTHON_BIN="${DEN_AGENT_PYTHON_BIN:-python3}"
+CLAUDE_BIN="${DEN_AGENT_CLAUDE_BIN:-claude}"
+CODEX_BIN="${DEN_AGENT_CODEX_BIN:-codex}"
+
+BASE_URL="${DEN_MCP_URL:-${DEN_MCP_BASE_URL:-http://127.0.0.1:5199}}"
+HEARTBEAT_SECONDS="${DEN_AGENT_HEARTBEAT_SECONDS:-60}"
+SESSION_ID="${DEN_AGENT_SESSION_ID:-}"
+PROJECT_ID="${DEN_PROJECT_ID:-}"
+
+VENDOR=""
+AGENT_ID=""
+VENDOR_MODE=""
+VENDOR_HAS_EXISTING_PROMPT=0
+SESSION_CHECKED_IN=0
+CLEANUP_DONE=0
+HEARTBEAT_PID=""
+ACTIVE_TASK_ID=""
+ACTIVE_DISPATCH_ID=""
+ACTIVE_STATUS="idle"
+DISPATCH_SUMMARY=""
+DISPATCH_PROMPT=""
+declare -a VENDOR_ARGS=()
+declare -a POSITIONALS=()
+
+usage() {
+    cat >&2 <<'EOF'
+Usage: den-agent <claude|codex> [wrapper options] [--] [vendor args...]
+
+Wrapper options:
+  --project <id>              Den project id. If omitted, resolves from cwd.
+  --base-url <url>            den-mcp base URL (default: http://127.0.0.1:5199)
+  --session-id <id>           Explicit agent session id
+  --heartbeat-seconds <secs>  Heartbeat interval while the vendor CLI is running
+  -h, --help                  Show this help
+EOF
+}
+
+log() {
+    printf 'den-agent: %s\n' "$*" >&2
+}
+
+have_command() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+den_signal() {
+    :
+}
+
+den_signal_clear() {
+    :
+}
+
+source_signal_helper() {
+    if [[ -f "${DEN_SIGNAL_HELPER}" ]]; then
+        # shellcheck disable=SC1090
+        # shellcheck disable=SC1091
+        source "${DEN_SIGNAL_HELPER}"
+    fi
+}
+
+uri_encode() {
+    "${JQ_BIN}" -rn --arg value "$1" '$value|@uri'
+}
+
+api_get() {
+    local endpoint="$1"
+    "${CURL_BIN}" -fsS "${BASE_URL%/}${endpoint}"
+}
+
+api_post() {
+    local endpoint="$1"
+    local body="$2"
+    "${CURL_BIN}" -fsS \
+        -H "Content-Type: application/json" \
+        -X POST \
+        --data "${body}" \
+        "${BASE_URL%/}${endpoint}"
+}
+
+generate_session_id() {
+    if [[ -n "${SESSION_ID}" ]]; then
+        return
+    fi
+
+    if [[ -r /proc/sys/kernel/random/uuid ]]; then
+        SESSION_ID="$(< /proc/sys/kernel/random/uuid)"
+        return
+    fi
+
+    SESSION_ID="$("${PYTHON_BIN}" -c 'import uuid; print(uuid.uuid4())')"
+}
+
+vendor_binary() {
+    case "${VENDOR}" in
+        claude) printf '%s\n' "${CLAUDE_BIN}" ;;
+        codex) printf '%s\n' "${CODEX_BIN}" ;;
+        *) return 1 ;;
+    esac
+}
+
+load_positionals_claude() {
+    POSITIONALS=()
+    local skip_next=0
+    local arg
+
+    # Keep this in sync with `claude --help` and docs/agent-cli-integration-note.md.
+    for arg in "${VENDOR_ARGS[@]}"; do
+        if (( skip_next )); then
+            skip_next=0
+            continue
+        fi
+
+        case "${arg}" in
+            --)
+                break
+                ;;
+            --add-dir|--agent|--agents|--allowedTools|--allowed-tools|--append-system-prompt|--betas|--debug-file|--disallowedTools|--disallowed-tools|--effort|--fallback-model|--file|--input-format|--json-schema|--max-budget-usd|--mcp-config|--model|-n|--name|--output-format|--permission-mode|--plugin-dir|--remote-control-session-name-prefix|--session-id|--setting-sources|--settings|--system-prompt|--tools|-d|--debug)
+                skip_next=1
+                ;;
+            --*=*)
+                ;;
+            -*)
+                ;;
+            *)
+                POSITIONALS+=("${arg}")
+                ;;
+        esac
+    done
+}
+
+classify_claude_invocation() {
+    local arg
+
+    for arg in "${VENDOR_ARGS[@]}"; do
+        case "${arg}" in
+            -c|--continue|-r|--resume|--resume=*|--from-pr|--from-pr=*|--fork-session)
+                VENDOR_MODE="resume"
+                VENDOR_HAS_EXISTING_PROMPT=0
+                return
+                ;;
+            -p|--print|-h|--help)
+                VENDOR_MODE="passthrough"
+                VENDOR_HAS_EXISTING_PROMPT=0
+                return
+                ;;
+        esac
+    done
+
+    load_positionals_claude
+    if [[ "${#POSITIONALS[@]}" -gt 0 ]]; then
+        case "${POSITIONALS[0]}" in
+            agents|auth|auto-mode|doctor|install|mcp|plugin|plugins|setup-token|update|upgrade|help)
+                VENDOR_MODE="passthrough"
+                VENDOR_HAS_EXISTING_PROMPT=0
+                return
+                ;;
+            *)
+                VENDOR_MODE="interactive"
+                VENDOR_HAS_EXISTING_PROMPT=1
+                return
+                ;;
+        esac
+    fi
+
+    VENDOR_MODE="interactive"
+    VENDOR_HAS_EXISTING_PROMPT=0
+}
+
+load_positionals_codex() {
+    POSITIONALS=()
+    local skip_next=0
+    local arg
+
+    # Keep this in sync with `codex --help` and docs/agent-cli-integration-note.md.
+    for arg in "${VENDOR_ARGS[@]}"; do
+        if (( skip_next )); then
+            skip_next=0
+            continue
+        fi
+
+        case "${arg}" in
+            --)
+                break
+                ;;
+            -c|--config|--enable|--disable|--remote|--remote-auth-token-env|-i|--image|-m|--model|--local-provider|-p|--profile|-s|--sandbox|-a|--ask-for-approval|-C|--cd|--add-dir)
+                skip_next=1
+                ;;
+            --*=*)
+                ;;
+            -*)
+                ;;
+            *)
+                POSITIONALS+=("${arg}")
+                ;;
+        esac
+    done
+}
+
+classify_codex_invocation() {
+    local arg
+
+    for arg in "${VENDOR_ARGS[@]}"; do
+        case "${arg}" in
+            -h|--help)
+                VENDOR_MODE="passthrough"
+                VENDOR_HAS_EXISTING_PROMPT=0
+                return
+                ;;
+        esac
+    done
+
+    load_positionals_codex
+    if [[ "${#POSITIONALS[@]}" -gt 0 ]]; then
+        case "${POSITIONALS[0]}" in
+            resume|fork)
+                VENDOR_MODE="resume"
+                VENDOR_HAS_EXISTING_PROMPT=0
+                return
+                ;;
+            exec|review|login|logout|mcp|mcp-server|app-server|completion|sandbox|debug|apply|cloud|exec-server|features|help)
+                VENDOR_MODE="passthrough"
+                VENDOR_HAS_EXISTING_PROMPT=0
+                return
+                ;;
+            *)
+                VENDOR_MODE="interactive"
+                VENDOR_HAS_EXISTING_PROMPT=1
+                return
+                ;;
+        esac
+    fi
+
+    VENDOR_MODE="interactive"
+    VENDOR_HAS_EXISTING_PROMPT=0
+}
+
+classify_vendor_invocation() {
+    case "${VENDOR}" in
+        claude) classify_claude_invocation ;;
+        codex) classify_codex_invocation ;;
+        *) VENDOR_MODE="passthrough"; VENDOR_HAS_EXISTING_PROMPT=0 ;;
+    esac
+}
+
+resolve_project_from_cwd() {
+    local projects_json
+    local project_id
+
+    projects_json="$(api_get "/api/projects")" || return 1
+    project_id="$(
+        "${JQ_BIN}" -r --arg cwd "$PWD" '
+            [
+              .[]
+              | select(.root_path != null)
+              | select(($cwd == .root_path) or ($cwd | startswith(.root_path + "/")))
+            ]
+            | sort_by(.root_path | length)
+            | last
+            | .id // empty
+        ' <<<"${projects_json}"
+    )"
+
+    [[ -n "${project_id}" ]] || return 1
+    PROJECT_ID="${project_id}"
+}
+
+build_metadata() {
+    local mode="$1"
+    "${JQ_BIN}" -cn \
+        --arg wrapper "den-agent" \
+        --arg vendor "${VENDOR}" \
+        --arg cwd "$PWD" \
+        --arg session_id "${SESSION_ID}" \
+        --arg mode "${mode}" \
+        --arg pid "$$" \
+        '{
+            wrapper: $wrapper,
+            vendor: $vendor,
+            cwd: $cwd,
+            session_id: $session_id,
+            mode: $mode,
+            pid: ($pid | tonumber)
+        }'
+}
+
+initialize_kitty_state() {
+    [[ -n "${PROJECT_ID}" ]] || return 0
+
+    den_signal den_agent "${AGENT_ID}"
+    den_signal den_project "${PROJECT_ID}"
+    den_signal den_status "idle"
+    den_signal_clear den_task
+    den_signal_clear den_dispatch
+}
+
+check_in_session() {
+    local metadata_json
+    local body
+
+    metadata_json="$(build_metadata "${VENDOR_MODE}")"
+    body="$(
+        "${JQ_BIN}" -cn \
+            --arg agent "${AGENT_ID}" \
+            --arg project_id "${PROJECT_ID}" \
+            --arg session_id "${SESSION_ID}" \
+            --arg metadata "${metadata_json}" \
+            '{
+                agent: $agent,
+                project_id: $project_id,
+                session_id: $session_id,
+                metadata: $metadata
+            }'
+    )"
+
+    api_post "/api/agents/checkin" "${body}" >/dev/null || return 1
+    SESSION_CHECKED_IN=1
+}
+
+send_heartbeat() {
+    local body
+    body="$(
+        "${JQ_BIN}" -cn \
+            --arg agent "${AGENT_ID}" \
+            --arg project_id "${PROJECT_ID}" \
+            '{agent: $agent, project_id: $project_id}'
+    )"
+
+    api_post "/api/agents/heartbeat" "${body}" >/dev/null
+}
+
+start_heartbeat() {
+    [[ "${SESSION_CHECKED_IN}" -eq 1 ]] || return 0
+
+    (
+        trap 'exit 0' TERM INT
+        while sleep "${HEARTBEAT_SECONDS}"; do
+            send_heartbeat >/dev/null 2>&1 || exit 0
+        done
+    ) >/dev/null 2>&1 </dev/null &
+    HEARTBEAT_PID=$!
+}
+
+stop_heartbeat() {
+    if [[ -n "${HEARTBEAT_PID}" ]] && kill -0 "${HEARTBEAT_PID}" >/dev/null 2>&1; then
+        if have_command pkill; then
+            pkill -TERM -P "${HEARTBEAT_PID}" >/dev/null 2>&1 || true
+        fi
+        kill "${HEARTBEAT_PID}" >/dev/null 2>&1 || true
+    fi
+    HEARTBEAT_PID=""
+}
+
+check_out_session() {
+    local body
+
+    [[ "${SESSION_CHECKED_IN}" -eq 1 ]] || return 0
+
+    body="$(
+        "${JQ_BIN}" -cn \
+            --arg agent "${AGENT_ID}" \
+            --arg project_id "${PROJECT_ID}" \
+            --arg session_id "${SESSION_ID}" \
+            '{
+                agent: $agent,
+                project_id: $project_id,
+                session_id: $session_id
+            }'
+    )"
+
+    api_post "/api/agents/checkout" "${body}" >/dev/null 2>&1 || true
+    SESSION_CHECKED_IN=0
+}
+
+cleanup() {
+    local exit_code="${1:-0}"
+
+    if [[ "${CLEANUP_DONE}" -eq 1 ]]; then
+        return
+    fi
+    CLEANUP_DONE=1
+
+    stop_heartbeat
+
+    if [[ -n "${PROJECT_ID}" ]]; then
+        if [[ "${exit_code}" -eq 0 ]]; then
+            den_signal den_status "idle"
+            den_signal_clear den_task
+            den_signal_clear den_dispatch
+        else
+            den_signal den_status "error"
+        fi
+    fi
+
+    check_out_session
+}
+
+trap 'cleanup $?' EXIT
+
+discover_dispatch() {
+    local response
+    local encoded_project
+    local encoded_agent
+
+    encoded_project="$(uri_encode "${PROJECT_ID}")"
+    encoded_agent="$(uri_encode "${AGENT_ID}")"
+    response="$(
+        api_get "/api/dispatch?projectId=${encoded_project}&targetAgent=${encoded_agent}&status=approved"
+    )" || return 1
+
+    "${JQ_BIN}" -c '.[0] // empty' <<<"${response}"
+}
+
+detect_activity_status() {
+    local haystack
+    haystack="$(printf '%s\n%s\n' "${DISPATCH_SUMMARY}" "${DISPATCH_PROMPT}" | tr '[:upper:]' '[:lower:]')"
+
+    if [[ "${haystack}" == *review* ]]; then
+        printf 'reviewing\n'
+    else
+        printf 'working\n'
+    fi
+}
+
+copy_dispatch_prompt() {
+    local prompt="$1"
+
+    if [[ -z "${prompt}" ]]; then
+        return 1
+    fi
+
+    _pipe_to_clipboard() {
+        if have_command timeout; then
+            printf '%s' "${prompt}" | timeout 1 "$@" >/dev/null 2>&1
+        else
+            printf '%s' "${prompt}" | "$@" >/dev/null 2>&1
+        fi
+    }
+
+    if have_command pbcopy; then
+        _pipe_to_clipboard pbcopy
+        return 0
+    fi
+
+    if [[ -n "${WAYLAND_DISPLAY:-}${WAYLAND_SOCKET:-}" ]] && have_command wl-copy; then
+        _pipe_to_clipboard wl-copy
+        return 0
+    fi
+
+    if [[ -n "${DISPLAY:-}" ]] && have_command xclip; then
+        _pipe_to_clipboard xclip -selection clipboard
+        return 0
+    fi
+
+    if [[ -n "${DISPLAY:-}" ]] && have_command xsel; then
+        _pipe_to_clipboard xsel --clipboard --input
+        return 0
+    fi
+
+    return 1
+}
+
+show_dispatch_fallback() {
+    log "approved dispatch #${ACTIVE_DISPATCH_ID} is ready for ${AGENT_ID} in ${PROJECT_ID}"
+    if [[ -n "${ACTIVE_TASK_ID}" ]]; then
+        log "dispatch task: #${ACTIVE_TASK_ID}"
+    fi
+    if [[ -n "${DISPATCH_SUMMARY}" ]]; then
+        printf '%s\n' "${DISPATCH_SUMMARY}" >&2
+    fi
+    if [[ -n "${DISPATCH_PROMPT}" ]]; then
+        if copy_dispatch_prompt "${DISPATCH_PROMPT}"; then
+            log "copied dispatch prompt to the clipboard"
+        fi
+        printf '%s\n%s\n%s\n' \
+            '--- den-agent dispatch prompt start ---' \
+            "${DISPATCH_PROMPT}" \
+            '--- den-agent dispatch prompt end ---' >&2
+    fi
+}
+
+populate_dispatch_state() {
+    local dispatch_json="$1"
+
+    ACTIVE_DISPATCH_ID="$("${JQ_BIN}" -r '.id // empty' <<<"${dispatch_json}")"
+    ACTIVE_TASK_ID="$("${JQ_BIN}" -r '.task_id // empty' <<<"${dispatch_json}")"
+    DISPATCH_SUMMARY="$("${JQ_BIN}" -r '.summary // empty' <<<"${dispatch_json}")"
+    DISPATCH_PROMPT="$("${JQ_BIN}" -r '.context_prompt // empty' <<<"${dispatch_json}")"
+    ACTIVE_STATUS="$(detect_activity_status)"
+
+    [[ -n "${ACTIVE_DISPATCH_ID}" ]] && den_signal den_dispatch "${ACTIVE_DISPATCH_ID}"
+    if [[ -n "${ACTIVE_TASK_ID}" ]]; then
+        den_signal den_task "${ACTIVE_TASK_ID}"
+    else
+        den_signal_clear den_task
+    fi
+    den_signal den_status "${ACTIVE_STATUS}"
+}
+
+run_vendor() {
+    local vendor_bin
+    local exit_code
+    vendor_bin="$(vendor_binary)"
+
+    "${vendor_bin}" "$@" &
+    local child_pid=$!
+    wait "${child_pid}"
+    exit_code=$?
+    return "${exit_code}"
+}
+
+parse_args() {
+    [[ $# -gt 0 ]] || {
+        usage
+        exit 2
+    }
+
+    case "$1" in
+        claude)
+            VENDOR="claude"
+            AGENT_ID="claude-code"
+            shift
+            ;;
+        codex)
+            VENDOR="codex"
+            AGENT_ID="codex"
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            usage
+            exit 2
+            ;;
+    esac
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --project)
+                [[ $# -ge 2 ]] || {
+                    log "--project requires a value"
+                    exit 2
+                }
+                PROJECT_ID="$2"
+                shift 2
+                ;;
+            --base-url)
+                [[ $# -ge 2 ]] || {
+                    log "--base-url requires a value"
+                    exit 2
+                }
+                BASE_URL="$2"
+                shift 2
+                ;;
+            --session-id)
+                [[ $# -ge 2 ]] || {
+                    log "--session-id requires a value"
+                    exit 2
+                }
+                SESSION_ID="$2"
+                shift 2
+                ;;
+            --heartbeat-seconds)
+                [[ $# -ge 2 ]] || {
+                    log "--heartbeat-seconds requires a value"
+                    exit 2
+                }
+                HEARTBEAT_SECONDS="$2"
+                shift 2
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            --)
+                shift
+                VENDOR_ARGS+=("$@")
+                break
+                ;;
+            *)
+                VENDOR_ARGS+=("$1")
+                shift
+                ;;
+        esac
+    done
+}
+
+main() {
+    local exit_code
+
+    parse_args "$@"
+    source_signal_helper
+    classify_vendor_invocation
+
+    if [[ "${VENDOR_MODE}" == "passthrough" ]]; then
+        run_vendor "${VENDOR_ARGS[@]}"
+        exit_code=$?
+        cleanup "${exit_code}"
+        return "${exit_code}"
+    fi
+
+    if [[ -z "${PROJECT_ID}" ]]; then
+        if have_command "${CURL_BIN}" && have_command "${JQ_BIN}"; then
+            resolve_project_from_cwd || log "could not resolve a Den project from ${PWD}; continuing without Den integration"
+        else
+            log "curl and jq are required for project resolution; continuing without Den integration"
+        fi
+    fi
+
+    initialize_kitty_state
+    generate_session_id
+
+    if [[ -n "${PROJECT_ID}" ]] && have_command "${CURL_BIN}" && have_command "${JQ_BIN}"; then
+        if check_in_session; then
+            start_heartbeat
+
+            local dispatch_json
+            dispatch_json="$(discover_dispatch || true)"
+            if [[ -n "${dispatch_json}" ]]; then
+                populate_dispatch_state "${dispatch_json}"
+
+                if [[ "${VENDOR_MODE}" == "interactive" ]] && [[ "${VENDOR_HAS_EXISTING_PROMPT}" -eq 0 ]] && [[ -n "${DISPATCH_PROMPT}" ]]; then
+                    log "starting ${VENDOR} with approved dispatch #${ACTIVE_DISPATCH_ID}"
+                    run_vendor "${VENDOR_ARGS[@]}" "${DISPATCH_PROMPT}"
+                    exit_code=$?
+                    cleanup "${exit_code}"
+                    return "${exit_code}"
+                fi
+
+                show_dispatch_fallback
+            fi
+        else
+            log "Den checkin failed for ${AGENT_ID}/${PROJECT_ID}; continuing in manual mode"
+        fi
+    elif [[ -n "${PROJECT_ID}" ]]; then
+        log "curl and jq are required for Den integration; continuing in manual mode"
+    fi
+
+    run_vendor "${VENDOR_ARGS[@]}"
+    exit_code=$?
+    cleanup "${exit_code}"
+    return "${exit_code}"
+}
+
+main "$@"
