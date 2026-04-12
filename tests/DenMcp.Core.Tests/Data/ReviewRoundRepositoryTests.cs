@@ -55,6 +55,10 @@ public class ReviewRoundRepositoryTests : IAsyncLifetime
         Assert.Equal("def456", second.LastReviewedHeadCommit);
         Assert.Equal(2, second.CommitsSinceLastReview);
         Assert.Single(first.TestsRun!);
+        Assert.Equal("main", first.PreferredDiff.BaseRef);
+        Assert.Equal("task/594-review-rounds-sha-metadata", first.PreferredDiff.HeadRef);
+        Assert.Equal("def456", second.DeltaDiff!.BaseCommit);
+        Assert.False(second.IsStackedBranchReview);
     }
 
     [Fact]
@@ -123,5 +127,77 @@ public class ReviewRoundRepositoryTests : IAsyncLifetime
 
         Assert.Single(detail.ReviewRounds);
         Assert.Equal("def456", detail.ReviewRounds[0].HeadCommit);
+    }
+
+    [Fact]
+    public async Task CreateAsync_PersistsExplicitDiffMetadataAndBranchComposition()
+    {
+        var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Stacked review" });
+
+        var round = await _repo.CreateAsync(new CreateReviewRoundInput
+        {
+            TaskId = task.Id,
+            RequestedBy = "claude-code",
+            Branch = "task/544",
+            BaseBranch = "main",
+            BaseCommit = "aaa111",
+            HeadCommit = "ddd444",
+            PreferredDiffBaseRef = "task/543",
+            PreferredDiffBaseCommit = "bbb222",
+            PreferredDiffHeadRef = "task/544",
+            PreferredDiffHeadCommit = "ddd444",
+            AlternateDiffBaseRef = "main",
+            AlternateDiffBaseCommit = "aaa111",
+            AlternateDiffHeadRef = "task/544",
+            AlternateDiffHeadCommit = "ddd444",
+            DeltaBaseCommit = "ccc333",
+            InheritedCommitCount = 3,
+            TaskLocalCommitCount = 2
+        });
+
+        Assert.Equal("task/543", round.PreferredDiff.BaseRef);
+        Assert.Equal("bbb222", round.PreferredDiff.BaseCommit);
+        Assert.NotNull(round.AlternateDiff);
+        Assert.Equal("main", round.AlternateDiff!.BaseRef);
+        Assert.Equal("ccc333", round.DeltaDiff!.BaseCommit);
+        Assert.True(round.IsStackedBranchReview);
+        Assert.Equal(3, round.BranchComposition.InheritedCommitCount);
+        Assert.Equal(2, round.BranchComposition.TaskLocalCommitCount);
+        Assert.True(round.BranchComposition.HasInheritedChanges);
+        Assert.True(round.BranchComposition.HasTaskLocalChanges);
+    }
+
+    [Fact]
+    public async Task CreateAsync_AlternateDiffWithoutBaseRef_Throws()
+    {
+        var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Invalid alternate diff" });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _repo.CreateAsync(new CreateReviewRoundInput
+        {
+            TaskId = task.Id,
+            RequestedBy = "claude-code",
+            Branch = "task/596",
+            BaseBranch = "main",
+            BaseCommit = "abc123",
+            HeadCommit = "def456",
+            AlternateDiffHeadRef = "task/596"
+        }));
+    }
+
+    [Fact]
+    public async Task CreateAsync_NegativeCommitCounts_Throws()
+    {
+        var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Invalid counts" });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _repo.CreateAsync(new CreateReviewRoundInput
+        {
+            TaskId = task.Id,
+            RequestedBy = "claude-code",
+            Branch = "task/596",
+            BaseBranch = "main",
+            BaseCommit = "abc123",
+            HeadCommit = "def456",
+            InheritedCommitCount = -1
+        }));
     }
 }

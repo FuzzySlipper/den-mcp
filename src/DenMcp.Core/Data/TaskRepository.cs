@@ -147,7 +147,11 @@ public sealed class TaskRepository : ITaskRepository
         reviewCmd.CommandText = """
             SELECT id, task_id, round_number, requested_by, branch, base_branch, base_commit,
                    head_commit, last_reviewed_head_commit, commits_since_last_review, tests_run,
-                   notes, verdict, verdict_by, verdict_notes, requested_at, verdict_at
+                   notes, preferred_diff_base_ref, preferred_diff_base_commit, preferred_diff_head_ref,
+                   preferred_diff_head_commit, alternate_diff_base_ref, alternate_diff_base_commit,
+                   alternate_diff_head_ref, alternate_diff_head_commit, delta_base_commit,
+                   inherited_commit_count, task_local_commit_count, verdict, verdict_by, verdict_notes,
+                   requested_at, verdict_at
             FROM review_rounds WHERE task_id = @id
             ORDER BY round_number ASC
             """;
