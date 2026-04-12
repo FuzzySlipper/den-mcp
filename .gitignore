@@ -92,5 +92,5 @@ src/DenMcp.Server/ClientApp/node_modules/
 # Agent guidance files (local-only, not committed)
 AGENTS.md
 CLAUDE.md
-!bin/
-!bin/den-agent
+!/bin/
+!/bin/den-agent
