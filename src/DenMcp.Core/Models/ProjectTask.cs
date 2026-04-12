@@ -35,6 +35,7 @@ public sealed class TaskDetail
     public required List<TaskDependencyInfo> Dependencies { get; set; }
     public required List<TaskSummary> Subtasks { get; set; }
     public required List<Message> RecentMessages { get; set; }
+    public required List<ReviewRound> ReviewRounds { get; set; }
 }
 
 public sealed class TaskDependencyInfo

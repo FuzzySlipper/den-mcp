@@ -1,6 +1,7 @@
 export type TaskStatus = 'planned' | 'in_progress' | 'review' | 'blocked' | 'done' | 'cancelled';
 export type DocType = 'prd' | 'spec' | 'adr' | 'convention' | 'reference' | 'note';
 export type AgentSessionStatus = 'active' | 'inactive';
+export type ReviewVerdict = 'changes_requested' | 'looks_good' | 'follow_up_needed' | 'blocked_by_dependency';
 
 export interface Project {
   id: string;
@@ -55,6 +56,27 @@ export interface TaskDetail {
   dependencies: TaskDependencyInfo[];
   subtasks: TaskSummary[];
   recent_messages: Message[];
+  review_rounds: ReviewRound[];
+}
+
+export interface ReviewRound {
+  id: number;
+  task_id: number;
+  round_number: number;
+  requested_by: string;
+  branch: string;
+  base_branch: string;
+  base_commit: string;
+  head_commit: string;
+  last_reviewed_head_commit: string | null;
+  commits_since_last_review: number | null;
+  tests_run: string[] | null;
+  notes: string | null;
+  verdict: ReviewVerdict | null;
+  verdict_by: string | null;
+  verdict_notes: string | null;
+  requested_at: string;
+  verdict_at: string | null;
 }
 
 export interface Message {

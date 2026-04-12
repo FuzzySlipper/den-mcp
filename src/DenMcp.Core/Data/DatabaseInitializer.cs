@@ -212,6 +212,39 @@ public sealed class DatabaseInitializer
             ON agent_sessions(project_id, status);
 
         ------------------------------------------------------------
+        -- REVIEW ROUNDS
+        ------------------------------------------------------------
+        CREATE TABLE IF NOT EXISTS review_rounds (
+            id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id                     INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            round_number                INTEGER NOT NULL,
+            requested_by                TEXT NOT NULL,
+            branch                      TEXT NOT NULL,
+            base_branch                 TEXT NOT NULL,
+            base_commit                 TEXT NOT NULL,
+            head_commit                 TEXT NOT NULL,
+            last_reviewed_head_commit   TEXT,
+            commits_since_last_review   INTEGER,
+            tests_run                   TEXT,
+            notes                       TEXT,
+            verdict                     TEXT
+                                        CHECK (verdict IS NULL OR verdict IN (
+                                            'changes_requested',
+                                            'looks_good',
+                                            'follow_up_needed',
+                                            'blocked_by_dependency'
+                                        )),
+            verdict_by                  TEXT,
+            verdict_notes               TEXT,
+            requested_at                TEXT NOT NULL DEFAULT (datetime('now')),
+            verdict_at                  TEXT,
+            UNIQUE(task_id, round_number)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_review_rounds_task
+            ON review_rounds(task_id, round_number);
+
+        ------------------------------------------------------------
         -- DISPATCH ENTRIES
         ------------------------------------------------------------
         CREATE TABLE IF NOT EXISTS dispatch_entries (

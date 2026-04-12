@@ -93,4 +93,22 @@ public static class EnumExtensions
         "task_status" => DispatchTriggerType.TaskStatus,
         _ => throw new ArgumentException($"Unknown dispatch trigger type: {value}", nameof(value))
     };
+
+    public static string ToDbValue(this ReviewVerdict verdict) => verdict switch
+    {
+        ReviewVerdict.ChangesRequested => "changes_requested",
+        ReviewVerdict.LooksGood => "looks_good",
+        ReviewVerdict.FollowUpNeeded => "follow_up_needed",
+        ReviewVerdict.BlockedByDependency => "blocked_by_dependency",
+        _ => throw new ArgumentOutOfRangeException(nameof(verdict), verdict, null)
+    };
+
+    public static ReviewVerdict ParseReviewVerdict(string value) => value switch
+    {
+        "changes_requested" => ReviewVerdict.ChangesRequested,
+        "looks_good" => ReviewVerdict.LooksGood,
+        "follow_up_needed" => ReviewVerdict.FollowUpNeeded,
+        "blocked_by_dependency" => ReviewVerdict.BlockedByDependency,
+        _ => throw new ArgumentException($"Unknown review verdict: {value}", nameof(value))
+    };
 }
