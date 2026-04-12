@@ -65,6 +65,12 @@ public sealed class DenApiClient : IDisposable
     public async Task<TaskDetail> GetTaskAsync(string projectId, int taskId) =>
         await GetAsync<TaskDetail>($"api/projects/{Esc(projectId)}/tasks/{taskId}");
 
+    public async Task<ReviewPacketResult> RequestReviewAsync(string projectId, int taskId, object body) =>
+        await PostAsync<ReviewPacketResult>($"api/projects/{Esc(projectId)}/tasks/{taskId}/review/request", body);
+
+    public async Task<ReviewPacketResult> PostReviewFindingsAsync(string projectId, int taskId, object body) =>
+        await PostAsync<ReviewPacketResult>($"api/projects/{Esc(projectId)}/tasks/{taskId}/review/findings/post", body);
+
     public async Task<ProjectTask> UpdateTaskAsync(string projectId, int taskId, string agent,
         Dictionary<string, object?> changes)
     {

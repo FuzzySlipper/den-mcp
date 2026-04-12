@@ -66,6 +66,7 @@ builder.Services.AddSingleton<IMessageRepository, MessageRepository>();
 builder.Services.AddSingleton<IDocumentRepository, DocumentRepository>();
 builder.Services.AddSingleton<IAgentSessionRepository, AgentSessionRepository>();
 builder.Services.AddSingleton<IDispatchRepository, DispatchRepository>();
+builder.Services.AddSingleton<IReviewWorkflowService, ReviewWorkflowService>();
 
 // Dispatch
 builder.Services.AddSingleton<IRoutingService, RoutingService>();

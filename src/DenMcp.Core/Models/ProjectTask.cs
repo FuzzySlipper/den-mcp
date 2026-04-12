@@ -38,6 +38,7 @@ public sealed class TaskDetail
     public required List<ReviewRound> ReviewRounds { get; set; }
     public required List<ReviewFinding> OpenReviewFindings { get; set; }
     public required List<ReviewFinding> ResolvedReviewFindings { get; set; }
+    public required ReviewWorkflowSummary ReviewWorkflow { get; set; }
 }
 
 public sealed class TaskDependencyInfo

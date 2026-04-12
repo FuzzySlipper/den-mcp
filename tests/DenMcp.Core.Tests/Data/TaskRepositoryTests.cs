@@ -190,4 +190,55 @@ public class TaskRepositoryTests : IAsyncLifetime
         Assert.Single(mine);
         Assert.Equal("Mine", mine[0].Title);
     }
+
+    [Fact]
+    public async Task GetDetailAsync_BuildsReviewWorkflowSummary()
+    {
+        var rounds = new ReviewRoundRepository(_testDb.Db);
+        var findings = new ReviewFindingRepository(_testDb.Db);
+        var task = await _repo.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Review summary" });
+        var round = await rounds.CreateAsync(new CreateReviewRoundInput
+        {
+            TaskId = task.Id,
+            RequestedBy = "claude-code",
+            Branch = "task/597-review-packet-ux",
+            BaseBranch = "main",
+            BaseCommit = "aaa111",
+            HeadCommit = "bbb222"
+        });
+
+        await findings.CreateAsync(new CreateReviewFindingInput
+        {
+            ReviewRoundId = round.Id,
+            CreatedBy = "codex",
+            Category = ReviewFindingCategory.BlockingBug,
+            Summary = "Still open"
+        });
+
+        var resolvedFinding = await findings.CreateAsync(new CreateReviewFindingInput
+        {
+            ReviewRoundId = round.Id,
+            CreatedBy = "codex",
+            Category = ReviewFindingCategory.TestWeakness,
+            Summary = "Covered later"
+        });
+
+        await findings.SetStatusAsync(resolvedFinding.Id, new UpdateReviewFindingStatusInput
+        {
+            Status = ReviewFindingStatus.VerifiedFixed,
+            UpdatedBy = "codex",
+            Notes = "Confirmed in review"
+        });
+
+        var detail = await _repo.GetDetailAsync(task.Id);
+
+        Assert.NotNull(detail.ReviewWorkflow.CurrentRound);
+        Assert.Equal(1, detail.ReviewWorkflow.ReviewRoundCount);
+        Assert.Equal(1, detail.ReviewWorkflow.UnresolvedFindingCount);
+        Assert.Equal(1, detail.ReviewWorkflow.ResolvedFindingCount);
+        Assert.Single(detail.ReviewWorkflow.Timeline);
+        Assert.Equal(2, detail.ReviewWorkflow.Timeline[0].TotalFindingCount);
+        Assert.Equal(1, detail.ReviewWorkflow.Timeline[0].OpenFindingCount);
+        Assert.Equal(1, detail.ReviewWorkflow.Timeline[0].ResolvedFindingCount);
+    }
 }
