@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
-import pathlib
-import sys
 import threading
 import time
 import urllib.error
@@ -154,7 +151,7 @@ def draw_tab(
 ) -> int:
     del before, extra_data
 
-    snapshot = resolve_tab_snapshot(tab, watcher=_WATCHER, count_cache=_COUNT_CACHE, boss_getter=_get_boss)
+    snapshot = resolve_tab_snapshot(tab, count_cache=_COUNT_CACHE, boss_getter=_get_boss)
     text = build_tab_text(tab, index, snapshot)
 
     if max_title_length > 0:
@@ -166,7 +163,6 @@ def draw_tab(
 
 def resolve_tab_snapshot(
     tab: Any,
-    watcher: Any,
     count_cache: DispatchCountCache,
     boss_getter: Callable[[], Any] = lambda: None,
 ) -> TabStateSnapshot | None:
@@ -179,27 +175,35 @@ def resolve_tab_snapshot(
         return None
 
     active_window_id = resolve_active_window_id(real_tab)
-    managed_states = []
+    managed_windows: list[tuple[Any, str, str, dict[str, str]]] = []
     for window in windows:
-        window_id = getattr(window, "id", None)
-        if not isinstance(window_id, int):
+        user_vars = _read_window_user_vars(window)
+        agent = user_vars.get("den_agent")
+        project = user_vars.get("den_project")
+        if not (agent and project):
             continue
+        managed_windows.append((window, agent, project, user_vars))
 
-        state = watcher.get_window_state(window_id)
-        if state and state.is_managed:
-            managed_states.append(state)
-
-    if not managed_states:
+    if not managed_windows:
         return None
 
-    chosen = next((state for state in managed_states if state.window_id == active_window_id), managed_states[0])
-    pending_dispatch_count = count_cache.get(chosen.project)
+    chosen_window, agent, project, user_vars = next(
+        (
+            candidate
+            for candidate in managed_windows
+            if getattr(candidate[0], "id", None) == active_window_id
+        ),
+        managed_windows[0],
+    )
+    del chosen_window
+
+    pending_dispatch_count = count_cache.get(project)
     return TabStateSnapshot(
-        project=chosen.project or "project",
-        agent=chosen.agent or "agent",
-        status=chosen.status,
-        task_id=chosen.task_id,
-        dispatch_id=chosen.dispatch_id,
+        project=project,
+        agent=agent,
+        status=user_vars.get("den_status"),
+        task_id=user_vars.get("den_task"),
+        dispatch_id=user_vars.get("den_dispatch"),
         pending_dispatch_count=pending_dispatch_count,
     )
 
@@ -348,29 +352,15 @@ def iter_tab_windows(tab: Any) -> Iterable[Any]:
     return []
 
 
+def _read_window_user_vars(window: Any) -> dict[str, str]:
+    raw = getattr(window, "user_vars", None)
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
 def _default_base_url() -> str:
     return (
         os.environ.get("DEN_MCP_URL")
         or os.environ.get("DEN_MCP_BASE_URL")
         or "http://127.0.0.1:5199"
     )
-
-
-def _load_den_watcher() -> Any:
-    if "den_watcher" in sys.modules:
-        return sys.modules["den_watcher"]
-
-    module_path = pathlib.Path(__file__).with_name("den_watcher.py")
-    spec = importlib.util.spec_from_file_location("den_watcher", module_path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError("Unable to load den_watcher.py")
-
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["den_watcher"] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-_WATCHER_MODULE = _load_den_watcher()
-_WATCHER = _WATCHER_MODULE._WATCHER
 _COUNT_CACHE = DispatchCountCache()

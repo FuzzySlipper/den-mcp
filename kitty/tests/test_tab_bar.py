@@ -27,25 +27,6 @@ class ImmediateExecutor:
         return future
 
 
-@dataclass
-class FakeState:
-    window_id: int
-    agent: str | None = None
-    project: str | None = None
-    status: str | None = None
-    task_id: str | None = None
-    dispatch_id: str | None = None
-    is_managed: bool = True
-
-
-class FakeWatcher:
-    def __init__(self, states: dict[int, FakeState]) -> None:
-        self.states = states
-
-    def get_window_state(self, window_id: int) -> FakeState | None:
-        return self.states.get(window_id)
-
-
 class FakeCountCache:
     def __init__(self, values: dict[str, int | None]) -> None:
         self.values = values
@@ -60,6 +41,7 @@ class FakeCountCache:
 @dataclass
 class FakeWindow:
     id: int
+    user_vars: dict[str, str] | None = None
 
 
 @dataclass
@@ -127,16 +109,18 @@ class TabBarTests(unittest.TestCase):
         self.assertEqual(["den-mcp"], fetches)
 
     def test_resolve_tab_snapshot_prefers_active_managed_window(self) -> None:
-        real_tab = FakeRealTab(id=11, windows=[FakeWindow(1), FakeWindow(2)], active_window_id=2)
-        watcher = FakeWatcher({
-            1: FakeState(window_id=1, agent="claude-code", project="quillforge", status="working", task_id="10"),
-            2: FakeState(window_id=2, agent="codex", project="den-mcp", status="reviewing", task_id="561"),
-        })
+        real_tab = FakeRealTab(
+            id=11,
+            windows=[
+                FakeWindow(1, {"den_agent": "claude-code", "den_project": "quillforge", "den_status": "working", "den_task": "10"}),
+                FakeWindow(2, {"den_agent": "codex", "den_project": "den-mcp", "den_status": "reviewing", "den_task": "561"}),
+            ],
+            active_window_id=2,
+        )
         count_cache = FakeCountCache({"den-mcp": 3})
 
         snapshot = tab_bar.resolve_tab_snapshot(
             FakeTabData(tab_id=11),
-            watcher=watcher,
             count_cache=count_cache,
             boss_getter=lambda: FakeBoss(real_tab),
         )
@@ -148,6 +132,56 @@ class TabBarTests(unittest.TestCase):
         self.assertEqual("561", snapshot.task_id)
         self.assertEqual(3, snapshot.pending_dispatch_count)
         self.assertEqual(["den-mcp"], count_cache.projects)
+
+    def test_resolve_tab_snapshot_ignores_partially_managed_windows(self) -> None:
+        real_tab = FakeRealTab(
+            id=12,
+            windows=[
+                FakeWindow(1, {"den_agent": "codex"}),
+                FakeWindow(2, {"den_project": "den-mcp"}),
+                FakeWindow(3, {"den_agent": "codex", "den_project": "den-mcp", "den_status": "working"}),
+            ],
+            active_window_id=1,
+        )
+        count_cache = FakeCountCache({"den-mcp": 1})
+
+        snapshot = tab_bar.resolve_tab_snapshot(
+            FakeTabData(tab_id=12),
+            count_cache=count_cache,
+            boss_getter=lambda: FakeBoss(real_tab),
+        )
+
+        self.assertIsNotNone(snapshot)
+        assert snapshot is not None
+        self.assertEqual("den-mcp", snapshot.project)
+        self.assertEqual("codex", snapshot.agent)
+        self.assertEqual("working", snapshot.status)
+        self.assertEqual(["den-mcp"], count_cache.projects)
+
+    def test_resolve_tab_snapshot_treats_cleared_user_vars_as_unmanaged(self) -> None:
+        real_tab = FakeRealTab(
+            id=13,
+            windows=[
+                FakeWindow(
+                    1,
+                    {
+                        "den_agent": "",
+                        "den_project": "",
+                        "den_status": "",
+                        "den_task": "",
+                    },
+                ),
+            ],
+            active_window_id=1,
+        )
+
+        snapshot = tab_bar.resolve_tab_snapshot(
+            FakeTabData(tab_id=13),
+            count_cache=FakeCountCache({}),
+            boss_getter=lambda: FakeBoss(real_tab),
+        )
+
+        self.assertIsNone(snapshot)
 
     def test_build_tab_text_and_colors_for_managed_tab(self) -> None:
         snapshot = tab_bar.TabStateSnapshot(
@@ -167,18 +201,15 @@ class TabBarTests(unittest.TestCase):
         self.assertEqual(tab_bar.STATUS_STYLE["reviewing"]["bg"], bg)
 
     def test_draw_tab_falls_back_for_unmanaged_tab(self) -> None:
-        original_watcher = tab_bar._WATCHER
         original_cache = tab_bar._COUNT_CACHE
         original_boss = tab_bar._get_boss
         screen = FakeScreen()
 
         try:
-            tab_bar._WATCHER = FakeWatcher({})
             tab_bar._COUNT_CACHE = FakeCountCache({})
             tab_bar._get_boss = lambda: FakeBoss(FakeRealTab(id=3, windows=[]))
             tab_bar.draw_tab(FakeDrawData(), screen, FakeTabData(tab_id=3, title="Shell"), 0, 20, 0, False, object())
         finally:
-            tab_bar._WATCHER = original_watcher
             tab_bar._COUNT_CACHE = original_cache
             tab_bar._get_boss = original_boss
 

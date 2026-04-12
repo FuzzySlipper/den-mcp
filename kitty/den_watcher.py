@@ -127,10 +127,6 @@ class DenWatcher:
         if isinstance(self._executor, ThreadPoolExecutor):
             self._executor.shutdown(wait=False, cancel_futures=True)
 
-    def get_window_state(self, window_id: int) -> AgentWindowState | None:
-        with self._lock:
-            return self._window_states.get(window_id)
-
     def _apply_presentation(
         self,
         boss: Boss,
