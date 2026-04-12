@@ -156,6 +156,7 @@ public sealed class TaskRepository : ITaskRepository
         await using var reviewReader = await reviewCmd.ExecuteReaderAsync();
         while (await reviewReader.ReadAsync())
             reviewRounds.Add(ReviewRoundRepository.ReadReviewRound(reviewReader));
+        await reviewReader.CloseAsync();
 
         return new TaskDetail
         {

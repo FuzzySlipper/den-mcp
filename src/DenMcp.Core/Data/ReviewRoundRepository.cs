@@ -22,7 +22,7 @@ public sealed class ReviewRoundRepository : IReviewRoundRepository
     public async Task<ReviewRound> CreateAsync(CreateReviewRoundInput input)
     {
         await using var conn = await _db.CreateConnectionAsync();
-        await using var tx = await conn.BeginTransactionAsync();
+        await using var tx = await conn.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
 
         var latest = await GetLatestByTaskWithConnectionAsync(conn, input.TaskId);
         var roundNumber = (latest?.RoundNumber ?? 0) + 1;
