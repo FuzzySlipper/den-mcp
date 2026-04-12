@@ -37,6 +37,26 @@ public static class Fmt
         _ => ConsoleColor.White
     };
 
+    public static ConsoleColor DispatchStatusColor(DispatchStatus status) => status switch
+    {
+        DispatchStatus.Pending => ConsoleColor.Yellow,
+        DispatchStatus.Approved => ConsoleColor.Cyan,
+        DispatchStatus.Rejected => ConsoleColor.Red,
+        DispatchStatus.Completed => ConsoleColor.Green,
+        DispatchStatus.Expired => ConsoleColor.DarkGray,
+        _ => ConsoleColor.White
+    };
+
+    public static string DispatchStatusIcon(DispatchStatus status) => status switch
+    {
+        DispatchStatus.Pending => "?",
+        DispatchStatus.Approved => ">",
+        DispatchStatus.Rejected => "x",
+        DispatchStatus.Completed => "v",
+        DispatchStatus.Expired => "-",
+        _ => " "
+    };
+
     public static void WriteColored(string text, ConsoleColor color)
     {
         Console.ForegroundColor = color;

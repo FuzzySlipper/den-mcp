@@ -89,6 +89,28 @@ public sealed class DenApiClient : IDisposable
         return JsonSerializer.Deserialize<ProjectTask>(json, JsonOpts);
     }
 
+    // Dispatch
+    public async Task<List<DispatchEntry>> ListDispatchesAsync(
+        string? projectId = null,
+        string? targetAgent = null,
+        string? status = null)
+    {
+        var query = BuildQuery(
+            ("projectId", projectId),
+            ("targetAgent", targetAgent),
+            ("status", status));
+        return await GetAsync<List<DispatchEntry>>($"api/dispatch{query}");
+    }
+
+    public async Task<DispatchEntry> GetDispatchAsync(int dispatchId) =>
+        await GetAsync<DispatchEntry>($"api/dispatch/{dispatchId}");
+
+    public async Task<DispatchEntry> ApproveDispatchAsync(int dispatchId, string decidedBy) =>
+        await PostAsync<DispatchEntry>($"api/dispatch/{dispatchId}/approve", new { decided_by = decidedBy });
+
+    public async Task<DispatchEntry> RejectDispatchAsync(int dispatchId, string decidedBy) =>
+        await PostAsync<DispatchEntry>($"api/dispatch/{dispatchId}/reject", new { decided_by = decidedBy });
+
     // Messages
     public async Task<Message> SendMessageAsync(string projectId, string sender, string content,
         int? taskId = null, int? threadId = null, string? metadata = null)
