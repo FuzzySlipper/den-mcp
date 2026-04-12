@@ -140,13 +140,31 @@ public sealed class TaskRepository : ITaskRepository
         await using var msgReader = await msgCmd.ExecuteReaderAsync();
         while (await msgReader.ReadAsync())
             messages.Add(ReadMessage(msgReader));
+        await msgReader.CloseAsync();
+
+        // Review rounds
+        await using var reviewCmd = conn.CreateCommand();
+        reviewCmd.CommandText = """
+            SELECT id, task_id, round_number, requested_by, branch, base_branch, base_commit,
+                   head_commit, last_reviewed_head_commit, commits_since_last_review, tests_run,
+                   notes, verdict, verdict_by, verdict_notes, requested_at, verdict_at
+            FROM review_rounds WHERE task_id = @id
+            ORDER BY round_number ASC
+            """;
+        reviewCmd.Parameters.AddWithValue("@id", id);
+        var reviewRounds = new List<ReviewRound>();
+        await using var reviewReader = await reviewCmd.ExecuteReaderAsync();
+        while (await reviewReader.ReadAsync())
+            reviewRounds.Add(ReviewRoundRepository.ReadReviewRound(reviewReader));
+        await reviewReader.CloseAsync();
 
         return new TaskDetail
         {
             Task = task,
             Dependencies = deps,
             Subtasks = subtasks,
-            RecentMessages = messages
+            RecentMessages = messages,
+            ReviewRounds = reviewRounds
         };
     }
 

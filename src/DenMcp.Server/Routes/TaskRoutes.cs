@@ -97,6 +97,66 @@ public static class TaskRoutes
             }
         });
 
+        group.MapGet("/{taskId:int}/review-rounds", async (ITaskRepository taskRepo, IReviewRoundRepository reviewRepo,
+            string projectId, int taskId) =>
+        {
+            var task = await taskRepo.GetByIdAsync(taskId);
+            if (task is null || task.ProjectId != projectId)
+                return Results.NotFound(new { error = $"Task {taskId} not found" });
+
+            var rounds = await reviewRepo.ListByTaskAsync(taskId);
+            return Results.Ok(rounds);
+        });
+
+        group.MapPost("/{taskId:int}/review-rounds", async (ITaskRepository taskRepo, IReviewRoundRepository reviewRepo,
+            string projectId, int taskId, CreateReviewRoundRequest req) =>
+        {
+            var task = await taskRepo.GetByIdAsync(taskId);
+            if (task is null || task.ProjectId != projectId)
+                return Results.NotFound(new { error = $"Task {taskId} not found" });
+
+            try
+            {
+                var round = await reviewRepo.CreateAsync(new CreateReviewRoundInput
+                {
+                    TaskId = taskId,
+                    RequestedBy = req.RequestedBy,
+                    Branch = req.Branch,
+                    BaseBranch = req.BaseBranch,
+                    BaseCommit = req.BaseCommit,
+                    HeadCommit = req.HeadCommit,
+                    LastReviewedHeadCommit = req.LastReviewedHeadCommit,
+                    CommitsSinceLastReview = req.CommitsSinceLastReview,
+                    TestsRun = req.TestsRun,
+                    Notes = req.Notes
+                });
+                return Results.Created($"/api/projects/{projectId}/tasks/{taskId}/review-rounds/{round.Id}", round);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+
+        group.MapPost("/{taskId:int}/review-rounds/{roundId:int}/verdict", async (ITaskRepository taskRepo,
+            IReviewRoundRepository reviewRepo, string projectId, int taskId, int roundId, SetReviewVerdictRequest req) =>
+        {
+            var task = await taskRepo.GetByIdAsync(taskId);
+            if (task is null || task.ProjectId != projectId)
+                return Results.NotFound(new { error = $"Task {taskId} not found" });
+
+            var round = await reviewRepo.GetByIdAsync(roundId);
+            if (round is null || round.TaskId != taskId)
+                return Results.NotFound(new { error = $"Review round {roundId} not found" });
+
+            var updated = await reviewRepo.SetVerdictAsync(
+                roundId,
+                EnumExtensions.ParseReviewVerdict(req.Verdict),
+                req.DecidedBy,
+                req.Notes);
+            return Results.Ok(updated);
+        });
+
         group.MapGet("/next", async (ITaskRepository repo, string projectId, string? assignedTo) =>
         {
             var next = await repo.GetNextTaskAsync(projectId, assignedTo);
@@ -132,7 +192,7 @@ public static class TaskRoutes
                 return Results.NotFound(new { error = $"Task {taskId} not found" });
 
             await repo.RemoveDependencyAsync(taskId, dependsOn);
-            return Results.Ok(new { message = $"Removed dependency." });
+            return Results.Ok(new { message = "Removed dependency." });
         });
     }
 }
@@ -155,5 +215,21 @@ public record UpdateTaskRequest(
     string? AssignedTo = null,
     List<string>? Tags = null,
     int? ParentId = null);
+
+public record CreateReviewRoundRequest(
+    string RequestedBy,
+    string Branch,
+    string BaseBranch,
+    string BaseCommit,
+    string HeadCommit,
+    string? LastReviewedHeadCommit = null,
+    int? CommitsSinceLastReview = null,
+    List<string>? TestsRun = null,
+    string? Notes = null);
+
+public record SetReviewVerdictRequest(
+    string Verdict,
+    string DecidedBy,
+    string? Notes = null);
 
 public record AddDependencyRequest(int DependsOn);

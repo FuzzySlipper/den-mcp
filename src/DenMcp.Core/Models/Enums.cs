@@ -40,3 +40,11 @@ public enum DispatchTriggerType
     Message,
     TaskStatus
 }
+
+public enum ReviewVerdict
+{
+    ChangesRequested,
+    LooksGood,
+    FollowUpNeeded,
+    BlockedByDependency
+}

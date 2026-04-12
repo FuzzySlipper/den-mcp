@@ -118,6 +118,58 @@ public sealed class TaskTools
         return JsonSerializer.Serialize(tasks, JsonOpts.Default);
     }
 
+    [McpServerTool(Name = "create_review_round"), Description("Create a review round for a task with explicit branch and commit metadata.")]
+    public static async Task<string> CreateReviewRound(
+        IReviewRoundRepository repo,
+        [Description("Task ID.")] int task_id,
+        [Description("Agent or user requesting review.")] string requested_by,
+        [Description("Head branch under review, e.g. task/544-fix-review-loop.")] string branch,
+        [Description("Base branch for the intended diff, e.g. main or task/543-parent.")] string base_branch,
+        [Description("Base commit SHA for the review diff.")] string base_commit,
+        [Description("Head commit SHA being reviewed.")] string head_commit,
+        [Description("Optional last reviewed head SHA. Defaults to the previous round's head when omitted.")] string? last_reviewed_head_commit = null,
+        [Description("Optional number of commits since the last review round.")] int? commits_since_last_review = null,
+        [Description("Optional JSON array of test commands run by the implementer.")] string? tests_run = null,
+        [Description("Optional scope notes or rereview notes.")] string? notes = null)
+    {
+        var parsedTests = tests_run is not null ? JsonSerializer.Deserialize<List<string>>(tests_run) : null;
+        var round = await repo.CreateAsync(new CreateReviewRoundInput
+        {
+            TaskId = task_id,
+            RequestedBy = requested_by,
+            Branch = branch,
+            BaseBranch = base_branch,
+            BaseCommit = base_commit,
+            HeadCommit = head_commit,
+            LastReviewedHeadCommit = last_reviewed_head_commit,
+            CommitsSinceLastReview = commits_since_last_review,
+            TestsRun = parsedTests,
+            Notes = notes
+        });
+        return JsonSerializer.Serialize(round, JsonOpts.Default);
+    }
+
+    [McpServerTool(Name = "list_review_rounds"), Description("List review rounds for a task in chronological order.")]
+    public static async Task<string> ListReviewRounds(
+        IReviewRoundRepository repo,
+        [Description("Task ID.")] int task_id)
+    {
+        var rounds = await repo.ListByTaskAsync(task_id);
+        return JsonSerializer.Serialize(rounds, JsonOpts.Default);
+    }
+
+    [McpServerTool(Name = "set_review_verdict"), Description("Set the verdict for a review round.")]
+    public static async Task<string> SetReviewVerdict(
+        IReviewRoundRepository repo,
+        [Description("Review round ID.")] int review_round_id,
+        [Description("Verdict: changes_requested, looks_good, follow_up_needed, blocked_by_dependency.")] string verdict,
+        [Description("Agent or user setting the verdict.")] string decided_by,
+        [Description("Optional verdict notes.")] string? notes = null)
+    {
+        var updated = await repo.SetVerdictAsync(review_round_id, EnumExtensions.ParseReviewVerdict(verdict), decided_by, notes);
+        return JsonSerializer.Serialize(updated, JsonOpts.Default);
+    }
+
     [McpServerTool(Name = "next_task"), Description("Get the next unblocked task to work on. Checks subtasks of in-progress parents first, then top-level planned tasks. Ranks by priority, then fewer dependencies, then lower ID.")]
     public static async Task<string> NextTask(
         ITaskRepository repo,

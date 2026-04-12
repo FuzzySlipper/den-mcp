@@ -41,6 +41,7 @@ public class DatabaseInitializerTests : IDisposable
         Assert.Contains("task_history", tables);
         Assert.Contains("messages", tables);
         Assert.Contains("message_reads", tables);
+        Assert.Contains("review_rounds", tables);
         Assert.Contains("documents", tables);
         Assert.Contains("documents_fts", tables);
     }
