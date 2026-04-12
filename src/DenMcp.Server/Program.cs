@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using DenMcp.Core.Data;
 using DenMcp.Core.Llm;
 using DenMcp.Core.Models;
+using DenMcp.Core.Services;
 using DenMcp.Server;
 using DenMcp.Server.Routes;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -63,6 +64,11 @@ builder.Services.AddSingleton<IMessageRepository, MessageRepository>();
 builder.Services.AddSingleton<IDocumentRepository, DocumentRepository>();
 builder.Services.AddSingleton<IAgentSessionRepository, AgentSessionRepository>();
 builder.Services.AddSingleton<IDispatchRepository, DispatchRepository>();
+
+// Dispatch
+builder.Services.AddSingleton<IRoutingService, RoutingService>();
+builder.Services.AddSingleton<IPromptGenerationService, PromptGenerationService>();
+builder.Services.AddSingleton<IDispatchDetectionService, DispatchDetectionService>();
 
 // Librarian
 builder.Services.AddSingleton<LibrarianGatherer>();

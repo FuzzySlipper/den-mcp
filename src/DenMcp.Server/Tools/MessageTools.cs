@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text.Json;
 using DenMcp.Core.Data;
 using DenMcp.Core.Models;
+using DenMcp.Core.Services;
 using ModelContextProtocol.Server;
 
 namespace DenMcp.Server.Tools;
@@ -12,6 +13,7 @@ public sealed class MessageTools
     [McpServerTool(Name = "send_message"), Description("Send a message in a project. Can be project-level, attached to a task, or a reply in a thread.")]
     public static async Task<string> SendMessage(
         IMessageRepository repo,
+        IDispatchDetectionService detection,
         [Description("Project ID.")] string project_id,
         [Description("Your agent identity, e.g. 'claude-code'.")] string sender,
         [Description("Message body (markdown).")] string content,
@@ -30,6 +32,7 @@ public sealed class MessageTools
         };
 
         var created = await repo.CreateAsync(msg);
+        await detection.OnMessageCreatedAsync(created);
         return JsonSerializer.Serialize(created, JsonOpts.Default);
     }
 
