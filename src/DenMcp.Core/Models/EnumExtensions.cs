@@ -152,6 +152,33 @@ public static class EnumExtensions
         _ => throw new ArgumentException($"Unknown review finding status: {value}", nameof(value))
     };
 
+    public static ReviewFindingStatus[]? GetReviewFindingStatuses(string? statusList, bool? resolved)
+    {
+        if (!string.IsNullOrWhiteSpace(statusList))
+        {
+            return statusList.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(ParseReviewFindingStatus)
+                .ToArray();
+        }
+
+        return resolved switch
+        {
+            true =>
+            [
+                ReviewFindingStatus.VerifiedFixed,
+                ReviewFindingStatus.Superseded,
+                ReviewFindingStatus.SplitToFollowUp
+            ],
+            false =>
+            [
+                ReviewFindingStatus.Open,
+                ReviewFindingStatus.ClaimedFixed,
+                ReviewFindingStatus.NotFixed
+            ],
+            _ => null
+        };
+    }
+
     public static bool IsResolved(this ReviewFindingStatus status) => status switch
     {
         ReviewFindingStatus.VerifiedFixed => true,

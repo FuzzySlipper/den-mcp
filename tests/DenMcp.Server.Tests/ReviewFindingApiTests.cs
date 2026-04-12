@@ -4,6 +4,7 @@ using System.Text.Json;
 using DenMcp.Core.Data;
 using DenMcp.Core.Llm;
 using DenMcp.Core.Models;
+using DenMcp.Server.Tools;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
@@ -18,6 +19,7 @@ public class ReviewFindingApiTests : IAsyncLifetime
     private ReviewFindingAppFactory _factory = null!;
     private HttpClient _client = null!;
     private const string ProjectId = "proj";
+    private const string OtherProjectId = "other";
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -36,6 +38,7 @@ public class ReviewFindingApiTests : IAsyncLifetime
         using var scope = _factory.Services.CreateScope();
         var projects = scope.ServiceProvider.GetRequiredService<IProjectRepository>();
         await projects.CreateAsync(new Project { Id = ProjectId, Name = "Test" });
+        await projects.CreateAsync(new Project { Id = OtherProjectId, Name = "Other" });
     }
 
     public Task DisposeAsync()
@@ -147,6 +150,67 @@ public class ReviewFindingApiTests : IAsyncLifetime
         Assert.Equal("Verified", detail.ResolvedReviewFindings[0].Summary);
     }
 
+    [Fact]
+    public async Task RespondToReviewFinding_Returns400_WhenFollowUpTaskIsInDifferentProject()
+    {
+        var (task, round) = await CreateRoundAsync();
+        var finding = await CreateFindingAsync(task.Id, round.Id);
+        var otherProjectTask = await CreateTaskAsync("Cross-project task", OtherProjectId);
+
+        var response = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/tasks/{task.Id}/review-findings/{finding.Id}/response", new
+        {
+            responded_by = "claude-code",
+            status = "split_to_follow_up",
+            follow_up_task_id = otherProjectTask.Id
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task McpRespondToReviewFinding_RejectsCrossProjectFollowUpTask()
+    {
+        var (task, round) = await CreateRoundAsync();
+        var finding = await CreateFindingAsync(task.Id, round.Id);
+        var otherProjectTask = await CreateTaskAsync("Cross-project task", OtherProjectId);
+
+        using var scope = _factory.Services.CreateScope();
+        var findingRepo = scope.ServiceProvider.GetRequiredService<IReviewFindingRepository>();
+        var taskRepo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => TaskTools.RespondToReviewFinding(
+            findingRepo,
+            taskRepo,
+            finding.Id,
+            "claude-code",
+            status: "split_to_follow_up",
+            follow_up_task_id: otherProjectTask.Id));
+
+        Assert.Contains("same project", ex.Message);
+    }
+
+    [Fact]
+    public async Task McpSetReviewFindingStatus_RejectsCrossProjectFollowUpTask()
+    {
+        var (task, round) = await CreateRoundAsync();
+        var finding = await CreateFindingAsync(task.Id, round.Id);
+        var otherProjectTask = await CreateTaskAsync("Cross-project task", OtherProjectId);
+
+        using var scope = _factory.Services.CreateScope();
+        var findingRepo = scope.ServiceProvider.GetRequiredService<IReviewFindingRepository>();
+        var taskRepo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => TaskTools.SetReviewFindingStatus(
+            findingRepo,
+            taskRepo,
+            finding.Id,
+            "split_to_follow_up",
+            "codex",
+            follow_up_task_id: otherProjectTask.Id));
+
+        Assert.Contains("same project", ex.Message);
+    }
+
     private async Task<(ProjectTask Task, ReviewRound Round)> CreateRoundAsync()
     {
         var task = await CreateTaskAsync("Review target");
@@ -164,11 +228,11 @@ public class ReviewFindingApiTests : IAsyncLifetime
         return (task, round!);
     }
 
-    private async Task<ProjectTask> CreateTaskAsync(string title)
+    private async Task<ProjectTask> CreateTaskAsync(string title, string projectId = ProjectId)
     {
         using var scope = _factory.Services.CreateScope();
         var repo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
-        return await repo.CreateAsync(new ProjectTask { ProjectId = ProjectId, Title = title });
+        return await repo.CreateAsync(new ProjectTask { ProjectId = projectId, Title = title });
     }
 
     private async Task<ReviewFinding> CreateFindingAsync(int taskId, int roundId, string summary = "Structured finding")

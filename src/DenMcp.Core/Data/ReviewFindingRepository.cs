@@ -105,7 +105,7 @@ public sealed class ReviewFindingRepository : IReviewFindingRepository
         ValidateFollowUp(input.Status, input.FollowUpTaskId);
 
         await using var conn = await _db.CreateConnectionAsync();
-        await using var cmd = CreateSelectCommand(conn);
+        await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             UPDATE review_findings
             SET response_by = @responseBy,
@@ -154,7 +154,7 @@ public sealed class ReviewFindingRepository : IReviewFindingRepository
         ValidateFollowUp(input.Status, input.FollowUpTaskId);
 
         await using var conn = await _db.CreateConnectionAsync();
-        await using var cmd = CreateSelectCommand(conn);
+        await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             UPDATE review_findings
             SET status = @status,

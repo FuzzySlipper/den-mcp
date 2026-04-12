@@ -205,7 +205,7 @@ public sealed class TaskTools
         [Description("Optional statuses (comma-separated): open, claimed_fixed, verified_fixed, not_fixed, superseded, split_to_follow_up.")] string? status = null,
         [Description("Optional resolved filter. True = resolved/history, false = unresolved only.")] bool? resolved = null)
     {
-        var statuses = GetFindingStatuses(status, resolved);
+        var statuses = EnumExtensions.GetReviewFindingStatuses(status, resolved);
 
         if (review_round_id is not null)
         {
@@ -232,8 +232,7 @@ public sealed class TaskTools
         [Description("Optional notes explaining the status update.")] string? status_notes = null,
         [Description("Optional follow-up task ID when the finding is split out.")] int? follow_up_task_id = null)
     {
-        if (follow_up_task_id is not null && await taskRepo.GetByIdAsync(follow_up_task_id.Value) is null)
-            throw new KeyNotFoundException($"Follow-up task {follow_up_task_id.Value} not found");
+        await ValidateFollowUpTaskProjectAsync(repo, taskRepo, review_finding_id, follow_up_task_id);
 
         var updated = await repo.RespondAsync(review_finding_id, new RespondToReviewFindingInput
         {
@@ -256,8 +255,7 @@ public sealed class TaskTools
         [Description("Optional status notes.")] string? notes = null,
         [Description("Optional follow-up task ID when the finding is split out.")] int? follow_up_task_id = null)
     {
-        if (follow_up_task_id is not null && await taskRepo.GetByIdAsync(follow_up_task_id.Value) is null)
-            throw new KeyNotFoundException($"Follow-up task {follow_up_task_id.Value} not found");
+        await ValidateFollowUpTaskProjectAsync(repo, taskRepo, review_finding_id, follow_up_task_id);
 
         var updated = await repo.SetStatusAsync(review_finding_id, new UpdateReviewFindingStatusInput
         {
@@ -301,30 +299,26 @@ public sealed class TaskTools
         return JsonSerializer.Serialize(new { message = $"Removed dependency: task {task_id} no longer depends on task {depends_on}." }, JsonOpts.Default);
     }
 
-    private static ReviewFindingStatus[]? GetFindingStatuses(string? status, bool? resolved)
+    private static async Task ValidateFollowUpTaskProjectAsync(
+        IReviewFindingRepository findingRepo,
+        ITaskRepository taskRepo,
+        int reviewFindingId,
+        int? followUpTaskId)
     {
-        if (!string.IsNullOrWhiteSpace(status))
-        {
-            return status.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Select(EnumExtensions.ParseReviewFindingStatus)
-                .ToArray();
-        }
+        if (followUpTaskId is null)
+            return;
 
-        return resolved switch
+        var finding = await findingRepo.GetByIdAsync(reviewFindingId)
+            ?? throw new KeyNotFoundException($"Review finding {reviewFindingId} not found");
+        var findingTask = await taskRepo.GetByIdAsync(finding.TaskId)
+            ?? throw new KeyNotFoundException($"Owning task {finding.TaskId} not found for review finding {reviewFindingId}");
+        var followUpTask = await taskRepo.GetByIdAsync(followUpTaskId.Value)
+            ?? throw new KeyNotFoundException($"Follow-up task {followUpTaskId.Value} not found");
+
+        if (!string.Equals(findingTask.ProjectId, followUpTask.ProjectId, StringComparison.Ordinal))
         {
-            true =>
-            [
-                ReviewFindingStatus.VerifiedFixed,
-                ReviewFindingStatus.Superseded,
-                ReviewFindingStatus.SplitToFollowUp
-            ],
-            false =>
-            [
-                ReviewFindingStatus.Open,
-                ReviewFindingStatus.ClaimedFixed,
-                ReviewFindingStatus.NotFixed
-            ],
-            _ => null
-        };
+            throw new InvalidOperationException(
+                $"Follow-up task {followUpTaskId.Value} must be in the same project as review finding {reviewFindingId}.");
+        }
     }
 }

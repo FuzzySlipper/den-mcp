@@ -166,7 +166,7 @@ public static class TaskRoutes
 
             try
             {
-                var statuses = GetFindingStatuses(status, resolved);
+                var statuses = EnumExtensions.GetReviewFindingStatuses(status, resolved);
 
                 if (roundId is not null)
                 {
@@ -339,32 +339,6 @@ public static class TaskRoutes
         });
     }
 
-    private static ReviewFindingStatus[]? GetFindingStatuses(string? status, bool? resolved)
-    {
-        if (!string.IsNullOrWhiteSpace(status))
-        {
-            return status.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Select(EnumExtensions.ParseReviewFindingStatus)
-                .ToArray();
-        }
-
-        return resolved switch
-        {
-            true =>
-            [
-                ReviewFindingStatus.VerifiedFixed,
-                ReviewFindingStatus.Superseded,
-                ReviewFindingStatus.SplitToFollowUp
-            ],
-            false =>
-            [
-                ReviewFindingStatus.Open,
-                ReviewFindingStatus.ClaimedFixed,
-                ReviewFindingStatus.NotFixed
-            ],
-            _ => null
-        };
-    }
 }
 
 public record CreateTaskRequest(
