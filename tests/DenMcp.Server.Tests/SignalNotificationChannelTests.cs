@@ -130,6 +130,8 @@ public class SignalNotificationChannelTests : IAsyncLifetime
         await using var channel = CreateChannel(handler);
         await channel.StartListeningAsync(CancellationToken.None);
 
+        Assert.Contains("signal-events", handler.RequestedClientNames);
+
         var approved = await _dispatches.GetByIdAsync(dispatch.Id);
         Assert.NotNull(approved);
         Assert.Equal(DispatchStatus.Approved, approved.Status);
@@ -171,7 +173,7 @@ public class SignalNotificationChannelTests : IAsyncLifetime
 
         return new SignalNotificationChannel(
             options,
-            new StubHttpClientFactory(client),
+            new StubHttpClientFactory(client, handler.RequestedClientNames),
             _dispatches,
             _links,
             NullLogger<SignalNotificationChannel>.Instance);
@@ -186,10 +188,19 @@ public class SignalNotificationChannelTests : IAsyncLifetime
     private sealed class StubHttpClientFactory : IHttpClientFactory
     {
         private readonly HttpClient _client;
+        private readonly List<string> _requestedClientNames;
 
-        public StubHttpClientFactory(HttpClient client) => _client = client;
+        public StubHttpClientFactory(HttpClient client, List<string> requestedClientNames)
+        {
+            _client = client;
+            _requestedClientNames = requestedClientNames;
+        }
 
-        public HttpClient CreateClient(string name) => _client;
+        public HttpClient CreateClient(string name)
+        {
+            _requestedClientNames.Add(name);
+            return _client;
+        }
     }
 
     private sealed class StubSignalHandler(Func<RequestSnapshot, HttpResponseMessage> responder) : HttpMessageHandler
@@ -197,6 +208,7 @@ public class SignalNotificationChannelTests : IAsyncLifetime
         private readonly Func<RequestSnapshot, HttpResponseMessage> _responder = responder;
 
         public List<RequestSnapshot> Requests { get; } = [];
+        public List<string> RequestedClientNames { get; } = [];
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {

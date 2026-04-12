@@ -363,6 +363,7 @@ public sealed class DatabaseInitializer
         // SQLite has no ALTER TABLE ... ADD COLUMN IF NOT EXISTS,
         // so we check via PRAGMA table_info.
         await TryAddColumnAsync(connection, "agent_sessions", "session_id", "TEXT");
+        await TryAddColumnAsync(connection, "dispatch_entries", "completed_by", "TEXT");
         await TryAddColumnAsync(connection, "review_rounds", "preferred_diff_base_ref", "TEXT");
         await TryAddColumnAsync(connection, "review_rounds", "preferred_diff_base_commit", "TEXT");
         await TryAddColumnAsync(connection, "review_rounds", "preferred_diff_head_ref", "TEXT");

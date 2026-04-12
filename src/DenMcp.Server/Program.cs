@@ -80,6 +80,12 @@ builder.Services.AddHttpClient("signal-daemon", (services, client) =>
     client.BaseAddress = new Uri(denOptions.Signal.GetBaseUrl());
     client.Timeout = TimeSpan.FromSeconds(10);
 });
+builder.Services.AddHttpClient("signal-events", (services, client) =>
+{
+    var denOptions = services.GetRequiredService<DenMcpOptions>();
+    client.BaseAddress = new Uri(denOptions.Signal.GetBaseUrl());
+    client.Timeout = Timeout.InfiniteTimeSpan;
+});
 builder.Services.AddSingleton<SignalNotificationChannel>();
 builder.Services.AddSingleton<INotificationChannel>(services => services.GetRequiredService<SignalNotificationChannel>());
 builder.Services.AddHostedService<NotificationListenerHostedService>();

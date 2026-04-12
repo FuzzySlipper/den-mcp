@@ -97,7 +97,7 @@ public sealed class SignalNotificationChannel : INotificationChannel, IAsyncDisp
         if (!await EnsureDaemonAvailableAsync(cancellationToken))
             return;
 
-        var client = CreateClient();
+        var client = CreateEventsClient();
         var path = HasConfiguredAccount()
             ? $"/api/v1/events?account={Uri.EscapeDataString(_options.Signal.Account!)}"
             : "/api/v1/events";
@@ -233,6 +233,9 @@ public sealed class SignalNotificationChannel : INotificationChannel, IAsyncDisp
 
     private HttpClient CreateClient()
         => _httpClientFactory.CreateClient("signal-daemon");
+
+    private HttpClient CreateEventsClient()
+        => _httpClientFactory.CreateClient("signal-events");
 
     private async Task<long?> SendMessageAsync(string message, CancellationToken cancellationToken)
     {

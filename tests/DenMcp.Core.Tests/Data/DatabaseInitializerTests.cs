@@ -166,4 +166,55 @@ public class DatabaseInitializerTests : IDisposable
 
         await Assert.ThrowsAsync<SqliteException>(() => invalidInsert.ExecuteNonQueryAsync());
     }
+
+    [Fact]
+    public async Task InitializeAsync_AddsCompletedByColumnToExistingDispatchEntriesTable()
+    {
+        await using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                CREATE TABLE projects (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT
+                );
+
+                CREATE TABLE dispatch_entries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    target_agent TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    trigger_type TEXT NOT NULL,
+                    trigger_id INTEGER NOT NULL,
+                    task_id INTEGER,
+                    summary TEXT,
+                    context_prompt TEXT,
+                    dedup_key TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    expires_at TEXT NOT NULL,
+                    decided_at TEXT,
+                    completed_at TEXT,
+                    decided_by TEXT
+                );
+                """;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var initializer = new DatabaseInitializer(_dbPath, NullLogger<DatabaseInitializer>.Instance);
+        await initializer.InitializeAsync();
+
+        await using var verify = new SqliteConnection(initializer.ConnectionString);
+        await verify.OpenAsync();
+
+        var columns = new List<string>();
+        await using var checkCmd = verify.CreateCommand();
+        checkCmd.CommandText = "PRAGMA table_info(dispatch_entries)";
+        await using var reader = await checkCmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            columns.Add(reader.GetString(1));
+
+        Assert.Contains("completed_by", columns);
+    }
 }
