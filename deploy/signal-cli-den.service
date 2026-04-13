@@ -1,17 +1,15 @@
 [Unit]
-Description=den-mcp server
-Wants=signal-cli-den.service
-After=network.target signal-cli-den.service
+Description=signal-cli daemon for den-mcp
+After=network.target
 
 [Service]
-Type=exec
+Type=simple
 User=den-mcp
 Group=den-mcp
 WorkingDirectory=/data/dev/den-mcp/server
 Environment=HOME=/data/dev/den-mcp/server
-Environment=DOTNET_BUNDLE_EXTRACT_BASE_DIR=/data/dev/den-mcp/server/.net
 EnvironmentFile=/data/dev/den-mcp/server/env/server.env
-ExecStart=/data/dev/den-mcp/server/DenMcp.Server
+ExecStart=/bin/bash -lc 'exec ./.local/bin/signal-cli -a "$DenMcp__Signal__Account" daemon --http="${DenMcp__Signal__HttpHost}:${DenMcp__Signal__HttpPort}"'
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
