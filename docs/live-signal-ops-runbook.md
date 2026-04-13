@@ -97,7 +97,7 @@ curl -fsS http://127.0.0.1:5199/health
 If you also updated the checked-in unit file, use the helper instead:
 
 ```bash
-sudo ./scripts/repair-live-signal-service.sh
+sudo bash scripts/repair-live-signal-service.sh
 ```
 
 That script:
@@ -186,7 +186,7 @@ curl -fsS http://127.0.0.1:8081/api/v1/check
 Normalize to the expected live port with:
 
 ```bash
-sudo ./scripts/fix-live-signal-port.sh
+sudo bash scripts/fix-live-signal-port.sh
 ```
 
 That updates `DenMcp__Signal__HttpPort`, restarts both services, and rechecks health.

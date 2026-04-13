@@ -262,6 +262,7 @@ wait_for_dispatch_status() {
   done
 
   curl -fsS "$den_base/api/dispatch/$dispatch_id"
+  return 124
 }
 
 parse_args() {
@@ -403,8 +404,17 @@ main() {
     if (( WAIT_FOR_REACTION_SECONDS > 0 )); then
       echo
       echo "Waiting up to ${WAIT_FOR_REACTION_SECONDS}s for a Signal reaction on dispatch #${dispatch_id} ..."
-      local final_dispatch final_status
-      final_dispatch=$(wait_for_dispatch_status "$den_base" "$dispatch_id" "$WAIT_FOR_REACTION_SECONDS")
+      local final_dispatch final_status reaction_check_rc
+      if final_dispatch=$(wait_for_dispatch_status "$den_base" "$dispatch_id" "$WAIT_FOR_REACTION_SECONDS"); then
+        reaction_check_rc=0
+      else
+        reaction_check_rc=$?
+      fi
+
+      if (( reaction_check_rc != 0 )) && (( reaction_check_rc != 124 )); then
+        die "Failed to recheck dispatch #$dispatch_id (exit $reaction_check_rc)"
+      fi
+
       final_status=$(printf '%s' "$final_dispatch" | extract_json_field dispatch_status)
       printf '%s\n' "$final_dispatch"
 
