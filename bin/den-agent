@@ -14,6 +14,7 @@ CODEX_BIN="${DEN_AGENT_CODEX_BIN:-codex}"
 
 BASE_URL="${DEN_MCP_URL:-${DEN_MCP_BASE_URL:-http://127.0.0.1:5199}}"
 HEARTBEAT_SECONDS="${DEN_AGENT_HEARTBEAT_SECONDS:-60}"
+DISPATCH_POLL_SECONDS="${DEN_AGENT_DISPATCH_POLL_SECONDS:-5}"
 SESSION_ID="${DEN_AGENT_SESSION_ID:-}"
 PROJECT_ID="${DEN_PROJECT_ID:-}"
 
@@ -24,6 +25,7 @@ VENDOR_HAS_EXISTING_PROMPT=0
 SESSION_CHECKED_IN=0
 CLEANUP_DONE=0
 HEARTBEAT_PID=""
+DISPATCH_POLL_PID=""
 ACTIVE_TASK_ID=""
 ACTIVE_DISPATCH_ID=""
 ACTIVE_STATUS="idle"
@@ -361,6 +363,16 @@ stop_heartbeat() {
     HEARTBEAT_PID=""
 }
 
+stop_dispatch_poll() {
+    if [[ -n "${DISPATCH_POLL_PID}" ]] && kill -0 "${DISPATCH_POLL_PID}" >/dev/null 2>&1; then
+        if have_command pkill; then
+            pkill -TERM -P "${DISPATCH_POLL_PID}" >/dev/null 2>&1 || true
+        fi
+        kill "${DISPATCH_POLL_PID}" >/dev/null 2>&1 || true
+    fi
+    DISPATCH_POLL_PID=""
+}
+
 check_out_session() {
     local body
 
@@ -391,6 +403,7 @@ cleanup() {
     CLEANUP_DONE=1
 
     stop_heartbeat
+    stop_dispatch_poll
 
     if [[ -n "${PROJECT_ID}" ]]; then
         if [[ "${exit_code}" -eq 0 ]]; then
@@ -507,16 +520,47 @@ populate_dispatch_state() {
     den_signal den_status "${ACTIVE_STATUS}"
 }
 
+start_dispatch_poll() {
+    [[ "${SESSION_CHECKED_IN}" -eq 1 ]] || return 0
+
+    case "${DISPATCH_POLL_SECONDS}" in
+        ""|0|0s|0.0|0.0s)
+            return 0
+            ;;
+    esac
+
+    (
+        local dispatch_json
+        local dispatch_id
+
+        trap 'exit 0' TERM INT
+
+        while sleep "${DISPATCH_POLL_SECONDS}"; do
+            dispatch_json="$(discover_dispatch || true)"
+            [[ -n "${dispatch_json}" ]] || continue
+
+            dispatch_id="$("${JQ_BIN}" -r '.id // empty' <<<"${dispatch_json}")"
+            [[ -n "${dispatch_id}" ]] || continue
+            [[ "${dispatch_id}" != "${ACTIVE_DISPATCH_ID}" ]] || continue
+
+            populate_dispatch_state "${dispatch_json}"
+            printf '\n' >&2
+            log "new approved dispatch #${ACTIVE_DISPATCH_ID} arrived while ${VENDOR} is running"
+            show_dispatch_fallback
+        done
+    ) &
+    DISPATCH_POLL_PID=$!
+}
+
 run_vendor() {
     local vendor_bin
-    local exit_code
     vendor_bin="$(vendor_binary)"
 
-    "${vendor_bin}" "$@" &
-    local child_pid=$!
-    wait "${child_pid}"
-    exit_code=$?
-    return "${exit_code}"
+    # Run in foreground so the child inherits the controlling TTY.
+    # Backgrounding with `&` either redirects stdin to /dev/null (no job control)
+    # or puts the child in a non-foreground process group (with `set -m`), both of
+    # which cause codex to abort with "stdin is not a terminal".
+    "${vendor_bin}" "$@"
 }
 
 parse_args() {
@@ -630,7 +674,11 @@ main() {
             dispatch_json="$(discover_dispatch || true)"
             if [[ -n "${dispatch_json}" ]]; then
                 populate_dispatch_state "${dispatch_json}"
+            fi
 
+            start_dispatch_poll
+
+            if [[ -n "${dispatch_json}" ]]; then
                 if [[ "${VENDOR_MODE}" == "interactive" ]] && [[ "${VENDOR_HAS_EXISTING_PROMPT}" -eq 0 ]] && [[ -n "${DISPATCH_PROMPT}" ]]; then
                     log "starting ${VENDOR} with approved dispatch #${ACTIVE_DISPATCH_ID}"
                     run_vendor "${VENDOR_ARGS[@]}" "${DISPATCH_PROMPT}"

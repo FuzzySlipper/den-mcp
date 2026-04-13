@@ -7,6 +7,7 @@ import stat
 import subprocess
 import tempfile
 import textwrap
+import time
 import unittest
 
 
@@ -142,6 +143,7 @@ class DenAgentTests(unittest.TestCase):
     def base_env(self) -> dict[str, str]:
         env = os.environ.copy()
         env["PATH"] = f"{self.fake_bin}:{env['PATH']}"
+        env["DEN_MCP_URL"] = "http://127.0.0.1:5199"
         env["DEN_AGENT_TEST_CURL_LOG"] = str(self.curl_log)
         env["DEN_AGENT_TEST_VENDOR_LOG"] = str(self.vendor_log)
         env["DEN_AGENT_TEST_PROJECTS_FILE"] = str(self.projects_file)
@@ -266,6 +268,44 @@ class DenAgentTests(unittest.TestCase):
         self.assertIn("approved dispatch #42 is ready", result.stderr)
         self.assertIn("--- den-agent dispatch prompt start ---", result.stderr)
         self.assertIn("Prompt to paste manually", result.stderr)
+
+    def test_running_session_reports_newly_approved_dispatch(self) -> None:
+        self.write_projects()
+
+        env = self.base_env()
+        env["DEN_AGENT_DISPATCH_POLL_SECONDS"] = "0.01"
+        env["DEN_AGENT_TEST_VENDOR_SLEEP"] = "0.25"
+
+        proc = subprocess.Popen(
+            ["bash", str(SCRIPT_PATH), "claude"],
+            cwd=self.workspace,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.addCleanup(lambda: proc.kill() if proc.poll() is None else None)
+
+        deadline = time.time() + 2
+        while time.time() < deadline and not self.vendor_log.exists():
+            time.sleep(0.01)
+        self.assertTrue(self.vendor_log.exists(), "vendor process never started")
+
+        self.write_dispatch(prompt="Prompt arriving mid-session")
+
+        stdout, stderr = proc.communicate(timeout=5)
+
+        self.assertEqual(0, proc.returncode, stderr)
+
+        vendor_calls = self.read_jsonl(self.vendor_log)
+        self.assertEqual(1, len(vendor_calls))
+        self.assertEqual("claude", vendor_calls[0]["name"])
+        self.assertEqual([], vendor_calls[0]["argv"])
+
+        self.assertIn("new approved dispatch #42 arrived while claude is running", stderr)
+        self.assertIn("approved dispatch #42 is ready", stderr)
+        self.assertIn("Prompt arriving mid-session", stderr)
+        self.assertIn("SetUserVar=den_dispatch=", stdout)
 
     def test_den_failure_falls_back_to_manual_vendor_launch(self) -> None:
         env = self.base_env()
