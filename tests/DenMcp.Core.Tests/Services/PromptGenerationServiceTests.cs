@@ -200,6 +200,70 @@ public class PromptGenerationServiceTests : IAsyncLifetime
         Assert.Contains("codex", result.ContextPrompt);
     }
 
+    [Fact]
+    public async Task ReviewFeedbackMessagePrompt_GivesCoderSpecificNextStep()
+    {
+        var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Feedback task" });
+        await _messages.CreateAsync(new Message
+        {
+            ProjectId = "proj",
+            TaskId = task.Id,
+            Sender = "codex",
+            Content = "Please fix the missing merge guard."
+        });
+
+        var evt = new DispatchEvent
+        {
+            EventKind = DispatchEvent.MessageReceived,
+            ProjectId = "proj",
+            TaskId = task.Id,
+            Recipient = "claude-code",
+            Sender = "codex",
+            MessageType = "review_feedback",
+            MessageId = 1
+        };
+
+        var trigger = _routing.MatchTrigger(DefaultConfig, evt)!;
+        var result = await _service.GenerateAsync(evt, trigger, DefaultConfig);
+
+        Assert.Contains("request review again", result.ContextPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("missing merge guard", result.ContextPrompt);
+        Assert.Contains("review feedback", result.Summary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("codex", result.Summary);
+    }
+
+    [Fact]
+    public async Task MergeRequestPrompt_GivesMergeAndNextTaskInstructions()
+    {
+        var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Merge task" });
+        await _messages.CreateAsync(new Message
+        {
+            ProjectId = "proj",
+            TaskId = task.Id,
+            Sender = "codex",
+            Content = "Review approved. Reviewed head SHA: `abc123`. Merge when the branch still matches."
+        });
+
+        var evt = new DispatchEvent
+        {
+            EventKind = DispatchEvent.MessageReceived,
+            ProjectId = "proj",
+            TaskId = task.Id,
+            Recipient = "claude-code",
+            Sender = "codex",
+            MessageType = "merge_request",
+            MessageId = 1
+        };
+
+        var trigger = _routing.MatchTrigger(DefaultConfig, evt)!;
+        var result = await _service.GenerateAsync(evt, trigger, DefaultConfig);
+
+        Assert.Contains("merge it and mark the task done", result.ContextPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("work-complete Signal message", result.ContextPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("merge handoff", result.Summary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("codex", result.Summary);
+    }
+
     #endregion
 
     #region Planning prompt

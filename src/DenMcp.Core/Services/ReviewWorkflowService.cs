@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using DenMcp.Core.Data;
 using DenMcp.Core.Models;
+using Microsoft.Extensions.Logging;
 
 namespace DenMcp.Core.Services;
 
@@ -9,6 +10,7 @@ public interface IReviewWorkflowService
 {
     Task<ReviewPacketResult> RequestReviewAsync(string projectId, RequestReviewInput input);
     Task<ReviewPacketResult> PostReviewFindingsAsync(string projectId, PostReviewFindingsInput input);
+    Task<ReviewVerdictResult> SetReviewVerdictAsync(SetReviewVerdictInput input);
 }
 
 public sealed class ReviewWorkflowService : IReviewWorkflowService
@@ -17,17 +19,26 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
     private readonly IReviewRoundRepository _reviewRounds;
     private readonly IReviewFindingRepository _reviewFindings;
     private readonly IMessageRepository _messages;
+    private readonly IDispatchRepository _dispatches;
+    private readonly IDispatchDetectionService _detection;
+    private readonly ILogger<ReviewWorkflowService> _logger;
 
     public ReviewWorkflowService(
         ITaskRepository tasks,
         IReviewRoundRepository reviewRounds,
         IReviewFindingRepository reviewFindings,
-        IMessageRepository messages)
+        IMessageRepository messages,
+        IDispatchRepository dispatches,
+        IDispatchDetectionService detection,
+        ILogger<ReviewWorkflowService> logger)
     {
         _tasks = tasks;
         _reviewRounds = reviewRounds;
         _reviewFindings = reviewFindings;
         _messages = messages;
+        _dispatches = dispatches;
+        _detection = detection;
+        _logger = logger;
     }
 
     public async Task<ReviewPacketResult> RequestReviewAsync(string projectId, RequestReviewInput input)
@@ -178,6 +189,40 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
                 .ToList(),
             OpenFindings = openFindings,
             TestCommands = reviewerCommands
+        };
+    }
+
+    public async Task<ReviewVerdictResult> SetReviewVerdictAsync(SetReviewVerdictInput input)
+    {
+        var round = await _reviewRounds.GetByIdAsync(input.ReviewRoundId)
+            ?? throw new KeyNotFoundException($"Review round {input.ReviewRoundId} not found");
+
+        if (input.TaskId is not null && round.TaskId != input.TaskId.Value)
+            throw new KeyNotFoundException($"Review round {input.ReviewRoundId} not found for task {input.TaskId.Value}");
+
+        var detail = await _tasks.GetDetailAsync(round.TaskId);
+        if (input.ProjectId is not null)
+            ValidateTaskProject(detail, input.ProjectId, detail.Task.Id);
+
+        var updated = await _reviewRounds.SetVerdictAsync(
+            input.ReviewRoundId,
+            input.Verdict,
+            input.DecidedBy,
+            input.Notes);
+
+        Message? handoffMessage = null;
+        if (ShouldEmitVerdictHandoff(updated.Verdict))
+            handoffMessage = await CreateVerdictHandoffMessageAsync(detail, updated);
+
+        var completedDispatches = handoffMessage is null
+            ? []
+            : await CompleteApprovedReviewerDispatchesAsync(detail.Task.ProjectId, detail.Task.Id, input.DecidedBy);
+
+        return new ReviewVerdictResult
+        {
+            ReviewRound = updated,
+            HandoffMessage = handoffMessage,
+            CompletedDispatches = completedDispatches
         };
     }
 
@@ -375,4 +420,177 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
         test_commands = finding.TestCommands,
         follow_up_task_id = finding.FollowUpTaskId
     };
+
+    private static bool ShouldEmitVerdictHandoff(ReviewVerdict? verdict) =>
+        verdict is ReviewVerdict.ChangesRequested or ReviewVerdict.FollowUpNeeded or ReviewVerdict.LooksGood;
+
+    private async Task<Message> CreateVerdictHandoffMessageAsync(TaskDetail detail, ReviewRound round)
+    {
+        var recipient = ResolveImplementer(detail.Task, round);
+        var threadId = await ResolveThreadIdAsync(detail.Task.ProjectId, detail.Task.Id, round.Id);
+        var metadata = BuildVerdictHandoffMetadata(recipient, round);
+
+        var created = await _messages.CreateAsync(new Message
+        {
+            ProjectId = detail.Task.ProjectId,
+            TaskId = detail.Task.Id,
+            ThreadId = threadId,
+            Sender = round.VerdictBy ?? round.RequestedBy,
+            Content = BuildVerdictHandoffContent(detail, round),
+            Metadata = metadata
+        });
+
+        try
+        {
+            await _detection.OnMessageCreatedAsync(created);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Dispatch detection failed for review verdict handoff message {MessageId}", created.Id);
+        }
+
+        return created;
+    }
+
+    private async Task<int?> ResolveThreadIdAsync(string projectId, int taskId, int reviewRoundId)
+    {
+        var messages = await _messages.GetMessagesAsync(projectId, taskId: taskId, limit: 100);
+        foreach (var message in messages)
+        {
+            if (!TryGetReviewRoundId(message.Metadata, out var messageRoundId) || messageRoundId != reviewRoundId)
+                continue;
+
+            return message.ThreadId ?? message.Id;
+        }
+
+        var latestTaskMessage = messages.FirstOrDefault();
+        return latestTaskMessage is null ? null : latestTaskMessage.ThreadId ?? latestTaskMessage.Id;
+    }
+
+    private static bool TryGetReviewRoundId(JsonElement? metadata, out int reviewRoundId)
+    {
+        reviewRoundId = default;
+        if (metadata is not JsonElement element ||
+            !element.TryGetProperty("review_round_id", out var roundIdElement) ||
+            roundIdElement.ValueKind != JsonValueKind.Number)
+        {
+            return false;
+        }
+
+        return roundIdElement.TryGetInt32(out reviewRoundId);
+    }
+
+    private async Task<List<DispatchEntry>> CompleteApprovedReviewerDispatchesAsync(
+        string projectId,
+        int taskId,
+        string reviewer)
+    {
+        var approved = await _dispatches.ListAsync(projectId, reviewer, [DispatchStatus.Approved]);
+        var completed = new List<DispatchEntry>();
+
+        foreach (var entry in approved.Where(entry => entry.TaskId == taskId))
+        {
+            try
+            {
+                completed.Add(await _dispatches.CompleteAsync(entry.Id, "review-workflow"));
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Failed to complete reviewer dispatch {DispatchId} after verdict handoff", entry.Id);
+            }
+        }
+
+        return completed;
+    }
+
+    private static string ResolveImplementer(ProjectTask task, ReviewRound round)
+    {
+        if (!string.IsNullOrWhiteSpace(task.AssignedTo))
+            return task.AssignedTo;
+
+        return round.RequestedBy;
+    }
+
+    private static JsonElement BuildVerdictHandoffMetadata(string recipient, ReviewRound round)
+    {
+        var messageType = round.Verdict == ReviewVerdict.LooksGood ? "merge_request" : "review_feedback";
+        return JsonSerializer.SerializeToElement(new
+        {
+            type = messageType,
+            recipient,
+            review_round_id = round.Id,
+            review_round_number = round.RoundNumber,
+            verdict = round.Verdict?.ToDbValue(),
+            reviewer = round.VerdictBy,
+            branch = round.Branch,
+            base_branch = round.BaseBranch,
+            base_commit = round.BaseCommit,
+            head_commit = round.HeadCommit,
+            last_reviewed_head_commit = round.LastReviewedHeadCommit,
+            tests_run = round.TestsRun,
+            preferred_diff = new
+            {
+                base_ref = round.PreferredDiff.BaseRef,
+                base_commit = round.PreferredDiff.BaseCommit,
+                head_ref = round.PreferredDiff.HeadRef,
+                head_commit = round.PreferredDiff.HeadCommit
+            },
+            alternate_diff = round.AlternateDiff is null ? null : new
+            {
+                base_ref = round.AlternateDiff.BaseRef,
+                base_commit = round.AlternateDiff.BaseCommit,
+                head_ref = round.AlternateDiff.HeadRef,
+                head_commit = round.AlternateDiff.HeadCommit
+            }
+        });
+    }
+
+    private static string BuildVerdictHandoffContent(TaskDetail detail, ReviewRound round)
+    {
+        var sb = new StringBuilder();
+        var isApproval = round.Verdict == ReviewVerdict.LooksGood;
+        var title = isApproval ? "Review approved" : "Review follow-up";
+
+        sb.AppendLine(title);
+        sb.AppendLine();
+        sb.AppendLine($"**Task #{detail.Task.Id}**: {detail.Task.Title}");
+        sb.AppendLine($"Review round: `{round.RoundNumber}`");
+        sb.AppendLine($"Verdict: `{round.Verdict?.ToDbValue() ?? "pending"}`");
+        sb.AppendLine($"Reviewed diff: `{round.PreferredDiff.BaseRef}...{round.PreferredDiff.HeadRef}`");
+        sb.AppendLine($"Base SHA: `{round.BaseCommit}`");
+        sb.AppendLine($"Reviewed head SHA: `{round.HeadCommit}`");
+        sb.AppendLine($"Branch: `{round.Branch}`");
+        if (round.VerdictBy is not null)
+            sb.AppendLine($"Reviewer: `{round.VerdictBy}`");
+
+        AppendListSection(
+            sb,
+            isApproval ? "Reviewer test commands" : "Open findings",
+            isApproval
+                ? round.TestsRun ?? []
+                : detail.OpenReviewFindings
+                    .OrderBy(finding => finding.FindingNumber)
+                    .Select(FormatFindingOverviewLine)
+                    .ToList(),
+            skipIfEmpty: false);
+
+        AppendOptionalNotes(sb, round.VerdictNotes);
+
+        sb.AppendLine();
+        sb.AppendLine("Next step:");
+        if (isApproval)
+        {
+            sb.AppendLine($"- Confirm `{round.Branch}` is still at reviewed head `{round.HeadCommit}`.");
+            sb.AppendLine($"- If it matches, merge to `{round.BaseBranch}`, mark the task done, and pick up your next task.");
+            sb.AppendLine("- If there is no next task, send a work-complete Signal message.");
+        }
+        else
+        {
+            sb.AppendLine("- Read the task thread and evaluate the review feedback.");
+            sb.AppendLine($"- Address the needed changes on `{round.Branch}`.");
+            sb.AppendLine("- When ready, request review again with the new head commit and tests run.");
+        }
+
+        return sb.ToString().TrimEnd();
+    }
 }

@@ -159,23 +159,34 @@ public static class TaskRoutes
             }
         });
 
-        group.MapPost("/{taskId:int}/review-rounds/{roundId:int}/verdict", async (ITaskRepository taskRepo,
-            IReviewRoundRepository reviewRepo, string projectId, int taskId, int roundId, SetReviewVerdictRequest req) =>
+        group.MapPost("/{taskId:int}/review-rounds/{roundId:int}/verdict", async (
+            IReviewWorkflowService workflow,
+            string projectId,
+            int taskId,
+            int roundId,
+            SetReviewVerdictRequest req) =>
         {
-            var task = await taskRepo.GetByIdAsync(taskId);
-            if (task is null || task.ProjectId != projectId)
-                return Results.NotFound(new { error = $"Task {taskId} not found" });
-
-            var round = await reviewRepo.GetByIdAsync(roundId);
-            if (round is null || round.TaskId != taskId)
-                return Results.NotFound(new { error = $"Review round {roundId} not found" });
-
-            var updated = await reviewRepo.SetVerdictAsync(
-                roundId,
-                EnumExtensions.ParseReviewVerdict(req.Verdict),
-                req.DecidedBy,
-                req.Notes);
-            return Results.Ok(updated);
+            try
+            {
+                var result = await workflow.SetReviewVerdictAsync(new SetReviewVerdictInput
+                {
+                    ProjectId = projectId,
+                    TaskId = taskId,
+                    ReviewRoundId = roundId,
+                    Verdict = EnumExtensions.ParseReviewVerdict(req.Verdict),
+                    DecidedBy = req.DecidedBy,
+                    Notes = req.Notes
+                });
+                return Results.Ok(result.ReviewRound);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { error = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
         });
 
         group.MapGet("/{taskId:int}/review-findings", async (ITaskRepository taskRepo, IReviewRoundRepository reviewRepo,

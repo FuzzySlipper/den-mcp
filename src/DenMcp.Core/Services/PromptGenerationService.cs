@@ -52,6 +52,10 @@ public sealed class PromptGenerationService : IPromptGenerationService
                 => await BuildTaskTransitionPrompt(evt, config, customOpener),
             DispatchEvent.MessageReceived when (evt.MessageType is "planning_summary" or "planning")
                 => await BuildPlanningPrompt(evt, config, customOpener),
+            DispatchEvent.MessageReceived when evt.MessageType is "review_feedback"
+                => await BuildReviewFeedbackMessagePrompt(evt, config, customOpener),
+            DispatchEvent.MessageReceived when evt.MessageType is "merge_request" or "review_approval"
+                => await BuildMergeRequestPrompt(evt, config, customOpener),
             DispatchEvent.MessageReceived
                 => await BuildMessagePrompt(evt, config, customOpener),
             _ => BuildFallbackPrompt(evt, customOpener)
@@ -152,6 +156,56 @@ public sealed class PromptGenerationService : IPromptGenerationService
         return new PromptResult
         {
             Summary = $"{evt.Sender} sent planning context{summaryTask} on {evt.ProjectId}",
+            ContextPrompt = sb.ToString().TrimEnd()
+        };
+    }
+
+    private async Task<PromptResult> BuildReviewFeedbackMessagePrompt(DispatchEvent evt, RoutingConfig config, string? customOpener)
+    {
+        var sb = new StringBuilder();
+        var role = ResolveRoleName(config, "implementer");
+
+        sb.AppendLine(customOpener ?? $"Review feedback is ready on {evt.ProjectId} from {evt.Sender}.");
+        sb.AppendLine();
+        sb.AppendLine($"You are the {role} for {evt.ProjectId}.");
+        sb.AppendLine();
+
+        AppendTriggeringMessage(sb, evt);
+        await AppendTaskAndMessages(sb, evt);
+
+        sb.AppendLine();
+        sb.AppendLine("Review the findings, decide what needs to change, and update the task branch.");
+        sb.AppendLine("When you are ready, request review again with the new head commit and tests run.");
+
+        var summaryTask = evt.TaskId.HasValue ? $" on #{evt.TaskId}" : "";
+        return new PromptResult
+        {
+            Summary = $"{evt.Sender} sent review feedback{summaryTask} on {evt.ProjectId}",
+            ContextPrompt = sb.ToString().TrimEnd()
+        };
+    }
+
+    private async Task<PromptResult> BuildMergeRequestPrompt(DispatchEvent evt, RoutingConfig config, string? customOpener)
+    {
+        var sb = new StringBuilder();
+        var role = ResolveRoleName(config, "implementer");
+
+        sb.AppendLine(customOpener ?? $"Review approved work on {evt.ProjectId} from {evt.Sender}.");
+        sb.AppendLine();
+        sb.AppendLine($"You are the {role} for {evt.ProjectId}.");
+        sb.AppendLine();
+
+        AppendTriggeringMessage(sb, evt);
+        await AppendTaskAndMessages(sb, evt);
+
+        sb.AppendLine();
+        sb.AppendLine("If the branch still matches the reviewed head commit in the thread, merge it and mark the task done.");
+        sb.AppendLine("After merging, request your next task. If nothing is available, send a work-complete Signal message.");
+
+        var summaryTask = evt.TaskId.HasValue ? $" on #{evt.TaskId}" : "";
+        return new PromptResult
+        {
+            Summary = $"{evt.Sender} sent merge handoff{summaryTask} on {evt.ProjectId}",
             ContextPrompt = sb.ToString().TrimEnd()
         };
     }

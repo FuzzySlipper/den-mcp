@@ -90,6 +90,23 @@ public sealed class PostReviewFindingsInput
     public string? Notes { get; set; }
 }
 
+public sealed class SetReviewVerdictInput
+{
+    public string? ProjectId { get; set; }
+    public int? TaskId { get; set; }
+    public int ReviewRoundId { get; set; }
+    public ReviewVerdict Verdict { get; set; }
+    public required string DecidedBy { get; set; }
+    public string? Notes { get; set; }
+}
+
+public sealed class ReviewVerdictResult
+{
+    public required ReviewRound ReviewRound { get; set; }
+    public Message? HandoffMessage { get; set; }
+    public required List<DispatchEntry> CompletedDispatches { get; set; }
+}
+
 public static class ReviewWorkflowSummaryBuilder
 {
     public static ReviewWorkflowSummary Build(

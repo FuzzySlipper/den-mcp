@@ -4,6 +4,8 @@ using System.Text.Json;
 using DenMcp.Core.Data;
 using DenMcp.Core.Llm;
 using DenMcp.Core.Models;
+using DenMcp.Core.Services;
+using DenMcp.Server.Tools;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
@@ -169,11 +171,89 @@ public class ReviewWorkflowApiTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
-    private async Task<ProjectTask> CreateTaskAsync(string title)
+    [Fact]
+    public async Task RestSetVerdict_PostsFeedbackHandoffAndCompletesReviewerDispatch()
+    {
+        var task = await CreateTaskAsync("REST verdict handoff", assignedTo: "claude-code");
+        var reviewRequest = await CreateReviewRequestPacketAsync(task.Id, "claude-code");
+        await CreateFindingAsync(task.Id, reviewRequest.ReviewRound!.Id, "Missing merge guard");
+        var reviewerDispatch = await CreateApprovedReviewerDispatchAsync(task.Id, reviewRequest.Message.Id, "codex");
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{ProjectId}/tasks/{task.Id}/review-rounds/{reviewRequest.ReviewRound.Id}/verdict",
+            new
+            {
+                verdict = "changes_requested",
+                decided_by = "codex",
+                notes = "Please address before merge"
+            });
+
+        response.EnsureSuccessStatusCode();
+
+        using var scope = _factory.Services.CreateScope();
+        var messages = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+        var dispatches = scope.ServiceProvider.GetRequiredService<IDispatchRepository>();
+
+        var taskMessages = await messages.GetMessagesAsync(ProjectId, task.Id, limit: 20);
+        var handoff = Assert.Single(taskMessages, message =>
+            message.Metadata.HasValue &&
+            message.Metadata.Value.TryGetProperty("type", out var type) &&
+            type.GetString() == "review_feedback");
+
+        Assert.Equal(reviewRequest.Message.Id, handoff.ThreadId);
+        Assert.Equal("claude-code", handoff.Metadata!.Value.GetProperty("recipient").GetString());
+
+        var implementerDispatches = await dispatches.ListAsync(ProjectId, "claude-code", [DispatchStatus.Pending]);
+        Assert.Single(implementerDispatches);
+
+        var completedReviewerDispatch = await dispatches.GetByIdAsync(reviewerDispatch.Id);
+        Assert.Equal(DispatchStatus.Completed, completedReviewerDispatch!.Status);
+    }
+
+    [Fact]
+    public async Task McpSetVerdict_PostsMergeHandoff()
+    {
+        var task = await CreateTaskAsync("MCP merge handoff");
+        var reviewRequest = await CreateReviewRequestPacketAsync(task.Id, "claude-code");
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var workflow = scope.ServiceProvider.GetRequiredService<IReviewWorkflowService>();
+            var result = await TaskTools.SetReviewVerdict(
+                workflow,
+                reviewRequest.ReviewRound!.Id,
+                "looks_good",
+                "codex",
+                "Approved for merge");
+
+            Assert.Contains("looks_good", result);
+        }
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var messages = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+            var dispatches = scope.ServiceProvider.GetRequiredService<IDispatchRepository>();
+
+            var taskMessages = await messages.GetMessagesAsync(ProjectId, task.Id, limit: 20);
+            var handoff = Assert.Single(taskMessages, message =>
+                message.Metadata.HasValue &&
+                message.Metadata.Value.TryGetProperty("type", out var type) &&
+                type.GetString() == "merge_request");
+
+            Assert.Equal("claude-code", handoff.Metadata!.Value.GetProperty("recipient").GetString());
+            Assert.Contains("pick up your next task", handoff.Content, StringComparison.OrdinalIgnoreCase);
+
+            var implementerDispatches = await dispatches.ListAsync(ProjectId, "claude-code", [DispatchStatus.Pending]);
+            Assert.Single(implementerDispatches);
+            Assert.Contains("mark the task done", implementerDispatches[0].ContextPrompt!, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private async Task<ProjectTask> CreateTaskAsync(string title, string? assignedTo = null)
     {
         using var scope = _factory.Services.CreateScope();
         var repo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
-        return await repo.CreateAsync(new ProjectTask { ProjectId = ProjectId, Title = title });
+        return await repo.CreateAsync(new ProjectTask { ProjectId = ProjectId, Title = title, AssignedTo = assignedTo });
     }
 
     private async Task<ReviewRound> CreateRoundAsync(int taskId, string headCommit = "bbb222")
@@ -216,6 +296,40 @@ public class ReviewWorkflowApiTests : IAsyncLifetime
             Sender = sender,
             Content = content
         });
+    }
+
+    private async Task<ReviewPacketResult> CreateReviewRequestPacketAsync(int taskId, string requestedBy)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var workflow = scope.ServiceProvider.GetRequiredService<IReviewWorkflowService>();
+        return await workflow.RequestReviewAsync(ProjectId, new RequestReviewInput
+        {
+            TaskId = taskId,
+            RequestedBy = requestedBy,
+            Branch = "task/658-post-review-automation",
+            BaseBranch = "main",
+            BaseCommit = "aaa111",
+            HeadCommit = "bbb222"
+        });
+    }
+
+    private async Task<DispatchEntry> CreateApprovedReviewerDispatchAsync(int taskId, int triggerId, string reviewer)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var dispatches = scope.ServiceProvider.GetRequiredService<IDispatchRepository>();
+        var (entry, _) = await dispatches.CreateIfAbsentAsync(new DispatchEntry
+        {
+            ProjectId = ProjectId,
+            TargetAgent = reviewer,
+            TriggerType = DispatchTriggerType.Message,
+            TriggerId = triggerId,
+            TaskId = taskId,
+            Summary = "Review dispatch",
+            ContextPrompt = "Review this task",
+            DedupKey = DispatchEntry.BuildDedupKey(DispatchTriggerType.Message, triggerId, reviewer),
+            ExpiresAt = DateTime.UtcNow.AddHours(1)
+        });
+        return await dispatches.ApproveAsync(entry.Id, "signal-user");
     }
 
     private sealed class ReviewWorkflowAppFactory : WebApplicationFactory<Program>

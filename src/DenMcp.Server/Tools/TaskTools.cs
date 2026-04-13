@@ -182,14 +182,20 @@ public sealed class TaskTools
 
     [McpServerTool(Name = "set_review_verdict"), Description("Set the verdict for a review round.")]
     public static async Task<string> SetReviewVerdict(
-        IReviewRoundRepository repo,
+        IReviewWorkflowService workflow,
         [Description("Review round ID.")] int review_round_id,
         [Description("Verdict: changes_requested, looks_good, follow_up_needed, blocked_by_dependency.")] string verdict,
         [Description("Agent or user setting the verdict.")] string decided_by,
         [Description("Optional verdict notes.")] string? notes = null)
     {
-        var updated = await repo.SetVerdictAsync(review_round_id, EnumExtensions.ParseReviewVerdict(verdict), decided_by, notes);
-        return JsonSerializer.Serialize(updated, JsonOpts.Default);
+        var result = await workflow.SetReviewVerdictAsync(new SetReviewVerdictInput
+        {
+            ReviewRoundId = review_round_id,
+            Verdict = EnumExtensions.ParseReviewVerdict(verdict),
+            DecidedBy = decided_by,
+            Notes = notes
+        });
+        return JsonSerializer.Serialize(result.ReviewRound, JsonOpts.Default);
     }
 
     [McpServerTool(Name = "create_review_finding"), Description("Create a structured finding for a review round.")]
