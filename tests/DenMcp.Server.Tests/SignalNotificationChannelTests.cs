@@ -86,7 +86,7 @@ public class SignalNotificationChannelTests : IAsyncLifetime
 
         var message = parameters.GetProperty("message").GetString();
         Assert.Contains("codex posted review feedback on #42", message);
-        Assert.Contains("React ✅ to approve, ❌ to reject.", message);
+        Assert.Contains("React ✅ or 👍 to approve, ❌ or 👎 to reject.", message);
     }
 
     [Fact]
@@ -191,6 +191,53 @@ public class SignalNotificationChannelTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task StartListeningAsync_ApprovesDispatchFromThumbsUpReaction()
+    {
+        var dispatch = await CreateDispatchAsync(triggerId: 11);
+        await _links.LinkDispatchMessageAsync("signal", "1712345678911", dispatch.Id, "+15551234567");
+
+        var payload = """
+            event:receive
+            data:{"account":"+15550001111","envelope":{"sourceNumber":"+15551234567","timestamp":1712350000011,"dataMessage":{"timestamp":1712350000011,"reaction":{"emoji":"👍","targetSentTimestamp":1712345678911,"isRemove":false}}}}
+
+            """;
+
+        var handler = new StubSignalHandler(snapshot =>
+        {
+            if (snapshot.Method == HttpMethod.Get && snapshot.Path == "/api/v1/check")
+                return new HttpResponseMessage(HttpStatusCode.OK);
+
+            if (snapshot.Method == HttpMethod.Get && snapshot.Path == "/api/v1/events")
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(payload, Encoding.UTF8, "text/event-stream")
+                };
+            }
+
+            if (snapshot.Method == HttpMethod.Post && snapshot.Path == "/api/v1/rpc")
+            {
+                return JsonResponse(new
+                {
+                    jsonrpc = "2.0",
+                    result = new { timestamp = 1712350000012L },
+                    id = "thumbs-up"
+                });
+            }
+
+            throw new InvalidOperationException($"Unexpected request: {snapshot.Method} {snapshot.Path}");
+        });
+
+        await using var channel = CreateChannel(handler);
+        await channel.StartListeningAsync(CancellationToken.None);
+
+        var approved = await _dispatches.GetByIdAsync(dispatch.Id);
+        Assert.NotNull(approved);
+        Assert.Equal(DispatchStatus.Approved, approved.Status);
+        Assert.Equal("signal:+15551234567", approved.DecidedBy);
+    }
+
+    [Fact]
     public async Task StartListeningAsync_WithUsernameRecipient_MatchesReactionUsingRememberedRecipientIdentity()
     {
         var dispatch = await CreateDispatchAsync();
@@ -256,6 +303,53 @@ public class SignalNotificationChannelTests : IAsyncLifetime
         Assert.NotNull(approved);
         Assert.Equal(DispatchStatus.Approved, approved.Status);
         Assert.Equal("signal:12150588-774a-4698-8bca-075297d373c3", approved.DecidedBy);
+    }
+
+    [Fact]
+    public async Task StartListeningAsync_RejectsDispatchFromThumbsDownReaction()
+    {
+        var dispatch = await CreateDispatchAsync(triggerId: 12);
+        await _links.LinkDispatchMessageAsync("signal", "1712345678912", dispatch.Id, "+15551234567");
+
+        var payload = """
+            event:receive
+            data:{"account":"+15550001111","envelope":{"sourceNumber":"+15551234567","timestamp":1712350000012,"dataMessage":{"timestamp":1712350000012,"reaction":{"emoji":"👎","targetSentTimestamp":1712345678912,"isRemove":false}}}}
+
+            """;
+
+        var handler = new StubSignalHandler(snapshot =>
+        {
+            if (snapshot.Method == HttpMethod.Get && snapshot.Path == "/api/v1/check")
+                return new HttpResponseMessage(HttpStatusCode.OK);
+
+            if (snapshot.Method == HttpMethod.Get && snapshot.Path == "/api/v1/events")
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(payload, Encoding.UTF8, "text/event-stream")
+                };
+            }
+
+            if (snapshot.Method == HttpMethod.Post && snapshot.Path == "/api/v1/rpc")
+            {
+                return JsonResponse(new
+                {
+                    jsonrpc = "2.0",
+                    result = new { timestamp = 1712350000013L },
+                    id = "thumbs-down"
+                });
+            }
+
+            throw new InvalidOperationException($"Unexpected request: {snapshot.Method} {snapshot.Path}");
+        });
+
+        await using var channel = CreateChannel(handler);
+        await channel.StartListeningAsync(CancellationToken.None);
+
+        var rejected = await _dispatches.GetByIdAsync(dispatch.Id);
+        Assert.NotNull(rejected);
+        Assert.Equal(DispatchStatus.Rejected, rejected.Status);
+        Assert.Equal("signal:+15551234567", rejected.DecidedBy);
     }
 
     [Fact]

@@ -15,7 +15,9 @@ public sealed class SignalNotificationChannel : INotificationChannel, IAsyncDisp
 {
     private const string ChannelName = "signal";
     private const string ApproveEmoji = "\u2705";
+    private const string ApproveAltEmoji = "\U0001F44D";
     private const string RejectEmoji = "\u274C";
+    private const string RejectAltEmoji = "\U0001F44E";
     private const string DispatchIcon = "\U0001F4CB";
     private const string ActiveIcon = "\U0001F7E2";
     private const string FinishedIcon = "\U0001F3C1";
@@ -835,10 +837,12 @@ public sealed class SignalNotificationChannel : INotificationChannel, IAsyncDisp
     }
 
     private static bool IsApprovalReaction(string? emoji) =>
-        string.Equals(emoji, ApproveEmoji, StringComparison.Ordinal);
+        string.Equals(emoji, ApproveEmoji, StringComparison.Ordinal) ||
+        string.Equals(emoji, ApproveAltEmoji, StringComparison.Ordinal);
 
     private static bool IsRejectReaction(string? emoji) =>
-        string.Equals(emoji, RejectEmoji, StringComparison.Ordinal);
+        string.Equals(emoji, RejectEmoji, StringComparison.Ordinal) ||
+        string.Equals(emoji, RejectAltEmoji, StringComparison.Ordinal);
 
     private static string BuildSignalActor(string? source, string? sourceNumber, string? sourceUuid, string? sourceName)
     {
@@ -864,7 +868,7 @@ public sealed class SignalNotificationChannel : INotificationChannel, IAsyncDisp
             lines[0] += $" (task #{taskId})";
 
         lines.Add(string.IsNullOrWhiteSpace(summary) ? "Pending dispatch awaiting approval." : summary.Trim());
-        lines.Add($"React {ApproveEmoji} to approve, {RejectEmoji} to reject.");
+        lines.Add($"React {ApproveEmoji} or {ApproveAltEmoji} to approve, {RejectEmoji} or {RejectAltEmoji} to reject.");
         lines.Add("Reply \"details\" for the full prompt.");
         return string.Join("\n", lines);
     }

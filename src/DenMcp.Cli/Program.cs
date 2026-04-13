@@ -1,5 +1,6 @@
 using DenMcp.Cli;
 using DenMcp.Cli.Commands;
+using DenMcp.Core;
 
 var config = CliConfig.Load();
 var router = new CommandRouter(args);
@@ -42,8 +43,7 @@ catch (HttpRequestException ex)
 
 static int ShowVersion()
 {
-    var version = typeof(CliConfig).Assembly.GetName().Version?.ToString(3) ?? "unknown";
-    Console.WriteLine($"den-mcp {version}");
+    Console.WriteLine($"den-mcp {BuildInfo.DisplayVersion}");
     return 0;
 }
 

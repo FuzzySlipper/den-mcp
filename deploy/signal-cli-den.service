@@ -4,8 +4,8 @@ After=network.target
 
 [Service]
 Type=simple
-User=den-mcp
-Group=den-mcp
+User=patch
+Group=patch
 WorkingDirectory=/data/dev/den-mcp/server
 Environment=HOME=/data/dev/den-mcp/server
 EnvironmentFile=/data/dev/den-mcp/server/env/server.env
