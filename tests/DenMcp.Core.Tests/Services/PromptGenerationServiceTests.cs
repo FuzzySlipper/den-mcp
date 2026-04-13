@@ -259,6 +259,7 @@ public class PromptGenerationServiceTests : IAsyncLifetime
         var result = await _service.GenerateAsync(evt, trigger, DefaultConfig);
 
         Assert.Contains("merge it and mark the task done", result.ContextPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("request review again with the new head SHA and tests run", result.ContextPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("work-complete Signal message", result.ContextPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("merge handoff", result.Summary, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("codex", result.Summary);

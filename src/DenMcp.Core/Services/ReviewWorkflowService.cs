@@ -196,6 +196,7 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
     {
         var round = await _reviewRounds.GetByIdAsync(input.ReviewRoundId)
             ?? throw new KeyNotFoundException($"Review round {input.ReviewRoundId} not found");
+        var previousVerdict = round.Verdict;
 
         if (input.TaskId is not null && round.TaskId != input.TaskId.Value)
             throw new KeyNotFoundException($"Review round {input.ReviewRoundId} not found for task {input.TaskId.Value}");
@@ -212,9 +213,18 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
 
         Message? handoffMessage = null;
         if (ShouldEmitVerdictHandoff(updated.Verdict))
-            handoffMessage = await CreateVerdictHandoffMessageAsync(detail, updated);
+        {
+            handoffMessage = await FindExistingVerdictHandoffMessageAsync(
+                detail.Task.ProjectId,
+                detail.Task.Id,
+                updated.Id,
+                GetVerdictHandoffMessageType(updated));
 
-        var completedDispatches = handoffMessage is null
+            if (previousVerdict != updated.Verdict || handoffMessage is null)
+                handoffMessage = await CreateVerdictHandoffMessageAsync(detail, updated);
+        }
+
+        var completedDispatches = !ShouldEmitVerdictHandoff(updated.Verdict)
             ? []
             : await CompleteApprovedReviewerDispatchesAsync(detail.Task.ProjectId, detail.Task.Id, input.DecidedBy);
 
@@ -463,8 +473,7 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
             return message.ThreadId ?? message.Id;
         }
 
-        var latestTaskMessage = messages.FirstOrDefault();
-        return latestTaskMessage is null ? null : latestTaskMessage.ThreadId ?? latestTaskMessage.Id;
+        return null;
     }
 
     private static bool TryGetReviewRoundId(JsonElement? metadata, out int reviewRoundId)
@@ -511,9 +520,40 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
         return round.RequestedBy;
     }
 
+    private async Task<Message?> FindExistingVerdictHandoffMessageAsync(
+        string projectId,
+        int taskId,
+        int reviewRoundId,
+        string messageType)
+    {
+        var messages = await _messages.GetMessagesAsync(projectId, taskId: taskId, limit: 100);
+        return messages.FirstOrDefault(message =>
+            TryGetReviewRoundId(message.Metadata, out var messageRoundId) &&
+            messageRoundId == reviewRoundId &&
+            TryGetMessageType(message.Metadata, out var existingMessageType) &&
+            string.Equals(existingMessageType, messageType, StringComparison.Ordinal));
+    }
+
+    private static bool TryGetMessageType(JsonElement? metadata, out string? messageType)
+    {
+        messageType = null;
+        if (metadata is not JsonElement element ||
+            !element.TryGetProperty("type", out var typeElement) ||
+            typeElement.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        messageType = typeElement.GetString();
+        return !string.IsNullOrWhiteSpace(messageType);
+    }
+
+    private static string GetVerdictHandoffMessageType(ReviewRound round) =>
+        round.Verdict == ReviewVerdict.LooksGood ? "merge_request" : "review_feedback";
+
     private static JsonElement BuildVerdictHandoffMetadata(string recipient, ReviewRound round)
     {
-        var messageType = round.Verdict == ReviewVerdict.LooksGood ? "merge_request" : "review_feedback";
+        var messageType = GetVerdictHandoffMessageType(round);
         return JsonSerializer.SerializeToElement(new
         {
             type = messageType,
@@ -582,6 +622,7 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
         {
             sb.AppendLine($"- Confirm `{round.Branch}` is still at reviewed head `{round.HeadCommit}`.");
             sb.AppendLine($"- If it matches, merge to `{round.BaseBranch}`, mark the task done, and pick up your next task.");
+            sb.AppendLine("- If the branch has new commits beyond that reviewed head, request review again with the new head SHA and tests run instead of merging.");
             sb.AppendLine("- If there is no next task, send a work-complete Signal message.");
         }
         else

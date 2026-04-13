@@ -275,6 +275,7 @@ public class ReviewWorkflowServiceTests : IAsyncLifetime
         Assert.NotNull(result.HandoffMessage);
         Assert.Contains("Reviewed head SHA: `bbb222`", result.HandoffMessage!.Content);
         Assert.Contains("pick up your next task", result.HandoffMessage.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("request review again with the new head SHA and tests run", result.HandoffMessage.Content, StringComparison.OrdinalIgnoreCase);
         Assert.True(result.HandoffMessage.Metadata.HasValue);
         Assert.Equal("merge_request", result.HandoffMessage.Metadata!.Value.GetProperty("type").GetString());
         Assert.Equal("claude-code", result.HandoffMessage.Metadata!.Value.GetProperty("recipient").GetString());
@@ -283,5 +284,108 @@ public class ReviewWorkflowServiceTests : IAsyncLifetime
         Assert.Single(implementerDispatches);
         Assert.Contains("Merge handoff", implementerDispatches[0].Summary!, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("mark the task done", implementerDispatches[0].ContextPrompt!, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("request review again with the new head SHA and tests run", implementerDispatches[0].ContextPrompt!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SetReviewVerdictAsync_WithoutMatchingRoundMessage_CreatesRootTaskHandoff()
+    {
+        var task = await _tasks.CreateAsync(new ProjectTask
+        {
+            ProjectId = "proj",
+            Title = "Root handoff fallback",
+            AssignedTo = "claude-code"
+        });
+        var unrelatedThread = await _messages.CreateAsync(new Message
+        {
+            ProjectId = "proj",
+            TaskId = task.Id,
+            Sender = "codex",
+            Content = "Unrelated task chatter"
+        });
+        await _messages.CreateAsync(new Message
+        {
+            ProjectId = "proj",
+            TaskId = task.Id,
+            ThreadId = unrelatedThread.Id,
+            Sender = "claude-code",
+            Content = "Reply in the unrelated thread"
+        });
+
+        var round = await _rounds.CreateAsync(new CreateReviewRoundInput
+        {
+            TaskId = task.Id,
+            RequestedBy = "claude-code",
+            Branch = "task/658-post-review-automation",
+            BaseBranch = "main",
+            BaseCommit = "aaa111",
+            HeadCommit = "bbb222"
+        });
+
+        var result = await _workflow.SetReviewVerdictAsync(new SetReviewVerdictInput
+        {
+            ProjectId = "proj",
+            TaskId = task.Id,
+            ReviewRoundId = round.Id,
+            Verdict = ReviewVerdict.ChangesRequested,
+            DecidedBy = "codex",
+            Notes = "Needs one more pass"
+        });
+
+        Assert.NotNull(result.HandoffMessage);
+        Assert.Null(result.HandoffMessage!.ThreadId);
+    }
+
+    [Fact]
+    public async Task SetReviewVerdictAsync_SameVerdictTwice_ReusesExistingHandoff()
+    {
+        var task = await _tasks.CreateAsync(new ProjectTask
+        {
+            ProjectId = "proj",
+            Title = "Idempotent verdict",
+            AssignedTo = "claude-code"
+        });
+        var reviewRequest = await _workflow.RequestReviewAsync("proj", new RequestReviewInput
+        {
+            TaskId = task.Id,
+            RequestedBy = "claude-code",
+            Branch = "task/658-post-review-automation",
+            BaseBranch = "main",
+            BaseCommit = "aaa111",
+            HeadCommit = "bbb222"
+        });
+
+        var firstResult = await _workflow.SetReviewVerdictAsync(new SetReviewVerdictInput
+        {
+            ProjectId = "proj",
+            TaskId = task.Id,
+            ReviewRoundId = reviewRequest.ReviewRound!.Id,
+            Verdict = ReviewVerdict.LooksGood,
+            DecidedBy = "codex",
+            Notes = "Approved for merge"
+        });
+
+        var secondResult = await _workflow.SetReviewVerdictAsync(new SetReviewVerdictInput
+        {
+            ProjectId = "proj",
+            TaskId = task.Id,
+            ReviewRoundId = reviewRequest.ReviewRound!.Id,
+            Verdict = ReviewVerdict.LooksGood,
+            DecidedBy = "codex",
+            Notes = "Approved for merge"
+        });
+
+        Assert.NotNull(firstResult.HandoffMessage);
+        Assert.NotNull(secondResult.HandoffMessage);
+        Assert.Equal(firstResult.HandoffMessage!.Id, secondResult.HandoffMessage!.Id);
+
+        var taskMessages = await _messages.GetMessagesAsync("proj", taskId: task.Id, limit: 20);
+        Assert.Single(taskMessages, message =>
+            message.Metadata.HasValue &&
+            message.Metadata.Value.TryGetProperty("type", out var type) &&
+            type.GetString() == "merge_request");
+
+        var implementerDispatches = await _dispatches.ListAsync("proj", "claude-code", [DispatchStatus.Pending]);
+        Assert.Single(implementerDispatches);
     }
 }
