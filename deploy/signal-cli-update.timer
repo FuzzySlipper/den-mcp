@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly signal-cli update check for den-mcp
+
+[Timer]
+OnCalendar=weekly
+RandomizedDelaySec=12h
+Persistent=true
+Unit=signal-cli-update.service
+
+[Install]
+WantedBy=timers.target

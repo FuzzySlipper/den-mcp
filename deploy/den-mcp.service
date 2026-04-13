@@ -1,18 +1,20 @@
 [Unit]
-Description=den-mcp — centralized MCP server for task management, agent messaging, and document storage
-After=network.target
+Description=den-mcp server
+Wants=signal-cli-den.service
+After=network.target signal-cli-den.service
 
 [Service]
-Type=notify
-User=patch
-WorkingDirectory=/home/patch
-ExecStart=/usr/bin/dotnet /opt/den-mcp/DenMcp.Server.dll
+Type=exec
+User=den-mcp
+Group=den-mcp
+WorkingDirectory=/data/dev/den-mcp/server
+Environment=HOME=/data/dev/den-mcp/server
+Environment=DOTNET_BUNDLE_EXTRACT_BASE_DIR=/data/dev/den-mcp/server/.net
+EnvironmentFile=/data/dev/den-mcp/server/env/server.env
+ExecStart=/data/dev/den-mcp/server/DenMcp.Server
 Restart=on-failure
 RestartSec=5
-Environment=ASPNETCORE_ENVIRONMENT=Production
-Environment=DenMcp__ListenUrl=http://localhost:5199
-# Uncomment to override database path:
-# Environment=DenMcp__DatabasePath=/home/patch/.den-mcp/den.db
+NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target

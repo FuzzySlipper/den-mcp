@@ -1,0 +1,13 @@
+[Unit]
+Description=Update signal-cli for den-mcp
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/data/dev/den-mcp/repo
+ExecStart=/data/dev/den-mcp/repo/scripts/update-signal-cli.sh --apply
+Nice=10
+

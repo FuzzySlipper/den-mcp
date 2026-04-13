@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using System.Net.Http.Json;
@@ -14,7 +15,9 @@ public sealed class SignalNotificationChannel : INotificationChannel, IAsyncDisp
 {
     private const string ChannelName = "signal";
     private const string ApproveEmoji = "\u2705";
+    private const string ApproveAltEmoji = "\U0001F44D";
     private const string RejectEmoji = "\u274C";
+    private const string RejectAltEmoji = "\U0001F44E";
     private const string DispatchIcon = "\U0001F4CB";
     private const string ActiveIcon = "\U0001F7E2";
     private const string FinishedIcon = "\U0001F3C1";
@@ -28,6 +31,7 @@ public sealed class SignalNotificationChannel : INotificationChannel, IAsyncDisp
     private readonly IDispatchRepository _dispatches;
     private readonly INotificationMessageRepository _messageLinks;
     private readonly ILogger<SignalNotificationChannel> _logger;
+    private readonly ConcurrentDictionary<string, byte> _knownRecipientIdentities = new(StringComparer.OrdinalIgnoreCase);
     private SemaphoreSlim? _daemonLock = new(1, 1);
 
     private Process? _daemonProcess;
@@ -49,6 +53,8 @@ public sealed class SignalNotificationChannel : INotificationChannel, IAsyncDisp
         _dispatches = dispatches;
         _messageLinks = messageLinks;
         _logger = logger;
+
+        SeedConfiguredRecipientIdentities();
     }
 
     public async Task SendDispatchNotificationAsync(
@@ -67,7 +73,7 @@ public sealed class SignalNotificationChannel : INotificationChannel, IAsyncDisp
             ChannelName,
             timestamp.Value.ToString(CultureInfo.InvariantCulture),
             dispatch.Id,
-            _options.Signal.RecipientNumber);
+            _options.Signal.GetConfiguredRecipient());
     }
 
     public async Task SendAgentStatusAsync(
@@ -97,7 +103,7 @@ public sealed class SignalNotificationChannel : INotificationChannel, IAsyncDisp
         if (!await EnsureDaemonAvailableAsync(cancellationToken))
             return;
 
-        var client = CreateClient();
+        var client = CreateEventsClient();
         var path = HasConfiguredAccount()
             ? $"/api/v1/events?account={Uri.EscapeDataString(_options.Signal.Account!)}"
             : "/api/v1/events";
@@ -217,7 +223,7 @@ public sealed class SignalNotificationChannel : INotificationChannel, IAsyncDisp
     }
 
     private bool HasConfiguredRecipient() =>
-        !string.IsNullOrWhiteSpace(_options.Signal.RecipientNumber);
+        !string.IsNullOrWhiteSpace(_options.Signal.GetConfiguredRecipient());
 
     private bool HasConfiguredAccount() =>
         !string.IsNullOrWhiteSpace(_options.Signal.Account);
@@ -227,23 +233,37 @@ public sealed class SignalNotificationChannel : INotificationChannel, IAsyncDisp
         if (_missingConfigWarningLogged)
             return;
 
-        _logger.LogWarning("Signal notifications are enabled but DenMcp:Signal:RecipientNumber is not configured.");
+        _logger.LogWarning("Signal notifications are enabled but DenMcp:Signal:Recipient (or legacy RecipientNumber) is not configured.");
         _missingConfigWarningLogged = true;
     }
 
     private HttpClient CreateClient()
         => _httpClientFactory.CreateClient("signal-daemon");
 
+    private HttpClient CreateEventsClient()
+        => _httpClientFactory.CreateClient("signal-events");
+
     private async Task<long?> SendMessageAsync(string message, CancellationToken cancellationToken)
     {
         if (!await EnsureDaemonAvailableAsync(cancellationToken))
             return null;
 
+        var configuredRecipient = _options.Signal.GetConfiguredRecipient();
+        if (string.IsNullOrWhiteSpace(configuredRecipient))
+        {
+            LogMissingRecipientWarning();
+            return null;
+        }
+
         var parameters = new Dictionary<string, object?>
         {
-            ["message"] = message,
-            ["recipient"] = new[] { _options.Signal.RecipientNumber! }
+            ["message"] = message
         };
+
+        if (TryGetUsernameRecipient(configuredRecipient, out var username))
+            parameters["usernames"] = new[] { username };
+        else
+            parameters["recipient"] = new[] { configuredRecipient };
 
         if (HasConfiguredAccount())
             parameters["account"] = _options.Signal.Account;
@@ -254,6 +274,8 @@ public sealed class SignalNotificationChannel : INotificationChannel, IAsyncDisp
             _logger.LogWarning("Signal send response did not include a timestamp.");
             return null;
         }
+
+        RememberRecipientIdentities(response.Value);
 
         return timestampEl.ValueKind switch
         {
@@ -713,20 +735,114 @@ public sealed class SignalNotificationChannel : INotificationChannel, IAsyncDisp
 
     private bool MatchesConfiguredRecipient(params string?[] candidates)
     {
-        var configuredRecipient = _options.Signal.RecipientNumber?.Trim();
-        if (string.IsNullOrWhiteSpace(configuredRecipient))
+        if (_knownRecipientIdentities.IsEmpty)
+            SeedConfiguredRecipientIdentities();
+
+        if (_knownRecipientIdentities.IsEmpty)
             return false;
 
-        return candidates.Any(candidate =>
-            !string.IsNullOrWhiteSpace(candidate) &&
-            string.Equals(candidate.Trim(), configuredRecipient, StringComparison.OrdinalIgnoreCase));
+        foreach (var candidate in candidates)
+        {
+            foreach (var identity in EnumerateRecipientIdentities(candidate))
+            {
+                if (_knownRecipientIdentities.ContainsKey(identity))
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void SeedConfiguredRecipientIdentities()
+    {
+        foreach (var identity in EnumerateRecipientIdentities(_options.Signal.GetConfiguredRecipient()))
+            _knownRecipientIdentities.TryAdd(identity, 0);
+    }
+
+    private void RememberRecipientIdentities(JsonElement response)
+    {
+        if (response.ValueKind != JsonValueKind.Object ||
+            !response.TryGetProperty("results", out var results) ||
+            results.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        foreach (var result in results.EnumerateArray())
+        {
+            if (result.ValueKind != JsonValueKind.Object ||
+                !result.TryGetProperty("recipientAddress", out var address) ||
+                address.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            foreach (var field in new[] { "username", "number", "uuid" })
+            {
+                foreach (var identity in EnumerateRecipientIdentities(GetOptionalString(address, field)))
+                    _knownRecipientIdentities.TryAdd(identity, 0);
+            }
+        }
+    }
+
+    private static bool TryGetUsernameRecipient(string configuredRecipient, out string username)
+    {
+        var trimmed = configuredRecipient.Trim();
+        if (trimmed.StartsWith("u:", StringComparison.OrdinalIgnoreCase))
+        {
+            username = trimmed[2..].Trim();
+            return !string.IsNullOrWhiteSpace(username);
+        }
+
+        if (!LooksLikePhoneNumber(trimmed))
+        {
+            username = trimmed;
+            return true;
+        }
+
+        username = string.Empty;
+        return false;
+    }
+
+    private static bool LooksLikePhoneNumber(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        var trimmed = value.Trim();
+        if (trimmed.StartsWith('+'))
+            return trimmed[1..].All(char.IsDigit);
+
+        return trimmed.All(ch => char.IsDigit(ch) || ch is ' ' or '-' or '(' or ')' or '.');
+    }
+
+    private static IEnumerable<string> EnumerateRecipientIdentities(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            yield break;
+
+        var trimmed = value.Trim();
+        yield return trimmed;
+
+        if (trimmed.StartsWith("u:", StringComparison.OrdinalIgnoreCase))
+        {
+            var withoutPrefix = trimmed[2..].Trim();
+            if (!string.IsNullOrWhiteSpace(withoutPrefix))
+                yield return withoutPrefix;
+            yield break;
+        }
+
+        if (!LooksLikePhoneNumber(trimmed))
+            yield return $"u:{trimmed}";
     }
 
     private static bool IsApprovalReaction(string? emoji) =>
-        string.Equals(emoji, ApproveEmoji, StringComparison.Ordinal);
+        string.Equals(emoji, ApproveEmoji, StringComparison.Ordinal) ||
+        string.Equals(emoji, ApproveAltEmoji, StringComparison.Ordinal);
 
     private static bool IsRejectReaction(string? emoji) =>
-        string.Equals(emoji, RejectEmoji, StringComparison.Ordinal);
+        string.Equals(emoji, RejectEmoji, StringComparison.Ordinal) ||
+        string.Equals(emoji, RejectAltEmoji, StringComparison.Ordinal);
 
     private static string BuildSignalActor(string? source, string? sourceNumber, string? sourceUuid, string? sourceName)
     {
@@ -752,7 +868,7 @@ public sealed class SignalNotificationChannel : INotificationChannel, IAsyncDisp
             lines[0] += $" (task #{taskId})";
 
         lines.Add(string.IsNullOrWhiteSpace(summary) ? "Pending dispatch awaiting approval." : summary.Trim());
-        lines.Add($"React {ApproveEmoji} to approve, {RejectEmoji} to reject.");
+        lines.Add($"React {ApproveEmoji} or {ApproveAltEmoji} to approve, {RejectEmoji} or {RejectAltEmoji} to reject.");
         lines.Add("Reply \"details\" for the full prompt.");
         return string.Join("\n", lines);
     }

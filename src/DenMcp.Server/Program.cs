@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using DenMcp.Core;
 using DenMcp.Core.Data;
 using DenMcp.Core.Llm;
 using DenMcp.Core.Models;
@@ -80,6 +81,12 @@ builder.Services.AddHttpClient("signal-daemon", (services, client) =>
     client.BaseAddress = new Uri(denOptions.Signal.GetBaseUrl());
     client.Timeout = TimeSpan.FromSeconds(10);
 });
+builder.Services.AddHttpClient("signal-events", (services, client) =>
+{
+    var denOptions = services.GetRequiredService<DenMcpOptions>();
+    client.BaseAddress = new Uri(denOptions.Signal.GetBaseUrl());
+    client.Timeout = Timeout.InfiniteTimeSpan;
+});
 builder.Services.AddSingleton<SignalNotificationChannel>();
 builder.Services.AddSingleton<INotificationChannel>(services => services.GetRequiredService<SignalNotificationChannel>());
 builder.Services.AddHostedService<NotificationListenerHostedService>();
@@ -103,8 +110,13 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 
 // Health check
-var version = typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "unknown";
-app.MapGet("/health", () => Results.Ok(new { status = "healthy", version }));
+app.MapGet("/health", () => Results.Ok(new
+{
+    status = "healthy",
+    version = BuildInfo.Version,
+    informationalVersion = BuildInfo.InformationalVersion,
+    commit = BuildInfo.Commit
+}));
 
 // REST API
 app.MapProjectRoutes();

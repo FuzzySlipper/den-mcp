@@ -20,6 +20,7 @@ public sealed class SignalOptions
 {
     public bool Enabled { get; set; }
     public string? Account { get; set; }
+    public string? Recipient { get; set; }
     public string? RecipientNumber { get; set; }
     public string SignalCliPath { get; set; } = "signal-cli";
     public string HttpHost { get; set; } = "127.0.0.1";
@@ -29,4 +30,12 @@ public sealed class SignalOptions
     public bool NotifyOnAgentStatus { get; set; } = true;
 
     public string GetBaseUrl() => $"http://{HttpHost}:{HttpPort}";
+
+    public string? GetConfiguredRecipient()
+    {
+        if (!string.IsNullOrWhiteSpace(Recipient))
+            return Recipient.Trim();
+
+        return string.IsNullOrWhiteSpace(RecipientNumber) ? null : RecipientNumber.Trim();
+    }
 }
