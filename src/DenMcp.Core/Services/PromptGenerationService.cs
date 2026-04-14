@@ -83,7 +83,7 @@ public sealed class PromptGenerationService : IPromptGenerationService
         sb.AppendLine();
         sb.AppendLine("Post your review findings as a message to the task.");
         sb.AppendLine("If changes needed: set task status back to planned.");
-        sb.AppendLine("If approved: merge to main and set task status to done.");
+        sb.AppendLine("If approved: send approval/merge handoff so the implementer can merge the reviewed head and set the task status to done.");
 
         return new PromptResult
         {
