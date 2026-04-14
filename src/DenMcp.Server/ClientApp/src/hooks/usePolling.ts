@@ -11,7 +11,10 @@ export function usePolling<T>(
   const [error, setError] = useState<Error | null>(null);
   const fetcherRef = useRef(fetcher);
   const latestRequestIdRef = useRef(0);
-  fetcherRef.current = fetcher;
+
+  useEffect(() => {
+    fetcherRef.current = fetcher;
+  }, [fetcher]);
 
   const doFetch = useCallback(async (markLoading: boolean) => {
     const requestId = ++latestRequestIdRef.current;
@@ -20,23 +23,27 @@ export function usePolling<T>(
 
     try {
       const result = await fetcherRef.current();
-      if (requestId !== latestRequestIdRef.current) return;
-
-      setData(result);
-      setError(null);
+      if (requestId === latestRequestIdRef.current) {
+        setData(result);
+        setError(null);
+      }
     } catch (e) {
-      if (requestId !== latestRequestIdRef.current) return;
+      if (requestId === latestRequestIdRef.current) {
+        setError(e instanceof Error ? e : new Error(String(e)));
+      }
+    }
 
-      setError(e instanceof Error ? e : new Error(String(e)));
-    } finally {
-      if (requestId !== latestRequestIdRef.current) return;
-
+    if (requestId === latestRequestIdRef.current) {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void doFetch(true);
+    const timeoutId = window.setTimeout(() => {
+      void doFetch(true);
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, [doFetch, fetcher]);
 
   useEffect(() => {

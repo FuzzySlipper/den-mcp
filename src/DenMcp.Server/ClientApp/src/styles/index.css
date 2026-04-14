@@ -254,6 +254,35 @@ html, body, #root {
 .detail-meta dt { color: var(--text-muted); }
 .detail-meta dd { color: var(--text); }
 
+.detail-nav-button {
+  width: 100%;
+  appearance: none;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+}
+
+.detail-nav-button:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.detail-message-button {
+  width: 100%;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.detail-message-button .message-content {
+  min-width: 0;
+  flex: 1;
+}
+
 .detail-description {
   font-family: var(--font-mono);
   font-size: 12px;

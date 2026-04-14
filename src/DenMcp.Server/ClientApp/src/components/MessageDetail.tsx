@@ -10,20 +10,21 @@ interface Props {
 
 export function MessageDetail({ message, onClose }: Props) {
   const [thread, setThread] = useState<Thread | null>(null);
+  const threadRootId = message.thread_id ?? message.id;
 
   useEffect(() => {
     let cancelled = false;
-    setThread(null);
-    getThread(message.project_id, message.id)
+    getThread(message.project_id, threadRootId)
       .then(t => { if (!cancelled) setThread(t); })
       .catch(() => { if (!cancelled) setThread(null); });
     return () => { cancelled = true; };
-  }, [message.project_id, message.id]);
+  }, [message.project_id, threadRootId]);
 
+  const displayMessage = thread?.root ?? message;
   const replyCount = thread?.replies.length ?? 0;
   const title = replyCount > 0
-    ? `Thread started by ${message.sender}`
-    : `Message from ${message.sender}`;
+    ? `Thread started by ${displayMessage.sender}`
+    : `Message from ${displayMessage.sender}`;
 
   return (
     <div className="detail-overlay">
@@ -35,26 +36,26 @@ export function MessageDetail({ message, onClose }: Props) {
         <div className="detail-section">
           <dl className="detail-meta">
             <dt>From</dt>
-            <dd>{message.sender}</dd>
+            <dd>{displayMessage.sender}</dd>
             <dt>Project</dt>
-            <dd>{message.project_id}</dd>
+            <dd>{displayMessage.project_id}</dd>
             <dt>Time</dt>
-            <dd>{new Date(message.created_at + 'Z').toLocaleString()}</dd>
-            {message.task_id != null && (
-              <><dt>Task</dt><dd>#{message.task_id}</dd></>
+            <dd>{new Date(displayMessage.created_at + 'Z').toLocaleString()}</dd>
+            {displayMessage.task_id != null && (
+              <><dt>Task</dt><dd>#{displayMessage.task_id}</dd></>
             )}
             {replyCount > 0 && (
               <><dt>Replies</dt><dd>{replyCount}</dd></>
             )}
             {message.thread_id != null && (
-              <><dt>Reply to</dt><dd>#{message.thread_id}</dd></>
+              <><dt>Opened from</dt><dd>reply #{message.id}</dd></>
             )}
           </dl>
         </div>
 
         <div className="detail-section">
           <h3>Content</h3>
-          <div className="detail-description">{message.content}</div>
+          <div className="detail-description">{displayMessage.content}</div>
         </div>
 
         {thread && thread.replies.length > 0 && (

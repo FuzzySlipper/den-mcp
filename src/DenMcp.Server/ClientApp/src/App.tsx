@@ -69,6 +69,24 @@ export default function App() {
   const filterLabel = statusFilter ? ` [${statusFilter}]` : '';
   const sortLabel = sortMode !== 'priority' ? ` \u2195${sortMode}` : '';
 
+  const handleProjectSelect = useCallback((id: string) => {
+    setSelectedProject(id);
+    setSelectedTaskId(null);
+    setSelectedMessage(null);
+    setSelectedDoc(null);
+  }, []);
+
+  const handleTaskSelect = useCallback((taskId: number) => {
+    setSelectedTaskId(taskId);
+    setSelectedMessage(null);
+    setSelectedDoc(null);
+  }, []);
+
+  const handleMessageSelect = useCallback((message: Message) => {
+    setSelectedMessage(message);
+    setSelectedDoc(null);
+  }, []);
+
   return (
     <div className="dashboard">
       {/* Messages — top, full width */}
@@ -80,7 +98,7 @@ export default function App() {
           <MessageFeed
             messages={messages ?? []}
             isGlobal={isGlobal}
-            onSelect={setSelectedMessage}
+            onSelect={handleMessageSelect}
           />
         </div>
       </div>
@@ -99,12 +117,7 @@ export default function App() {
       <ProjectSidebar
         projects={projects ?? []}
         selectedId={effectiveProject}
-        onSelect={(id) => {
-          setSelectedProject(id);
-          setSelectedTaskId(null);
-          setSelectedMessage(null);
-          setSelectedDoc(null);
-        }}
+        onSelect={handleProjectSelect}
       />
 
       {/* Main area — bottom right */}
@@ -128,7 +141,7 @@ export default function App() {
             <TaskTree
               tasks={tasks ?? []}
               selectedTaskId={selectedTaskId}
-              onSelect={setSelectedTaskId}
+              onSelect={handleTaskSelect}
               statusFilter={statusFilter}
               sortMode={sortMode}
             />
@@ -146,14 +159,18 @@ export default function App() {
       {/* Detail overlays */}
       {selectedTaskId != null && effectiveProject && (
         <TaskDetail
+          key={`${effectiveProject}:${selectedTaskId}`}
           projectId={effectiveProject}
           taskId={selectedTaskId}
+          onSelectTask={handleTaskSelect}
+          onSelectMessage={handleMessageSelect}
           onClose={() => setSelectedTaskId(null)}
         />
       )}
 
       {selectedMessage && (
         <MessageDetail
+          key={`${selectedMessage.project_id}:${selectedMessage.id}`}
           message={selectedMessage}
           onClose={() => setSelectedMessage(null)}
         />

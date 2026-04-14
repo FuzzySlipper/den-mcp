@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type {
+  Message,
   ReviewFinding,
   ReviewTimelineEntry,
   ReviewVerdict,
@@ -12,6 +13,8 @@ import { formatTimeAgo } from '../utils';
 interface Props {
   projectId: string;
   taskId: number;
+  onSelectTask: (taskId: number) => void;
+  onSelectMessage: (message: Message) => void;
   onClose: () => void;
 }
 
@@ -47,7 +50,7 @@ function renderFindingMeta(finding: ReviewFinding): string[] {
   return parts;
 }
 
-export function TaskDetail({ projectId, taskId, onClose }: Props) {
+export function TaskDetail({ projectId, taskId, onSelectTask, onSelectMessage, onClose }: Props) {
   const [detail, setDetail] = useState<TaskDetailType | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -94,6 +97,12 @@ export function TaskDetail({ projectId, taskId, onClose }: Props) {
 
   const { task } = detail;
   const currentRound = detail.review_workflow.current_round;
+
+  const handleTaskNavigation = (nextTaskId: number) => {
+    if (nextTaskId !== task.id) {
+      onSelectTask(nextTaskId);
+    }
+  };
 
   return (
     <div className="detail-overlay">
@@ -197,10 +206,16 @@ export function TaskDetail({ projectId, taskId, onClose }: Props) {
           <div className="detail-section">
             <h3>Dependencies</h3>
             {detail.dependencies.map(dep => (
-              <div key={dep.task_id} className="list-item" style={{ cursor: 'default' }}>
+              <button
+                key={dep.task_id}
+                type="button"
+                className="list-item detail-nav-button"
+                onClick={() => handleTaskNavigation(dep.task_id)}
+                title={`Open task #${dep.task_id}`}
+              >
                 <span className={`badge badge-${dep.status}`}>{dep.status}</span>
                 {' '}#{dep.task_id} {dep.title}
-              </div>
+              </button>
             ))}
           </div>
         )}
@@ -209,10 +224,16 @@ export function TaskDetail({ projectId, taskId, onClose }: Props) {
           <div className="detail-section">
             <h3>Subtasks</h3>
             {detail.subtasks.map(sub => (
-              <div key={sub.id} className="list-item" style={{ cursor: 'default' }}>
+              <button
+                key={sub.id}
+                type="button"
+                className="list-item detail-nav-button"
+                onClick={() => handleTaskNavigation(sub.id)}
+                title={`Open task #${sub.id}`}
+              >
                 <span className={`badge badge-${sub.status}`}>{sub.status}</span>
                 {' '}#{sub.id} {sub.title}
-              </div>
+              </button>
             ))}
           </div>
         )}
@@ -228,11 +249,17 @@ export function TaskDetail({ projectId, taskId, onClose }: Props) {
           <div className="detail-section">
             <h3>Recent Messages</h3>
             {detail.recent_messages.map(msg => (
-              <div key={msg.id} className="message-item" style={{ cursor: 'default' }}>
+              <button
+                key={msg.id}
+                type="button"
+                className="message-item detail-nav-button detail-message-button"
+                onClick={() => onSelectMessage(msg)}
+                title={msg.thread_id != null ? `Open thread #${msg.thread_id}` : `Open message #${msg.id}`}
+              >
                 <span className="message-time">{formatTimeAgo(msg.created_at)}</span>
                 <span className="message-sender">{msg.sender}:</span>
                 <span className="message-content">{msg.content.replace(/\n/g, ' ')}</span>
-              </div>
+              </button>
             ))}
           </div>
         )}
