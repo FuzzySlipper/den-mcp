@@ -81,6 +81,8 @@ public sealed class PromptGenerationService : IPromptGenerationService
         await AppendRecentMessages(sb, evt);
 
         sb.AppendLine();
+        AppendReviewerWorkflowGuidance(sb);
+        sb.AppendLine();
         sb.AppendLine("Post your review findings as a message to the task.");
         sb.AppendLine("If changes needed: set task status back to planned.");
         sb.AppendLine("If approved: send approval/merge handoff so the implementer can merge the reviewed head and set the task status to done.");
@@ -109,6 +111,8 @@ public sealed class PromptGenerationService : IPromptGenerationService
         await AppendRecentMessages(sb, evt);
 
         sb.AppendLine();
+        AppendImplementerWorkflowGuidance(sb);
+        sb.AppendLine();
         sb.AppendLine("Address the review feedback, then set task status to review when ready.");
 
         return new PromptResult
@@ -132,6 +136,9 @@ public sealed class PromptGenerationService : IPromptGenerationService
 
         await AppendRecentMessages(sb, evt);
 
+        sb.AppendLine();
+        AppendImplementerWorkflowGuidance(sb);
+
         return new PromptResult
         {
             Summary = $"Task #{evt.TaskId} ({evt.TaskTitle}) moved to {evt.ToStatus}",
@@ -149,6 +156,8 @@ public sealed class PromptGenerationService : IPromptGenerationService
         AppendTriggeringMessage(sb, evt);
         await AppendTaskAndMessages(sb, evt);
 
+        sb.AppendLine();
+        AppendImplementerWorkflowGuidance(sb);
         sb.AppendLine();
         sb.AppendLine("Review the planning context and proceed with the outlined work.");
 
@@ -173,6 +182,8 @@ public sealed class PromptGenerationService : IPromptGenerationService
         AppendTriggeringMessage(sb, evt);
         await AppendTaskAndMessages(sb, evt);
 
+        sb.AppendLine();
+        AppendImplementerWorkflowGuidance(sb);
         sb.AppendLine();
         sb.AppendLine("Review the findings, decide what needs to change, and update the task branch.");
         sb.AppendLine("When you are ready, request review again with the new head commit and tests run.");
@@ -303,6 +314,21 @@ public sealed class PromptGenerationService : IPromptGenerationService
             sb.AppendLine();
         }
         sb.AppendLine("---");
+    }
+
+    private static void AppendImplementerWorkflowGuidance(StringBuilder sb)
+    {
+        sb.AppendLine("Workflow guardrails:");
+        sb.AppendLine("- Default posture: if the current plan still fits reality and the path is straightforward, keep working until the current slice is complete.");
+        sb.AppendLine("- Stop and ask for guidance if reality materially conflicts with the plan, the plan is too vague to implement confidently, scope needs to expand in a non-obvious way, repeated failed attempts suggest the assumptions are wrong, or you are inventing a complex workaround mainly to cope with local mess.");
+        sb.AppendLine("- Creating or updating Den tasks is cheap; prefer a follow-up task over landing thin interfaces, deceptive scaffolding, or code TODOs that leave the real behavior unwired.");
+    }
+
+    private static void AppendReviewerWorkflowGuidance(StringBuilder sb)
+    {
+        sb.AppendLine("Review for correctness, regressions, scope drift, and workflow hygiene.");
+        sb.AppendLine("Call out deceptive completeness such as thin interfaces, unwired scaffolding, or code TODOs standing in for tracked follow-up work.");
+        sb.AppendLine("If the implementation drifted into complex local-environment workarounds or other signs that the implementer should have stopped and asked for guidance, say so explicitly.");
     }
 
     /// <summary>

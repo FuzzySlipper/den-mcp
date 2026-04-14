@@ -55,6 +55,8 @@ public class PromptGenerationServiceTests : IAsyncLifetime
         Assert.Contains("Add dispatch API", result.ContextPrompt);
         Assert.Contains("reviewer", result.ContextPrompt);
         Assert.Contains("git diff main...HEAD", result.ContextPrompt);
+        Assert.Contains("workflow hygiene", result.ContextPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("thin interfaces", result.ContextPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains($"#{task.Id}", result.Summary);
     }
 
@@ -120,6 +122,8 @@ public class PromptGenerationServiceTests : IAsyncLifetime
         Assert.Contains("review feedback", result.ContextPrompt);
         Assert.Contains("implementer", result.ContextPrompt);
         Assert.Contains("missing null check", result.ContextPrompt);
+        Assert.Contains("Stop and ask for guidance", result.ContextPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("code TODOs", result.ContextPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Review feedback", result.Summary);
     }
 
@@ -228,6 +232,8 @@ public class PromptGenerationServiceTests : IAsyncLifetime
 
         Assert.Contains("request review again", result.ContextPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("missing merge guard", result.ContextPrompt);
+        Assert.Contains("Default posture", result.ContextPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("complex workaround", result.ContextPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("review feedback", result.Summary, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("codex", result.Summary);
     }
@@ -289,6 +295,7 @@ public class PromptGenerationServiceTests : IAsyncLifetime
         // The planning-specific prompt includes the message body and planning next-action
         Assert.Contains("three phases", result.ContextPrompt);
         Assert.Contains("proceed with the outlined work", result.ContextPrompt);
+        Assert.Contains("Stop and ask for guidance", result.ContextPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("planning context", result.Summary);
     }
 
@@ -446,8 +453,8 @@ public class PromptGenerationServiceTests : IAsyncLifetime
         var result = await _service.GenerateAsync(evt, trigger, DefaultConfig);
 
         Assert.Contains("(truncated)", result.ContextPrompt);
-        // Prompt should be significantly shorter than the 2000-char message
-        Assert.True(result.ContextPrompt.Length < 1800);
+        Assert.Contains(new string('x', 1000), result.ContextPrompt);
+        Assert.DoesNotContain(new string('x', 1001), result.ContextPrompt);
     }
 
     #endregion

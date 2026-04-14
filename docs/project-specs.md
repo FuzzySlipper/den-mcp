@@ -435,5 +435,14 @@ and document storage. The MCP server is connected as "den".
 - If a review comes back approved, the implementer merges the reviewed head
   and marks the task done; the reviewer approves or requests changes but does
   not merge.
+- If the path is straightforward and still fits the current plan, keep working
+  until the current slice is complete.
+- Stop and ask for guidance when reality materially conflicts with the plan,
+  the plan is too vague to implement confidently, scope needs to expand in a
+  non-obvious way, repeated failed attempts suggest the assumptions are wrong,
+  or you are inventing a complex workaround mainly to cope with local mess.
+- Creating or updating Den tasks is cheap; prefer a follow-up task over
+  landing thin interfaces, deceptive scaffolding, or code TODOs that leave the
+  real behavior unwired.
 - Cross-project docs (conventions, shared specs) are under project `_global`.
 ```

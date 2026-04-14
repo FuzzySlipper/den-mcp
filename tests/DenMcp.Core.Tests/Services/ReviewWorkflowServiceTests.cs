@@ -233,6 +233,8 @@ public class ReviewWorkflowServiceTests : IAsyncLifetime
         Assert.Equal(reviewRequest.Message.Id, result.HandoffMessage!.ThreadId);
         Assert.Contains(finding.FindingKey, result.HandoffMessage.Content);
         Assert.Contains("request review again", result.HandoffMessage.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Stop and ask for guidance", result.HandoffMessage.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("code TODOs", result.HandoffMessage.Content, StringComparison.OrdinalIgnoreCase);
         Assert.True(result.HandoffMessage.Metadata.HasValue);
         Assert.Equal("review_feedback", result.HandoffMessage.Metadata!.Value.GetProperty("type").GetString());
         Assert.Equal("claude-code", result.HandoffMessage.Metadata!.Value.GetProperty("recipient").GetString());

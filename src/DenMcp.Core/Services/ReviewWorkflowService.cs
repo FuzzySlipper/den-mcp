@@ -628,7 +628,9 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
         else
         {
             sb.AppendLine("- Read the task thread and evaluate the review feedback.");
-            sb.AppendLine($"- Address the needed changes on `{round.Branch}`.");
+            sb.AppendLine($"- Address the needed changes on `{round.Branch}` if the path back to green is straightforward and still fits the plan.");
+            sb.AppendLine("- Stop and ask for guidance if reality no longer matches the plan, the plan is too vague to implement confidently, scope needs to expand in a non-obvious way, repeated failed attempts suggest the assumptions are wrong, or you are inventing a complex workaround mainly to cope with local mess.");
+            sb.AppendLine("- Creating or updating Den tasks is cheap; prefer a follow-up task over landing thin interfaces, deceptive scaffolding, or code TODOs that leave the real behavior unwired.");
             sb.AppendLine("- When ready, request review again with the new head commit and tests run.");
         }
 
