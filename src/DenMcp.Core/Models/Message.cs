@@ -37,6 +37,8 @@ public static class MessageIntentCompatibility
         ["comment"] = MessageIntent.General,
         ["note"] = MessageIntent.Note,
         ["status_update"] = MessageIntent.StatusUpdate,
+        // Older merge-result messages already exist in live DBs under this type,
+        // so keep backfill/read compatibility by treating them as status updates.
         ["merge_complete"] = MessageIntent.StatusUpdate,
         ["question"] = MessageIntent.Question,
         ["answer"] = MessageIntent.Answer,
