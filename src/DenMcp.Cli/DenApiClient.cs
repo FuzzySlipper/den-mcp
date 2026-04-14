@@ -113,18 +113,19 @@ public sealed class DenApiClient : IDisposable
 
     // Messages
     public async Task<Message> SendMessageAsync(string projectId, string sender, string content,
-        int? taskId = null, int? threadId = null, string? metadata = null)
+        int? taskId = null, int? threadId = null, string? metadata = null, MessageIntent? intent = null)
     {
-        var body = new { sender, content, task_id = taskId, thread_id = threadId, metadata };
+        var body = new { sender, content, task_id = taskId, thread_id = threadId, metadata, intent };
         return await PostAsync<Message>($"api/projects/{Esc(projectId)}/messages", body);
     }
 
     public async Task<List<Message>> GetMessagesAsync(string projectId, int? taskId = null,
-        string? since = null, string? unreadFor = null, int? limit = null)
+        string? since = null, string? unreadFor = null, int? limit = null, MessageIntent? intent = null)
     {
         var query = BuildQuery(
             ("taskId", taskId?.ToString()), ("since", since),
-            ("unreadFor", unreadFor), ("limit", limit?.ToString()));
+            ("unreadFor", unreadFor), ("limit", limit?.ToString()),
+            ("intent", intent?.ToDbValue()));
         return await GetAsync<List<Message>>($"api/projects/{Esc(projectId)}/messages{query}");
     }
 

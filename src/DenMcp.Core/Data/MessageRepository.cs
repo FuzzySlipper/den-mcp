@@ -9,7 +9,7 @@ public interface IMessageRepository
 {
     Task<Message> CreateAsync(Message message);
     Task<List<Message>> GetMessagesAsync(string projectId, int? taskId = null,
-        DateTime? since = null, string? unreadFor = null, int limit = 20);
+        DateTime? since = null, string? unreadFor = null, int limit = 20, MessageIntent? intent = null);
     Task<Thread> GetThreadAsync(int threadId);
     Task<int> MarkReadAsync(string agent, int[] messageIds);
 }
@@ -22,18 +22,21 @@ public sealed class MessageRepository : IMessageRepository
 
     public async Task<Message> CreateAsync(Message message)
     {
+        var resolvedIntent = MessageIntentCompatibility.ResolveWriteIntent(message.Intent, message.Metadata);
+
         await using var conn = await _db.CreateConnectionAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO messages (project_id, task_id, thread_id, sender, content, metadata)
-            VALUES (@projectId, @taskId, @threadId, @sender, @content, @metadata)
-            RETURNING id, project_id, task_id, thread_id, sender, content, metadata, created_at
+            INSERT INTO messages (project_id, task_id, thread_id, sender, content, intent, metadata)
+            VALUES (@projectId, @taskId, @threadId, @sender, @content, @intent, @metadata)
+            RETURNING id, project_id, task_id, thread_id, sender, content, intent, metadata, created_at
             """;
         cmd.Parameters.AddWithValue("@projectId", message.ProjectId);
         cmd.Parameters.AddWithValue("@taskId", (object?)message.TaskId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@threadId", (object?)message.ThreadId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@sender", message.Sender);
         cmd.Parameters.AddWithValue("@content", message.Content);
+        cmd.Parameters.AddWithValue("@intent", resolvedIntent.ToDbValue());
         cmd.Parameters.AddWithValue("@metadata",
             message.Metadata.HasValue ? message.Metadata.Value.GetRawText() : DBNull.Value);
 
@@ -43,7 +46,7 @@ public sealed class MessageRepository : IMessageRepository
     }
 
     public async Task<List<Message>> GetMessagesAsync(string projectId, int? taskId = null,
-        DateTime? since = null, string? unreadFor = null, int limit = 20)
+        DateTime? since = null, string? unreadFor = null, int limit = 20, MessageIntent? intent = null)
     {
         limit = Math.Clamp(limit, 1, 100);
 
@@ -77,8 +80,14 @@ public sealed class MessageRepository : IMessageRepository
             cmd.Parameters.AddWithValue("@unreadFor", unreadFor);
         }
 
+        if (intent is not null)
+        {
+            where.Add("m.intent = @intent");
+            cmd.Parameters.AddWithValue("@intent", intent.Value.ToDbValue());
+        }
+
         cmd.CommandText = $"""
-            SELECT m.id, m.project_id, m.task_id, m.thread_id, m.sender, m.content, m.metadata, m.created_at
+            SELECT m.id, m.project_id, m.task_id, m.thread_id, m.sender, m.content, m.intent, m.metadata, m.created_at
             FROM messages m
             WHERE {string.Join(" AND ", where)}
             ORDER BY m.created_at DESC
@@ -99,7 +108,7 @@ public sealed class MessageRepository : IMessageRepository
 
         // Get root message
         await using var rootCmd = conn.CreateCommand();
-        rootCmd.CommandText = "SELECT id, project_id, task_id, thread_id, sender, content, metadata, created_at FROM messages WHERE id = @id";
+        rootCmd.CommandText = "SELECT id, project_id, task_id, thread_id, sender, content, intent, metadata, created_at FROM messages WHERE id = @id";
         rootCmd.Parameters.AddWithValue("@id", threadId);
         await using var rootReader = await rootCmd.ExecuteReaderAsync();
         if (!await rootReader.ReadAsync())
@@ -110,7 +119,7 @@ public sealed class MessageRepository : IMessageRepository
         // Get replies
         await using var repliesCmd = conn.CreateCommand();
         repliesCmd.CommandText = """
-            SELECT id, project_id, task_id, thread_id, sender, content, metadata, created_at
+            SELECT id, project_id, task_id, thread_id, sender, content, intent, metadata, created_at
             FROM messages WHERE thread_id = @threadId
             ORDER BY created_at ASC
             """;
@@ -145,7 +154,7 @@ public sealed class MessageRepository : IMessageRepository
 
     private static Message ReadMessage(SqliteDataReader reader)
     {
-        var metaJson = reader.IsDBNull(6) ? null : reader.GetString(6);
+        var metaJson = reader.IsDBNull(7) ? null : reader.GetString(7);
         return new Message
         {
             Id = reader.GetInt32(0),
@@ -154,8 +163,9 @@ public sealed class MessageRepository : IMessageRepository
             ThreadId = reader.IsDBNull(3) ? null : reader.GetInt32(3),
             Sender = reader.GetString(4),
             Content = reader.GetString(5),
+            Intent = EnumExtensions.ParseMessageIntent(reader.GetString(6)),
             Metadata = metaJson is not null ? JsonSerializer.Deserialize<JsonElement>(metaJson) : null,
-            CreatedAt = DateTime.Parse(reader.GetString(7))
+            CreatedAt = DateTime.Parse(reader.GetString(8))
         };
     }
 }

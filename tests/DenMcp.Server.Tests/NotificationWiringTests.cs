@@ -59,7 +59,7 @@ public class NotificationWiringTests : IAsyncLifetime
         var notification = Assert.Single(_factory.RecordingChannel.DispatchNotifications);
         Assert.Equal(ProjectId, notification.ProjectId);
         Assert.Equal("claude-code", notification.TargetAgent);
-        Assert.Contains("review_feedback", notification.Summary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("review feedback", notification.Summary, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

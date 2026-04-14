@@ -131,7 +131,7 @@ public sealed class TaskRepository : ITaskRepository
         // Recent messages on this task
         await using var msgCmd = conn.CreateCommand();
         msgCmd.CommandText = """
-            SELECT id, project_id, task_id, thread_id, sender, content, metadata, created_at
+            SELECT id, project_id, task_id, thread_id, sender, content, intent, metadata, created_at
             FROM messages WHERE task_id = @id
             ORDER BY created_at DESC LIMIT 10
             """;
@@ -494,7 +494,7 @@ public sealed class TaskRepository : ITaskRepository
 
     internal static Message ReadMessage(SqliteDataReader reader)
     {
-        var metaJson = reader.IsDBNull(6) ? null : reader.GetString(6);
+        var metaJson = reader.IsDBNull(7) ? null : reader.GetString(7);
         return new Message
         {
             Id = reader.GetInt32(0),
@@ -503,8 +503,9 @@ public sealed class TaskRepository : ITaskRepository
             ThreadId = reader.IsDBNull(3) ? null : reader.GetInt32(3),
             Sender = reader.GetString(4),
             Content = reader.GetString(5),
+            Intent = EnumExtensions.ParseMessageIntent(reader.GetString(6)),
             Metadata = metaJson is not null ? JsonSerializer.Deserialize<JsonElement>(metaJson) : null,
-            CreatedAt = DateTime.Parse(reader.GetString(7))
+            CreatedAt = DateTime.Parse(reader.GetString(8))
         };
     }
 }

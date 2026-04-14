@@ -15,33 +15,54 @@ public static class MessageRoutes
         group.MapPost("/", async (IMessageRepository repo, IDispatchDetectionService detection,
             ILoggerFactory loggers, string projectId, SendMessageRequest req) =>
         {
-            var msg = new Message
-            {
-                ProjectId = projectId,
-                Sender = req.Sender,
-                Content = req.Content,
-                TaskId = req.TaskId,
-                ThreadId = req.ThreadId,
-                Metadata = req.Metadata is not null ? JsonSerializer.Deserialize<JsonElement>(req.Metadata) : null
-            };
-            var created = await repo.CreateAsync(msg);
             try
             {
-                await detection.OnMessageCreatedAsync(created);
+                var msg = new Message
+                {
+                    ProjectId = projectId,
+                    Sender = req.Sender,
+                    Content = req.Content,
+                    TaskId = req.TaskId,
+                    ThreadId = req.ThreadId,
+                    Intent = req.Intent,
+                    Metadata = req.Metadata is not null ? JsonSerializer.Deserialize<JsonElement>(req.Metadata) : null
+                };
+                var created = await repo.CreateAsync(msg);
+                try
+                {
+                    await detection.OnMessageCreatedAsync(created);
+                }
+                catch (Exception ex)
+                {
+                    loggers.CreateLogger("DispatchDetection")
+                        .LogError(ex, "Dispatch detection failed for message {MessageId}", created.Id);
+                }
+                return Results.Created($"/api/projects/{projectId}/messages/{created.Id}", created);
             }
-            catch (Exception ex)
+            catch (InvalidOperationException ex)
             {
-                loggers.CreateLogger("DispatchDetection")
-                    .LogError(ex, "Dispatch detection failed for message {MessageId}", created.Id);
+                return Results.BadRequest(new { error = ex.Message });
             }
-            return Results.Created($"/api/projects/{projectId}/messages/{created.Id}", created);
         });
 
         group.MapGet("/", async (IMessageRepository repo, string projectId,
-            int? taskId, string? since, string? unreadFor, int? limit) =>
+            int? taskId, string? since, string? unreadFor, int? limit, string? intent) =>
         {
+            MessageIntent? parsedIntent = null;
+            if (!string.IsNullOrWhiteSpace(intent))
+            {
+                try
+                {
+                    parsedIntent = EnumExtensions.ParseMessageIntent(intent);
+                }
+                catch (ArgumentException ex)
+                {
+                    return Results.BadRequest(new { error = ex.Message });
+                }
+            }
+
             DateTime? sinceDate = since is not null ? DateTime.Parse(since) : null;
-            var messages = await repo.GetMessagesAsync(projectId, taskId, sinceDate, unreadFor, limit ?? 20);
+            var messages = await repo.GetMessagesAsync(projectId, taskId, sinceDate, unreadFor, limit ?? 20, parsedIntent);
             return Results.Ok(messages);
         });
 
@@ -73,6 +94,7 @@ public record SendMessageRequest(
     string Content,
     int? TaskId = null,
     int? ThreadId = null,
-    string? Metadata = null);
+    string? Metadata = null,
+    MessageIntent? Intent = null);
 
 public record MarkReadRequest(string Agent, int[] MessageIds);

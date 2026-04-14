@@ -1,5 +1,17 @@
 export type TaskStatus = 'planned' | 'in_progress' | 'review' | 'blocked' | 'done' | 'cancelled';
 export type DocType = 'prd' | 'spec' | 'adr' | 'convention' | 'reference' | 'note';
+export type MessageIntent =
+  | 'general'
+  | 'note'
+  | 'status_update'
+  | 'question'
+  | 'answer'
+  | 'handoff'
+  | 'review_request'
+  | 'review_feedback'
+  | 'review_approval'
+  | 'task_ready'
+  | 'task_blocked';
 export type AgentSessionStatus = 'active' | 'inactive';
 export type ReviewVerdict = 'changes_requested' | 'looks_good' | 'follow_up_needed' | 'blocked_by_dependency';
 export type ReviewFindingCategory = 'blocking_bug' | 'acceptance_gap' | 'test_weakness' | 'follow_up_candidate';
@@ -191,6 +203,7 @@ export interface Message {
   thread_id: number | null;
   sender: string;
   content: string;
+  intent: MessageIntent;
   metadata: unknown | null;
   created_at: string;
 }

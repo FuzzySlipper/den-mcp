@@ -20,6 +20,21 @@ public enum DocType
     Note
 }
 
+public enum MessageIntent
+{
+    General,
+    Note,
+    StatusUpdate,
+    Question,
+    Answer,
+    Handoff,
+    ReviewRequest,
+    ReviewFeedback,
+    ReviewApproval,
+    TaskReady,
+    TaskBlocked
+}
+
 public enum AgentSessionStatus
 {
     Active,

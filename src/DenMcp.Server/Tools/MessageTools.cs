@@ -21,8 +21,10 @@ public sealed class MessageTools
         [Description("Message body (markdown).")] string content,
         [Description("Attach to a task by ID.")] int? task_id = null,
         [Description("Reply to an existing message (forms a thread).")] int? thread_id = null,
-        [Description("Optional JSON metadata, e.g. {\"type\":\"review_request\"}.")] string? metadata = null)
+        [Description("Optional JSON metadata, e.g. {\"type\":\"review_request\"}.")] string? metadata = null,
+        [Description("Optional canonical intent, e.g. review_feedback or handoff.")] string? intent = null)
     {
+        var parsedIntent = ParseIntent(intent);
         var msg = new Message
         {
             ProjectId = project_id,
@@ -30,6 +32,7 @@ public sealed class MessageTools
             Content = content,
             TaskId = task_id,
             ThreadId = thread_id,
+            Intent = parsedIntent,
             Metadata = metadata is not null ? JsonSerializer.Deserialize<JsonElement>(metadata) : null
         };
 
@@ -52,10 +55,12 @@ public sealed class MessageTools
         [Description("Filter to messages on a specific task.")] int? task_id = null,
         [Description("ISO datetime — only messages after this time.")] string? since = null,
         [Description("Agent identity — only unread messages for this agent.")] string? unread_for = null,
-        [Description("Max messages to return. Default 20, max 100.")] int limit = 20)
+        [Description("Max messages to return. Default 20, max 100.")] int limit = 20,
+        [Description("Optional canonical intent filter.")] string? intent = null)
     {
         DateTime? sinceDate = since is not null ? DateTime.Parse(since) : null;
-        var messages = await repo.GetMessagesAsync(project_id, task_id, sinceDate, unread_for, limit);
+        var parsedIntent = ParseIntent(intent);
+        var messages = await repo.GetMessagesAsync(project_id, task_id, sinceDate, unread_for, limit, parsedIntent);
         return JsonSerializer.Serialize(messages, JsonOpts.Default);
     }
 
@@ -78,5 +83,13 @@ public sealed class MessageTools
             .Select(int.Parse).ToArray();
         var count = await repo.MarkReadAsync(agent, ids);
         return JsonSerializer.Serialize(new { marked = count }, JsonOpts.Default);
+    }
+
+    private static MessageIntent? ParseIntent(string? intent)
+    {
+        if (string.IsNullOrWhiteSpace(intent))
+            return null;
+
+        return EnumExtensions.ParseMessageIntent(intent);
     }
 }

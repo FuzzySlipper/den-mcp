@@ -46,6 +46,38 @@ public static class EnumExtensions
         _ => throw new ArgumentException($"Unknown doc type: {value}", nameof(value))
     };
 
+    public static string ToDbValue(this MessageIntent intent) => intent switch
+    {
+        MessageIntent.General => "general",
+        MessageIntent.Note => "note",
+        MessageIntent.StatusUpdate => "status_update",
+        MessageIntent.Question => "question",
+        MessageIntent.Answer => "answer",
+        MessageIntent.Handoff => "handoff",
+        MessageIntent.ReviewRequest => "review_request",
+        MessageIntent.ReviewFeedback => "review_feedback",
+        MessageIntent.ReviewApproval => "review_approval",
+        MessageIntent.TaskReady => "task_ready",
+        MessageIntent.TaskBlocked => "task_blocked",
+        _ => throw new ArgumentOutOfRangeException(nameof(intent), intent, null)
+    };
+
+    public static MessageIntent ParseMessageIntent(string value) => value switch
+    {
+        "general" => MessageIntent.General,
+        "note" => MessageIntent.Note,
+        "status_update" => MessageIntent.StatusUpdate,
+        "question" => MessageIntent.Question,
+        "answer" => MessageIntent.Answer,
+        "handoff" => MessageIntent.Handoff,
+        "review_request" => MessageIntent.ReviewRequest,
+        "review_feedback" => MessageIntent.ReviewFeedback,
+        "review_approval" => MessageIntent.ReviewApproval,
+        "task_ready" => MessageIntent.TaskReady,
+        "task_blocked" => MessageIntent.TaskBlocked,
+        _ => throw new ArgumentException($"Unknown message intent: {value}", nameof(value))
+    };
+
     public static string ToDbValue(this AgentSessionStatus status) => status switch
     {
         AgentSessionStatus.Active => "active",

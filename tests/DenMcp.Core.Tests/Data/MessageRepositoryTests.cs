@@ -1,5 +1,6 @@
 using DenMcp.Core.Data;
 using DenMcp.Core.Models;
+using System.Text.Json;
 
 namespace DenMcp.Core.Tests.Data;
 
@@ -23,10 +24,12 @@ public class MessageRepositoryTests : IAsyncLifetime
     {
         var msg = await _repo.CreateAsync(new Message { ProjectId = "proj", Sender = "claude-code", Content = "Hello!" });
         Assert.True(msg.Id > 0);
+        Assert.Equal(MessageIntent.General, msg.Intent);
 
         var messages = await _repo.GetMessagesAsync("proj");
         Assert.Single(messages);
         Assert.Equal("Hello!", messages[0].Content);
+        Assert.Equal(MessageIntent.General, messages[0].Intent);
     }
 
     [Fact]
@@ -75,5 +78,71 @@ public class MessageRepositoryTests : IAsyncLifetime
 
         Assert.Equal(1, count1);
         Assert.Equal(0, count2); // already read
+    }
+
+    [Fact]
+    public async Task CreateAsync_DerivesIntentFromLegacyMetadataType()
+    {
+        var metadata = JsonSerializer.Deserialize<JsonElement>(
+            """{"type":"merge_request","recipient":"codex"}""");
+
+        var msg = await _repo.CreateAsync(new Message
+        {
+            ProjectId = "proj",
+            Sender = "claude-code",
+            Content = "Approved for merge",
+            Metadata = metadata
+        });
+
+        Assert.Equal(MessageIntent.ReviewApproval, msg.Intent);
+    }
+
+    [Fact]
+    public async Task GetMessages_FiltersByIntent()
+    {
+        await _repo.CreateAsync(new Message
+        {
+            ProjectId = "proj",
+            Sender = "codex",
+            Content = "General note",
+            Intent = MessageIntent.Note
+        });
+        await _repo.CreateAsync(new Message
+        {
+            ProjectId = "proj",
+            Sender = "codex",
+            Content = "Review feedback",
+            Metadata = JsonSerializer.Deserialize<JsonElement>(
+                """{"type":"review_feedback","recipient":"claude-code"}""")
+        });
+
+        var notes = await _repo.GetMessagesAsync("proj", intent: MessageIntent.Note);
+        var feedback = await _repo.GetMessagesAsync("proj", intent: MessageIntent.ReviewFeedback);
+
+        Assert.Single(notes);
+        Assert.Equal("General note", notes[0].Content);
+        Assert.Equal(MessageIntent.Note, notes[0].Intent);
+
+        Assert.Single(feedback);
+        Assert.Equal("Review feedback", feedback[0].Content);
+        Assert.Equal(MessageIntent.ReviewFeedback, feedback[0].Intent);
+    }
+
+    [Fact]
+    public async Task CreateAsync_RejectsConflictingIntentAndLegacyMetadataType()
+    {
+        var metadata = JsonSerializer.Deserialize<JsonElement>(
+            """{"type":"review_feedback","recipient":"claude-code"}""");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => _repo.CreateAsync(new Message
+        {
+            ProjectId = "proj",
+            Sender = "codex",
+            Content = "Conflicting intent",
+            Intent = MessageIntent.ReviewRequest,
+            Metadata = metadata
+        }));
+
+        Assert.Contains("conflicts", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 }

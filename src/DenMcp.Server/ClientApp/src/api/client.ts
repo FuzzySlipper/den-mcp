@@ -126,6 +126,7 @@ export interface GetMessagesOpts {
   since?: string;
   unreadFor?: string;
   limit?: number;
+  intent?: string;
 }
 
 export function getMessages(projectId: string, opts: GetMessagesOpts = {}): Promise<Message[]> {
@@ -134,6 +135,7 @@ export function getMessages(projectId: string, opts: GetMessagesOpts = {}): Prom
     since: opts.since,
     unreadFor: opts.unreadFor,
     limit: opts.limit,
+    intent: opts.intent,
   });
   return get(`/api/projects/${esc(projectId)}/messages${q}`);
 }

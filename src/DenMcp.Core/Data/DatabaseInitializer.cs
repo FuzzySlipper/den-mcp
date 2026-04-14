@@ -1,3 +1,5 @@
+using System.Text.Json;
+using DenMcp.Core.Models;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 
@@ -120,6 +122,20 @@ public sealed class DatabaseInitializer
             thread_id   INTEGER REFERENCES messages(id) ON DELETE SET NULL,
             sender      TEXT NOT NULL,
             content     TEXT NOT NULL,
+            intent      TEXT NOT NULL DEFAULT 'general'
+                        CHECK (intent IN (
+                            'general',
+                            'note',
+                            'status_update',
+                            'question',
+                            'answer',
+                            'handoff',
+                            'review_request',
+                            'review_feedback',
+                            'review_approval',
+                            'task_ready',
+                            'task_blocked'
+                        )),
             metadata    TEXT,
             created_at  TEXT NOT NULL DEFAULT (datetime('now'))
         );
@@ -364,6 +380,22 @@ public sealed class DatabaseInitializer
         // so we check via PRAGMA table_info.
         await TryAddColumnAsync(connection, "agent_sessions", "session_id", "TEXT");
         await TryAddColumnAsync(connection, "dispatch_entries", "completed_by", "TEXT");
+        await TryAddColumnAsync(connection, "messages", "intent",
+            """
+            TEXT NOT NULL DEFAULT 'general' CHECK (intent IN (
+                'general',
+                'note',
+                'status_update',
+                'question',
+                'answer',
+                'handoff',
+                'review_request',
+                'review_feedback',
+                'review_approval',
+                'task_ready',
+                'task_blocked'
+            ))
+            """);
         await TryAddColumnAsync(connection, "review_rounds", "preferred_diff_base_ref", "TEXT");
         await TryAddColumnAsync(connection, "review_rounds", "preferred_diff_base_commit", "TEXT");
         await TryAddColumnAsync(connection, "review_rounds", "preferred_diff_head_ref", "TEXT");
@@ -377,6 +409,9 @@ public sealed class DatabaseInitializer
             "INTEGER CHECK (inherited_commit_count IS NULL OR inherited_commit_count >= 0)");
         await TryAddColumnAsync(connection, "review_rounds", "task_local_commit_count",
             "INTEGER CHECK (task_local_commit_count IS NULL OR task_local_commit_count >= 0)");
+        await EnsureIndexAsync(connection, "idx_messages_project_intent",
+            "CREATE INDEX IF NOT EXISTS idx_messages_project_intent ON messages(project_id, intent)");
+        await BackfillMessageIntentsAsync(connection);
     }
 
     private static async Task TryAddColumnAsync(SqliteConnection connection, string table, string column, string columnDefinition)
@@ -394,5 +429,61 @@ public sealed class DatabaseInitializer
         await using var alterCmd = connection.CreateCommand();
         alterCmd.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {columnDefinition}";
         await alterCmd.ExecuteNonQueryAsync();
+    }
+
+    private static async Task EnsureIndexAsync(SqliteConnection connection, string indexName, string createIndexSql)
+    {
+        await using var checkCmd = connection.CreateCommand();
+        checkCmd.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = @name";
+        checkCmd.Parameters.AddWithValue("@name", indexName);
+        var exists = await checkCmd.ExecuteScalarAsync();
+        if (exists is not null)
+            return;
+
+        await using var createCmd = connection.CreateCommand();
+        createCmd.CommandText = createIndexSql;
+        await createCmd.ExecuteNonQueryAsync();
+    }
+
+    private static async Task BackfillMessageIntentsAsync(SqliteConnection connection)
+    {
+        var pendingUpdates = new List<(int Id, string Intent)>();
+
+        await using (var selectCmd = connection.CreateCommand())
+        {
+            selectCmd.CommandText = """
+                SELECT id, metadata
+                FROM messages
+                WHERE intent = 'general' AND metadata IS NOT NULL
+                """;
+
+            await using var reader = await selectCmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                var id = reader.GetInt32(0);
+                var metadataJson = reader.GetString(1);
+
+                try
+                {
+                    var metadata = JsonSerializer.Deserialize<JsonElement>(metadataJson);
+                    var intent = MessageIntentCompatibility.DeriveFromMetadata(metadata);
+                    if (intent is not null && intent != MessageIntent.General)
+                        pendingUpdates.Add((id, intent.Value.ToDbValue()));
+                }
+                catch (JsonException)
+                {
+                    // Leave malformed legacy metadata at the default 'general' intent.
+                }
+            }
+        }
+
+        foreach (var update in pendingUpdates)
+        {
+            await using var updateCmd = connection.CreateCommand();
+            updateCmd.CommandText = "UPDATE messages SET intent = @intent WHERE id = @id";
+            updateCmd.Parameters.AddWithValue("@intent", update.Intent);
+            updateCmd.Parameters.AddWithValue("@id", update.Id);
+            await updateCmd.ExecuteNonQueryAsync();
+        }
     }
 }

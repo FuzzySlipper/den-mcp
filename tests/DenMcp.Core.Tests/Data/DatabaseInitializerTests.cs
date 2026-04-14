@@ -217,4 +217,87 @@ public class DatabaseInitializerTests : IDisposable
 
         Assert.Contains("completed_by", columns);
     }
+
+    [Fact]
+    public async Task InitializeAsync_AddsIntentColumnAndBackfillsLegacyMessageTypes()
+    {
+        await using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                CREATE TABLE messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id TEXT NOT NULL,
+                    task_id INTEGER,
+                    thread_id INTEGER,
+                    sender TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    metadata TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+
+                INSERT INTO messages (project_id, sender, content, metadata) VALUES
+                    ('proj', 'codex', 'Request review', '{"type":"review_request_packet","recipient":"claude-code"}'),
+                    ('proj', 'codex', 'Planning handoff', '{"type":"planning_summary","recipient":"claude-code"}'),
+                    ('proj', 'codex', 'Unknown legacy type', '{"type":"something_else"}'),
+                    ('proj', 'codex', 'Malformed json', '{not-json');
+                """;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var initializer = new DatabaseInitializer(_dbPath, NullLogger<DatabaseInitializer>.Instance);
+        await initializer.InitializeAsync();
+
+        await using var verify = new SqliteConnection(initializer.ConnectionString);
+        await verify.OpenAsync();
+
+        var rows = new List<(string Content, string Intent)>();
+        await using var checkCmd = verify.CreateCommand();
+        checkCmd.CommandText = "SELECT content, intent FROM messages ORDER BY id";
+        await using var reader = await checkCmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            rows.Add((reader.GetString(0), reader.GetString(1)));
+
+        Assert.Collection(
+            rows,
+            row =>
+            {
+                Assert.Equal("Request review", row.Content);
+                Assert.Equal("review_request", row.Intent);
+            },
+            row =>
+            {
+                Assert.Equal("Planning handoff", row.Content);
+                Assert.Equal("handoff", row.Intent);
+            },
+            row =>
+            {
+                Assert.Equal("Unknown legacy type", row.Content);
+                Assert.Equal("general", row.Intent);
+            },
+            row =>
+            {
+                Assert.Equal("Malformed json", row.Content);
+                Assert.Equal("general", row.Intent);
+            });
+    }
+
+    [Fact]
+    public async Task InitializeAsync_MessageIntentConstraintRejectsUnknownValues()
+    {
+        var initializer = new DatabaseInitializer(_dbPath, NullLogger<DatabaseInitializer>.Instance);
+        await initializer.InitializeAsync();
+
+        await using var verify = new SqliteConnection(initializer.ConnectionString);
+        await verify.OpenAsync();
+
+        await using var insert = verify.CreateCommand();
+        insert.CommandText = """
+            INSERT INTO messages (project_id, sender, content, intent)
+            VALUES ('_global', 'codex', 'Bad intent', 'not_real')
+            """;
+
+        await Assert.ThrowsAsync<SqliteException>(() => insert.ExecuteNonQueryAsync());
+    }
 }
