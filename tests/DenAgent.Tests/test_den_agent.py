@@ -35,6 +35,7 @@ class DenAgentTests(unittest.TestCase):
 
         self.curl_log = self.root / "curl-log.jsonl"
         self.vendor_log = self.root / "vendor-log.jsonl"
+        self.kitten_log = self.root / "kitten-log.jsonl"
         self.projects_file = self.root / "projects.json"
         self.dispatch_file = self.root / "dispatch.json"
 
@@ -139,6 +140,34 @@ class DenAgentTests(unittest.TestCase):
         )
         make_executable(self.fake_bin / "claude", vendor_stub)
         make_executable(self.fake_bin / "codex", vendor_stub)
+        make_executable(
+            self.fake_bin / "kitten",
+            textwrap.dedent(
+                """\
+                #!/usr/bin/env python3
+                import json
+                import os
+                import pathlib
+                import sys
+
+                stdin_text = sys.stdin.read()
+                args = sys.argv[1:]
+                entry = {"argv": args, "stdin": stdin_text}
+
+                if "--details-file" in args:
+                    details_index = args.index("--details-file")
+                    if details_index + 1 < len(args):
+                        details_path = pathlib.Path(args[details_index + 1])
+                        entry["details_file"] = str(details_path)
+                        if details_path.exists():
+                            entry["details_text"] = details_path.read_text(encoding="utf-8")
+                            details_path.unlink(missing_ok=True)
+
+                with open(os.environ["DEN_AGENT_TEST_KITTEN_LOG"], "a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(entry) + "\\n")
+                """
+            ),
+        )
 
     def base_env(self) -> dict[str, str]:
         env = os.environ.copy()
@@ -146,8 +175,11 @@ class DenAgentTests(unittest.TestCase):
         env["DEN_MCP_URL"] = "http://127.0.0.1:5199"
         env["DEN_AGENT_TEST_CURL_LOG"] = str(self.curl_log)
         env["DEN_AGENT_TEST_VENDOR_LOG"] = str(self.vendor_log)
+        env["DEN_AGENT_TEST_KITTEN_LOG"] = str(self.kitten_log)
         env["DEN_AGENT_TEST_PROJECTS_FILE"] = str(self.projects_file)
         env["DEN_AGENT_TEST_DISPATCH_FILE"] = str(self.dispatch_file)
+        env.pop("KITTY_WINDOW_ID", None)
+        env.pop("KITTY_LISTEN_ON", None)
         return env
 
     def read_jsonl(self, path: pathlib.Path) -> list[dict]:
@@ -305,6 +337,60 @@ class DenAgentTests(unittest.TestCase):
         self.assertIn("new approved dispatch #42 arrived while claude is running", stderr)
         self.assertIn("approved dispatch #42 is ready", stderr)
         self.assertIn("Prompt arriving mid-session", stderr)
+        self.assertIn("--- den-agent dispatch prompt start ---", stderr)
+        self.assertEqual("", stdout)
+        self.assertEqual([], self.read_jsonl(self.kitten_log))
+
+    def test_running_session_in_kitty_uses_overlay_clipboard_and_paste_without_prompt_blob(self) -> None:
+        self.write_projects()
+
+        env = self.base_env()
+        env["DEN_AGENT_DISPATCH_POLL_SECONDS"] = "0.01"
+        env["DEN_AGENT_TEST_VENDOR_SLEEP"] = "0.25"
+        env["KITTY_WINDOW_ID"] = "77"
+
+        proc = subprocess.Popen(
+            ["bash", str(SCRIPT_PATH), "claude"],
+            cwd=self.workspace,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.addCleanup(lambda: proc.kill() if proc.poll() is None else None)
+
+        deadline = time.time() + 2
+        while time.time() < deadline and not self.vendor_log.exists():
+            time.sleep(0.01)
+        self.assertTrue(self.vendor_log.exists(), "vendor process never started")
+
+        self.write_dispatch(prompt="Prompt arriving mid-session")
+
+        stdout, stderr = proc.communicate(timeout=5)
+
+        self.assertEqual(0, proc.returncode, stderr)
+
+        kitten_calls = self.read_jsonl(self.kitten_log)
+        self.assertEqual(4, len(kitten_calls))
+
+        self.assertEqual(["@", "focus-window", "--match", "id:77"], kitten_calls[0]["argv"])
+        self.assertEqual(["clipboard"], kitten_calls[1]["argv"])
+        self.assertEqual("Prompt arriving mid-session", kitten_calls[1]["stdin"])
+        self.assertEqual(
+            ["@", "send-text", "--match", "id:77", "--stdin", "--bracketed-paste", "auto"],
+            kitten_calls[2]["argv"],
+        )
+        self.assertEqual("Prompt arriving mid-session", kitten_calls[2]["stdin"])
+        self.assertIn("@", kitten_calls[3]["argv"])
+        self.assertIn("launch", kitten_calls[3]["argv"])
+        self.assertIn("--details-file", kitten_calls[3]["argv"])
+        self.assertIn("Prompt arriving mid-session", kitten_calls[3]["details_text"])
+        self.assertIn("Pasted into the active kitty session input buffer: yes", kitten_calls[3]["details_text"])
+
+        self.assertIn("new approved dispatch #42 arrived while claude is running", stderr)
+        self.assertIn("opened kitty dispatch overlay", stderr)
+        self.assertNotIn("--- den-agent dispatch prompt start ---", stderr)
+        self.assertNotIn("Prompt arriving mid-session", stderr)
         self.assertIn("SetUserVar=den_dispatch=", stdout)
 
     def test_den_failure_falls_back_to_manual_vendor_launch(self) -> None:

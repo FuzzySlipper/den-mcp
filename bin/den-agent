@@ -9,6 +9,7 @@ DEN_SIGNAL_HELPER="${REPO_ROOT}/kitty/den-signal.sh"
 CURL_BIN="${DEN_AGENT_CURL_BIN:-curl}"
 JQ_BIN="${DEN_AGENT_JQ_BIN:-jq}"
 PYTHON_BIN="${DEN_AGENT_PYTHON_BIN:-python3}"
+KITTY_BIN="${DEN_AGENT_KITTY_BIN:-kitten}"
 CLAUDE_BIN="${DEN_AGENT_CLAUDE_BIN:-claude}"
 CODEX_BIN="${DEN_AGENT_CODEX_BIN:-codex}"
 
@@ -53,6 +54,10 @@ log() {
 
 have_command() {
     command -v "$1" >/dev/null 2>&1
+}
+
+have_kitty_window() {
+    [[ -n "${KITTY_WINDOW_ID:-}" ]] && have_command "${KITTY_BIN}"
 }
 
 den_signal() {
@@ -460,6 +465,10 @@ copy_dispatch_prompt() {
         fi
     }
 
+    if have_kitty_window; then
+        _pipe_to_clipboard "${KITTY_BIN}" clipboard && return 0
+    fi
+
     if have_command pbcopy; then
         _pipe_to_clipboard pbcopy
         return 0
@@ -481,6 +490,145 @@ copy_dispatch_prompt() {
     fi
 
     return 1
+}
+
+paste_dispatch_prompt_with_kitty() {
+    local prompt="$1"
+
+    if [[ -z "${prompt}" ]] || ! have_kitty_window; then
+        return 1
+    fi
+
+    if have_command timeout; then
+        printf '%s' "${prompt}" | timeout 1 \
+            "${KITTY_BIN}" @ send-text \
+            --match "id:${KITTY_WINDOW_ID}" \
+            --stdin \
+            --bracketed-paste auto >/dev/null 2>&1
+    else
+        printf '%s' "${prompt}" | "${KITTY_BIN}" @ send-text \
+            --match "id:${KITTY_WINDOW_ID}" \
+            --stdin \
+            --bracketed-paste auto >/dev/null 2>&1
+    fi
+}
+
+focus_dispatch_window_with_kitty() {
+    have_kitty_window || return 1
+    "${KITTY_BIN}" @ focus-window --match "id:${KITTY_WINDOW_ID}" >/dev/null 2>&1
+}
+
+dispatch_overlay_title() {
+    if [[ -n "${ACTIVE_DISPATCH_ID}" ]]; then
+        printf 'Dispatch #%s\n' "${ACTIVE_DISPATCH_ID}"
+    else
+        printf 'Dispatch handoff\n'
+    fi
+}
+
+build_active_dispatch_overlay_text() {
+    local prompt_pasted="$1"
+    local prompt_copied="$2"
+    local task_label="project-wide"
+
+    if [[ -n "${ACTIVE_TASK_ID}" ]]; then
+        task_label="#${ACTIVE_TASK_ID}"
+    fi
+
+    cat <<EOF
+Dispatch approved while ${VENDOR} is running.
+
+Project: ${PROJECT_ID}
+Task: ${task_label}
+
+Summary:
+${DISPATCH_SUMMARY:-No summary was provided.}
+
+Prompt delivery:
+- Pasted into the active kitty session input buffer: ${prompt_pasted}
+- Copied to the clipboard: ${prompt_copied}
+
+Next step:
+- Review the text already inserted into the running session and submit when ready.
+- If the input buffer did not update cleanly, paste the prompt from the clipboard instead.
+
+Context prompt:
+${DISPATCH_PROMPT:-No generated prompt was stored for this dispatch.}
+EOF
+}
+
+launch_dispatch_overlay_with_kitty() {
+    local title="$1"
+    local text="$2"
+    local details_path
+
+    have_kitty_window || return 1
+
+    details_path="$(mktemp "${TMPDIR:-/tmp}/den-dispatch-XXXXXX.txt")" || return 1
+    printf '%s' "${text}" >"${details_path}"
+
+    if "${KITTY_BIN}" @ launch \
+        --match "window_id:${KITTY_WINDOW_ID}" \
+        --source-window "id:${KITTY_WINDOW_ID}" \
+        --type overlay \
+        --cwd "${REPO_ROOT}" \
+        --title "${title}" \
+        "${PYTHON_BIN}" "${REPO_ROOT}/kitty/den_approve.py" \
+        --details-file "${details_path}" \
+        --details-title "${title}" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    rm -f "${details_path}"
+    return 1
+}
+
+deliver_active_dispatch_with_kitty() {
+    local prompt_pasted=0
+    local prompt_copied=0
+    local overlay_opened=0
+    local overlay_text
+    local overlay_title
+
+    have_kitty_window || return 1
+
+    focus_dispatch_window_with_kitty || true
+
+    if [[ -n "${DISPATCH_PROMPT}" ]]; then
+        if copy_dispatch_prompt "${DISPATCH_PROMPT}"; then
+            prompt_copied=1
+        fi
+        if paste_dispatch_prompt_with_kitty "${DISPATCH_PROMPT}"; then
+            prompt_pasted=1
+        fi
+    fi
+
+    overlay_text="$(build_active_dispatch_overlay_text \
+        "$([[ "${prompt_pasted}" -eq 1 ]] && printf 'yes' || printf 'no')" \
+        "$([[ "${prompt_copied}" -eq 1 ]] && printf 'yes' || printf 'no')")"
+    overlay_title="$(dispatch_overlay_title)"
+    if launch_dispatch_overlay_with_kitty "${overlay_title}" "${overlay_text}"; then
+        overlay_opened=1
+    fi
+
+    if [[ "${prompt_pasted}" -eq 0 ]] && [[ "${prompt_copied}" -eq 0 ]] && [[ "${overlay_opened}" -eq 0 ]]; then
+        return 1
+    fi
+
+    log "approved dispatch #${ACTIVE_DISPATCH_ID} is ready for ${AGENT_ID} in ${PROJECT_ID}"
+    if [[ -n "${ACTIVE_TASK_ID}" ]]; then
+        log "dispatch task: #${ACTIVE_TASK_ID}"
+    fi
+    if [[ "${prompt_pasted}" -eq 1 ]]; then
+        log "pasted dispatch prompt into the active kitty session input buffer"
+    fi
+    if [[ "${prompt_copied}" -eq 1 ]]; then
+        log "copied dispatch prompt to the clipboard"
+    fi
+    if [[ "${overlay_opened}" -eq 1 ]]; then
+        log "opened kitty dispatch overlay"
+    fi
+    return 0
 }
 
 show_dispatch_fallback() {
@@ -544,9 +692,11 @@ start_dispatch_poll() {
             [[ "${dispatch_id}" != "${ACTIVE_DISPATCH_ID}" ]] || continue
 
             populate_dispatch_state "${dispatch_json}"
-            printf '\n' >&2
             log "new approved dispatch #${ACTIVE_DISPATCH_ID} arrived while ${VENDOR} is running"
-            show_dispatch_fallback
+            if ! deliver_active_dispatch_with_kitty; then
+                printf '\n' >&2
+                show_dispatch_fallback
+            fi
         done
     ) &
     DISPATCH_POLL_PID=$!

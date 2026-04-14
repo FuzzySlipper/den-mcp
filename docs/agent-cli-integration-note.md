@@ -36,6 +36,11 @@ This note verifies what the currently installed `claude` and `codex` CLIs suppor
    - show the dispatch summary
    - copy or print the full prompt for explicit user paste/confirmation
 
+For the current trusted local kitty workflow, a follow-on improvement is acceptable on top of that fallback:
+
+- when `den-agent` is already running inside a kitty window and a new approved dispatch arrives mid-session, use kitty remote control to focus the agent window, paste the generated prompt into the live session input buffer with bracketed paste, copy it to the clipboard, and open a details overlay
+- keep the plain prompt dump as the non-kitty/manual fallback instead of making kitty-specific delivery a hard requirement
+
 ### Avoid for MVP
 
 - writing characters into a running TTY as the primary mechanism
@@ -88,4 +93,4 @@ That keeps the kitten useful even when automatic delivery is unavailable.
 
 ## Bottom line
 
-The clean cross-vendor abstraction is not "inject prompt into whatever session happens to exist." The clean abstraction is "deliver dispatch context before the session starts, and gracefully fall back to show/copy/focus when the session already exists."
+The clean cross-vendor abstraction is not "inject prompt into whatever session happens to exist." The clean abstraction is "deliver dispatch context before the session starts, and gracefully fall back to show/copy/focus when the session already exists," with kitty-mediated paste/overlay as an optional local enhancement when the wrapper is already running inside a trusted kitty session.
