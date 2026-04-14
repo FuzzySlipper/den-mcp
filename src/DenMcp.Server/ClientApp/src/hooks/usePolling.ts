@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 
+// Pass a stable (memoized) fetcher. A fresh fetcher identity is treated as a
+// new input and triggers an immediate refetch.
 export function usePolling<T>(
   fetcher: () => Promise<T>,
   intervalMs: number,
@@ -11,9 +13,10 @@ export function usePolling<T>(
   const latestRequestIdRef = useRef(0);
   fetcherRef.current = fetcher;
 
-  const doFetch = useCallback(async () => {
+  const doFetch = useCallback(async (markLoading: boolean) => {
     const requestId = ++latestRequestIdRef.current;
-    setLoading(true);
+    if (markLoading)
+      setLoading(true);
 
     try {
       const result = await fetcherRef.current();
@@ -33,13 +36,19 @@ export function usePolling<T>(
   }, []);
 
   useEffect(() => {
-    void doFetch();
+    void doFetch(true);
   }, [doFetch, fetcher]);
 
   useEffect(() => {
-    const id = setInterval(doFetch, intervalMs);
+    const id = setInterval(() => {
+      void doFetch(false);
+    }, intervalMs);
     return () => clearInterval(id);
   }, [doFetch, intervalMs]);
 
-  return { data, loading, error, refresh: doFetch };
+  const refresh = useCallback(() => {
+    void doFetch(true);
+  }, [doFetch]);
+
+  return { data, loading, error, refresh };
 }
