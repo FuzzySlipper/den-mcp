@@ -138,6 +138,49 @@ public class MessageApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RestMessageFeed_FiltersByIntent()
+    {
+        var rootResponse = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/messages", new
+        {
+            sender = "alice",
+            content = "General thread root"
+        });
+        rootResponse.EnsureSuccessStatusCode();
+        var root = await rootResponse.Content.ReadFromJsonAsync<Message>(JsonOpts);
+
+        await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/messages", new
+        {
+            sender = "bob",
+            content = "Review feedback reply",
+            thread_id = root!.Id,
+            metadata = """{"type":"review_feedback","recipient":"claude-code"}"""
+        });
+
+        await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/messages", new
+        {
+            sender = "carol",
+            content = "Standalone note",
+            intent = "note"
+        });
+
+        var response = await _client.GetAsync($"/api/projects/{ProjectId}/messages/feed?intent=review_feedback");
+        response.EnsureSuccessStatusCode();
+
+        var feed = await response.Content.ReadFromJsonAsync<List<MessageFeedItem>>(JsonOpts);
+        var item = Assert.Single(feed!);
+        Assert.Equal(root.Id, item.RootMessage.Id);
+        Assert.Equal("Review feedback reply", item.LatestMessage.Content);
+        Assert.Equal(MessageIntent.ReviewFeedback, item.LatestMessage.Intent);
+    }
+
+    [Fact]
+    public async Task RestMessageFeed_RejectsUnknownIntentFilter()
+    {
+        var response = await _client.GetAsync($"/api/projects/{ProjectId}/messages/feed?intent=not_real");
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
     public async Task McpMessageTools_SendAndGetMessages_SupportIntent()
     {
         using var scope = _factory.Services.CreateScope();

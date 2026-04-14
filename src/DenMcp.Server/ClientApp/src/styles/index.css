@@ -66,6 +66,25 @@ html, body, #root {
   font-weight: normal;
 }
 
+.panel-header .header-spacer {
+  margin-left: auto;
+}
+
+.panel-filter-label {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.panel-filter-select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-family: var(--font-sans);
+}
+
 .panel-body {
   flex: 1;
   overflow-y: auto;
@@ -128,6 +147,52 @@ html, body, #root {
 .badge-blocked { background: #3a1a24; color: var(--red); }
 .badge-done { background: #1a2e1a; color: var(--green); }
 .badge-cancelled { background: #2a2b3d; color: var(--text-muted); }
+
+.intent-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.intent-general,
+.intent-note {
+  background: #2a2b3d;
+  color: var(--text-muted);
+}
+
+.intent-status_update,
+.intent-handoff {
+  background: #1a2744;
+  color: var(--accent);
+}
+
+.intent-question,
+.intent-review_request {
+  background: #3b2a14;
+  color: var(--yellow);
+}
+
+.intent-answer,
+.intent-review_approval,
+.intent-task_ready {
+  background: #1a2e1a;
+  color: var(--green);
+}
+
+.intent-review_feedback,
+.intent-task_blocked {
+  background: #3a1a24;
+  color: var(--red);
+}
 
 /* Tree nodes */
 .tree-node {

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Message, Thread } from '../api/types';
 import { getThread } from '../api/client';
 import { formatTimeAgo } from '../utils';
+import { messageIntentLabel } from '../messageIntents';
 
 interface Props {
   message: Message;
@@ -37,6 +38,12 @@ export function MessageDetail({ message, onClose }: Props) {
           <dl className="detail-meta">
             <dt>From</dt>
             <dd>{displayMessage.sender}</dd>
+            <dt>Intent</dt>
+            <dd>
+              <span className={`intent-chip intent-${displayMessage.intent}`}>
+                {messageIntentLabel(displayMessage.intent)}
+              </span>
+            </dd>
             <dt>Project</dt>
             <dd>{displayMessage.project_id}</dd>
             <dt>Time</dt>
@@ -65,6 +72,7 @@ export function MessageDetail({ message, onClose }: Props) {
               <div key={reply.id} style={{ marginBottom: 12 }}>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', marginBottom: 2 }}>
                   <span className="message-time">{formatTimeAgo(reply.created_at)}</span>
+                  <span className={`intent-chip intent-${reply.intent}`}>{messageIntentLabel(reply.intent)}</span>
                   <span className="message-sender">{reply.sender}:</span>
                 </div>
                 <div className="detail-description" style={{ paddingLeft: 10 }}>

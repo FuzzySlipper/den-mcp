@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from 'react';
-import type { Message, DocumentSummary } from './api/types';
+import type { Message, DocumentSummary, MessageIntent } from './api/types';
 import { listProjects, listTasks, getMessageFeed, listDocuments, listActiveAgents } from './api/client';
 import { usePolling } from './hooks/usePolling';
 import { ProjectSidebar } from './components/ProjectSidebar';
@@ -11,6 +11,7 @@ import { MessageDetail } from './components/MessageDetail';
 import { DocumentList } from './components/DocumentList';
 import { DocumentDetail } from './components/DocumentDetail';
 import { AgentBar } from './components/AgentBar';
+import { MESSAGE_INTENT_OPTIONS, messageIntentLabel } from './messageIntents';
 
 export default function App() {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
@@ -19,6 +20,7 @@ export default function App() {
   const [selectedDoc, setSelectedDoc] = useState<DocumentSummary | null>(null);
   const [viewMode, setViewMode] = useState<'tasks' | 'documents'>('tasks');
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [messageIntentFilter, setMessageIntentFilter] = useState<MessageIntent | ''>('');
   const [sortMode, setSortMode] = useState('priority');
 
   const fetchProjects = useCallback(() => listProjects(), []);
@@ -40,9 +42,12 @@ export default function App() {
 
   const fetchMessages = useCallback(
     () => effectiveProject
-      ? getMessageFeed(effectiveProject, 15)
+      ? getMessageFeed(effectiveProject, {
+        limit: 15,
+        intent: messageIntentFilter || undefined,
+      })
       : Promise.resolve([]),
-    [effectiveProject],
+    [effectiveProject, messageIntentFilter],
   );
   const { data: messages } = usePolling(fetchMessages, 5000);
 
@@ -67,6 +72,7 @@ export default function App() {
 
   const taskCount = tasks?.length ?? 0;
   const filterLabel = statusFilter ? ` [${statusFilter}]` : '';
+  const messageFilterLabel = messageIntentFilter ? ` [${messageIntentFilter}]` : '';
   const sortLabel = sortMode !== 'priority' ? ` \u2195${sortMode}` : '';
 
   const handleProjectSelect = useCallback((id: string) => {
@@ -92,7 +98,21 @@ export default function App() {
       {/* Messages — top, full width */}
       <div className="panel panel-messages">
         <div className="panel-header">
-          Messages {effectiveProject && <span className="count">({messages?.length ?? 0})</span>}
+          Messages {effectiveProject && <span className="count">({messages?.length ?? 0}{messageFilterLabel})</span>}
+          <span className="header-spacer" />
+          <label className="panel-filter-label" htmlFor="message-intent-filter">Intent</label>
+          <select
+            id="message-intent-filter"
+            className="panel-filter-select"
+            value={messageIntentFilter}
+            onChange={e => setMessageIntentFilter((e.target.value as MessageIntent) || '')}
+            title={messageIntentFilter ? `Filtering messages by ${messageIntentLabel(messageIntentFilter)}` : 'Show all message intents'}
+          >
+            <option value="">All</option>
+            {MESSAGE_INTENT_OPTIONS.map(option => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
         </div>
         <div className="panel-body">
           <MessageFeed

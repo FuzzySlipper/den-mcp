@@ -1,5 +1,6 @@
 import type { Message, MessageFeedItem } from '../api/types';
 import { formatTimeAgo, truncate } from '../utils';
+import { messageIntentLabel } from '../messageIntents';
 
 interface Props {
   messages: MessageFeedItem[];
@@ -28,6 +29,7 @@ export function MessageFeed({ messages, isGlobal, onSelect }: Props) {
             <div className="message-feed-topline">
               <span className="message-time">{formatTimeAgo(item.latest_activity_at)}</span>
               {isGlobal && <span className="message-project-tag">[{truncate(root.project_id, 12)}]</span>}
+              <span className={`intent-chip intent-${latest.intent}`}>{messageIntentLabel(latest.intent)}</span>
               {isThread ? (
                 <>
                   <span className="message-thread-badge">Thread</span>

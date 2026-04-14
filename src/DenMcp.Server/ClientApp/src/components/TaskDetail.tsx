@@ -9,6 +9,7 @@ import type {
 } from '../api/types';
 import { getTask, updateTask } from '../api/client';
 import { formatTimeAgo } from '../utils';
+import { messageIntentLabel } from '../messageIntents';
 
 interface Props {
   projectId: string;
@@ -257,6 +258,7 @@ export function TaskDetail({ projectId, taskId, onSelectTask, onSelectMessage, o
                 title={msg.thread_id != null ? `Open thread #${msg.thread_id}` : `Open message #${msg.id}`}
               >
                 <span className="message-time">{formatTimeAgo(msg.created_at)}</span>
+                <span className={`intent-chip intent-${msg.intent}`}>{messageIntentLabel(msg.intent)}</span>
                 <span className="message-sender">{msg.sender}:</span>
                 <span className="message-content">{msg.content.replace(/\n/g, ' ')}</span>
               </button>

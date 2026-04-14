@@ -66,9 +66,22 @@ public static class MessageRoutes
             return Results.Ok(messages);
         });
 
-        group.MapGet("/feed", async (IMessageRepository repo, string projectId, int? limit) =>
+        group.MapGet("/feed", async (IMessageRepository repo, string projectId, int? limit, string? intent) =>
         {
-            var feed = await repo.GetFeedAsync(projectId, limit ?? 20);
+            MessageIntent? parsedIntent = null;
+            if (!string.IsNullOrWhiteSpace(intent))
+            {
+                try
+                {
+                    parsedIntent = EnumExtensions.ParseMessageIntent(intent);
+                }
+                catch (ArgumentException ex)
+                {
+                    return Results.BadRequest(new { error = ex.Message });
+                }
+            }
+
+            var feed = await repo.GetFeedAsync(projectId, limit ?? 20, parsedIntent);
             return Results.Ok(feed);
         });
 

@@ -57,6 +57,40 @@ public static class Fmt
         _ => " "
     };
 
+    public static ConsoleColor MessageIntentColor(MessageIntent intent) => intent switch
+    {
+        MessageIntent.Note => ConsoleColor.Gray,
+        MessageIntent.StatusUpdate => ConsoleColor.Cyan,
+        MessageIntent.Question => ConsoleColor.Yellow,
+        MessageIntent.Answer => ConsoleColor.Green,
+        MessageIntent.Handoff => ConsoleColor.Cyan,
+        MessageIntent.ReviewRequest => ConsoleColor.Yellow,
+        MessageIntent.ReviewFeedback => ConsoleColor.Red,
+        MessageIntent.ReviewApproval => ConsoleColor.Green,
+        MessageIntent.TaskReady => ConsoleColor.Green,
+        MessageIntent.TaskBlocked => ConsoleColor.Red,
+        _ => ConsoleColor.DarkGray
+    };
+
+    public static string MessageIntentLabel(MessageIntent intent) => intent switch
+    {
+        MessageIntent.StatusUpdate => "status",
+        MessageIntent.ReviewRequest => "review",
+        MessageIntent.ReviewFeedback => "feedback",
+        MessageIntent.ReviewApproval => "approval",
+        MessageIntent.TaskReady => "ready",
+        MessageIntent.TaskBlocked => "blocked",
+        _ => intent.ToDbValue()
+    };
+
+    public static void WriteIntentBadge(MessageIntent? intent)
+    {
+        var resolved = intent ?? MessageIntent.General;
+        Console.Write("[");
+        WriteColored(MessageIntentLabel(resolved), MessageIntentColor(resolved));
+        Console.Write("]");
+    }
+
     public static void WriteColored(string text, ConsoleColor color)
     {
         Console.ForegroundColor = color;

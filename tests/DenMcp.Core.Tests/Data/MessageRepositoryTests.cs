@@ -132,6 +132,41 @@ public class MessageRepositoryTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetFeedAsync_FiltersByIntentWhileKeepingThreadRootContext()
+    {
+        var root = await _repo.CreateAsync(new Message
+        {
+            ProjectId = "proj",
+            Sender = "alice",
+            Content = "General thread root"
+        });
+        await _repo.CreateAsync(new Message
+        {
+            ProjectId = "proj",
+            Sender = "bob",
+            Content = "Review feedback reply",
+            ThreadId = root.Id,
+            Metadata = JsonSerializer.Deserialize<JsonElement>(
+                """{"type":"review_feedback","recipient":"claude-code"}""")
+        });
+        await _repo.CreateAsync(new Message
+        {
+            ProjectId = "proj",
+            Sender = "carol",
+            Content = "Standalone note",
+            Intent = MessageIntent.Note
+        });
+
+        var feed = await _repo.GetFeedAsync("proj", intent: MessageIntent.ReviewFeedback);
+
+        var item = Assert.Single(feed);
+        Assert.Equal(root.Id, item.RootMessage.Id);
+        Assert.Equal("General thread root", item.RootMessage.Content);
+        Assert.Equal("Review feedback reply", item.LatestMessage.Content);
+        Assert.Equal(0, item.ReplyCount);
+    }
+
+    [Fact]
     public async Task MarkRead_IsIdempotent()
     {
         var msg = await _repo.CreateAsync(new Message { ProjectId = "proj", Sender = "codex", Content = "Test" });

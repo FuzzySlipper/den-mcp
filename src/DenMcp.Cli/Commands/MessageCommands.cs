@@ -1,3 +1,5 @@
+using DenMcp.Core.Models;
+
 namespace DenMcp.Cli.Commands;
 
 public static class MessageCommands
@@ -9,18 +11,36 @@ public static class MessageCommands
 
         var unreadFor = router.HasFlag("unread") ? "user" : null;
         var limit = router.GetFlag("limit") is { } l ? int.Parse(l) : 20;
+        MessageIntent? intent = null;
+        if (router.GetFlag("intent") is { } intentFlag)
+        {
+            try
+            {
+                intent = EnumExtensions.ParseMessageIntent(intentFlag);
+            }
+            catch (ArgumentException ex)
+            {
+                Console.Error.WriteLine(ex.Message);
+                return 1;
+            }
+        }
 
-        var messages = await client.GetMessagesAsync(project, unreadFor: unreadFor, limit: limit);
+        var messages = await client.GetMessagesAsync(project, unreadFor: unreadFor, limit: limit, intent: intent);
         if (messages.Count == 0)
         {
             Console.WriteLine(unreadFor is not null ? "No unread messages." : "No messages.");
             return 0;
         }
 
-        Fmt.WriteHeader($"Messages — {project}");
+        var header = $"Messages — {project}";
+        if (intent is not null)
+            header += $" [{intent.Value.ToDbValue()}]";
+        Fmt.WriteHeader(header);
         foreach (var msg in messages)
         {
             Console.Write($"  #{msg.Id} ");
+            Fmt.WriteIntentBadge(msg.Intent);
+            Console.Write(" ");
             Fmt.WriteColored(msg.Sender, ConsoleColor.Cyan);
             Console.Write($" ({Fmt.FormatTime(msg.CreatedAt)})");
             if (msg.TaskId is not null)

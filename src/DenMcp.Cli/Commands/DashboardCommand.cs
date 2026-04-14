@@ -107,6 +107,7 @@ internal sealed class DashboardView : Toplevel
 
     // Status filter: null = show all
     private string? _statusFilter;
+    private MessageIntent? _messageIntentFilter;
 
     // Sort mode: "priority" | "id" | "status" | "title"
     private string _sortMode = "priority";
@@ -229,7 +230,7 @@ internal sealed class DashboardView : Toplevel
             new(Key.R, "~R~ Refresh", () => _ = RefreshData()),
             new(Key.S, "~S~ Status", OnChangeStatus),
             new(Key.N, "~N~ Next", OnShowNext),
-            new(Key.F, "~F~ Filter", OnFilterStatus),
+            new(Key.F, "~F~ Filter", OnOpenFilter),
             new(Key.O, "~O~ Sort", OnChangeSort),
             new(Key.V, "~V~ View", CyclePaneMode),
             new(Key.A, "~A~ Approve", ApproveSelectedDispatch),
@@ -472,15 +473,17 @@ internal sealed class DashboardView : Toplevel
     {
         if (_currentProject is null) return;
 
-        _messages = await _client.GetMessagesAsync(_currentProject, limit: 15);
+        _messages = await _client.GetMessagesAsync(_currentProject, limit: 15, intent: _messageIntentFilter);
         var msgLines = _messages.Select(m =>
         {
             var time = FormatShortTime(m.CreatedAt);
             var projectTag = isGlobal ? $"[{Truncate(m.ProjectId, 12)}] " : "";
-            return $"[{time}] {projectTag}{m.Sender}: {Truncate(m.Content.ReplaceLineEndings(" "), 50)}";
+            var intent = Fmt.MessageIntentLabel(m.Intent ?? MessageIntent.General);
+            return $"[{time}] {projectTag}[{intent}] {m.Sender}: {Truncate(m.Content.ReplaceLineEndings(" "), 50)}";
         }).ToList();
         _messageList.SetSource(msgLines);
-        _messageFrame.Title = $"Messages — {_currentProject} ({_messages.Count})";
+        var intentLabel = _messageIntentFilter is not null ? $" [{_messageIntentFilter.Value.ToDbValue()}]" : "";
+        _messageFrame.Title = $"Messages — {_currentProject}{intentLabel} ({_messages.Count})";
 
         await CleanupDeadSessionsAsync();
 
@@ -886,7 +889,8 @@ internal sealed class DashboardView : Toplevel
             foreach (var msg in detail.RecentMessages)
             {
                 var ago = FormatShortTime(msg.CreatedAt);
-                lines.Add($"    [{ago}] {msg.Sender}: {Truncate(msg.Content.ReplaceLineEndings(" "), 50)}");
+                var intent = Fmt.MessageIntentLabel(msg.Intent ?? MessageIntent.General);
+                lines.Add($"    [{ago}] [{intent}] {msg.Sender}: {Truncate(msg.Content.ReplaceLineEndings(" "), 50)}");
             }
         }
 
@@ -1082,6 +1086,17 @@ internal sealed class DashboardView : Toplevel
             SortNodes(node.Children);
     }
 
+    private void OnOpenFilter()
+    {
+        if (_messageFrame.HasFocus)
+        {
+            OnFilterMessageIntent();
+            return;
+        }
+
+        OnFilterStatus();
+    }
+
     private void OnFilterStatus()
     {
         if (_paneMode != DashboardPaneMode.Tasks)
@@ -1119,6 +1134,54 @@ internal sealed class DashboardView : Toplevel
         Application.Run(dlg);
     }
 
+    private void OnFilterMessageIntent()
+    {
+        var options = new[]
+        {
+            "(all)",
+            "handoff",
+            "review_feedback",
+            "review_approval",
+            "review_request",
+            "question",
+            "task_blocked",
+            "task_ready",
+            "status_update",
+            "note",
+            "answer",
+            "general"
+        };
+
+        var currentIdx = 0;
+        if (_messageIntentFilter is not null)
+        {
+            var idx = Array.IndexOf(options, _messageIntentFilter.Value.ToDbValue());
+            if (idx >= 0) currentIdx = idx;
+        }
+
+        var dlg = new Dialog("Filter Messages by Intent", 34, 16);
+        var list = new ListView(options)
+        {
+            X = 1, Y = 1,
+            Width = Dim.Fill(1),
+            Height = Dim.Fill(2),
+            SelectedItem = currentIdx
+        };
+        dlg.Add(list);
+
+        list.OpenSelectedItem += e =>
+        {
+            _messageIntentFilter = e.Item == 0 ? null : EnumExtensions.ParseMessageIntent(options[e.Item]);
+            Application.RequestStop();
+            _ = RefreshMessagesAndAgents(string.Equals(_currentProject, "_global", StringComparison.Ordinal));
+        };
+
+        var cancel = new Button("Cancel");
+        cancel.Clicked += () => Application.RequestStop();
+        dlg.AddButton(cancel);
+        Application.Run(dlg);
+    }
+
     public override bool ProcessKey(KeyEvent kb)
     {
         // Intercept global shortcuts before child views (TreeView/ListView) consume them
@@ -1129,7 +1192,7 @@ internal sealed class DashboardView : Toplevel
                 case 'r': _ = RefreshData(); return true;
                 case 's': OnChangeStatus(); return true;
                 case 'n': OnShowNext(); return true;
-                case 'f': OnFilterStatus(); return true;
+                case 'f': OnOpenFilter(); return true;
                 case 'o': OnChangeSort(); return true;
                 case 'v': CyclePaneMode(); return true;
                 case 'a': ApproveSelectedDispatch(); return true;
@@ -1150,6 +1213,7 @@ internal sealed class DashboardView : Toplevel
         var lines = new List<string>
         {
             $"  From:    {msg.Sender}",
+            $"  Intent:  {(msg.Intent ?? MessageIntent.General).ToDbValue()}",
             $"  Project: {msg.ProjectId}",
             $"  Time:    {msg.CreatedAt:yyyy-MM-dd HH:mm:ss} UTC",
         };
@@ -1180,13 +1244,14 @@ internal sealed class DashboardView : Toplevel
             foreach (var reply in thread.Replies)
             {
                 var ago = FormatShortTime(reply.CreatedAt);
-                lines.Add($"    [{ago}] {reply.Sender}:");
+                var intent = Fmt.MessageIntentLabel(reply.Intent ?? MessageIntent.General);
+                lines.Add($"    [{ago}] [{intent}] {reply.Sender}:");
                 foreach (var rline in reply.Content.Split('\n'))
                     lines.Add($"      {rline}");
             }
         }
 
-        var dlg = new Dialog($"Message from {msg.Sender}", 78, 24);
+        var dlg = new Dialog($"Message from {msg.Sender} [{(msg.Intent ?? MessageIntent.General).ToDbValue()}]", 78, 24);
         var textView = new TextView
         {
             X = 1, Y = 0,

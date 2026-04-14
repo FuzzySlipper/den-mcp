@@ -103,7 +103,10 @@ public static class TaskCommands
             Fmt.WriteHeader("Recent Messages");
             foreach (var msg in detail.RecentMessages)
             {
-                Fmt.WriteColored($"  {msg.Sender}", ConsoleColor.Cyan);
+                Console.Write("  ");
+                Fmt.WriteIntentBadge(msg.Intent);
+                Console.Write(" ");
+                Fmt.WriteColored(msg.Sender, ConsoleColor.Cyan);
                 Console.Write($" ({Fmt.FormatTime(msg.CreatedAt)}): ");
                 Console.WriteLine(Fmt.Truncate(msg.Content.ReplaceLineEndings(" "), 60));
             }

@@ -63,7 +63,7 @@ static int ShowHelp()
           next                           Get next unblocked task
           create-task --title <title>    Create a new task
           status <id> <status>           Update task status
-          messages                       List recent messages
+          messages                       List recent messages [--intent <intent>]
           send --content <text>          Send a message
           docs                           List documents
           doc <slug>                     Show a document

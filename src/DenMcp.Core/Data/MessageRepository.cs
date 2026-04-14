@@ -10,7 +10,7 @@ public interface IMessageRepository
     Task<Message> CreateAsync(Message message);
     Task<List<Message>> GetMessagesAsync(string projectId, int? taskId = null,
         DateTime? since = null, string? unreadFor = null, int limit = 20, MessageIntent? intent = null);
-    Task<List<MessageFeedItem>> GetFeedAsync(string projectId, int limit = 20);
+    Task<List<MessageFeedItem>> GetFeedAsync(string projectId, int limit = 20, MessageIntent? intent = null);
     Task<Thread> GetThreadAsync(int threadId);
     Task<int> MarkReadAsync(string agent, int[] messageIds);
 }
@@ -103,12 +103,14 @@ public sealed class MessageRepository : IMessageRepository
         return messages;
     }
 
-    public async Task<List<MessageFeedItem>> GetFeedAsync(string projectId, int limit = 20)
+    public async Task<List<MessageFeedItem>> GetFeedAsync(string projectId, int limit = 20, MessageIntent? intent = null)
     {
         limit = Math.Clamp(limit, 1, 100);
 
         await using var conn = await _db.CreateConnectionAsync();
         await using var cmd = conn.CreateCommand();
+        var intentClause = intent is not null ? "AND m.intent = @intent" : "";
+        var latestIntentClause = intent is not null ? "AND m2.intent = @intent" : "";
         cmd.CommandText = """
             WITH conversation_roots AS (
                 SELECT
@@ -117,6 +119,9 @@ public sealed class MessageRepository : IMessageRepository
                     COUNT(*) - 1 AS reply_count
                 FROM messages m
                 WHERE m.project_id = @projectId
+            """ + $"""
+                  {intentClause}
+            """ + """
                 GROUP BY COALESCE(m.thread_id, m.id)
             )
             SELECT
@@ -131,6 +136,9 @@ public sealed class MessageRepository : IMessageRepository
                 FROM messages m2
                 WHERE m2.project_id = @projectId
                   AND COALESCE(m2.thread_id, m2.id) = cr.root_id
+            """ + $"""
+                  {latestIntentClause}
+            """ + """
                 ORDER BY m2.created_at DESC, m2.id DESC
                 LIMIT 1
             )
@@ -139,6 +147,8 @@ public sealed class MessageRepository : IMessageRepository
             """;
         cmd.Parameters.AddWithValue("@projectId", projectId);
         cmd.Parameters.AddWithValue("@limit", limit);
+        if (intent is not null)
+            cmd.Parameters.AddWithValue("@intent", intent.Value.ToDbValue());
 
         var items = new List<MessageFeedItem>();
         await using var reader = await cmd.ExecuteReaderAsync();

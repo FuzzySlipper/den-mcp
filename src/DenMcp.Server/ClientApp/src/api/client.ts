@@ -141,8 +141,13 @@ export function getMessages(projectId: string, opts: GetMessagesOpts = {}): Prom
   return get(`/api/projects/${esc(projectId)}/messages${q}`);
 }
 
-export function getMessageFeed(projectId: string, limit = 20): Promise<MessageFeedItem[]> {
-  const q = buildQuery({ limit });
+export interface GetMessageFeedOpts {
+  limit?: number;
+  intent?: string;
+}
+
+export function getMessageFeed(projectId: string, opts: GetMessageFeedOpts = {}): Promise<MessageFeedItem[]> {
+  const q = buildQuery({ limit: opts.limit, intent: opts.intent });
   return get(`/api/projects/${esc(projectId)}/messages/feed${q}`);
 }
 
