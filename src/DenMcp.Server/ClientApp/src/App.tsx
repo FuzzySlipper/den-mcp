@@ -21,7 +21,8 @@ export default function App() {
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [sortMode, setSortMode] = useState('priority');
 
-  const { data: projects } = usePolling(() => listProjects(), 5000);
+  const fetchProjects = useCallback(() => listProjects(), []);
+  const { data: projects } = usePolling(fetchProjects, 5000);
 
   // Auto-select first project
   const effectiveProject = selectedProject
@@ -101,6 +102,7 @@ export default function App() {
         onSelect={(id) => {
           setSelectedProject(id);
           setSelectedTaskId(null);
+          setSelectedMessage(null);
           setSelectedDoc(null);
         }}
       />
