@@ -228,9 +228,10 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
                 handoffMessage = await CreateVerdictHandoffMessageAsync(detail, updated);
         }
 
-        var completedDispatches = !ShouldEmitVerdictHandoff(updated.Verdict)
-            ? []
-            : await CompleteApprovedReviewerDispatchesAsync(detail.Task.ProjectId, detail.Task.Id, input.DecidedBy);
+        var completedDispatches = await ResolveReviewerDispatchesAsync(
+            detail.Task.ProjectId,
+            detail.Task.Id,
+            input.DecidedBy);
 
         return new ReviewVerdictResult
         {
@@ -494,23 +495,30 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
         return roundIdElement.TryGetInt32(out reviewRoundId);
     }
 
-    private async Task<List<DispatchEntry>> CompleteApprovedReviewerDispatchesAsync(
+    private async Task<List<DispatchEntry>> ResolveReviewerDispatchesAsync(
         string projectId,
         int taskId,
         string reviewer)
     {
-        var approved = await _dispatches.ListAsync(projectId, reviewer, [DispatchStatus.Approved]);
+        var open = await _dispatches.ListAsync(projectId, reviewer, [DispatchStatus.Pending, DispatchStatus.Approved]);
         var completed = new List<DispatchEntry>();
 
-        foreach (var entry in approved.Where(entry => entry.TaskId == taskId))
+        foreach (var entry in open.Where(entry => entry.TaskId == taskId))
         {
             try
             {
-                completed.Add(await _dispatches.CompleteAsync(entry.Id, "review-workflow"));
+                if (entry.Status == DispatchStatus.Approved)
+                {
+                    completed.Add(await _dispatches.CompleteAsync(entry.Id, "review-workflow"));
+                }
+                else
+                {
+                    await _dispatches.ExpireAsync(entry.Id);
+                }
             }
             catch (InvalidOperationException ex)
             {
-                _logger.LogWarning(ex, "Failed to complete reviewer dispatch {DispatchId} after verdict handoff", entry.Id);
+                _logger.LogWarning(ex, "Failed to resolve reviewer dispatch {DispatchId} after verdict", entry.Id);
             }
         }
 

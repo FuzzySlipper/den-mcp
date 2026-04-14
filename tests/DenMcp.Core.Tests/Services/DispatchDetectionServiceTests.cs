@@ -53,6 +53,28 @@ public class DispatchDetectionServiceTests : IAsyncLifetime
 
     #region Task status change dispatch
 
+    private async Task<DispatchEntry> CreateDispatchAsync(
+        int triggerId,
+        int taskId,
+        string targetAgent,
+        DispatchTriggerType triggerType = DispatchTriggerType.Message)
+    {
+        var (dispatch, _) = await _dispatches.CreateIfAbsentAsync(new DispatchEntry
+        {
+            ProjectId = "proj",
+            TargetAgent = targetAgent,
+            TriggerType = triggerType,
+            TriggerId = triggerId,
+            TaskId = taskId,
+            Summary = $"Dispatch {triggerId}",
+            ContextPrompt = "Context",
+            DedupKey = DispatchEntry.BuildDedupKey(triggerType, triggerId, targetAgent),
+            ExpiresAt = DateTime.UtcNow.AddHours(1)
+        });
+
+        return dispatch;
+    }
+
     [Fact]
     public async Task TaskMovedToReview_CreatesDispatchForReviewer()
     {
@@ -90,6 +112,23 @@ public class DispatchDetectionServiceTests : IAsyncLifetime
 
         var pending = await _dispatches.ListAsync("proj", statuses: [DispatchStatus.Pending]);
         Assert.Empty(pending); // No trigger for review→done in default config
+    }
+
+    [Fact]
+    public async Task TaskMovedToDone_ExpiresOpenDispatchesForTask()
+    {
+        var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Cleanup task" });
+        var pending = await CreateDispatchAsync(triggerId: 10, taskId: task.Id, targetAgent: "codex");
+        var approved = await CreateDispatchAsync(triggerId: 11, taskId: task.Id, targetAgent: "claude-code");
+        await _dispatches.ApproveAsync(approved.Id, "user");
+        var otherTask = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Other task" });
+        var untouched = await CreateDispatchAsync(triggerId: 12, taskId: otherTask.Id, targetAgent: "codex");
+
+        await _detection.OnTaskStatusChangedAsync(task, "review", "done", "codex");
+
+        Assert.Equal(DispatchStatus.Expired, (await _dispatches.GetByIdAsync(pending.Id))!.Status);
+        Assert.Equal(DispatchStatus.Expired, (await _dispatches.GetByIdAsync(approved.Id))!.Status);
+        Assert.Equal(DispatchStatus.Pending, (await _dispatches.GetByIdAsync(untouched.Id))!.Status);
     }
 
     [Fact]
@@ -148,6 +187,34 @@ public class DispatchDetectionServiceTests : IAsyncLifetime
         Assert.Single(pending);
         Assert.Equal("claude-code", pending[0].TargetAgent);
         Assert.Contains("review feedback", pending[0].Summary!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task MessageDispatch_ExpiresOlderTaskDispatchForSameTarget()
+    {
+        var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Review cleanup" });
+        await _detection.OnTaskStatusChangedAsync(task, "in_progress", "review", "claude-code");
+        var older = Assert.Single(await _dispatches.ListAsync("proj", "codex", [DispatchStatus.Pending]));
+
+        var msg = await _messages.CreateAsync(new Message
+        {
+            ProjectId = "proj",
+            TaskId = task.Id,
+            Sender = "patch-codex",
+            Content = "Please review the latest pass.",
+            Intent = MessageIntent.ReviewRequest,
+            Metadata = JsonSerializer.Deserialize<JsonElement>(
+                """{"recipient":"codex","handoff_kind":"review_request"}""")
+        });
+
+        await _detection.OnMessageCreatedAsync(msg);
+
+        var pending = await _dispatches.ListAsync("proj", "codex", [DispatchStatus.Pending]);
+        Assert.Single(pending);
+        Assert.Equal(msg.Id, pending[0].TriggerId);
+
+        var expiredOlder = await _dispatches.GetByIdAsync(older.Id);
+        Assert.Equal(DispatchStatus.Expired, expiredOlder!.Status);
     }
 
     [Fact]

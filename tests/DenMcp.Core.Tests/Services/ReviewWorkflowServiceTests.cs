@@ -221,6 +221,21 @@ public class ReviewWorkflowServiceTests : IAsyncLifetime
             ExpiresAt = DateTime.UtcNow.AddHours(1)
         });
         await _dispatches.ApproveAsync(reviewDispatch.Id, "signal-user");
+        var (stalePendingDispatch, _) = await _dispatches.CreateIfAbsentAsync(new DispatchEntry
+        {
+            ProjectId = "proj",
+            TargetAgent = "codex",
+            TriggerType = DispatchTriggerType.Message,
+            TriggerId = reviewRequest.Message.Id + 1000,
+            TaskId = task.Id,
+            Summary = "Older pending review request",
+            ContextPrompt = "Review this older request",
+            DedupKey = DispatchEntry.BuildDedupKey(
+                DispatchTriggerType.Message,
+                reviewRequest.Message.Id + 1000,
+                "codex"),
+            ExpiresAt = DateTime.UtcNow.AddHours(1)
+        });
 
         var result = await _workflow.SetReviewVerdictAsync(new SetReviewVerdictInput
         {
@@ -253,6 +268,9 @@ public class ReviewWorkflowServiceTests : IAsyncLifetime
 
         var completedReviewerDispatch = await _dispatches.GetByIdAsync(reviewDispatch.Id);
         Assert.Equal(DispatchStatus.Completed, completedReviewerDispatch!.Status);
+
+        var expiredPendingReviewerDispatch = await _dispatches.GetByIdAsync(stalePendingDispatch.Id);
+        Assert.Equal(DispatchStatus.Expired, expiredPendingReviewerDispatch!.Status);
     }
 
     [Fact]

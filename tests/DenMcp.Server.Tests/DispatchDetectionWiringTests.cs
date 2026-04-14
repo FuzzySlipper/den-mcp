@@ -60,6 +60,32 @@ public class DispatchDetectionWiringTests : IAsyncLifetime
         return await dispatches.ListAsync(ProjectId, statuses: [DispatchStatus.Pending]);
     }
 
+    private async Task<DispatchEntry> CreateDispatchAsync(
+        int taskId,
+        int triggerId,
+        string targetAgent,
+        bool approve = false)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var dispatches = scope.ServiceProvider.GetRequiredService<IDispatchRepository>();
+        var (dispatch, _) = await dispatches.CreateIfAbsentAsync(new DispatchEntry
+        {
+            ProjectId = ProjectId,
+            TargetAgent = targetAgent,
+            TriggerType = DispatchTriggerType.Message,
+            TriggerId = triggerId,
+            TaskId = taskId,
+            Summary = $"Dispatch {triggerId}",
+            ContextPrompt = "Context",
+            DedupKey = DispatchEntry.BuildDedupKey(DispatchTriggerType.Message, triggerId, targetAgent),
+            ExpiresAt = DateTime.UtcNow.AddHours(1)
+        });
+
+        return approve
+            ? await dispatches.ApproveAsync(dispatch.Id, "user")
+            : dispatch;
+    }
+
     #region REST wiring — dispatch is created
 
     [Fact]
@@ -110,6 +136,26 @@ public class DispatchDetectionWiringTests : IAsyncLifetime
         var dispatches = await GetDispatchesAsync();
         Assert.Single(dispatches);
         Assert.Equal("codex", dispatches[0].TargetAgent);
+    }
+
+    [Fact]
+    public async Task RestTaskUpdate_ToDone_ExpiresOpenDispatchesForTask()
+    {
+        var taskId = await SeedTaskAsync();
+        var pending = await CreateDispatchAsync(taskId, 100, "codex");
+        var approved = await CreateDispatchAsync(taskId, 101, "claude-code", approve: true);
+
+        var response = await _client.PutAsJsonAsync($"/api/projects/{ProjectId}/tasks/{taskId}", new
+        {
+            agent = "claude-code",
+            status = "done"
+        });
+        response.EnsureSuccessStatusCode();
+
+        using var scope = _factory.Services.CreateScope();
+        var dispatches = scope.ServiceProvider.GetRequiredService<IDispatchRepository>();
+        Assert.Equal(DispatchStatus.Expired, (await dispatches.GetByIdAsync(pending.Id))!.Status);
+        Assert.Equal(DispatchStatus.Expired, (await dispatches.GetByIdAsync(approved.Id))!.Status);
     }
 
     #endregion

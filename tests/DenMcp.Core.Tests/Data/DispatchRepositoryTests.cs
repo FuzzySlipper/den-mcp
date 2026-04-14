@@ -8,25 +8,30 @@ public class DispatchRepositoryTests : IAsyncLifetime
 {
     private readonly TestDb _testDb = new();
     private DispatchRepository _repo = null!;
+    private TaskRepository _tasks = null!;
 
     public async Task InitializeAsync()
     {
         await _testDb.InitializeAsync();
         _repo = new DispatchRepository(_testDb.Db);
+        _tasks = new TaskRepository(_testDb.Db);
         var projRepo = new ProjectRepository(_testDb.Db);
         await projRepo.CreateAsync(new Project { Id = "proj", Name = "Test" });
     }
 
     public Task DisposeAsync() => _testDb.DisposeAsync();
 
-    private DispatchEntry MakeEntry(int triggerId = 1, string agent = "claude-code",
-        DispatchTriggerType triggerType = DispatchTriggerType.TaskStatus) => new()
+    private DispatchEntry MakeEntry(
+        int triggerId = 1,
+        string agent = "claude-code",
+        DispatchTriggerType triggerType = DispatchTriggerType.TaskStatus,
+        int? taskId = null) => new()
     {
         ProjectId = "proj",
         TargetAgent = agent,
         TriggerType = triggerType,
         TriggerId = triggerId,
-        TaskId = null,
+        TaskId = taskId,
         Summary = "test dispatch",
         DedupKey = DispatchEntry.BuildDedupKey(triggerType, triggerId, agent),
         ExpiresAt = DateTime.UtcNow.AddHours(24)
@@ -180,6 +185,60 @@ public class DispatchRepositoryTests : IAsyncLifetime
         // Can't complete a pending entry — must be approved first
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => _repo.CompleteAsync(entry.Id));
+    }
+
+    [Fact]
+    public async Task Expire_TransitionsApprovedToExpired()
+    {
+        var (entry, _) = await _repo.CreateIfAbsentAsync(MakeEntry());
+        await _repo.ApproveAsync(entry.Id, "user");
+
+        var expired = await _repo.ExpireAsync(entry.Id);
+
+        Assert.Equal(DispatchStatus.Expired, expired.Status);
+        Assert.Equal("user", expired.DecidedBy);
+    }
+
+    [Fact]
+    public async Task ExpireOpenForTask_ExpiresPendingAndApprovedEntriesForTask()
+    {
+        var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Task 42" });
+        var otherTaskRecord = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Task 99" });
+        var (pending, _) = await _repo.CreateIfAbsentAsync(MakeEntry(triggerId: 1, taskId: task.Id));
+        var (approved, _) = await _repo.CreateIfAbsentAsync(MakeEntry(triggerId: 2, taskId: task.Id));
+        await _repo.ApproveAsync(approved.Id, "user");
+        var (otherTask, _) = await _repo.CreateIfAbsentAsync(MakeEntry(triggerId: 3, taskId: otherTaskRecord.Id));
+        var (taskless, _) = await _repo.CreateIfAbsentAsync(MakeEntry(triggerId: 4));
+
+        var expiredCount = await _repo.ExpireOpenForTaskAsync("proj", task.Id);
+
+        Assert.Equal(2, expiredCount);
+        Assert.Equal(DispatchStatus.Expired, (await _repo.GetByIdAsync(pending.Id))!.Status);
+        Assert.Equal(DispatchStatus.Expired, (await _repo.GetByIdAsync(approved.Id))!.Status);
+        Assert.Equal(DispatchStatus.Pending, (await _repo.GetByIdAsync(otherTask.Id))!.Status);
+        Assert.Equal(DispatchStatus.Pending, (await _repo.GetByIdAsync(taskless.Id))!.Status);
+    }
+
+    [Fact]
+    public async Task ExpireSupersededForTaskTarget_ExpiresOnlyOlderEntriesForSameTaskAndTarget()
+    {
+        var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Task 42" });
+        var otherTaskRecord = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Task 99" });
+        var (olderPending, _) = await _repo.CreateIfAbsentAsync(MakeEntry(triggerId: 1, taskId: task.Id));
+        var (olderApproved, _) = await _repo.CreateIfAbsentAsync(MakeEntry(triggerId: 2, taskId: task.Id));
+        await _repo.ApproveAsync(olderApproved.Id, "user");
+        var (otherTarget, _) = await _repo.CreateIfAbsentAsync(MakeEntry(triggerId: 3, agent: "codex", taskId: task.Id));
+        var (otherTask, _) = await _repo.CreateIfAbsentAsync(MakeEntry(triggerId: 4, taskId: otherTaskRecord.Id));
+        var (current, _) = await _repo.CreateIfAbsentAsync(MakeEntry(triggerId: 5, taskId: task.Id));
+
+        var expiredCount = await _repo.ExpireSupersededForTaskTargetAsync("proj", task.Id, "claude-code", current.Id);
+
+        Assert.Equal(2, expiredCount);
+        Assert.Equal(DispatchStatus.Expired, (await _repo.GetByIdAsync(olderPending.Id))!.Status);
+        Assert.Equal(DispatchStatus.Expired, (await _repo.GetByIdAsync(olderApproved.Id))!.Status);
+        Assert.Equal(DispatchStatus.Pending, (await _repo.GetByIdAsync(otherTarget.Id))!.Status);
+        Assert.Equal(DispatchStatus.Pending, (await _repo.GetByIdAsync(otherTask.Id))!.Status);
+        Assert.Equal(DispatchStatus.Pending, (await _repo.GetByIdAsync(current.Id))!.Status);
     }
 
     [Fact]

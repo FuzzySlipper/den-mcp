@@ -104,34 +104,46 @@ public sealed class DispatchDetectionService : IDispatchDetectionService
             Sender = changedBy
         };
 
-        await TryCreateDispatchAsync(evt, DispatchTriggerType.TaskStatus, task.Id);
+        var dispatch = await TryCreateDispatchAsync(evt, DispatchTriggerType.TaskStatus, task.Id);
+        if (IsTerminalTaskStatus(toStatus))
+        {
+            var expired = await _dispatches.ExpireOpenForTaskAsync(task.ProjectId, task.Id, dispatch?.Id);
+            if (expired > 0)
+            {
+                _logger.LogInformation(
+                    "Expired {ExpiredCount} open dispatch(es) for terminal task #{TaskId} in {ProjectId}",
+                    expired,
+                    task.Id,
+                    task.ProjectId);
+            }
+        }
     }
 
-    private async Task TryCreateDispatchAsync(DispatchEvent evt, DispatchTriggerType triggerType, int triggerId)
+    private async Task<DispatchEntry?> TryCreateDispatchAsync(DispatchEvent evt, DispatchTriggerType triggerType, int triggerId)
     {
         var configResult = await _routing.GetRoutingConfigAsync(evt.ProjectId);
         if (!configResult.IsValid)
         {
             _logger.LogWarning("Skipping dispatch detection for {ProjectId}: {Error}",
                 evt.ProjectId, configResult.ValidationError);
-            return;
+            return null;
         }
 
         var trigger = _routing.MatchTrigger(configResult.Config, evt);
         if (trigger is null)
-            return; // No trigger matched — not a dispatchable event
+            return null; // No trigger matched — not a dispatchable event
 
         var targetAgent = _routing.ResolveAgent(configResult.Config, trigger, evt);
         if (targetAgent is null)
         {
             _logger.LogWarning("Trigger matched but target agent resolved to null for {ProjectId} event {EventKind}",
                 evt.ProjectId, evt.EventKind);
-            return;
+            return null;
         }
 
         // Don't dispatch to the same agent that caused the event
         if (string.Equals(targetAgent, evt.Sender, StringComparison.OrdinalIgnoreCase))
-            return;
+            return null;
 
         // Generate prompt
         var promptResult = await _prompts.GenerateAsync(evt, trigger, configResult.Config);
@@ -153,6 +165,25 @@ public sealed class DispatchDetectionService : IDispatchDetectionService
         };
 
         var (dispatch, created) = await _dispatches.CreateIfAbsentAsync(entry);
+        if (evt.TaskId is int taskId)
+        {
+            // Dispatches are a queue/cache over the task thread, so newer task-attached
+            // work for the same target should retire older open entries.
+            var expired = await _dispatches.ExpireSupersededForTaskTargetAsync(
+                evt.ProjectId,
+                taskId,
+                targetAgent,
+                dispatch.Id);
+            if (expired > 0)
+            {
+                _logger.LogInformation(
+                    "Expired {ExpiredCount} superseded dispatch(es) for task #{TaskId} targeting {TargetAgent}",
+                    expired,
+                    taskId,
+                    targetAgent);
+            }
+        }
+
         if (created)
         {
             _logger.LogInformation("Created dispatch #{DispatchId}: {Summary}",
@@ -169,5 +200,11 @@ public sealed class DispatchDetectionService : IDispatchDetectionService
                 _logger.LogError(ex, "Failed to send notification for dispatch {DispatchId}", dispatch.Id);
             }
         }
+
+        return dispatch;
     }
+
+    private static bool IsTerminalTaskStatus(string toStatus) =>
+        string.Equals(toStatus, "done", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toStatus, "cancelled", StringComparison.OrdinalIgnoreCase);
 }

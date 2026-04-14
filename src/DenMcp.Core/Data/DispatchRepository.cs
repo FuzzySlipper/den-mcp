@@ -16,6 +16,9 @@ public interface IDispatchRepository
     Task<DispatchEntry> ApproveAsync(int id, string decidedBy);
     Task<DispatchEntry> RejectAsync(int id, string decidedBy);
     Task<DispatchEntry> CompleteAsync(int id, string? completedBy = null);
+    Task<DispatchEntry> ExpireAsync(int id);
+    Task<int> ExpireOpenForTaskAsync(string projectId, int taskId, int? excludeId = null);
+    Task<int> ExpireSupersededForTaskTargetAsync(string projectId, int taskId, string targetAgent, int keepId);
     Task<int> ExpireStaleAsync(DateTime now);
     Task<int> GetPendingCountAsync(string? projectId = null);
 }
@@ -144,6 +147,76 @@ public sealed class DispatchRepository : IDispatchRepository
             throw new InvalidOperationException(
                 $"Dispatch {id} cannot transition to completed (must be approved)");
         return ReadEntry(reader);
+    }
+
+    public async Task<DispatchEntry> ExpireAsync(int id)
+    {
+        await using var conn = await _db.CreateConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE dispatch_entries
+            SET status = @newStatus
+            WHERE id = @id AND status IN ('pending', 'approved')
+            RETURNING id, project_id, target_agent, status, trigger_type, trigger_id,
+                      task_id, summary, context_prompt, dedup_key,
+                      created_at, expires_at, decided_at, completed_at, decided_by, completed_by
+            """;
+        cmd.Parameters.AddWithValue("@id", id);
+        cmd.Parameters.AddWithValue("@newStatus", DispatchStatus.Expired.ToDbValue());
+
+        await using var reader = await cmd.ExecuteReaderAsync();
+        if (!await reader.ReadAsync())
+            throw new InvalidOperationException(
+                $"Dispatch {id} cannot transition to expired (must be pending or approved)");
+        return ReadEntry(reader);
+    }
+
+    public async Task<int> ExpireOpenForTaskAsync(string projectId, int taskId, int? excludeId = null)
+    {
+        await using var conn = await _db.CreateConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE dispatch_entries
+            SET status = 'expired'
+            WHERE project_id = @projectId
+              AND task_id = @taskId
+              AND status IN ('pending', 'approved')
+            """;
+        cmd.Parameters.AddWithValue("@projectId", projectId);
+        cmd.Parameters.AddWithValue("@taskId", taskId);
+
+        if (excludeId is not null)
+        {
+            cmd.CommandText += " AND id != @excludeId";
+            cmd.Parameters.AddWithValue("@excludeId", excludeId.Value);
+        }
+
+        return await cmd.ExecuteNonQueryAsync();
+    }
+
+    public async Task<int> ExpireSupersededForTaskTargetAsync(
+        string projectId,
+        int taskId,
+        string targetAgent,
+        int keepId)
+    {
+        await using var conn = await _db.CreateConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE dispatch_entries
+            SET status = 'expired'
+            WHERE project_id = @projectId
+              AND task_id = @taskId
+              AND target_agent = @targetAgent
+              AND status IN ('pending', 'approved')
+              AND id < @keepId
+            """;
+        cmd.Parameters.AddWithValue("@projectId", projectId);
+        cmd.Parameters.AddWithValue("@taskId", taskId);
+        cmd.Parameters.AddWithValue("@targetAgent", targetAgent);
+        cmd.Parameters.AddWithValue("@keepId", keepId);
+
+        return await cmd.ExecuteNonQueryAsync();
     }
 
     public async Task<int> ExpireStaleAsync(DateTime now)
