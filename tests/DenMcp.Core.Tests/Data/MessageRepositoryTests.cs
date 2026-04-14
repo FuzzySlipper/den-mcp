@@ -70,6 +70,68 @@ public class MessageRepositoryTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetFeedAsync_GroupsRepliesUnderRootAndKeepsStandaloneMessages()
+    {
+        var olderRoot = await _repo.CreateAsync(new Message
+        {
+            ProjectId = "proj",
+            Sender = "alice",
+            Content = "Older thread root"
+        });
+        var standalone = await _repo.CreateAsync(new Message
+        {
+            ProjectId = "proj",
+            Sender = "carol",
+            Content = "Standalone update"
+        });
+        await _repo.CreateAsync(new Message
+        {
+            ProjectId = "proj",
+            Sender = "bob",
+            Content = "Latest reply in older thread",
+            ThreadId = olderRoot.Id
+        });
+
+        var feed = await _repo.GetFeedAsync("proj");
+
+        Assert.Equal(2, feed.Count);
+
+        var threadedItem = Assert.Single(feed, item => item.RootMessage.Id == olderRoot.Id);
+        Assert.Equal("Latest reply in older thread", threadedItem.LatestMessage.Content);
+        Assert.Equal(1, threadedItem.ReplyCount);
+
+        var standaloneItem = Assert.Single(feed, item => item.RootMessage.Id == standalone.Id);
+        Assert.Equal(0, standaloneItem.ReplyCount);
+        Assert.Equal(standalone.Id, standaloneItem.LatestMessage.Id);
+    }
+
+    [Fact]
+    public async Task GetFeedAsync_UsesRootMessageForThreadSummary()
+    {
+        var root = await _repo.CreateAsync(new Message
+        {
+            ProjectId = "proj",
+            Sender = "alice",
+            Content = "Planning summary"
+        });
+        var reply = await _repo.CreateAsync(new Message
+        {
+            ProjectId = "proj",
+            Sender = "bob",
+            Content = "Follow-up question",
+            ThreadId = root.Id
+        });
+
+        var feed = await _repo.GetFeedAsync("proj");
+
+        var item = Assert.Single(feed);
+        Assert.Equal(root.Id, item.RootMessage.Id);
+        Assert.Equal(reply.Id, item.LatestMessage.Id);
+        Assert.Equal("Planning summary", item.RootMessage.Content);
+        Assert.Equal("Follow-up question", item.LatestMessage.Content);
+    }
+
+    [Fact]
     public async Task MarkRead_IsIdempotent()
     {
         var msg = await _repo.CreateAsync(new Message { ProjectId = "proj", Sender = "codex", Content = "Test" });

@@ -101,6 +101,43 @@ public class MessageApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RestMessageFeed_ReturnsThreadSummaries()
+    {
+        var rootResponse = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/messages", new
+        {
+            sender = "alice",
+            content = "Thread root"
+        });
+        rootResponse.EnsureSuccessStatusCode();
+        var root = await rootResponse.Content.ReadFromJsonAsync<Message>(JsonOpts);
+
+        await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/messages", new
+        {
+            sender = "carol",
+            content = "Standalone note"
+        });
+
+        await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/messages", new
+        {
+            sender = "bob",
+            content = "Thread reply",
+            thread_id = root!.Id
+        });
+
+        var response = await _client.GetAsync($"/api/projects/{ProjectId}/messages/feed?limit=10");
+        response.EnsureSuccessStatusCode();
+
+        var feed = await response.Content.ReadFromJsonAsync<List<MessageFeedItem>>(JsonOpts);
+        Assert.NotNull(feed);
+        Assert.Equal(2, feed!.Count);
+
+        var threadItem = Assert.Single(feed, item => item.RootMessage.Id == root.Id);
+        Assert.Equal(root.Id, threadItem.RootMessage.Id);
+        Assert.Equal(1, threadItem.ReplyCount);
+        Assert.Equal("Thread reply", threadItem.LatestMessage.Content);
+    }
+
+    [Fact]
     public async Task McpMessageTools_SendAndGetMessages_SupportIntent()
     {
         using var scope = _factory.Services.CreateScope();

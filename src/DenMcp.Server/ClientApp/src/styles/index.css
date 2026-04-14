@@ -479,6 +479,48 @@ html, body, #root {
   flex-shrink: 0;
 }
 
+.message-feed-item {
+  padding: 6px 10px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.message-feed-item:hover { background: var(--bg-hover); }
+
+.message-feed-item-thread {
+  border-left: 2px solid var(--cyan);
+  padding-left: 8px;
+}
+
+.message-feed-topline,
+.message-feed-bottomline {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.message-feed-bottomline {
+  padding-left: 2px;
+}
+
+.message-thread-badge {
+  color: var(--cyan);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.message-thread-meta,
+.message-thread-divider {
+  color: var(--text-muted);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
 /* Document items */
 .doc-item {
   padding: 4px 10px;

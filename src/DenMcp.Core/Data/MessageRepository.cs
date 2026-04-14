@@ -10,6 +10,7 @@ public interface IMessageRepository
     Task<Message> CreateAsync(Message message);
     Task<List<Message>> GetMessagesAsync(string projectId, int? taskId = null,
         DateTime? since = null, string? unreadFor = null, int limit = 20, MessageIntent? intent = null);
+    Task<List<MessageFeedItem>> GetFeedAsync(string projectId, int limit = 20);
     Task<Thread> GetThreadAsync(int threadId);
     Task<int> MarkReadAsync(string agent, int[] messageIds);
 }
@@ -102,6 +103,59 @@ public sealed class MessageRepository : IMessageRepository
         return messages;
     }
 
+    public async Task<List<MessageFeedItem>> GetFeedAsync(string projectId, int limit = 20)
+    {
+        limit = Math.Clamp(limit, 1, 100);
+
+        await using var conn = await _db.CreateConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            WITH conversation_roots AS (
+                SELECT
+                    COALESCE(m.thread_id, m.id) AS root_id,
+                    MAX(m.created_at) AS latest_activity_at,
+                    COUNT(*) - 1 AS reply_count
+                FROM messages m
+                WHERE m.project_id = @projectId
+                GROUP BY COALESCE(m.thread_id, m.id)
+            )
+            SELECT
+                root.id, root.project_id, root.task_id, root.thread_id, root.sender, root.content, root.intent, root.metadata, root.created_at,
+                latest.id, latest.project_id, latest.task_id, latest.thread_id, latest.sender, latest.content, latest.intent, latest.metadata, latest.created_at,
+                cr.reply_count,
+                cr.latest_activity_at
+            FROM conversation_roots cr
+            JOIN messages root ON root.id = cr.root_id
+            JOIN messages latest ON latest.id = (
+                SELECT m2.id
+                FROM messages m2
+                WHERE m2.project_id = @projectId
+                  AND COALESCE(m2.thread_id, m2.id) = cr.root_id
+                ORDER BY m2.created_at DESC, m2.id DESC
+                LIMIT 1
+            )
+            ORDER BY cr.latest_activity_at DESC, cr.root_id DESC
+            LIMIT @limit
+            """;
+        cmd.Parameters.AddWithValue("@projectId", projectId);
+        cmd.Parameters.AddWithValue("@limit", limit);
+
+        var items = new List<MessageFeedItem>();
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            items.Add(new MessageFeedItem
+            {
+                RootMessage = ReadMessage(reader, 0),
+                LatestMessage = ReadMessage(reader, 9),
+                ReplyCount = reader.GetInt32(18),
+                LatestActivityAt = DateTime.Parse(reader.GetString(19))
+            });
+        }
+
+        return items;
+    }
+
     public async Task<Thread> GetThreadAsync(int threadId)
     {
         await using var conn = await _db.CreateConnectionAsync();
@@ -152,20 +206,20 @@ public sealed class MessageRepository : IMessageRepository
         return count;
     }
 
-    private static Message ReadMessage(SqliteDataReader reader)
+    private static Message ReadMessage(SqliteDataReader reader, int offset = 0)
     {
-        var metaJson = reader.IsDBNull(7) ? null : reader.GetString(7);
+        var metaJson = reader.IsDBNull(offset + 7) ? null : reader.GetString(offset + 7);
         return new Message
         {
-            Id = reader.GetInt32(0),
-            ProjectId = reader.GetString(1),
-            TaskId = reader.IsDBNull(2) ? null : reader.GetInt32(2),
-            ThreadId = reader.IsDBNull(3) ? null : reader.GetInt32(3),
-            Sender = reader.GetString(4),
-            Content = reader.GetString(5),
-            Intent = EnumExtensions.ParseMessageIntent(reader.GetString(6)),
+            Id = reader.GetInt32(offset + 0),
+            ProjectId = reader.GetString(offset + 1),
+            TaskId = reader.IsDBNull(offset + 2) ? null : reader.GetInt32(offset + 2),
+            ThreadId = reader.IsDBNull(offset + 3) ? null : reader.GetInt32(offset + 3),
+            Sender = reader.GetString(offset + 4),
+            Content = reader.GetString(offset + 5),
+            Intent = EnumExtensions.ParseMessageIntent(reader.GetString(offset + 6)),
             Metadata = metaJson is not null ? JsonSerializer.Deserialize<JsonElement>(metaJson) : null,
-            CreatedAt = DateTime.Parse(reader.GetString(8))
+            CreatedAt = DateTime.Parse(reader.GetString(offset + 8))
         };
     }
 }

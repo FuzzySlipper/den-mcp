@@ -21,6 +21,14 @@ public sealed class Thread
     public required List<Message> Replies { get; set; }
 }
 
+public sealed class MessageFeedItem
+{
+    public required Message RootMessage { get; set; }
+    public required Message LatestMessage { get; set; }
+    public int ReplyCount { get; set; }
+    public DateTime LatestActivityAt { get; set; }
+}
+
 public static class MessageIntentCompatibility
 {
     private static readonly Dictionary<string, MessageIntent> LegacyTypeToIntent = new(StringComparer.Ordinal)

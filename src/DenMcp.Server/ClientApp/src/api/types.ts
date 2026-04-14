@@ -208,6 +208,13 @@ export interface Message {
   created_at: string;
 }
 
+export interface MessageFeedItem {
+  root_message: Message;
+  latest_message: Message;
+  reply_count: number;
+  latest_activity_at: string;
+}
+
 export interface Thread {
   root: Message;
   replies: Message[];

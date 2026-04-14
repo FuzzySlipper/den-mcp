@@ -13,16 +13,22 @@ export function MessageDetail({ message, onClose }: Props) {
 
   useEffect(() => {
     let cancelled = false;
+    setThread(null);
     getThread(message.project_id, message.id)
       .then(t => { if (!cancelled) setThread(t); })
-      .catch(() => {});
+      .catch(() => { if (!cancelled) setThread(null); });
     return () => { cancelled = true; };
   }, [message.project_id, message.id]);
+
+  const replyCount = thread?.replies.length ?? 0;
+  const title = replyCount > 0
+    ? `Thread started by ${message.sender}`
+    : `Message from ${message.sender}`;
 
   return (
     <div className="detail-overlay">
       <div className="detail-header">
-        <h2>Message from {message.sender}</h2>
+        <h2>{title}</h2>
         <button className="detail-close" onClick={onClose}>✕</button>
       </div>
       <div className="detail-body">
@@ -36,6 +42,9 @@ export function MessageDetail({ message, onClose }: Props) {
             <dd>{new Date(message.created_at + 'Z').toLocaleString()}</dd>
             {message.task_id != null && (
               <><dt>Task</dt><dd>#{message.task_id}</dd></>
+            )}
+            {replyCount > 0 && (
+              <><dt>Replies</dt><dd>{replyCount}</dd></>
             )}
             {message.thread_id != null && (
               <><dt>Reply to</dt><dd>#{message.thread_id}</dd></>

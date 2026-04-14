@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
 import type { Message, DocumentSummary } from './api/types';
-import { listProjects, listTasks, getMessages, listDocuments, listActiveAgents } from './api/client';
+import { listProjects, listTasks, getMessageFeed, listDocuments, listActiveAgents } from './api/client';
 import { usePolling } from './hooks/usePolling';
 import { ProjectSidebar } from './components/ProjectSidebar';
 import { TaskTree } from './components/TaskTree';
@@ -40,7 +40,7 @@ export default function App() {
 
   const fetchMessages = useCallback(
     () => effectiveProject
-      ? getMessages(effectiveProject, { limit: 15 })
+      ? getMessageFeed(effectiveProject, 15)
       : Promise.resolve([]),
     [effectiveProject],
   );

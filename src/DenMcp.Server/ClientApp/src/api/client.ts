@@ -5,6 +5,7 @@ import type {
   TaskDetail,
   ProjectTask,
   Message,
+  MessageFeedItem,
   Thread,
   DocumentSummary,
   Document,
@@ -138,6 +139,11 @@ export function getMessages(projectId: string, opts: GetMessagesOpts = {}): Prom
     intent: opts.intent,
   });
   return get(`/api/projects/${esc(projectId)}/messages${q}`);
+}
+
+export function getMessageFeed(projectId: string, limit = 20): Promise<MessageFeedItem[]> {
+  const q = buildQuery({ limit });
+  return get(`/api/projects/${esc(projectId)}/messages/feed${q}`);
 }
 
 export function getThread(projectId: string, threadId: number): Promise<Thread> {

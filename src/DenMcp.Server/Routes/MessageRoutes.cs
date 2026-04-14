@@ -66,6 +66,12 @@ public static class MessageRoutes
             return Results.Ok(messages);
         });
 
+        group.MapGet("/feed", async (IMessageRepository repo, string projectId, int? limit) =>
+        {
+            var feed = await repo.GetFeedAsync(projectId, limit ?? 20);
+            return Results.Ok(feed);
+        });
+
         group.MapGet("/thread/{threadId:int}", async (IMessageRepository repo, string projectId, int threadId) =>
         {
             try
