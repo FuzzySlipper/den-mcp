@@ -291,6 +291,8 @@ class ApprovalController:
             return False
 
         approved_count = 0
+        # This records that the operator chose the batch-approval path even if
+        # a later API error interrupts the loop before every dispatch is handled.
         self.approved_all = True
         self.select_first()
 
@@ -386,10 +388,6 @@ class ApprovalHandler(Handler):
                 self.controller.select_last()
             self.draw_screen()
             return
-        if key_event.matches("r"):
-            self.controller.refresh()
-            self.draw_screen()
-
     def _handle_char(self, char: str) -> bool:
         lower = char.lower()
         if lower == "q":

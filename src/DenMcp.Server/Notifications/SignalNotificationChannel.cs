@@ -243,6 +243,16 @@ public sealed class SignalNotificationChannel : INotificationChannel, IAsyncDisp
     private HttpClient CreateEventsClient()
         => _httpClientFactory.CreateClient("signal-events");
 
+    private void ReleaseExitedDaemonProcess()
+    {
+        if (_daemonProcess is null || !_daemonProcess.HasExited)
+            return;
+
+        _daemonProcess.Dispose();
+        _daemonProcess = null;
+        _ownsDaemonProcess = false;
+    }
+
     private async Task<long?> SendMessageAsync(string message, CancellationToken cancellationToken)
     {
         if (!await EnsureDaemonAvailableAsync(cancellationToken))
@@ -363,6 +373,8 @@ public sealed class SignalNotificationChannel : INotificationChannel, IAsyncDisp
                 ResetAvailabilityWarning();
                 return true;
             }
+
+            ReleaseExitedDaemonProcess();
 
             if (_daemonProcess is null || _daemonProcess.HasExited)
             {

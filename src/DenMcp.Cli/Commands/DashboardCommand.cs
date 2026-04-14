@@ -87,6 +87,9 @@ internal sealed class DashboardView : Toplevel
     private readonly FrameView _messageFrame;
     private readonly ListView _messageList;
     private readonly StatusBar _statusBar;
+    private readonly StatusItem _changeStatusStatusItem;
+    private readonly StatusItem _approveDispatchStatusItem;
+    private readonly StatusItem _rejectDispatchStatusItem;
     private readonly CancellationTokenSource _cts = new();
 
     // Documents mode
@@ -224,17 +227,21 @@ internal sealed class DashboardView : Toplevel
         _taskFrame.Add(_dispatchList);
 
         // Status bar
+        _changeStatusStatusItem = new(Key.S, "~S~ Status", OnChangeStatus, () => _paneMode == DashboardPaneMode.Tasks);
+        _approveDispatchStatusItem = new(Key.A, "~A~ Approve", ApproveSelectedDispatch, () => _paneMode == DashboardPaneMode.Dispatches);
+        _rejectDispatchStatusItem = new(Key.X, "~X~ Reject", RejectSelectedDispatch, () => _paneMode == DashboardPaneMode.Dispatches);
+
         _statusBar = new StatusBar(new StatusItem[]
         {
             new(Key.Q | Key.CtrlMask, "~^Q~ Quit", () => Application.RequestStop()),
             new(Key.R, "~R~ Refresh", () => _ = RefreshData()),
-            new(Key.S, "~S~ Status", OnChangeStatus),
+            _changeStatusStatusItem,
             new(Key.N, "~N~ Next", OnShowNext),
             new(Key.F, "~F~ Filter", OnOpenFilter),
             new(Key.O, "~O~ Sort", OnChangeSort),
             new(Key.V, "~V~ View", CyclePaneMode),
-            new(Key.A, "~A~ Approve", ApproveSelectedDispatch),
-            new(Key.X, "~X~ Reject", RejectSelectedDispatch),
+            _approveDispatchStatusItem,
+            _rejectDispatchStatusItem,
             new(Key.Tab, "~Tab~ Switch", CycleFocus)
         });
 
@@ -275,6 +282,7 @@ internal sealed class DashboardView : Toplevel
         _taskTree.Visible = _paneMode == DashboardPaneMode.Tasks;
         _docList.Visible = _paneMode == DashboardPaneMode.Documents;
         _dispatchList.Visible = _paneMode == DashboardPaneMode.Dispatches;
+        _statusBar.SetNeedsDisplay();
     }
 
     public async Task StartPolling()
@@ -959,7 +967,7 @@ internal sealed class DashboardView : Toplevel
         Application.Run(dlg);
     }
 
-    private async void OnChangeStatus()
+    private void OnChangeStatus()
     {
         if (_paneMode != DashboardPaneMode.Tasks)
             return;
@@ -1330,7 +1338,7 @@ internal sealed class DashboardView : Toplevel
     private static string FormatDispatchLine(DispatchEntry dispatch, bool isGlobal)
     {
         var age = FormatShortTime(dispatch.CreatedAt);
-        var projectTag = isGlobal ? $"[{Truncate(dispatch.ProjectId, 12)}] " : $"[{Truncate(dispatch.ProjectId, 12)}] ";
+        var projectTag = isGlobal ? $"[{Truncate(dispatch.ProjectId, 12)}] " : "";
         var taskTag = dispatch.TaskId is not null ? $" #{dispatch.TaskId}" : "";
         var summary = dispatch.Summary ?? $"{dispatch.TriggerType.ToDbValue()} #{dispatch.TriggerId}";
         return $"[{age}] {projectTag}{dispatch.TargetAgent}{taskTag}: {Truncate(summary.ReplaceLineEndings(" "), 52)}";

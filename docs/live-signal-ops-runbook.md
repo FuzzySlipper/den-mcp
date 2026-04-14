@@ -37,6 +37,8 @@ sudo ./scripts/smoke-live-dispatch-signal.sh --skip-direct-send
 sudo ./scripts/smoke-live-dispatch-signal.sh --target-agent codex --wait-for-reaction 60
 ```
 
+If you only want dispatch approvals during bring-up, set `DenMcp__Signal__NotifyOnAgentStatus=false` before restarting the server. The default `true` setting also emits agent check-in / checkout and task-status activity (`in_progress`, `review`, `done`), which is useful once the workflow is trusted but can feel noisy during early deploy validation.
+
 ## Service Model
 
 The live deployment is intentionally split across two Unix users:

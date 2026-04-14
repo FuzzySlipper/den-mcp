@@ -70,7 +70,7 @@ public static class DispatchCommands
     }
 
     public static Task<int> Show(DenApiClient client, CommandRouter router) =>
-        Show(client, GetDispatchId(router, "show"));
+        Show(client, GetDispatchId(router));
 
     public static async Task<int> Show(DenApiClient client, int dispatchId)
     {
@@ -84,7 +84,7 @@ public static class DispatchCommands
 
     public static async Task<int> Approve(DenApiClient client, CommandRouter router)
     {
-        var dispatchId = GetDispatchId(router, "approve");
+        var dispatchId = GetDispatchId(router);
         if (dispatchId <= 0)
             return ShowUsage("Usage: den dispatch approve <id> [--by <identity>]");
 
@@ -99,7 +99,7 @@ public static class DispatchCommands
 
     public static async Task<int> Reject(DenApiClient client, CommandRouter router)
     {
-        var dispatchId = GetDispatchId(router, "reject");
+        var dispatchId = GetDispatchId(router);
         if (dispatchId <= 0)
             return ShowUsage("Usage: den dispatch reject <id> [--by <identity>]");
 
@@ -114,7 +114,7 @@ public static class DispatchCommands
 
     public static async Task<int> Prompt(DenApiClient client, CommandRouter router)
     {
-        var dispatchId = GetDispatchId(router, "prompt");
+        var dispatchId = GetDispatchId(router);
         if (dispatchId <= 0)
             return ShowUsage("Usage: den dispatch prompt <id>");
 
@@ -160,7 +160,7 @@ public static class DispatchCommands
         }
     }
 
-    private static int GetDispatchId(CommandRouter router, string subcommand)
+    private static int GetDispatchId(CommandRouter router)
     {
         var positionals = router.GetPositionals("all");
         var idText = positionals.Count > 1 ? positionals[1] : null;
