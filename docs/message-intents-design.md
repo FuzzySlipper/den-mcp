@@ -244,12 +244,20 @@ Recommended compatibility plan:
 - Support new `message_intent` in routing documents.
 - Keep `message_type` as a deprecated alias for one compatibility window.
 - Prefer `message_intent` in generated docs/examples going forward.
+- Add exact-match `packet_kind` and `handoff_kind` predicates for the cases
+  where projects need subtype routing within a shared canonical intent.
+- Treat `message_type` as an intent-compatibility alias, not the long-term way
+  to distinguish packet or handoff subtypes.
 
 That lets a project express rules like:
 
 - `review_request` -> `reviewer`
 - `review_feedback` -> `{recipient}` or `implementer`
 - `task_blocked` -> coordinator / human overseer
+- `message_intent = review_request` plus `packet_kind = rereview_request` ->
+  specialized rereview handling without breaking canonical intent routing
+- `message_intent = handoff` plus `handoff_kind = planning_summary` ->
+  planner/context handoff handling distinct from other handoffs
 
 without relying on raw packet subtype strings.
 

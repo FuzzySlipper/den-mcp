@@ -56,6 +56,20 @@ public sealed class RoutingTrigger
     [JsonPropertyName("message_type")]
     public string? MessageType { get; set; }
 
+    /// <summary>
+    /// Exact review-packet subtype to match (e.g. "review_request" or "rereview_request").
+    /// Null means any packet subtype.
+    /// </summary>
+    [JsonPropertyName("packet_kind")]
+    public string? PacketKind { get; set; }
+
+    /// <summary>
+    /// Exact handoff subtype to match (e.g. "planning_summary" or "merge_request").
+    /// Null means any handoff subtype.
+    /// </summary>
+    [JsonPropertyName("handoff_kind")]
+    public string? HandoffKind { get; set; }
+
     /// <summary>If true, only matches messages with an explicit recipient in metadata.</summary>
     [JsonPropertyName("has_recipient")]
     public bool? HasRecipient { get; set; }
@@ -70,7 +84,8 @@ public sealed class RoutingTrigger
     /// <summary>
     /// Prompt template with interpolation placeholders.
     /// Supported: {project_id}, {task_id}, {task_title}, {branch}, {sender},
-    /// {message_intent}, {message_type}, {to_status}, {from_status}
+    /// {message_intent}, {message_type}, {packet_kind}, {handoff_kind},
+    /// {to_status}, {from_status}
     /// </summary>
     [JsonPropertyName("prompt_template")]
     public string? PromptTemplate { get; set; }

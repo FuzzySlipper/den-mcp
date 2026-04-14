@@ -135,6 +135,8 @@ public sealed class RoutingService : IRoutingService
             .Replace("{sender}", evt.Sender ?? "")
             .Replace("{message_intent}", evt.MessageIntent?.ToDbValue() ?? "")
             .Replace("{message_type}", evt.MessageType ?? evt.PacketKind ?? evt.HandoffKind ?? evt.MessageIntent?.ToDbValue() ?? "")
+            .Replace("{packet_kind}", evt.PacketKind ?? "")
+            .Replace("{handoff_kind}", evt.HandoffKind ?? "")
             .Replace("{to_status}", evt.ToStatus ?? "")
             .Replace("{from_status}", evt.FromStatus ?? "");
     }
@@ -226,6 +228,18 @@ public sealed class RoutingService : IRoutingService
         // Legacy message type predicate, with intent-aware compatibility fallback
         if (trigger.MessageType is not null &&
             !MatchesLegacyMessageTypeAlias(trigger.MessageType, evt))
+        {
+            return false;
+        }
+
+        if (trigger.PacketKind is not null &&
+            !string.Equals(trigger.PacketKind, evt.PacketKind, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (trigger.HandoffKind is not null &&
+            !string.Equals(trigger.HandoffKind, evt.HandoffKind, StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }

@@ -378,6 +378,94 @@ public class RoutingServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public void MatchTrigger_PacketKind_DistinguishesPacketSubtypes()
+    {
+        var config = new RoutingConfig
+        {
+            Triggers =
+            [
+                new RoutingTrigger
+                {
+                    Event = DispatchEvent.MessageReceived,
+                    MessageIntent = "review_request",
+                    PacketKind = "rereview_request",
+                    HasRecipient = true,
+                    DispatchTo = "{recipient}"
+                }
+            ]
+        };
+
+        var rereview = new DispatchEvent
+        {
+            EventKind = DispatchEvent.MessageReceived,
+            ProjectId = "proj",
+            MessageIntent = MessageIntent.ReviewRequest,
+            PacketKind = "rereview_request",
+            Recipient = "codex",
+            Sender = "claude-code",
+            MessageId = 1
+        };
+
+        var initialReview = new DispatchEvent
+        {
+            EventKind = DispatchEvent.MessageReceived,
+            ProjectId = "proj",
+            MessageIntent = MessageIntent.ReviewRequest,
+            PacketKind = "review_request",
+            Recipient = "codex",
+            Sender = "claude-code",
+            MessageId = 2
+        };
+
+        Assert.NotNull(_service.MatchTrigger(config, rereview));
+        Assert.Null(_service.MatchTrigger(config, initialReview));
+    }
+
+    [Fact]
+    public void MatchTrigger_HandoffKind_DistinguishesHandoffSubtypes()
+    {
+        var config = new RoutingConfig
+        {
+            Triggers =
+            [
+                new RoutingTrigger
+                {
+                    Event = DispatchEvent.MessageReceived,
+                    MessageIntent = "review_feedback",
+                    HandoffKind = "review_feedback",
+                    HasRecipient = true,
+                    DispatchTo = "{recipient}"
+                }
+            ]
+        };
+
+        var feedback = new DispatchEvent
+        {
+            EventKind = DispatchEvent.MessageReceived,
+            ProjectId = "proj",
+            MessageIntent = MessageIntent.ReviewFeedback,
+            HandoffKind = "review_feedback",
+            Recipient = "codex",
+            Sender = "claude-code",
+            MessageId = 1
+        };
+
+        var planning = new DispatchEvent
+        {
+            EventKind = DispatchEvent.MessageReceived,
+            ProjectId = "proj",
+            MessageIntent = MessageIntent.Handoff,
+            HandoffKind = "planning_summary",
+            Recipient = "codex",
+            Sender = "claude-code",
+            MessageId = 2
+        };
+
+        Assert.NotNull(_service.MatchTrigger(config, feedback));
+        Assert.Null(_service.MatchTrigger(config, planning));
+    }
+
+    [Fact]
     public void MatchTrigger_FirstMatchWins()
     {
         var config = new RoutingConfig
@@ -484,7 +572,7 @@ public class RoutingServiceTests : IAsyncLifetime
     [Fact]
     public void InterpolateTemplate_AllPlaceholders()
     {
-        var template = "Review task #{task_id} ({task_title}) on {branch} in {project_id}. From {sender}, intent: {message_intent}, type: {message_type}.";
+        var template = "Review task #{task_id} ({task_title}) on {branch} in {project_id}. From {sender}, intent: {message_intent}, type: {message_type}, packet: {packet_kind}, handoff: {handoff_kind}.";
         var evt = new DispatchEvent
         {
             EventKind = DispatchEvent.TaskStatusChanged,
@@ -498,7 +586,24 @@ public class RoutingServiceTests : IAsyncLifetime
         };
 
         var result = _service.InterpolateTemplate(template, evt);
-        Assert.Equal("Review task #546 (forge-stats lore accounting) on task/546-forge-stats in quillforge. From codex, intent: review_feedback, type: review_feedback.", result);
+        Assert.Equal("Review task #546 (forge-stats lore accounting) on task/546-forge-stats in quillforge. From codex, intent: review_feedback, type: review_feedback, packet: , handoff: .", result);
+    }
+
+    [Fact]
+    public void InterpolateTemplate_SubtypePlaceholders()
+    {
+        var template = "intent={message_intent}; packet={packet_kind}; handoff={handoff_kind}";
+        var evt = new DispatchEvent
+        {
+            EventKind = DispatchEvent.MessageReceived,
+            ProjectId = "proj",
+            MessageIntent = MessageIntent.ReviewApproval,
+            HandoffKind = "merge_request",
+            PacketKind = "review_findings"
+        };
+
+        var result = _service.InterpolateTemplate(template, evt);
+        Assert.Equal("intent=review_approval; packet=review_findings; handoff=merge_request", result);
     }
 
     [Fact]
