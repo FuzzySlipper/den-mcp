@@ -75,10 +75,15 @@ public static class MessageIntentCompatibility
         return DeriveFromLegacyType(legacyType);
     }
 
-    private static MessageIntent? DeriveFromLegacyType(string legacyType) =>
-        LegacyTypeToIntent.TryGetValue(legacyType, out var intent) ? intent : null;
+    public static MessageIntent? DeriveFromLegacyType(string? legacyType)
+    {
+        if (string.IsNullOrWhiteSpace(legacyType))
+            return null;
 
-    private static bool TryGetLegacyType(JsonElement? metadata, out string? legacyType)
+        return LegacyTypeToIntent.TryGetValue(legacyType, out var intent) ? intent : null;
+    }
+
+    public static bool TryGetLegacyType(JsonElement? metadata, out string? legacyType)
     {
         legacyType = null;
         if (metadata is not JsonElement element ||
@@ -92,4 +97,20 @@ public static class MessageIntentCompatibility
         legacyType = typeElement.GetString();
         return !string.IsNullOrWhiteSpace(legacyType);
     }
+
+    public static bool TryGetSubtype(JsonElement? metadata, string key, out string? subtype)
+    {
+        subtype = null;
+        if (metadata is not JsonElement element ||
+            element.ValueKind != JsonValueKind.Object ||
+            !element.TryGetProperty(key, out var subtypeElement) ||
+            subtypeElement.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        subtype = subtypeElement.GetString();
+        return !string.IsNullOrWhiteSpace(subtype);
+    }
+
 }

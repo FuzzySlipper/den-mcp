@@ -133,7 +133,8 @@ public sealed class RoutingService : IRoutingService
             .Replace("{task_title}", evt.TaskTitle ?? "")
             .Replace("{branch}", evt.Branch ?? $"task/{evt.TaskId}-*")
             .Replace("{sender}", evt.Sender ?? "")
-            .Replace("{message_type}", evt.MessageType ?? "")
+            .Replace("{message_intent}", evt.MessageIntent?.ToDbValue() ?? "")
+            .Replace("{message_type}", evt.MessageType ?? evt.PacketKind ?? evt.HandoffKind ?? evt.MessageIntent?.ToDbValue() ?? "")
             .Replace("{to_status}", evt.ToStatus ?? "")
             .Replace("{from_status}", evt.FromStatus ?? "");
     }
@@ -170,6 +171,26 @@ public sealed class RoutingService : IRoutingService
 
             if (string.IsNullOrWhiteSpace(trigger.DispatchTo))
                 return $"{prefix}: dispatch_to cannot be blank";
+
+            MessageIntent? parsedMessageIntent = null;
+            if (!string.IsNullOrWhiteSpace(trigger.MessageIntent))
+            {
+                try
+                {
+                    parsedMessageIntent = EnumExtensions.ParseMessageIntent(trigger.MessageIntent);
+                }
+                catch (ArgumentException ex)
+                {
+                    return $"{prefix}: {ex.Message}";
+                }
+            }
+
+            if (parsedMessageIntent is MessageIntent intent &&
+                MessageIntentCompatibility.DeriveFromLegacyType(trigger.MessageType) is MessageIntent aliasIntent &&
+                aliasIntent != intent)
+            {
+                return $"{prefix}: message_intent '{intent.ToDbValue()}' conflicts with legacy message_type '{trigger.MessageType}'.";
+            }
         }
 
         // Validate defaults
@@ -194,16 +215,38 @@ public sealed class RoutingService : IRoutingService
             !string.Equals(trigger.FromStatus, evt.FromStatus, StringComparison.OrdinalIgnoreCase))
             return false;
 
-        // Message type predicate
+        // Canonical message intent predicate
+        if (!string.IsNullOrWhiteSpace(trigger.MessageIntent))
+        {
+            var requiredIntent = EnumExtensions.ParseMessageIntent(trigger.MessageIntent);
+            if (evt.MessageIntent != requiredIntent)
+                return false;
+        }
+
+        // Legacy message type predicate, with intent-aware compatibility fallback
         if (trigger.MessageType is not null &&
-            !string.Equals(trigger.MessageType, evt.MessageType, StringComparison.OrdinalIgnoreCase))
+            !MatchesLegacyMessageTypeAlias(trigger.MessageType, evt))
+        {
             return false;
+        }
 
         // Recipient presence predicate
-        if (trigger.HasRecipient == true && evt.Recipient is null)
+        if (trigger.HasRecipient == true && string.IsNullOrWhiteSpace(evt.Recipient))
             return false;
 
         return true;
+    }
+
+    private static bool MatchesLegacyMessageTypeAlias(string configuredMessageType, DispatchEvent evt)
+    {
+        if (string.Equals(configuredMessageType, evt.MessageType, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var aliasIntent = MessageIntentCompatibility.DeriveFromLegacyType(configuredMessageType);
+        if (aliasIntent is not MessageIntent expectedIntent)
+            return false;
+
+        return evt.MessageIntent == expectedIntent;
     }
 
     /// <summary>

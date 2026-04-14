@@ -79,6 +79,23 @@ public class DispatchDetectionWiringTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RestMessageCreate_WithIntentOnly_TriggersDispatchDetection()
+    {
+        var response = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/messages", new
+        {
+            sender = "codex",
+            content = "Review feedback via REST intent",
+            intent = "review_feedback",
+            metadata = """{"recipient":"claude-code","handoff_kind":"review_feedback"}"""
+        });
+        response.EnsureSuccessStatusCode();
+
+        var dispatches = await GetDispatchesAsync();
+        Assert.Single(dispatches);
+        Assert.Equal("claude-code", dispatches[0].TargetAgent);
+    }
+
+    [Fact]
     public async Task RestTaskUpdate_TriggersDispatchDetection()
     {
         var taskId = await SeedTaskAsync();
@@ -110,6 +127,24 @@ public class DispatchDetectionWiringTests : IAsyncLifetime
         await MessageTools.SendMessage(repo, detection, logger,
             ProjectId, "codex", "MCP message content",
             metadata: """{"type":"review_feedback","recipient":"claude-code"}""");
+
+        var dispatches = await GetDispatchesAsync();
+        Assert.Single(dispatches);
+        Assert.Equal("claude-code", dispatches[0].TargetAgent);
+    }
+
+    [Fact]
+    public async Task McpSendMessage_WithIntentOnly_TriggersDispatchDetection()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+        var detection = scope.ServiceProvider.GetRequiredService<IDispatchDetectionService>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<MessageTools>>();
+
+        await MessageTools.SendMessage(repo, detection, logger,
+            ProjectId, "codex", "MCP intent message",
+            metadata: """{"recipient":"claude-code","handoff_kind":"review_feedback"}""",
+            intent: "review_feedback");
 
         var dispatches = await GetDispatchesAsync();
         Assert.Single(dispatches);

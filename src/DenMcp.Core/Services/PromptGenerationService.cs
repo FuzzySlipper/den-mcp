@@ -50,11 +50,13 @@ public sealed class PromptGenerationService : IPromptGenerationService
                 => await BuildFeedbackPrompt(evt, config, customOpener),
             DispatchEvent.TaskStatusChanged
                 => await BuildTaskTransitionPrompt(evt, config, customOpener),
-            DispatchEvent.MessageReceived when (evt.MessageType is "planning_summary" or "planning")
-                => await BuildPlanningPrompt(evt, config, customOpener),
-            DispatchEvent.MessageReceived when evt.MessageType is "review_feedback"
+            DispatchEvent.MessageReceived when evt.MessageIntent is MessageIntent.ReviewRequest
+                => await BuildReviewRequestMessagePrompt(evt, config, customOpener),
+            DispatchEvent.MessageReceived when evt.MessageIntent is MessageIntent.Handoff
+                => await BuildHandoffPrompt(evt, config, customOpener),
+            DispatchEvent.MessageReceived when evt.MessageIntent is MessageIntent.ReviewFeedback
                 => await BuildReviewFeedbackMessagePrompt(evt, config, customOpener),
-            DispatchEvent.MessageReceived when evt.MessageType is "merge_request" or "review_approval"
+            DispatchEvent.MessageReceived when evt.MessageIntent is MessageIntent.ReviewApproval
                 => await BuildMergeRequestPrompt(evt, config, customOpener),
             DispatchEvent.MessageReceived
                 => await BuildMessagePrompt(evt, config, customOpener),
@@ -122,6 +124,41 @@ public sealed class PromptGenerationService : IPromptGenerationService
         };
     }
 
+    private async Task<PromptResult> BuildReviewRequestMessagePrompt(DispatchEvent evt, RoutingConfig config, string? customOpener)
+    {
+        var sb = new StringBuilder();
+        var role = ResolveRoleName(config, "reviewer");
+        var branch = evt.Branch ?? (evt.TaskId.HasValue ? $"task/{evt.TaskId}-*" : null);
+
+        sb.AppendLine(customOpener ?? $"Review request is ready on {evt.ProjectId} from {evt.Sender}.");
+        sb.AppendLine();
+        sb.AppendLine($"You are the {role} for {evt.ProjectId}.");
+        if (branch is not null)
+            sb.AppendLine($"**Branch**: {branch}");
+        sb.AppendLine();
+
+        AppendTriggeringMessage(sb, evt);
+        await AppendTaskAndMessages(sb, evt);
+
+        sb.AppendLine();
+        AppendReviewerWorkflowGuidance(sb);
+        sb.AppendLine();
+        if (branch is not null)
+            sb.AppendLine($"Review the requested changes on `{branch}` and use `git diff main...HEAD` if needed.");
+        else
+            sb.AppendLine("Review the requested changes and inspect the task thread for branch/head context if needed.");
+        sb.AppendLine("Post your review findings as a message to the task.");
+        sb.AppendLine("If changes are needed, send feedback back to the implementer.");
+        sb.AppendLine("If approved, send approval/merge handoff so the implementer can merge the reviewed head and set the task status to done.");
+
+        var summaryTask = evt.TaskId.HasValue ? $" on #{evt.TaskId}" : "";
+        return new PromptResult
+        {
+            Summary = $"{evt.Sender} sent review request{summaryTask} on {evt.ProjectId}",
+            ContextPrompt = sb.ToString().TrimEnd()
+        };
+    }
+
     private async Task<PromptResult> BuildTaskTransitionPrompt(DispatchEvent evt, RoutingConfig config, string? customOpener)
     {
         var sb = new StringBuilder();
@@ -146,11 +183,12 @@ public sealed class PromptGenerationService : IPromptGenerationService
         };
     }
 
-    private async Task<PromptResult> BuildPlanningPrompt(DispatchEvent evt, RoutingConfig config, string? customOpener)
+    private async Task<PromptResult> BuildHandoffPrompt(DispatchEvent evt, RoutingConfig config, string? customOpener)
     {
         var sb = new StringBuilder();
+        var handoffLabel = ResolveHandoffLabel(evt);
 
-        sb.AppendLine(customOpener ?? $"You have a planning handoff on {evt.ProjectId} from {evt.Sender}.");
+        sb.AppendLine(customOpener ?? $"You have a {handoffLabel} handoff on {evt.ProjectId} from {evt.Sender}.");
         sb.AppendLine();
 
         AppendTriggeringMessage(sb, evt);
@@ -159,12 +197,12 @@ public sealed class PromptGenerationService : IPromptGenerationService
         sb.AppendLine();
         AppendImplementerWorkflowGuidance(sb);
         sb.AppendLine();
-        sb.AppendLine("Review the planning context and proceed with the outlined work.");
+        sb.AppendLine($"Review the {handoffLabel} context and proceed with the outlined work.");
 
         var summaryTask = evt.TaskId.HasValue ? $" on #{evt.TaskId}" : "";
         return new PromptResult
         {
-            Summary = $"{evt.Sender} sent planning context{summaryTask} on {evt.ProjectId}",
+            Summary = $"{evt.Sender} sent {handoffLabel} context{summaryTask} on {evt.ProjectId}",
             ContextPrompt = sb.ToString().TrimEnd()
         };
     }
@@ -235,7 +273,9 @@ public sealed class PromptGenerationService : IPromptGenerationService
         sb.AppendLine();
         sb.AppendLine("Read the messages and take appropriate action.");
 
-        var summaryType = evt.MessageType is not null ? $" ({evt.MessageType})" : "";
+        var summaryType = evt.MessageIntent is MessageIntent intent
+            ? $" ({intent.ToDbValue()})"
+            : evt.MessageType is not null ? $" ({evt.MessageType})" : "";
         var summaryTask = evt.TaskId.HasValue ? $" on #{evt.TaskId}" : "";
         return new PromptResult
         {
@@ -329,6 +369,12 @@ public sealed class PromptGenerationService : IPromptGenerationService
         sb.AppendLine("Review for correctness, regressions, scope drift, and workflow hygiene.");
         sb.AppendLine("Call out deceptive completeness such as thin interfaces, unwired scaffolding, or code TODOs standing in for tracked follow-up work.");
         sb.AppendLine("If the implementation drifted into complex local-environment workarounds or other signs that the implementer should have stopped and asked for guidance, say so explicitly.");
+    }
+
+    private static string ResolveHandoffLabel(DispatchEvent evt)
+    {
+        var kind = evt.HandoffKind ?? evt.MessageType;
+        return kind is "planning" or "planning_summary" ? "planning" : "handoff";
     }
 
     /// <summary>

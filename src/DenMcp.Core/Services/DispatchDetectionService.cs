@@ -46,6 +46,8 @@ public sealed class DispatchDetectionService : IDispatchDetectionService
         string? messageType = null;
         string? recipient = null;
         string? branch = null;
+        string? packetKind = null;
+        string? handoffKind = null;
 
         if (message.Metadata is JsonElement meta)
         {
@@ -55,14 +57,23 @@ public sealed class DispatchDetectionService : IDispatchDetectionService
                 recipient = recipientEl.GetString();
             if (meta.TryGetProperty("branch", out var branchEl))
                 branch = branchEl.GetString();
+            if (meta.TryGetProperty("packet_kind", out var packetKindEl))
+                packetKind = packetKindEl.GetString();
+            if (meta.TryGetProperty("handoff_kind", out var handoffKindEl))
+                handoffKind = handoffKindEl.GetString();
         }
+
+        messageType ??= packetKind ?? handoffKind;
 
         var evt = new DispatchEvent
         {
             EventKind = DispatchEvent.MessageReceived,
             ProjectId = message.ProjectId,
             MessageId = message.Id,
+            MessageIntent = message.Intent ?? MessageIntentCompatibility.ResolveWriteIntent(null, message.Metadata),
             MessageType = messageType,
+            PacketKind = packetKind,
+            HandoffKind = handoffKind,
             Recipient = recipient,
             Sender = message.Sender,
             TaskId = message.TaskId,

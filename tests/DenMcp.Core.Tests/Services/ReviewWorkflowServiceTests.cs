@@ -129,6 +129,8 @@ public class ReviewWorkflowServiceTests : IAsyncLifetime
         Assert.Contains("Tests run by implementer:", result.Packet.Content);
         Assert.Equal(task.Id, result.Message.TaskId);
         Assert.Equal("claude-code", result.Message.Sender);
+        Assert.Equal(MessageIntent.ReviewRequest, result.Message.Intent);
+        Assert.Equal("rereview_request", result.Message.Metadata!.Value.GetProperty("packet_kind").GetString());
         Assert.Single(result.TestCommands);
     }
 
@@ -175,6 +177,8 @@ public class ReviewWorkflowServiceTests : IAsyncLifetime
         Assert.Contains("Please address before merge", result.Packet.Content);
         Assert.Single(result.TestCommands);
         Assert.Equal("codex", result.Message.Sender);
+        Assert.Equal(MessageIntent.ReviewFeedback, result.Message.Intent);
+        Assert.Equal("review_findings", result.Message.Metadata!.Value.GetProperty("packet_kind").GetString());
     }
 
     [Fact]
@@ -235,8 +239,10 @@ public class ReviewWorkflowServiceTests : IAsyncLifetime
         Assert.Contains("request review again", result.HandoffMessage.Content, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Stop and ask for guidance", result.HandoffMessage.Content, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("code TODOs", result.HandoffMessage.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(MessageIntent.ReviewFeedback, result.HandoffMessage.Intent);
         Assert.True(result.HandoffMessage.Metadata.HasValue);
         Assert.Equal("review_feedback", result.HandoffMessage.Metadata!.Value.GetProperty("type").GetString());
+        Assert.Equal("review_feedback", result.HandoffMessage.Metadata!.Value.GetProperty("handoff_kind").GetString());
         Assert.Equal("claude-code", result.HandoffMessage.Metadata!.Value.GetProperty("recipient").GetString());
         Assert.Single(result.CompletedDispatches);
         Assert.Equal(reviewDispatch.Id, result.CompletedDispatches[0].Id);
@@ -278,8 +284,10 @@ public class ReviewWorkflowServiceTests : IAsyncLifetime
         Assert.Contains("Reviewed head SHA: `bbb222`", result.HandoffMessage!.Content);
         Assert.Contains("pick up your next task", result.HandoffMessage.Content, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("request review again with the new head SHA and tests run", result.HandoffMessage.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(MessageIntent.ReviewApproval, result.HandoffMessage.Intent);
         Assert.True(result.HandoffMessage.Metadata.HasValue);
         Assert.Equal("merge_request", result.HandoffMessage.Metadata!.Value.GetProperty("type").GetString());
+        Assert.Equal("merge_request", result.HandoffMessage.Metadata!.Value.GetProperty("handoff_kind").GetString());
         Assert.Equal("claude-code", result.HandoffMessage.Metadata!.Value.GetProperty("recipient").GetString());
 
         var implementerDispatches = await _dispatches.ListAsync("proj", "claude-code", [DispatchStatus.Pending]);
@@ -383,9 +391,9 @@ public class ReviewWorkflowServiceTests : IAsyncLifetime
 
         var taskMessages = await _messages.GetMessagesAsync("proj", taskId: task.Id, limit: 20);
         Assert.Single(taskMessages, message =>
+            message.Intent == MessageIntent.ReviewApproval &&
             message.Metadata.HasValue &&
-            message.Metadata.Value.TryGetProperty("type", out var type) &&
-            type.GetString() == "merge_request");
+            message.Metadata.Value.GetProperty("handoff_kind").GetString() == "merge_request");
 
         var implementerDispatches = await _dispatches.ListAsync("proj", "claude-code", [DispatchStatus.Pending]);
         Assert.Single(implementerDispatches);

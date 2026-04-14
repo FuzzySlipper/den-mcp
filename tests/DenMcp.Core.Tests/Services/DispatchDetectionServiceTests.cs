@@ -130,6 +130,27 @@ public class DispatchDetectionServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task MessageWithRecipientAndIntentOnly_CreatesDispatch()
+    {
+        var msg = await _messages.CreateAsync(new Message
+        {
+            ProjectId = "proj",
+            Sender = "codex",
+            Content = "Intent-driven feedback.",
+            Intent = MessageIntent.ReviewFeedback,
+            Metadata = JsonSerializer.Deserialize<JsonElement>(
+                """{"recipient":"claude-code","handoff_kind":"review_feedback"}""")
+        });
+
+        await _detection.OnMessageCreatedAsync(msg);
+
+        var pending = await _dispatches.ListAsync("proj", statuses: [DispatchStatus.Pending]);
+        Assert.Single(pending);
+        Assert.Equal("claude-code", pending[0].TargetAgent);
+        Assert.Contains("review feedback", pending[0].Summary!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task MessageWithoutRecipient_NoDispatch()
     {
         var msg = await _messages.CreateAsync(new Message
@@ -223,15 +244,16 @@ public class DispatchDetectionServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task MessageDispatch_IncludesMessageContent()
+    public async Task MessageDispatch_IncludesIntentDrivenHandoffContent()
     {
         var msg = await _messages.CreateAsync(new Message
         {
             ProjectId = "proj",
             Sender = "codex",
             Content = "Here is the detailed plan for phase 2.",
+            Intent = MessageIntent.Handoff,
             Metadata = JsonSerializer.Deserialize<JsonElement>(
-                """{"type":"planning_summary","recipient":"claude-code"}""")
+                """{"recipient":"claude-code","handoff_kind":"planning_summary"}""")
         });
 
         await _detection.OnMessageCreatedAsync(msg);

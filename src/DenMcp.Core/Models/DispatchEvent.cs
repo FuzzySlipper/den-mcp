@@ -24,8 +24,17 @@ public sealed class DispatchEvent
 
     // --- Message fields ---
 
+    /// <summary>Canonical workflow intent for a message event, if known.</summary>
+    public MessageIntent? MessageIntent { get; set; }
+
     /// <summary>Message metadata "type" value (e.g. "review_request", "review_feedback").</summary>
     public string? MessageType { get; set; }
+
+    /// <summary>Packet subtype from metadata when present (e.g. "review_findings").</summary>
+    public string? PacketKind { get; set; }
+
+    /// <summary>Handoff subtype from metadata when present (e.g. "planning_summary").</summary>
+    public string? HandoffKind { get; set; }
 
     /// <summary>Explicit recipient from message metadata, if present.</summary>
     public string? Recipient { get; set; }

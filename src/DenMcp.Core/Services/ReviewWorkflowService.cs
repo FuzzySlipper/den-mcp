@@ -91,9 +91,11 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
             ThreadId = input.ThreadId,
             Sender = input.RequestedBy,
             Content = packet.Content,
+            Intent = MessageIntent.ReviewRequest,
             Metadata = JsonSerializer.SerializeToElement(new
             {
                 type = packet.Kind == ReviewPacketKind.RereviewRequest ? "rereview_packet" : "review_request_packet",
+                packet_kind = packet.Kind == ReviewPacketKind.RereviewRequest ? "rereview_request" : "review_request",
                 review_round_id = round.Id,
                 review_round_number = round.RoundNumber,
                 branch = round.Branch,
@@ -162,9 +164,11 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
             ThreadId = input.ThreadId,
             Sender = input.Sender,
             Content = packet.Content,
+            Intent = MessageIntent.ReviewFeedback,
             Metadata = JsonSerializer.SerializeToElement(new
             {
                 type = "review_findings_packet",
+                packet_kind = "review_findings",
                 review_round_id = round.Id,
                 review_round_number = round.RoundNumber,
                 branch = round.Branch,
@@ -218,7 +222,7 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
                 detail.Task.ProjectId,
                 detail.Task.Id,
                 updated.Id,
-                GetVerdictHandoffMessageType(updated));
+                GetVerdictHandoffKind(updated));
 
             if (previousVerdict != updated.Verdict || handoffMessage is null)
                 handoffMessage = await CreateVerdictHandoffMessageAsync(detail, updated);
@@ -447,6 +451,7 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
             ThreadId = threadId,
             Sender = round.VerdictBy ?? round.RequestedBy,
             Content = BuildVerdictHandoffContent(detail, round),
+            Intent = GetVerdictHandoffIntent(round),
             Metadata = metadata
         });
 
@@ -524,39 +529,37 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
         string projectId,
         int taskId,
         int reviewRoundId,
-        string messageType)
+        string handoffKind)
     {
         var messages = await _messages.GetMessagesAsync(projectId, taskId: taskId, limit: 100);
         return messages.FirstOrDefault(message =>
             TryGetReviewRoundId(message.Metadata, out var messageRoundId) &&
             messageRoundId == reviewRoundId &&
-            TryGetMessageType(message.Metadata, out var existingMessageType) &&
-            string.Equals(existingMessageType, messageType, StringComparison.Ordinal));
+            TryGetHandoffKind(message.Metadata, out var existingHandoffKind) &&
+            string.Equals(existingHandoffKind, handoffKind, StringComparison.Ordinal));
     }
 
-    private static bool TryGetMessageType(JsonElement? metadata, out string? messageType)
+    private static bool TryGetHandoffKind(JsonElement? metadata, out string? handoffKind)
     {
-        messageType = null;
-        if (metadata is not JsonElement element ||
-            !element.TryGetProperty("type", out var typeElement) ||
-            typeElement.ValueKind != JsonValueKind.String)
-        {
-            return false;
-        }
+        if (MessageIntentCompatibility.TryGetSubtype(metadata, "handoff_kind", out handoffKind))
+            return true;
 
-        messageType = typeElement.GetString();
-        return !string.IsNullOrWhiteSpace(messageType);
+        return MessageIntentCompatibility.TryGetLegacyType(metadata, out handoffKind);
     }
 
-    private static string GetVerdictHandoffMessageType(ReviewRound round) =>
+    private static MessageIntent GetVerdictHandoffIntent(ReviewRound round) =>
+        round.Verdict == ReviewVerdict.LooksGood ? MessageIntent.ReviewApproval : MessageIntent.ReviewFeedback;
+
+    private static string GetVerdictHandoffKind(ReviewRound round) =>
         round.Verdict == ReviewVerdict.LooksGood ? "merge_request" : "review_feedback";
 
     private static JsonElement BuildVerdictHandoffMetadata(string recipient, ReviewRound round)
     {
-        var messageType = GetVerdictHandoffMessageType(round);
+        var handoffKind = GetVerdictHandoffKind(round);
         return JsonSerializer.SerializeToElement(new
         {
-            type = messageType,
+            type = handoffKind,
+            handoff_kind = handoffKind,
             recipient,
             review_round_id = round.Id,
             review_round_number = round.RoundNumber,

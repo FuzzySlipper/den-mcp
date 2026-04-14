@@ -150,7 +150,8 @@ public class PromptGenerationServiceTests : IAsyncLifetime
             TaskId = task.Id,
             Recipient = "claude-code",
             Sender = "codex",
-            MessageType = "review_feedback",
+            MessageIntent = MessageIntent.Note,
+            MessageType = "note",
             MessageId = 1
         };
 
@@ -171,7 +172,8 @@ public class PromptGenerationServiceTests : IAsyncLifetime
             ProjectId = "proj",
             Recipient = "claude-code",
             Sender = "codex",
-            MessageType = "review_feedback",
+            MessageIntent = MessageIntent.Note,
+            MessageType = "note",
             MessageId = 1,
             MessageContent = "Please fix the null check issue I flagged."
         };
@@ -223,6 +225,7 @@ public class PromptGenerationServiceTests : IAsyncLifetime
             TaskId = task.Id,
             Recipient = "claude-code",
             Sender = "codex",
+            MessageIntent = MessageIntent.ReviewFeedback,
             MessageType = "review_feedback",
             MessageId = 1
         };
@@ -257,6 +260,8 @@ public class PromptGenerationServiceTests : IAsyncLifetime
             TaskId = task.Id,
             Recipient = "claude-code",
             Sender = "codex",
+            MessageIntent = MessageIntent.ReviewApproval,
+            HandoffKind = "merge_request",
             MessageType = "merge_request",
             MessageId = 1
         };
@@ -271,12 +276,45 @@ public class PromptGenerationServiceTests : IAsyncLifetime
         Assert.Contains("codex", result.Summary);
     }
 
+    [Fact]
+    public async Task ReviewRequestMessagePrompt_GivesReviewerSpecificNextStep()
+    {
+        var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Review request task" });
+        await _messages.CreateAsync(new Message
+        {
+            ProjectId = "proj",
+            TaskId = task.Id,
+            Sender = "claude-code",
+            Content = "Please review the new routing behavior on this branch."
+        });
+
+        var evt = new DispatchEvent
+        {
+            EventKind = DispatchEvent.MessageReceived,
+            ProjectId = "proj",
+            TaskId = task.Id,
+            Recipient = "codex",
+            Sender = "claude-code",
+            MessageIntent = MessageIntent.ReviewRequest,
+            Branch = "task/660-message-intent-routing",
+            MessageId = 1
+        };
+
+        var trigger = _routing.MatchTrigger(DefaultConfig, evt)!;
+        var result = await _service.GenerateAsync(evt, trigger, DefaultConfig);
+
+        Assert.Contains("reviewer", result.ContextPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("git diff main...HEAD", result.ContextPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Post your review findings", result.ContextPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("review request", result.Summary, StringComparison.OrdinalIgnoreCase);
+    }
+
     #endregion
 
     #region Planning prompt
 
     [Fact]
-    public async Task PlanningPrompt_IncludesMessageContent()
+    public async Task HandoffPrompt_IncludesMessageContent()
     {
         var evt = new DispatchEvent
         {
@@ -284,7 +322,8 @@ public class PromptGenerationServiceTests : IAsyncLifetime
             ProjectId = "proj",
             Recipient = "codex",
             Sender = "claude-code",
-            MessageType = "planning_summary",
+            MessageIntent = MessageIntent.Handoff,
+            HandoffKind = "planning_summary",
             MessageId = 1,
             MessageContent = "Here's the plan for the dispatch system: three phases covering core, kitty, and wrapper."
         };
@@ -300,7 +339,7 @@ public class PromptGenerationServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task PlanningPrompt_WithTask_IncludesTaskContext()
+    public async Task HandoffPrompt_WithTask_IncludesTaskContext()
     {
         var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Dispatch epic" });
 
@@ -310,7 +349,8 @@ public class PromptGenerationServiceTests : IAsyncLifetime
             ProjectId = "proj",
             Recipient = "codex",
             Sender = "claude-code",
-            MessageType = "planning_summary",
+            MessageIntent = MessageIntent.Handoff,
+            HandoffKind = "planning_summary",
             MessageId = 1,
             TaskId = task.Id,
             MessageContent = "Planning summary for the task."

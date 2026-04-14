@@ -42,7 +42,17 @@ public sealed class RoutingTrigger
     [JsonPropertyName("from_status")]
     public string? FromStatus { get; set; }
 
-    /// <summary>Message metadata "type" value to match. Null means any.</summary>
+    /// <summary>
+    /// Canonical message intent to match. Null means any.
+    /// Serialized as snake_case, e.g. "review_feedback" or "handoff".
+    /// </summary>
+    [JsonPropertyName("message_intent")]
+    public string? MessageIntent { get; set; }
+
+    /// <summary>
+    /// Legacy message metadata "type" value to match. Null means any.
+    /// Kept as a temporary compatibility alias for older routing documents.
+    /// </summary>
     [JsonPropertyName("message_type")]
     public string? MessageType { get; set; }
 
@@ -59,7 +69,8 @@ public sealed class RoutingTrigger
 
     /// <summary>
     /// Prompt template with interpolation placeholders.
-    /// Supported: {project_id}, {task_id}, {task_title}, {branch}, {sender}, {message_type}
+    /// Supported: {project_id}, {task_id}, {task_title}, {branch}, {sender},
+    /// {message_intent}, {message_type}, {to_status}, {from_status}
     /// </summary>
     [JsonPropertyName("prompt_template")]
     public string? PromptTemplate { get; set; }

@@ -173,6 +173,28 @@ public class RoutingServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetRoutingConfig_InvalidMessageIntent_ReturnsInvalid()
+    {
+        var config = new RoutingConfig
+        {
+            Triggers =
+            [
+                new RoutingTrigger
+                {
+                    Event = DispatchEvent.MessageReceived,
+                    MessageIntent = "not_a_real_intent",
+                    DispatchTo = "reviewer"
+                }
+            ]
+        };
+        await StoreRoutingDoc(config);
+
+        var result = await _service.GetRoutingConfigAsync("proj");
+        Assert.False(result.IsValid);
+        Assert.Contains("Unknown message intent", result.ValidationError);
+    }
+
+    [Fact]
     public async Task GetRoutingConfig_FallbackIsNotSharedMutable()
     {
         var result1 = await _service.GetRoutingConfigAsync("proj");
@@ -252,6 +274,7 @@ public class RoutingServiceTests : IAsyncLifetime
             ProjectId = "proj",
             Recipient = "claude-code",
             Sender = "codex",
+            MessageIntent = MessageIntent.ReviewFeedback,
             MessageType = "review_feedback",
             MessageId = 100
         };
@@ -271,6 +294,7 @@ public class RoutingServiceTests : IAsyncLifetime
             ProjectId = "proj",
             Recipient = null,
             Sender = "codex",
+            MessageIntent = MessageIntent.ReviewFeedback,
             MessageType = "review_feedback",
             MessageId = 100
         };
@@ -280,11 +304,53 @@ public class RoutingServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public void MatchTrigger_CustomMessageType()
+    public void MatchTrigger_CustomMessageIntent()
     {
         var config = new RoutingConfig
         {
             Roles = new Dictionary<string, string> { ["planner"] = "codex" },
+            Triggers =
+            [
+                new RoutingTrigger
+                {
+                    Event = DispatchEvent.MessageReceived,
+                    MessageIntent = "handoff",
+                    HasRecipient = true,
+                    DispatchTo = "{recipient}"
+                }
+            ]
+        };
+
+        var match = new DispatchEvent
+        {
+            EventKind = DispatchEvent.MessageReceived,
+            ProjectId = "proj",
+            MessageIntent = MessageIntent.Handoff,
+            HandoffKind = "planning_summary",
+            Recipient = "codex",
+            Sender = "claude-code",
+            MessageId = 1
+        };
+
+        var noMatch = new DispatchEvent
+        {
+            EventKind = DispatchEvent.MessageReceived,
+            ProjectId = "proj",
+            MessageIntent = MessageIntent.ReviewRequest,
+            Recipient = "codex",
+            Sender = "claude-code",
+            MessageId = 2
+        };
+
+        Assert.NotNull(_service.MatchTrigger(config, match));
+        Assert.Null(_service.MatchTrigger(config, noMatch));
+    }
+
+    [Fact]
+    public void MatchTrigger_LegacyMessageTypeAlias_UsesCanonicalIntent()
+    {
+        var config = new RoutingConfig
+        {
             Triggers =
             [
                 new RoutingTrigger
@@ -297,28 +363,18 @@ public class RoutingServiceTests : IAsyncLifetime
             ]
         };
 
-        var match = new DispatchEvent
+        var evt = new DispatchEvent
         {
             EventKind = DispatchEvent.MessageReceived,
             ProjectId = "proj",
-            MessageType = "planning_summary",
+            MessageIntent = MessageIntent.Handoff,
+            HandoffKind = "planning_summary",
             Recipient = "codex",
             Sender = "claude-code",
             MessageId = 1
         };
 
-        var noMatch = new DispatchEvent
-        {
-            EventKind = DispatchEvent.MessageReceived,
-            ProjectId = "proj",
-            MessageType = "review_request",
-            Recipient = "codex",
-            Sender = "claude-code",
-            MessageId = 2
-        };
-
-        Assert.NotNull(_service.MatchTrigger(config, match));
-        Assert.Null(_service.MatchTrigger(config, noMatch));
+        Assert.NotNull(_service.MatchTrigger(config, evt));
     }
 
     [Fact]
@@ -428,7 +484,7 @@ public class RoutingServiceTests : IAsyncLifetime
     [Fact]
     public void InterpolateTemplate_AllPlaceholders()
     {
-        var template = "Review task #{task_id} ({task_title}) on {branch} in {project_id}. From {sender}, type: {message_type}.";
+        var template = "Review task #{task_id} ({task_title}) on {branch} in {project_id}. From {sender}, intent: {message_intent}, type: {message_type}.";
         var evt = new DispatchEvent
         {
             EventKind = DispatchEvent.TaskStatusChanged,
@@ -437,11 +493,12 @@ public class RoutingServiceTests : IAsyncLifetime
             TaskTitle = "forge-stats lore accounting",
             Branch = "task/546-forge-stats",
             Sender = "codex",
+            MessageIntent = MessageIntent.ReviewFeedback,
             MessageType = "review_feedback"
         };
 
         var result = _service.InterpolateTemplate(template, evt);
-        Assert.Equal("Review task #546 (forge-stats lore accounting) on task/546-forge-stats in quillforge. From codex, type: review_feedback.", result);
+        Assert.Equal("Review task #546 (forge-stats lore accounting) on task/546-forge-stats in quillforge. From codex, intent: review_feedback, type: review_feedback.", result);
     }
 
     [Fact]

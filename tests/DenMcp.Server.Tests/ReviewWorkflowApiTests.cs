@@ -196,9 +196,9 @@ public class ReviewWorkflowApiTests : IAsyncLifetime
 
         var taskMessages = await messages.GetMessagesAsync(ProjectId, task.Id, limit: 20);
         var handoff = Assert.Single(taskMessages, message =>
+            message.Intent == MessageIntent.ReviewFeedback &&
             message.Metadata.HasValue &&
-            message.Metadata.Value.TryGetProperty("type", out var type) &&
-            type.GetString() == "review_feedback");
+            message.Metadata.Value.GetProperty("handoff_kind").GetString() == "review_feedback");
 
         Assert.Equal(reviewRequest.Message.Id, handoff.ThreadId);
         Assert.Equal("claude-code", handoff.Metadata!.Value.GetProperty("recipient").GetString());
@@ -236,9 +236,9 @@ public class ReviewWorkflowApiTests : IAsyncLifetime
 
             var taskMessages = await messages.GetMessagesAsync(ProjectId, task.Id, limit: 20);
             var handoff = Assert.Single(taskMessages, message =>
+                message.Intent == MessageIntent.ReviewApproval &&
                 message.Metadata.HasValue &&
-                message.Metadata.Value.TryGetProperty("type", out var type) &&
-                type.GetString() == "merge_request");
+                message.Metadata.Value.GetProperty("handoff_kind").GetString() == "merge_request");
 
             Assert.Equal("claude-code", handoff.Metadata!.Value.GetProperty("recipient").GetString());
             Assert.Contains("pick up your next task", handoff.Content, StringComparison.OrdinalIgnoreCase);
