@@ -432,5 +432,8 @@ and document storage. The MCP server is connected as "den".
   `get_messages(project_id="rpg-system", unread_for="claude-code")`
 - When you want a sanity check from another agent, send a message with
   `metadata: {"type": "review_request"}` on the relevant task.
+- If a review comes back approved, the implementer merges the reviewed head
+  and marks the task done; the reviewer approves or requests changes but does
+  not merge.
 - Cross-project docs (conventions, shared specs) are under project `_global`.
 ```
