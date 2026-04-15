@@ -145,6 +145,12 @@ den_signal_clear den_dispatch
 The helper intentionally no-ops when `KITTY_WINDOW_ID` is not set so wrappers
 can call it unconditionally outside Kitty.
 
+When Kitty is active, the helper targets a terminal device instead of blindly
+writing OSC 1337 bytes into captured stdout. In a normal interactive Kitty
+session it writes to the terminal stream directly; if stdout is piped or
+captured, it falls back to the controlling TTY (`/dev/tty`) when available so
+user-variable updates stay terminal-only instead of leaking into pipelines.
+
 ## Manual testing
 
 ### Using the helper

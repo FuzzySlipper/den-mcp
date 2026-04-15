@@ -8,6 +8,28 @@ den_signal__base64() {
     printf '%s' "${1-}" | base64 | tr -d '\r\n'
 }
 
+den_signal__emit() {
+    local key="${1-}"
+    local encoded="${2-}"
+
+    if [ -t 1 ]; then
+        printf '\033]1337;SetUserVar=%s=%s\007' "$key" "$encoded"
+        return 0
+    fi
+
+    if [ -e /dev/tty ] && [ -w /dev/tty ]; then
+        printf '\033]1337;SetUserVar=%s=%s\007' "$key" "$encoded" > /dev/tty
+        return 0
+    fi
+
+    if [ -t 2 ]; then
+        printf '\033]1337;SetUserVar=%s=%s\007' "$key" "$encoded" >&2
+        return 0
+    fi
+
+    return 0
+}
+
 den_signal() {
     local key="${1-}"
     local value="${2-}"
@@ -25,7 +47,7 @@ den_signal() {
     fi
 
     encoded="$(den_signal__base64 "$value")"
-    printf '\033]1337;SetUserVar=%s=%s\007' "$key" "$encoded"
+    den_signal__emit "$key" "$encoded"
 }
 
 den_signal_clear() {

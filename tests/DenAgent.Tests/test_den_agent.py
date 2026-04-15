@@ -320,9 +320,7 @@ class DenAgentTests(unittest.TestCase):
         self.assertIn("http://127.0.0.1:5199/api/agents/checkout", urls)
         self.assertTrue(any(url == "http://127.0.0.1:5199/api/agents/heartbeat" for url in urls))
 
-        self.assertIn("SetUserVar=den_agent=", result.stdout)
-        self.assertIn("SetUserVar=den_project=", result.stdout)
-        self.assertIn("SetUserVar=den_dispatch=", result.stdout)
+        self.assertEqual("", result.stdout)
         self.assertIn("starting claude with approved dispatch #42", result.stderr)
 
     def test_review_dispatch_sets_reviewing_status_from_structured_context(self) -> None:
@@ -344,7 +342,7 @@ class DenAgentTests(unittest.TestCase):
         result = self.run_wrapper("claude", env=env)
 
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn("SetUserVar=den_status=cmV2aWV3aW5n", result.stdout)
+        self.assertEqual("", result.stdout)
 
     def test_implementer_dispatch_sets_working_status_from_structured_context(self) -> None:
         self.write_projects()
@@ -365,8 +363,7 @@ class DenAgentTests(unittest.TestCase):
         result = self.run_wrapper("claude", env=env)
 
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn("SetUserVar=den_status=d29ya2luZw==", result.stdout)
-        self.assertNotIn("SetUserVar=den_status=cmV2aWV3aW5n", result.stdout)
+        self.assertEqual("", result.stdout)
 
     def test_summary_containing_review_stays_working_without_structured_review_hint(self) -> None:
         self.write_projects()
@@ -387,8 +384,7 @@ class DenAgentTests(unittest.TestCase):
         result = self.run_wrapper("claude", env=env)
 
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn("SetUserVar=den_status=d29ya2luZw==", result.stdout)
-        self.assertNotIn("SetUserVar=den_status=cmV2aWV3aW5n", result.stdout)
+        self.assertEqual("", result.stdout)
 
     def test_resume_path_keeps_vendor_args_and_prints_dispatch_fallback(self) -> None:
         self.write_projects()
@@ -521,7 +517,7 @@ class DenAgentTests(unittest.TestCase):
         self.assertIn("pasted Den wake-up into the active kitty session input buffer", stderr)
         self.assertNotIn("--- den-agent dispatch prompt start ---", stderr)
         self.assertNotIn("Prompt arriving mid-session", stderr)
-        self.assertIn("SetUserVar=den_dispatch=", stdout)
+        self.assertEqual("", stdout)
 
     def test_den_failure_falls_back_to_manual_vendor_launch(self) -> None:
         env = self.base_env()
