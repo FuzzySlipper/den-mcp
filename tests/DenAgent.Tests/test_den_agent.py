@@ -38,9 +38,11 @@ class DenAgentTests(unittest.TestCase):
         self.kitten_log = self.root / "kitten-log.jsonl"
         self.projects_file = self.root / "projects.json"
         self.dispatch_file = self.root / "dispatch.json"
+        self.dispatch_context_file = self.root / "dispatch-context.json"
 
         self.projects_file.write_text("[]", encoding="utf-8")
         self.dispatch_file.write_text("[]", encoding="utf-8")
+        self.dispatch_context_file.write_text("{}", encoding="utf-8")
 
         make_executable(
             self.fake_bin / "curl",
@@ -90,6 +92,10 @@ class DenAgentTests(unittest.TestCase):
 
                 if path == "/api/dispatch":
                     sys.stdout.write(open(os.environ["DEN_AGENT_TEST_DISPATCH_FILE"], encoding="utf-8").read())
+                    raise SystemExit(0)
+
+                if path.startswith("/api/dispatch/") and path.endswith("/context"):
+                    sys.stdout.write(open(os.environ["DEN_AGENT_TEST_DISPATCH_CONTEXT_FILE"], encoding="utf-8").read())
                     raise SystemExit(0)
 
                 if path == "/api/agents/checkin":
@@ -178,6 +184,7 @@ class DenAgentTests(unittest.TestCase):
         env["DEN_AGENT_TEST_KITTEN_LOG"] = str(self.kitten_log)
         env["DEN_AGENT_TEST_PROJECTS_FILE"] = str(self.projects_file)
         env["DEN_AGENT_TEST_DISPATCH_FILE"] = str(self.dispatch_file)
+        env["DEN_AGENT_TEST_DISPATCH_CONTEXT_FILE"] = str(self.dispatch_context_file)
         env.pop("KITTY_WINDOW_ID", None)
         env.pop("KITTY_LISTEN_ON", None)
         return env
@@ -210,19 +217,27 @@ class DenAgentTests(unittest.TestCase):
         ]
         self.projects_file.write_text(json.dumps(payload), encoding="utf-8")
 
-    def write_dispatch(self, *, prompt: str = "Dispatch prompt", task_id: int = 564) -> None:
+    def write_dispatch(
+        self,
+        *,
+        prompt: str = "Dispatch prompt",
+        summary: str = "Review the current implementation",
+        task_id: int = 564,
+        target_agent: str = "claude-code",
+        dispatch_id: int = 42,
+    ) -> None:
         payload = [
             {
-                "id": 42,
+                "id": dispatch_id,
                 "project_id": "den-mcp",
-                "target_agent": "claude-code",
+                "target_agent": target_agent,
                 "status": "approved",
                 "trigger_type": "message_received",
                 "trigger_id": 9,
                 "task_id": task_id,
-                "summary": "Review the current implementation",
+                "summary": summary,
                 "context_prompt": prompt,
-                "dedup_key": "message_received:9:claude-code",
+                "dedup_key": f"message_received:9:{target_agent}",
                 "created_at": "2026-04-12T00:00:00Z",
                 "expires_at": "2026-04-13T00:00:00Z",
                 "decided_at": None,
@@ -233,9 +248,55 @@ class DenAgentTests(unittest.TestCase):
         ]
         self.dispatch_file.write_text(json.dumps(payload), encoding="utf-8")
 
+    def write_dispatch_context(
+        self,
+        *,
+        dispatch_id: int = 42,
+        task_id: int = 564,
+        target_agent: str = "claude-code",
+        context_kind: str = "handoff",
+        target_role: str = "implementer",
+        activity_hint: str | None = None,
+        message_intent: str | None = "handoff",
+        packet_kind: str | None = None,
+        handoff_kind: str | None = None,
+    ) -> None:
+        payload = {
+            "dispatch": {
+                "id": dispatch_id,
+                "project_id": "den-mcp",
+                "target_agent": target_agent,
+            },
+            "context": {
+                "schema_version": 1,
+                "context_kind": context_kind,
+                "project_id": "den-mcp",
+                "target_agent": target_agent,
+                "target_role": target_role,
+                "activity_hint": activity_hint,
+                "task_id": task_id,
+                "sender": "codex",
+                "recipient": target_agent,
+                "message_intent": message_intent,
+                "message_type": packet_kind or handoff_kind or message_intent,
+                "packet_kind": packet_kind,
+                "handoff_kind": handoff_kind,
+                "branch": None,
+                "from_status": None,
+                "to_status": None,
+                "triggering_message": None,
+                "trigger_thread": None,
+                "task_detail": None,
+                "workflow_guardrails": [],
+                "next_actions": [],
+            },
+        }
+        self.dispatch_context_file.write_text(json.dumps(payload), encoding="utf-8")
+
     def test_fresh_dispatch_launch_injects_prompt_and_runs_lifecycle(self) -> None:
         self.write_projects()
         self.write_dispatch(prompt="Dispatch prompt from Den")
+        self.write_dispatch_context(activity_hint="working")
 
         env = self.base_env()
         env["DEN_AGENT_HEARTBEAT_SECONDS"] = "0.01"
@@ -263,6 +324,71 @@ class DenAgentTests(unittest.TestCase):
         self.assertIn("SetUserVar=den_project=", result.stdout)
         self.assertIn("SetUserVar=den_dispatch=", result.stdout)
         self.assertIn("starting claude with approved dispatch #42", result.stderr)
+
+    def test_review_dispatch_sets_reviewing_status_from_structured_context(self) -> None:
+        self.write_projects()
+        self.write_dispatch(
+            prompt="Please review the branch",
+            summary="Please review the current implementation",
+        )
+        self.write_dispatch_context(
+            context_kind="review_request",
+            target_role="reviewer",
+            activity_hint="reviewing",
+            message_intent="review_request",
+            packet_kind="review_request",
+        )
+        env = self.base_env()
+        env["KITTY_WINDOW_ID"] = "11"
+
+        result = self.run_wrapper("claude", env=env)
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("SetUserVar=den_status=cmV2aWV3aW5n", result.stdout)
+
+    def test_implementer_dispatch_sets_working_status_from_structured_context(self) -> None:
+        self.write_projects()
+        self.write_dispatch(
+            prompt="Address the review findings and update the branch",
+            summary="Review follow-up for the implementer",
+        )
+        self.write_dispatch_context(
+            context_kind="review_feedback",
+            target_role="implementer",
+            activity_hint="working",
+            message_intent="review_feedback",
+            handoff_kind="review_feedback",
+        )
+        env = self.base_env()
+        env["KITTY_WINDOW_ID"] = "11"
+
+        result = self.run_wrapper("claude", env=env)
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("SetUserVar=den_status=d29ya2luZw==", result.stdout)
+        self.assertNotIn("SetUserVar=den_status=cmV2aWV3aW5n", result.stdout)
+
+    def test_summary_containing_review_stays_working_without_structured_review_hint(self) -> None:
+        self.write_projects()
+        self.write_dispatch(
+            prompt="Continue implementing the review workflow feature",
+            summary="Implement review workflow follow-up",
+        )
+        self.write_dispatch_context(
+            context_kind="handoff",
+            target_role="implementer",
+            activity_hint="working",
+            message_intent="handoff",
+            handoff_kind="planning_summary",
+        )
+        env = self.base_env()
+        env["KITTY_WINDOW_ID"] = "11"
+
+        result = self.run_wrapper("claude", env=env)
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("SetUserVar=den_status=d29ya2luZw==", result.stdout)
+        self.assertNotIn("SetUserVar=den_status=cmV2aWV3aW5n", result.stdout)
 
     def test_resume_path_keeps_vendor_args_and_prints_dispatch_fallback(self) -> None:
         self.write_projects()
@@ -303,6 +429,7 @@ class DenAgentTests(unittest.TestCase):
 
     def test_running_session_reports_newly_approved_dispatch(self) -> None:
         self.write_projects()
+        self.write_dispatch_context(activity_hint="working")
 
         env = self.base_env()
         env["DEN_AGENT_DISPATCH_POLL_SECONDS"] = "0.01"
@@ -343,6 +470,7 @@ class DenAgentTests(unittest.TestCase):
 
     def test_running_session_in_kitty_uses_overlay_clipboard_and_paste_without_prompt_blob(self) -> None:
         self.write_projects()
+        self.write_dispatch_context(activity_hint="working")
 
         env = self.base_env()
         env["DEN_AGENT_DISPATCH_POLL_SECONDS"] = "0.01"

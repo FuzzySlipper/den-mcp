@@ -81,13 +81,16 @@ public sealed class DispatchContextService : IDispatchContextService
             ? await TryGetTaskDetailAsync(evt.TaskId.Value)
             : null;
         var contextKind = ResolveContextKind(evt);
+        var targetRole = ResolveTargetRole(contextKind);
+        var activityHint = ResolveActivityHint(contextKind, targetRole);
 
         return new DispatchContextSnapshot
         {
             ContextKind = contextKind,
             ProjectId = evt.ProjectId,
             TargetAgent = targetAgent,
-            TargetRole = ResolveTargetRole(contextKind),
+            TargetRole = targetRole,
+            ActivityHint = activityHint,
             TaskId = evt.TaskId,
             Sender = evt.Sender,
             Recipient = evt.Recipient,
@@ -138,13 +141,15 @@ public sealed class DispatchContextService : IDispatchContextService
             ? await TryGetTaskDetailAsync(taskId.Value)
             : null;
         var contextKind = ResolveFallbackContextKind(dispatch, taskDetail);
+        var targetRole = ResolveTargetRole(contextKind);
 
         return new DispatchContextSnapshot
         {
             ContextKind = contextKind,
             ProjectId = dispatch.ProjectId,
             TargetAgent = dispatch.TargetAgent,
-            TargetRole = ResolveTargetRole(contextKind),
+            TargetRole = targetRole,
+            ActivityHint = ResolveActivityHint(contextKind, targetRole),
             TaskId = taskId,
             TaskDetail = taskDetail,
             WorkflowGuardrails = BuildWorkflowGuardrails(contextKind),
@@ -215,6 +220,11 @@ public sealed class DispatchContextService : IDispatchContextService
         "planning_handoff" => "implementer",
         _ => "assigned_agent"
     };
+
+    private static string ResolveActivityHint(string contextKind, string? targetRole) =>
+        contextKind == "review_request" || string.Equals(targetRole, "reviewer", StringComparison.Ordinal)
+            ? "reviewing"
+            : "working";
 
     private static List<string> BuildWorkflowGuardrails(string contextKind)
     {

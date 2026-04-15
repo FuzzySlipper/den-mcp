@@ -93,6 +93,21 @@ public class DispatchDetectionServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task TaskMovedToReview_StoresReviewingActivityHintInDispatchContext()
+    {
+        var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Feature X" });
+
+        await _detection.OnTaskStatusChangedAsync(task, "in_progress", "review", "claude-code");
+
+        var pending = Assert.Single(await _dispatches.ListAsync("proj", statuses: [DispatchStatus.Pending]));
+        var context = JsonSerializer.Deserialize<DispatchContextSnapshot>(pending.ContextJson!);
+
+        Assert.NotNull(context);
+        Assert.Equal("review_request", context!.ContextKind);
+        Assert.Equal("reviewing", context.ActivityHint);
+    }
+
+    [Fact]
     public async Task TaskMovedFromReviewToPlanned_CreatesDispatchForImplementer()
     {
         var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Bug fix" });
@@ -330,6 +345,29 @@ public class DispatchDetectionServiceTests : IAsyncLifetime
         var pending = await _dispatches.ListAsync("proj", statuses: [DispatchStatus.Pending]);
         Assert.Single(pending);
         Assert.Contains("detailed plan for phase 2", pending[0].ContextPrompt!);
+    }
+
+    [Fact]
+    public async Task PlanningHandoff_StoresWorkingActivityHintInDispatchContext()
+    {
+        var msg = await _messages.CreateAsync(new Message
+        {
+            ProjectId = "proj",
+            Sender = "codex",
+            Content = "Implement review workflow follow-up.",
+            Intent = MessageIntent.Handoff,
+            Metadata = JsonSerializer.Deserialize<JsonElement>(
+                """{"recipient":"claude-code","handoff_kind":"planning_summary"}""")
+        });
+
+        await _detection.OnMessageCreatedAsync(msg);
+
+        var pending = Assert.Single(await _dispatches.ListAsync("proj", statuses: [DispatchStatus.Pending]));
+        var context = JsonSerializer.Deserialize<DispatchContextSnapshot>(pending.ContextJson!);
+
+        Assert.NotNull(context);
+        Assert.Equal("planning_handoff", context!.ContextKind);
+        Assert.Equal("working", context.ActivityHint);
     }
 
     #endregion

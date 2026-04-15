@@ -142,6 +142,7 @@ public class DispatchApiTests : IAsyncLifetime
             ContextKind = "review_feedback",
             ProjectId = ProjectId,
             TargetAgent = "claude-code",
+            ActivityHint = "working",
             WorkflowGuardrails = ["guardrail"],
             NextActions = ["next step"]
         });
@@ -155,6 +156,7 @@ public class DispatchApiTests : IAsyncLifetime
         Assert.Equal(entry.Id, envelope!.Dispatch.Id);
         Assert.Equal("review_feedback", envelope.Context.ContextKind);
         Assert.Equal("claude-code", envelope.Context.TargetAgent);
+        Assert.Equal("working", envelope.Context.ActivityHint);
         Assert.Equal("next step", Assert.Single(envelope.Context.NextActions));
     }
 

@@ -32,6 +32,7 @@ ACTIVE_DISPATCH_ID=""
 ACTIVE_STATUS="idle"
 DISPATCH_SUMMARY=""
 DISPATCH_PROMPT=""
+DISPATCH_CONTEXT_JSON=""
 declare -a VENDOR_ARGS=()
 declare -a POSITIONALS=()
 
@@ -439,15 +440,49 @@ discover_dispatch() {
     "${JQ_BIN}" -c '.[0] // empty' <<<"${response}"
 }
 
-detect_activity_status() {
-    local haystack
-    haystack="$(printf '%s\n%s\n' "${DISPATCH_SUMMARY}" "${DISPATCH_PROMPT}" | tr '[:upper:]' '[:lower:]')"
+fetch_dispatch_context() {
+    local dispatch_id="$1"
 
-    if [[ "${haystack}" == *review* ]]; then
-        printf 'reviewing\n'
-    else
-        printf 'working\n'
+    [[ -n "${dispatch_id}" ]] || return 1
+    api_get "/api/dispatch/${dispatch_id}/context"
+}
+
+detect_activity_status() {
+    local context_json="${1:-}"
+    local activity_hint=""
+    local target_role=""
+    local context_kind=""
+    local message_intent=""
+    local packet_kind=""
+    local handoff_kind=""
+
+    if [[ -n "${context_json}" ]]; then
+        activity_hint="$("${JQ_BIN}" -r '.context.activity_hint // empty' <<<"${context_json}" 2>/dev/null || true)"
+        case "${activity_hint}" in
+            idle|working|reviewing|waiting|done|error)
+                printf '%s\n' "${activity_hint}"
+                return
+                ;;
+        esac
+
+        target_role="$("${JQ_BIN}" -r '.context.target_role // empty' <<<"${context_json}" 2>/dev/null || true)"
+        context_kind="$("${JQ_BIN}" -r '.context.context_kind // empty' <<<"${context_json}" 2>/dev/null || true)"
+        message_intent="$("${JQ_BIN}" -r '.context.message_intent // empty' <<<"${context_json}" 2>/dev/null || true)"
+        packet_kind="$("${JQ_BIN}" -r '.context.packet_kind // empty' <<<"${context_json}" 2>/dev/null || true)"
+        handoff_kind="$("${JQ_BIN}" -r '.context.handoff_kind // empty' <<<"${context_json}" 2>/dev/null || true)"
+
+        if [[ "${target_role}" == "reviewer" ]] ||
+            [[ "${context_kind}" == "review_request" ]] ||
+            [[ "${message_intent}" == "review_request" ]] ||
+            [[ "${packet_kind}" == "review_request" ]] ||
+            [[ "${packet_kind}" == "rereview_request" ]] ||
+            [[ "${handoff_kind}" == "review_request" ]]; then
+            printf 'reviewing\n'
+            return
+        fi
     fi
+
+    printf 'working\n'
 }
 
 copy_dispatch_prompt() {
@@ -669,7 +704,11 @@ populate_dispatch_state() {
     ACTIVE_TASK_ID="$("${JQ_BIN}" -r '.task_id // empty' <<<"${dispatch_json}")"
     DISPATCH_SUMMARY="$("${JQ_BIN}" -r '.summary // empty' <<<"${dispatch_json}")"
     DISPATCH_PROMPT="$("${JQ_BIN}" -r '.context_prompt // empty' <<<"${dispatch_json}")"
-    ACTIVE_STATUS="$(detect_activity_status)"
+    DISPATCH_CONTEXT_JSON=""
+    if [[ -n "${ACTIVE_DISPATCH_ID}" ]]; then
+        DISPATCH_CONTEXT_JSON="$(fetch_dispatch_context "${ACTIVE_DISPATCH_ID}" 2>/dev/null || true)"
+    fi
+    ACTIVE_STATUS="$(detect_activity_status "${DISPATCH_CONTEXT_JSON}")"
 
     [[ -n "${ACTIVE_DISPATCH_ID}" ]] && den_signal den_dispatch "${ACTIVE_DISPATCH_ID}"
     if [[ -n "${ACTIVE_TASK_ID}" ]]; then
