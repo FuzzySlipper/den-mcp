@@ -218,6 +218,13 @@ When staging a new live tree or cleaning up the existing one, preserve these pie
 - `server/.den-mcp/den.db`
 - `server/env/server.env`
 - `server/.local/share/signal-cli`
+
+Dispatch cleanup note:
+
+- Startup now includes an idempotent historical dispatch backfill for databases that still contain pre-`#668` stale rows.
+- It expires open dispatches tied to `done` or `cancelled` tasks.
+- It also expires older open dispatches when a newer open dispatch already exists for the same `{project_id, task_id, target_agent}` tuple.
+- No separate admin command is required; restarting an upgraded server is enough to apply the cleanup.
 - `server/.local/bin/signal-cli` and any installed versions under `.local/opt`
 
 The cutover helper at `deploy/activate-den-mcp-new.sh` is the source of truth for the expected ownership reset:

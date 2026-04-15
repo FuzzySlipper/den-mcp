@@ -300,4 +300,61 @@ public class DatabaseInitializerTests : IDisposable
 
         await Assert.ThrowsAsync<SqliteException>(() => insert.ExecuteNonQueryAsync());
     }
+
+    [Fact]
+    public async Task InitializeAsync_BackfillsHistoricalDispatchCleanup()
+    {
+        var initializer = new DatabaseInitializer(_dbPath, NullLogger<DatabaseInitializer>.Instance);
+        await initializer.InitializeAsync();
+
+        await using (var seed = new SqliteConnection(initializer.ConnectionString))
+        {
+            await seed.OpenAsync();
+
+            await using var cmd = seed.CreateCommand();
+            cmd.CommandText = """
+                INSERT INTO projects (id, name) VALUES ('proj', 'Test Project');
+
+                INSERT INTO tasks (id, project_id, title, status) VALUES
+                    (1, 'proj', 'Done task', 'done'),
+                    (2, 'proj', 'Cancelled task', 'cancelled'),
+                    (3, 'proj', 'Active review task', 'review'),
+                    (4, 'proj', 'Other active task', 'review');
+
+                INSERT INTO dispatch_entries (
+                    id, project_id, target_agent, status, trigger_type, trigger_id, task_id, dedup_key, expires_at
+                ) VALUES
+                    (1, 'proj', 'claude-code', 'pending', 'message', 1001, 1, 'done-task-pending', datetime('now', '+1 day')),
+                    (2, 'proj', 'claude-code', 'approved', 'message', 1002, 2, 'cancelled-task-approved', datetime('now', '+1 day')),
+                    (3, 'proj', 'claude-code', 'pending', 'message', 1003, 3, 'older-open-review-request', datetime('now', '+1 day')),
+                    (4, 'proj', 'claude-code', 'pending', 'message', 1004, 3, 'newer-open-review-request', datetime('now', '+1 day')),
+                    (5, 'proj', 'codex', 'pending', 'message', 1005, 3, 'different-target-stays-open', datetime('now', '+1 day')),
+                    (6, 'proj', 'claude-code', 'pending', 'message', 1006, 4, 'different-task-stays-open', datetime('now', '+1 day')),
+                    (7, 'proj', 'claude-code', 'pending', 'message', 1007, NULL, 'project-level-dispatch-stays-open', datetime('now', '+1 day'));
+                """;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        await initializer.InitializeAsync();
+
+        await using var verify = new SqliteConnection(initializer.ConnectionString);
+        await verify.OpenAsync();
+
+        var statuses = new List<(int Id, string Status)>();
+        await using var checkCmd = verify.CreateCommand();
+        checkCmd.CommandText = "SELECT id, status FROM dispatch_entries ORDER BY id";
+        await using var reader = await checkCmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            statuses.Add((reader.GetInt32(0), reader.GetString(1)));
+
+        Assert.Collection(
+            statuses,
+            row => Assert.Equal((1, "expired"), row),
+            row => Assert.Equal((2, "expired"), row),
+            row => Assert.Equal((3, "expired"), row),
+            row => Assert.Equal((4, "pending"), row),
+            row => Assert.Equal((5, "pending"), row),
+            row => Assert.Equal((6, "pending"), row),
+            row => Assert.Equal((7, "pending"), row));
+    }
 }
