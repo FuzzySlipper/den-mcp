@@ -374,7 +374,7 @@ public sealed class DatabaseInitializer
             ON dispatch_entries(dedup_key) WHERE status = 'pending';
         """;
 
-    private static async Task RunMigrationsAsync(SqliteConnection connection)
+    private async Task RunMigrationsAsync(SqliteConnection connection)
     {
         // Add session_id column to agent_sessions if it doesn't exist.
         // SQLite has no ALTER TABLE ... ADD COLUMN IF NOT EXISTS,
@@ -414,6 +414,7 @@ public sealed class DatabaseInitializer
         await EnsureIndexAsync(connection, "idx_messages_project_intent",
             "CREATE INDEX IF NOT EXISTS idx_messages_project_intent ON messages(project_id, intent)");
         await BackfillMessageIntentsAsync(connection);
+        await BackfillHistoricalDispatchCleanupAsync(connection);
     }
 
     private static async Task TryAddColumnAsync(SqliteConnection connection, string table, string column, string columnDefinition)
@@ -487,5 +488,57 @@ public sealed class DatabaseInitializer
             updateCmd.Parameters.AddWithValue("@id", update.Id);
             await updateCmd.ExecuteNonQueryAsync();
         }
+    }
+
+    private async Task BackfillHistoricalDispatchCleanupAsync(SqliteConnection connection)
+    {
+        var expiredTerminalTaskDispatches = await ExpireHistoricalDispatchesForTerminalTasksAsync(connection);
+        var expiredSupersededDispatches = await ExpireHistoricalSupersededTaskTargetDispatchesAsync(connection);
+        if (expiredTerminalTaskDispatches == 0 && expiredSupersededDispatches == 0)
+            return;
+
+        _logger.LogInformation(
+            "Expired {TerminalTaskDispatchCount} historical dispatches for terminal tasks and {SupersededDispatchCount} superseded task-target dispatches during startup backfill",
+            expiredTerminalTaskDispatches,
+            expiredSupersededDispatches);
+    }
+
+    private static async Task<int> ExpireHistoricalDispatchesForTerminalTasksAsync(SqliteConnection connection)
+    {
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            UPDATE dispatch_entries
+            SET status = 'expired'
+            WHERE status IN ('pending', 'approved')
+              AND task_id IS NOT NULL
+              AND EXISTS (
+                  SELECT 1
+                  FROM tasks
+                  WHERE tasks.id = dispatch_entries.task_id
+                    AND tasks.status IN ('done', 'cancelled')
+              )
+            """;
+        return await cmd.ExecuteNonQueryAsync();
+    }
+
+    private static async Task<int> ExpireHistoricalSupersededTaskTargetDispatchesAsync(SqliteConnection connection)
+    {
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            UPDATE dispatch_entries
+            SET status = 'expired'
+            WHERE status IN ('pending', 'approved')
+              AND task_id IS NOT NULL
+              AND EXISTS (
+                  SELECT 1
+                  FROM dispatch_entries AS newer
+                  WHERE newer.project_id = dispatch_entries.project_id
+                    AND newer.task_id = dispatch_entries.task_id
+                    AND newer.target_agent = dispatch_entries.target_agent
+                    AND newer.status IN ('pending', 'approved')
+                    AND newer.id > dispatch_entries.id
+              )
+            """;
+        return await cmd.ExecuteNonQueryAsync();
     }
 }
