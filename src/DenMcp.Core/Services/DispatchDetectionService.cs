@@ -23,6 +23,7 @@ public sealed class DispatchDetectionService : IDispatchDetectionService
     private readonly IRoutingService _routing;
     private readonly IDispatchRepository _dispatches;
     private readonly IPromptGenerationService _prompts;
+    private readonly IDispatchContextService _dispatchContexts;
     private readonly INotificationChannel _notifications;
     private readonly ILogger<DispatchDetectionService> _logger;
 
@@ -30,12 +31,14 @@ public sealed class DispatchDetectionService : IDispatchDetectionService
         IRoutingService routing,
         IDispatchRepository dispatches,
         IPromptGenerationService prompts,
+        IDispatchContextService dispatchContexts,
         INotificationChannel notifications,
         ILogger<DispatchDetectionService> logger)
     {
         _routing = routing;
         _dispatches = dispatches;
         _prompts = prompts;
+        _dispatchContexts = dispatchContexts;
         _notifications = notifications;
         _logger = logger;
     }
@@ -147,6 +150,7 @@ public sealed class DispatchDetectionService : IDispatchDetectionService
 
         // Generate prompt
         var promptResult = await _prompts.GenerateAsync(evt, trigger, configResult.Config);
+        var contextSnapshot = await _dispatchContexts.BuildSnapshotAsync(evt, targetAgent);
 
         var expiryMinutes = configResult.Config.Defaults.ExpiryMinutes;
         var dedupKey = DispatchEntry.BuildDedupKey(triggerType, triggerId, targetAgent);
@@ -160,6 +164,7 @@ public sealed class DispatchDetectionService : IDispatchDetectionService
             TaskId = evt.TaskId,
             Summary = promptResult.Summary,
             ContextPrompt = promptResult.ContextPrompt,
+            ContextJson = JsonSerializer.Serialize(contextSnapshot),
             DedupKey = dedupKey,
             ExpiresAt = DateTime.UtcNow.AddMinutes(expiryMinutes)
         };

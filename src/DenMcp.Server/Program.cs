@@ -74,6 +74,7 @@ builder.Services.AddSingleton<IReviewWorkflowService, ReviewWorkflowService>();
 // Dispatch
 builder.Services.AddSingleton<IRoutingService, RoutingService>();
 builder.Services.AddSingleton<IPromptGenerationService, PromptGenerationService>();
+builder.Services.AddSingleton<IDispatchContextService, DispatchContextService>();
 builder.Services.AddSingleton<IDispatchDetectionService, DispatchDetectionService>();
 builder.Services.AddHttpClient("signal-daemon", (services, client) =>
 {

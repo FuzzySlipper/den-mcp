@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace DenMcp.Core.Models;
 
 public sealed class DispatchEntry
@@ -11,6 +13,8 @@ public sealed class DispatchEntry
     public int? TaskId { get; set; }
     public string? Summary { get; set; }
     public string? ContextPrompt { get; set; }
+    [JsonIgnore]
+    public string? ContextJson { get; set; }
 
     /// <summary>
     /// Stable fingerprint for dedup. Formed from trigger_type + trigger_id + target_agent.

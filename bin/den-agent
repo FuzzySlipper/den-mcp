@@ -492,24 +492,32 @@ copy_dispatch_prompt() {
     return 1
 }
 
-paste_dispatch_prompt_with_kitty() {
-    local prompt="$1"
+paste_text_with_kitty() {
+    local text="$1"
 
-    if [[ -z "${prompt}" ]] || ! have_kitty_window; then
+    if [[ -z "${text}" ]] || ! have_kitty_window; then
         return 1
     fi
 
     if have_command timeout; then
-        printf '%s' "${prompt}" | timeout 1 \
+        printf '%s' "${text}" | timeout 1 \
             "${KITTY_BIN}" @ send-text \
             --match "id:${KITTY_WINDOW_ID}" \
             --stdin \
             --bracketed-paste auto >/dev/null 2>&1
     else
-        printf '%s' "${prompt}" | "${KITTY_BIN}" @ send-text \
+        printf '%s' "${text}" | "${KITTY_BIN}" @ send-text \
             --match "id:${KITTY_WINDOW_ID}" \
             --stdin \
             --bracketed-paste auto >/dev/null 2>&1
+    fi
+}
+
+build_dispatch_skill_wakeup() {
+    if [[ -n "${ACTIVE_DISPATCH_ID}" ]]; then
+        printf 'den %s' "${ACTIVE_DISPATCH_ID}"
+    else
+        printf 'den'
     fi
 }
 
@@ -527,8 +535,9 @@ dispatch_overlay_title() {
 }
 
 build_active_dispatch_overlay_text() {
-    local prompt_pasted="$1"
+    local wakeup_pasted="$1"
     local prompt_copied="$2"
+    local wakeup_text="$3"
     local task_label="project-wide"
 
     if [[ -n "${ACTIVE_TASK_ID}" ]]; then
@@ -544,15 +553,15 @@ Task: ${task_label}
 Summary:
 ${DISPATCH_SUMMARY:-No summary was provided.}
 
-Prompt delivery:
-- Pasted into the active kitty session input buffer: ${prompt_pasted}
-- Copied to the clipboard: ${prompt_copied}
+Handoff delivery:
+- Den wake-up pasted into the active kitty session input buffer: ${wakeup_pasted}
+- Full fallback prompt copied to the clipboard: ${prompt_copied}
 
 Next step:
-- Review the text already inserted into the running session and submit when ready.
-- If the input buffer did not update cleanly, paste the prompt from the clipboard instead.
+- Submit "${wakeup_text}" in the running session to load the structured handoff context from Den.
+- If the session does not recognize that wake-up or the skill is unavailable, paste the full prompt from the clipboard instead.
 
-Context prompt:
+Fallback prompt:
 ${DISPATCH_PROMPT:-No generated prompt was stored for this dispatch.}
 EOF
 }
@@ -584,34 +593,37 @@ launch_dispatch_overlay_with_kitty() {
 }
 
 deliver_active_dispatch_with_kitty() {
-    local prompt_pasted=0
+    local wakeup_pasted=0
     local prompt_copied=0
     local overlay_opened=0
     local overlay_text
     local overlay_title
+    local wakeup_text
 
     have_kitty_window || return 1
 
     focus_dispatch_window_with_kitty || true
+    wakeup_text="$(build_dispatch_skill_wakeup)"
 
     if [[ -n "${DISPATCH_PROMPT}" ]]; then
         if copy_dispatch_prompt "${DISPATCH_PROMPT}"; then
             prompt_copied=1
         fi
-        if paste_dispatch_prompt_with_kitty "${DISPATCH_PROMPT}"; then
-            prompt_pasted=1
-        fi
+    fi
+    if [[ -n "${wakeup_text}" ]] && paste_text_with_kitty "${wakeup_text}"; then
+        wakeup_pasted=1
     fi
 
     overlay_text="$(build_active_dispatch_overlay_text \
-        "$([[ "${prompt_pasted}" -eq 1 ]] && printf 'yes' || printf 'no')" \
-        "$([[ "${prompt_copied}" -eq 1 ]] && printf 'yes' || printf 'no')")"
+        "$([[ "${wakeup_pasted}" -eq 1 ]] && printf 'yes' || printf 'no')" \
+        "$([[ "${prompt_copied}" -eq 1 ]] && printf 'yes' || printf 'no')" \
+        "${wakeup_text}")"
     overlay_title="$(dispatch_overlay_title)"
     if launch_dispatch_overlay_with_kitty "${overlay_title}" "${overlay_text}"; then
         overlay_opened=1
     fi
 
-    if [[ "${prompt_pasted}" -eq 0 ]] && [[ "${prompt_copied}" -eq 0 ]] && [[ "${overlay_opened}" -eq 0 ]]; then
+    if [[ "${wakeup_pasted}" -eq 0 ]] && [[ "${prompt_copied}" -eq 0 ]] && [[ "${overlay_opened}" -eq 0 ]]; then
         return 1
     fi
 
@@ -619,11 +631,11 @@ deliver_active_dispatch_with_kitty() {
     if [[ -n "${ACTIVE_TASK_ID}" ]]; then
         log "dispatch task: #${ACTIVE_TASK_ID}"
     fi
-    if [[ "${prompt_pasted}" -eq 1 ]]; then
-        log "pasted dispatch prompt into the active kitty session input buffer"
+    if [[ "${wakeup_pasted}" -eq 1 ]]; then
+        log "pasted Den wake-up into the active kitty session input buffer"
     fi
     if [[ "${prompt_copied}" -eq 1 ]]; then
-        log "copied dispatch prompt to the clipboard"
+        log "copied fallback dispatch prompt to the clipboard"
     fi
     if [[ "${overlay_opened}" -eq 1 ]]; then
         log "opened kitty dispatch overlay"

@@ -356,6 +356,7 @@ public sealed class DatabaseInitializer
             task_id         INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
             summary         TEXT,
             context_prompt  TEXT,
+            context_json    TEXT,
             dedup_key       TEXT NOT NULL,
             created_at      TEXT NOT NULL DEFAULT (datetime('now')),
             expires_at      TEXT NOT NULL,
@@ -380,6 +381,7 @@ public sealed class DatabaseInitializer
         // so we check via PRAGMA table_info.
         await TryAddColumnAsync(connection, "agent_sessions", "session_id", "TEXT");
         await TryAddColumnAsync(connection, "dispatch_entries", "completed_by", "TEXT");
+        await TryAddColumnAsync(connection, "dispatch_entries", "context_json", "TEXT");
         await TryAddColumnAsync(connection, "messages", "intent",
             """
             TEXT NOT NULL DEFAULT 'general' CHECK (intent IN (

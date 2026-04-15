@@ -23,7 +23,9 @@ public class DispatchDetectionServiceTests : IAsyncLifetime
         var docs = new DocumentRepository(_testDb.Db);
         var routing = new RoutingService(docs);
         var prompts = new PromptGenerationService(_tasks, _messages, routing);
-        _detection = new DispatchDetectionService(routing, _dispatches, prompts, NoOpNotifications.Instance,
+        var contexts = new DispatchContextService(_dispatches, _messages, _tasks,
+            NullLogger<DispatchContextService>.Instance);
+        _detection = new DispatchDetectionService(routing, _dispatches, prompts, contexts, NoOpNotifications.Instance,
             NullLogger<DispatchDetectionService>.Instance);
 
         var projRepo = new ProjectRepository(_testDb.Db);

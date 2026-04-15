@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text.Json;
 using DenMcp.Core.Data;
 using DenMcp.Core.Models;
+using DenMcp.Core.Services;
 using ModelContextProtocol.Server;
 
 namespace DenMcp.Server.Tools;
@@ -38,6 +39,17 @@ public sealed class DispatchTools
         var entry = await repo.GetByIdAsync(dispatch_id);
         return entry is not null
             ? JsonSerializer.Serialize(entry, JsonOpts.Default)
+            : JsonSerializer.Serialize(new { error = $"Dispatch {dispatch_id} not found" }, JsonOpts.Default);
+    }
+
+    [McpServerTool(Name = "get_dispatch_context"), Description("Get the structured handoff context for a dispatch entry. This is the machine-oriented source of truth for targeted wake-ups.")]
+    public static async Task<string> GetDispatchContext(
+        IDispatchContextService contexts,
+        [Description("Dispatch entry ID.")] int dispatch_id)
+    {
+        var context = await contexts.GetContextAsync(dispatch_id);
+        return context is not null
+            ? JsonSerializer.Serialize(context, JsonOpts.Default)
             : JsonSerializer.Serialize(new { error = $"Dispatch {dispatch_id} not found" }, JsonOpts.Default);
     }
 

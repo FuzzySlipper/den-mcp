@@ -39,12 +39,12 @@ public sealed class DispatchRepository : IDispatchRepository
         insertCmd.CommandText = """
             INSERT INTO dispatch_entries
                 (project_id, target_agent, status, trigger_type, trigger_id, task_id,
-                 summary, context_prompt, dedup_key, expires_at)
+                 summary, context_prompt, context_json, dedup_key, expires_at)
             VALUES
                 (@projectId, @targetAgent, @status, @triggerType, @triggerId, @taskId,
-                 @summary, @contextPrompt, @dedupKey, @expiresAt)
+                 @summary, @contextPrompt, @contextJson, @dedupKey, @expiresAt)
             RETURNING id, project_id, target_agent, status, trigger_type, trigger_id,
-                      task_id, summary, context_prompt, dedup_key,
+                      task_id, summary, context_prompt, context_json, dedup_key,
                       created_at, expires_at, decided_at, completed_at, decided_by, completed_by
             """;
         AddCreateParams(insertCmd, entry);
@@ -134,7 +134,7 @@ public sealed class DispatchRepository : IDispatchRepository
             SET status = @newStatus, completed_at = datetime('now'), completed_by = @completedBy
             WHERE id = @id AND status = @requiredStatus
             RETURNING id, project_id, target_agent, status, trigger_type, trigger_id,
-                      task_id, summary, context_prompt, dedup_key,
+                      task_id, summary, context_prompt, context_json, dedup_key,
                       created_at, expires_at, decided_at, completed_at, decided_by, completed_by
             """;
         cmd.Parameters.AddWithValue("@id", id);
@@ -158,7 +158,7 @@ public sealed class DispatchRepository : IDispatchRepository
             SET status = @newStatus
             WHERE id = @id AND status IN ('pending', 'approved')
             RETURNING id, project_id, target_agent, status, trigger_type, trigger_id,
-                      task_id, summary, context_prompt, dedup_key,
+                      task_id, summary, context_prompt, context_json, dedup_key,
                       created_at, expires_at, decided_at, completed_at, decided_by, completed_by
             """;
         cmd.Parameters.AddWithValue("@id", id);
@@ -260,7 +260,7 @@ public sealed class DispatchRepository : IDispatchRepository
             SET status = @newStatus, decided_at = datetime('now'), decided_by = @decidedBy
             WHERE id = @id AND status = @requiredStatus
             RETURNING id, project_id, target_agent, status, trigger_type, trigger_id,
-                      task_id, summary, context_prompt, dedup_key,
+                      task_id, summary, context_prompt, context_json, dedup_key,
                       created_at, expires_at, decided_at, completed_at, decided_by, completed_by
             """;
         cmd.Parameters.AddWithValue("@id", id);
@@ -295,13 +295,14 @@ public sealed class DispatchRepository : IDispatchRepository
         cmd.Parameters.AddWithValue("@taskId", (object?)entry.TaskId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@summary", (object?)entry.Summary ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@contextPrompt", (object?)entry.ContextPrompt ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@contextJson", (object?)entry.ContextJson ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@dedupKey", entry.DedupKey);
         cmd.Parameters.AddWithValue("@expiresAt", entry.ExpiresAt.ToString("yyyy-MM-dd HH:mm:ss"));
     }
 
     private const string SelectColumns = """
         SELECT id, project_id, target_agent, status, trigger_type, trigger_id,
-               task_id, summary, context_prompt, dedup_key,
+               task_id, summary, context_prompt, context_json, dedup_key,
                created_at, expires_at, decided_at, completed_at, decided_by, completed_by
         FROM dispatch_entries
         """;
@@ -319,13 +320,14 @@ public sealed class DispatchRepository : IDispatchRepository
             TaskId = reader.IsDBNull(6) ? null : reader.GetInt32(6),
             Summary = reader.IsDBNull(7) ? null : reader.GetString(7),
             ContextPrompt = reader.IsDBNull(8) ? null : reader.GetString(8),
-            DedupKey = reader.GetString(9),
-            CreatedAt = DateTime.Parse(reader.GetString(10)),
-            ExpiresAt = DateTime.Parse(reader.GetString(11)),
-            DecidedAt = reader.IsDBNull(12) ? null : DateTime.Parse(reader.GetString(12)),
-            CompletedAt = reader.IsDBNull(13) ? null : DateTime.Parse(reader.GetString(13)),
-            DecidedBy = reader.IsDBNull(14) ? null : reader.GetString(14),
-            CompletedBy = reader.IsDBNull(15) ? null : reader.GetString(15)
+            ContextJson = reader.IsDBNull(9) ? null : reader.GetString(9),
+            DedupKey = reader.GetString(10),
+            CreatedAt = DateTime.Parse(reader.GetString(11)),
+            ExpiresAt = DateTime.Parse(reader.GetString(12)),
+            DecidedAt = reader.IsDBNull(13) ? null : DateTime.Parse(reader.GetString(13)),
+            CompletedAt = reader.IsDBNull(14) ? null : DateTime.Parse(reader.GetString(14)),
+            DecidedBy = reader.IsDBNull(15) ? null : reader.GetString(15),
+            CompletedBy = reader.IsDBNull(16) ? null : reader.GetString(16)
         };
     }
 }

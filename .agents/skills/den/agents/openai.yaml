@@ -1,0 +1,6 @@
+interface:
+  display_name: "Den"
+  short_description: "Check Den for queued work or fetch structured context for a specific dispatch."
+  default_prompt: "Use $den to check Den for pending dispatches, unread task-thread messages, and the next actionable handoff in the current project."
+policy:
+  allow_implicit_invocation: false

@@ -4,6 +4,8 @@ using System.Text.Json;
 using DenMcp.Core.Data;
 using DenMcp.Core.Llm;
 using DenMcp.Core.Models;
+using DenMcp.Core.Services;
+using DenMcp.Server.Tools;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
@@ -34,7 +36,10 @@ public class DispatchApiTests : IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    private async Task<DispatchEntry> CreatePendingDispatchAsync(int triggerId = 1, string agent = "claude-code")
+    private async Task<DispatchEntry> CreatePendingDispatchAsync(
+        int triggerId = 1,
+        string agent = "claude-code",
+        string? contextJson = null)
     {
         using var scope = _factory.Services.CreateScope();
         var repo = scope.ServiceProvider.GetRequiredService<IDispatchRepository>();
@@ -45,6 +50,7 @@ public class DispatchApiTests : IAsyncLifetime
             TriggerType = DispatchTriggerType.TaskStatus,
             TriggerId = triggerId,
             Summary = $"Test dispatch {triggerId}",
+            ContextJson = contextJson,
             DedupKey = DispatchEntry.BuildDedupKey(DispatchTriggerType.TaskStatus, triggerId, agent),
             ExpiresAt = DateTime.UtcNow.AddHours(24)
         });
@@ -126,6 +132,30 @@ public class DispatchApiTests : IAsyncLifetime
     {
         var response = await _client.GetAsync("/api/dispatch/9999");
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetContext_ReturnsStructuredDispatchContext()
+    {
+        var contextJson = JsonSerializer.Serialize(new DispatchContextSnapshot
+        {
+            ContextKind = "review_feedback",
+            ProjectId = ProjectId,
+            TargetAgent = "claude-code",
+            WorkflowGuardrails = ["guardrail"],
+            NextActions = ["next step"]
+        });
+        var entry = await CreatePendingDispatchAsync(contextJson: contextJson);
+
+        var response = await _client.GetAsync($"/api/dispatch/{entry.Id}/context");
+        response.EnsureSuccessStatusCode();
+
+        var envelope = await response.Content.ReadFromJsonAsync<DispatchContextEnvelope>(JsonOpts);
+        Assert.NotNull(envelope);
+        Assert.Equal(entry.Id, envelope!.Dispatch.Id);
+        Assert.Equal("review_feedback", envelope.Context.ContextKind);
+        Assert.Equal("claude-code", envelope.Context.TargetAgent);
+        Assert.Equal("next step", Assert.Single(envelope.Context.NextActions));
     }
 
     #endregion
@@ -274,6 +304,31 @@ public class DispatchApiTests : IAsyncLifetime
         Assert.Contains("\"expires_at\"", json);
         Assert.DoesNotContain("\"ProjectId\"", json);
         Assert.DoesNotContain("\"TargetAgent\"", json);
+    }
+
+    [Fact]
+    public async Task McpGetDispatchContext_ReturnsStructuredContext()
+    {
+        var contextJson = JsonSerializer.Serialize(new DispatchContextSnapshot
+        {
+            ContextKind = "handoff",
+            ProjectId = ProjectId,
+            TargetAgent = "claude-code",
+            WorkflowGuardrails = ["guardrail"],
+            NextActions = ["continue the handoff"]
+        });
+        var entry = await CreatePendingDispatchAsync(contextJson: contextJson);
+
+        using var scope = _factory.Services.CreateScope();
+        var contexts = scope.ServiceProvider.GetRequiredService<IDispatchContextService>();
+
+        var json = await DispatchTools.GetDispatchContext(contexts, entry.Id);
+        var envelope = JsonSerializer.Deserialize<DispatchContextEnvelope>(json, JsonOpts);
+
+        Assert.NotNull(envelope);
+        Assert.Equal(entry.Id, envelope!.Dispatch.Id);
+        Assert.Equal("handoff", envelope.Context.ContextKind);
+        Assert.Equal("continue the handoff", Assert.Single(envelope.Context.NextActions));
     }
 
     #endregion

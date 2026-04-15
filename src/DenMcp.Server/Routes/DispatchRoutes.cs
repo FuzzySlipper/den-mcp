@@ -1,5 +1,6 @@
 using DenMcp.Core.Data;
 using DenMcp.Core.Models;
+using DenMcp.Core.Services;
 
 namespace DenMcp.Server.Routes;
 
@@ -31,6 +32,14 @@ public static class DispatchRoutes
             var entry = await repo.GetByIdAsync(id);
             return entry is not null
                 ? Results.Ok(entry)
+                : Results.NotFound(new { error = $"Dispatch {id} not found" });
+        });
+
+        group.MapGet("/{id:int}/context", async (IDispatchContextService contexts, int id) =>
+        {
+            var context = await contexts.GetContextAsync(id);
+            return context is not null
+                ? Results.Ok(context)
                 : Results.NotFound(new { error = $"Dispatch {id} not found" });
         });
 

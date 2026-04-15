@@ -380,15 +380,17 @@ class DenAgentTests(unittest.TestCase):
             ["@", "send-text", "--match", "id:77", "--stdin", "--bracketed-paste", "auto"],
             kitten_calls[2]["argv"],
         )
-        self.assertEqual("Prompt arriving mid-session", kitten_calls[2]["stdin"])
+        self.assertEqual("den 42", kitten_calls[2]["stdin"])
         self.assertIn("@", kitten_calls[3]["argv"])
         self.assertIn("launch", kitten_calls[3]["argv"])
         self.assertIn("--details-file", kitten_calls[3]["argv"])
         self.assertIn("Prompt arriving mid-session", kitten_calls[3]["details_text"])
-        self.assertIn("Pasted into the active kitty session input buffer: yes", kitten_calls[3]["details_text"])
+        self.assertIn("Den wake-up pasted into the active kitty session input buffer: yes", kitten_calls[3]["details_text"])
+        self.assertIn('Submit "den 42" in the running session', kitten_calls[3]["details_text"])
 
         self.assertIn("new approved dispatch #42 arrived while claude is running", stderr)
         self.assertIn("opened kitty dispatch overlay", stderr)
+        self.assertIn("pasted Den wake-up into the active kitty session input buffer", stderr)
         self.assertNotIn("--- den-agent dispatch prompt start ---", stderr)
         self.assertNotIn("Prompt arriving mid-session", stderr)
         self.assertIn("SetUserVar=den_dispatch=", stdout)

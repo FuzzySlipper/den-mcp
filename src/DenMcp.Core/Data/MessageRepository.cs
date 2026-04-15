@@ -8,6 +8,7 @@ namespace DenMcp.Core.Data;
 public interface IMessageRepository
 {
     Task<Message> CreateAsync(Message message);
+    Task<Message?> GetByIdAsync(int id);
     Task<List<Message>> GetMessagesAsync(string projectId, int? taskId = null,
         DateTime? since = null, string? unreadFor = null, int limit = 20, MessageIntent? intent = null);
     Task<List<MessageFeedItem>> GetFeedAsync(string projectId, int limit = 20, MessageIntent? intent = null);
@@ -44,6 +45,20 @@ public sealed class MessageRepository : IMessageRepository
         await using var reader = await cmd.ExecuteReaderAsync();
         await reader.ReadAsync();
         return ReadMessage(reader);
+    }
+
+    public async Task<Message?> GetByIdAsync(int id)
+    {
+        await using var conn = await _db.CreateConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT id, project_id, task_id, thread_id, sender, content, intent, metadata, created_at
+            FROM messages WHERE id = @id
+            """;
+        cmd.Parameters.AddWithValue("@id", id);
+
+        await using var reader = await cmd.ExecuteReaderAsync();
+        return await reader.ReadAsync() ? ReadMessage(reader) : null;
     }
 
     public async Task<List<Message>> GetMessagesAsync(string projectId, int? taskId = null,
