@@ -41,6 +41,7 @@ Add to your `.mcp.json` or MCP settings:
 |-------------|----------------|
 | Claude Code | `claude-code`  |
 | Codex CLI   | `codex`        |
+| OMP         | `omp`          |
 | Kimi Code   | `kimi-code`    |
 | User        | `user`         |
 
