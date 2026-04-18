@@ -13,6 +13,8 @@ export type MessageIntent =
   | 'task_ready'
   | 'task_blocked';
 export type AgentSessionStatus = 'active' | 'inactive';
+export type DispatchStatus = 'pending' | 'approved' | 'rejected' | 'completed' | 'expired';
+export type DispatchTriggerType = 'message' | 'task_status';
 export type ReviewVerdict = 'changes_requested' | 'looks_good' | 'follow_up_needed' | 'blocked_by_dependency';
 export type ReviewFindingCategory = 'blocking_bug' | 'acceptance_gap' | 'test_weakness' | 'follow_up_candidate';
 export type ReviewFindingStatus = 'open' | 'claimed_fixed' | 'verified_fixed' | 'not_fixed' | 'superseded' | 'split_to_follow_up';
@@ -259,4 +261,23 @@ export interface AgentSession {
   checked_in_at: string;
   last_heartbeat: string;
   metadata: string | null;
+}
+
+export interface DispatchEntry {
+  id: number;
+  project_id: string;
+  target_agent: string;
+  status: DispatchStatus;
+  trigger_type: DispatchTriggerType;
+  trigger_id: number;
+  task_id: number | null;
+  summary: string | null;
+  context_prompt: string | null;
+  dedup_key: string;
+  created_at: string;
+  expires_at: string;
+  decided_at: string | null;
+  completed_at: string | null;
+  decided_by: string | null;
+  completed_by: string | null;
 }

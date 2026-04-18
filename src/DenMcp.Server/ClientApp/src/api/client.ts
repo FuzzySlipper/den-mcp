@@ -11,6 +11,7 @@ import type {
   Document,
   DocumentSearchResult,
   AgentSession,
+  DispatchEntry,
   ReviewPacketResult,
 } from './types';
 
@@ -188,4 +189,29 @@ export function searchDocuments(query: string, projectId?: string): Promise<Docu
 export function listActiveAgents(projectId?: string): Promise<AgentSession[]> {
   const q = buildQuery({ projectId });
   return get(`/api/agents/active${q}`);
+}
+
+// Dispatches
+
+export interface ListDispatchesOpts {
+  projectId?: string;
+  targetAgent?: string;
+  status?: string;
+}
+
+export function listDispatches(opts: ListDispatchesOpts = {}): Promise<DispatchEntry[]> {
+  const q = buildQuery({
+    projectId: opts.projectId,
+    targetAgent: opts.targetAgent,
+    status: opts.status,
+  });
+  return get(`/api/dispatch${q}`);
+}
+
+export function approveDispatch(dispatchId: number, decidedBy: string): Promise<DispatchEntry> {
+  return post(`/api/dispatch/${dispatchId}/approve`, { decided_by: decidedBy });
+}
+
+export function rejectDispatch(dispatchId: number, decidedBy: string): Promise<DispatchEntry> {
+  return post(`/api/dispatch/${dispatchId}/reject`, { decided_by: decidedBy });
 }

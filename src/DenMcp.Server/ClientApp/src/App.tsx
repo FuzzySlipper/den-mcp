@@ -1,6 +1,15 @@
 import { useState, useCallback, useMemo } from 'react';
-import type { Message, DocumentSummary, MessageIntent } from './api/types';
-import { listProjects, listTasks, getMessageFeed, listDocuments, listActiveAgents } from './api/client';
+import type { Message, DocumentSummary, MessageIntent, DispatchEntry } from './api/types';
+import {
+  listProjects,
+  listTasks,
+  getMessageFeed,
+  listDocuments,
+  listActiveAgents,
+  listDispatches,
+  approveDispatch,
+  rejectDispatch,
+} from './api/client';
 import { usePolling } from './hooks/usePolling';
 import { ProjectSidebar } from './components/ProjectSidebar';
 import { TaskTree } from './components/TaskTree';
@@ -11,6 +20,7 @@ import { MessageDetail } from './components/MessageDetail';
 import { DocumentList } from './components/DocumentList';
 import { DocumentDetail } from './components/DocumentDetail';
 import { AgentBar } from './components/AgentBar';
+import { DispatchPanel } from './components/DispatchPanel';
 import { MESSAGE_INTENT_OPTIONS, messageIntentLabel } from './messageIntents';
 
 export default function App() {
@@ -22,6 +32,8 @@ export default function App() {
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [messageIntentFilter, setMessageIntentFilter] = useState<MessageIntent | ''>('');
   const [sortMode, setSortMode] = useState('priority');
+  const [pendingDispatchActionId, setPendingDispatchActionId] = useState<number | null>(null);
+  const [dispatchActionError, setDispatchActionError] = useState<string | null>(null);
 
   const fetchProjects = useCallback(() => listProjects(), []);
   const { data: projects } = usePolling(fetchProjects, 5000);
@@ -65,6 +77,21 @@ export default function App() {
   );
   const { data: agents } = usePolling(fetchAgents, 5000);
 
+  const fetchDispatches = useCallback(
+    () => effectiveProject
+      ? listDispatches({
+        projectId: isGlobal ? undefined : effectiveProject,
+        status: 'pending',
+      })
+      : Promise.resolve([]),
+    [effectiveProject, isGlobal],
+  );
+  const {
+    data: dispatches,
+    error: dispatchError,
+    refresh: refreshDispatches,
+  } = usePolling(fetchDispatches, 5000);
+
   const sortedDocs = useMemo(
     () => documents ? [...documents].sort((a, b) => b.updated_at.localeCompare(a.updated_at)) : [],
     [documents],
@@ -92,6 +119,37 @@ export default function App() {
     setSelectedMessage(message);
     setSelectedDoc(null);
   }, []);
+
+  const handleDispatchDecision = useCallback(async (
+    dispatch: DispatchEntry,
+    decision: 'approve' | 'reject',
+  ) => {
+    const verb = decision === 'approve' ? 'approve' : 'reject';
+    const confirmed = window.confirm(
+      `${verb[0].toUpperCase()}${verb.slice(1)} dispatch #${dispatch.id} for ${dispatch.target_agent} on ${dispatch.project_id}?`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setPendingDispatchActionId(dispatch.id);
+    setDispatchActionError(null);
+
+    try {
+      if (decision === 'approve') {
+        await approveDispatch(dispatch.id, 'web-ui');
+      } else {
+        await rejectDispatch(dispatch.id, 'web-ui');
+      }
+    } catch (error) {
+      setDispatchActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPendingDispatchActionId(null);
+      refreshDispatches();
+    }
+  }, [refreshDispatches]);
+
+  const visibleDispatchError = dispatchActionError ?? (dispatchError ? dispatchError.message : null);
 
   return (
     <div className="dashboard">
@@ -123,13 +181,31 @@ export default function App() {
         </div>
       </div>
 
-      {/* Agents — middle, full width */}
-      <div className="panel panel-agents">
-        <div className="panel-header">
-          Agents <span className="count">({agents?.length ?? 0})</span>
+      {/* Middle row — agents plus dispatch fallback controls */}
+      <div className="panel-middle-grid">
+        <div className="panel panel-agents">
+          <div className="panel-header">
+            Agents <span className="count">({agents?.length ?? 0})</span>
+          </div>
+          <div className="panel-body panel-body-agents">
+            <AgentBar agents={agents ?? []} isGlobal={isGlobal} />
+          </div>
         </div>
-        <div className="panel-body" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center' }}>
-          <AgentBar agents={agents ?? []} isGlobal={isGlobal} />
+
+        <div className="panel panel-dispatches">
+          <div className="panel-header">
+            Dispatches <span className="count">({dispatches?.length ?? 0})</span>
+          </div>
+          <div className="panel-body">
+            <DispatchPanel
+              dispatches={dispatches ?? []}
+              isGlobal={isGlobal}
+              pendingActionId={pendingDispatchActionId}
+              actionError={visibleDispatchError}
+              onApprove={dispatch => void handleDispatchDecision(dispatch, 'approve')}
+              onReject={dispatch => void handleDispatchDecision(dispatch, 'reject')}
+            />
+          </div>
         </div>
       </div>
 
