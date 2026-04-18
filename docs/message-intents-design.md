@@ -232,6 +232,11 @@ This is where the workflow payoff lands.
 - `DispatchDetectionService` should populate `DispatchEvent.MessageIntent` from
   `Message.Intent`.
 - It should still extract `recipient` and other routing hints from metadata.
+- `recipient` should remain a concrete target agent identity.
+- A separate metadata key such as `target_role` can be used for role-targeted
+  handoffs that should resolve through the project's routing config.
+- If both `recipient` and `target_role` are present, `recipient` should take
+  precedence so direct addressing stays explicit.
 - It should not hardcode target-agent selection from intent in the service
   itself; routing policy still belongs in `RoutingService` / routing docs.
 
@@ -252,6 +257,7 @@ Recommended compatibility plan:
 That lets a project express rules like:
 
 - `review_request` -> `reviewer`
+- `target_role = reviewer` -> `{target_role}`
 - `review_feedback` -> `{recipient}` or `implementer`
 - `task_blocked` -> coordinator / human overseer
 - `message_intent = review_request` plus `packet_kind = rereview_request` ->
@@ -285,6 +291,9 @@ Keep the built-in fallback conservative:
 
 - task status transition to `review` still dispatches reviewer
 - explicit `recipient` still dispatches that agent
+- explicit `target_role` dispatches to the agent currently configured for that
+  role
+- if both are present, `recipient` wins over `target_role`
 - do not auto-dispatch every `review_request` / `question` / `task_blocked`
   message solely because the intent exists
 

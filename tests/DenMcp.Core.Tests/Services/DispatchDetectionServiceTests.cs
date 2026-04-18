@@ -23,7 +23,7 @@ public class DispatchDetectionServiceTests : IAsyncLifetime
         var docs = new DocumentRepository(_testDb.Db);
         var routing = new RoutingService(docs);
         var prompts = new PromptGenerationService(_tasks, _messages, routing);
-        var contexts = new DispatchContextService(_dispatches, _messages, _tasks,
+        var contexts = new DispatchContextService(_dispatches, _messages, _tasks, routing,
             NullLogger<DispatchContextService>.Instance);
         _detection = new DispatchDetectionService(routing, _dispatches, prompts, contexts, NoOpNotifications.Instance,
             NullLogger<DispatchDetectionService>.Instance);
@@ -207,6 +207,55 @@ public class DispatchDetectionServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task MessageWithTargetRole_CreatesDispatchForConfiguredRole()
+    {
+        var msg = await _messages.CreateAsync(new Message
+        {
+            ProjectId = "proj",
+            Sender = "claude-code",
+            Content = "Please review the latest pass.",
+            Intent = MessageIntent.ReviewRequest,
+            Metadata = JsonSerializer.Deserialize<JsonElement>(
+                """{"target_role":"reviewer","handoff_kind":"review_request"}""")
+        });
+
+        await _detection.OnMessageCreatedAsync(msg);
+
+        var pending = Assert.Single(await _dispatches.ListAsync("proj", statuses: [DispatchStatus.Pending]));
+        Assert.Equal("codex", pending.TargetAgent);
+
+        var context = JsonSerializer.Deserialize<DispatchContextSnapshot>(pending.ContextJson!);
+        Assert.NotNull(context);
+        Assert.Equal("target_role", context!.AddressedVia);
+        Assert.Equal("reviewer", context.MessageTargetRole);
+    }
+
+    [Fact]
+    public async Task MessageWithRecipientAndTargetRole_PrefersRecipient()
+    {
+        var msg = await _messages.CreateAsync(new Message
+        {
+            ProjectId = "proj",
+            Sender = "codex",
+            Content = "Please send this directly to Claude.",
+            Intent = MessageIntent.Handoff,
+            Metadata = JsonSerializer.Deserialize<JsonElement>(
+                """{"recipient":"claude-code","target_role":"reviewer","handoff_kind":"planning_summary"}""")
+        });
+
+        await _detection.OnMessageCreatedAsync(msg);
+
+        var pending = Assert.Single(await _dispatches.ListAsync("proj", statuses: [DispatchStatus.Pending]));
+        Assert.Equal("claude-code", pending.TargetAgent);
+
+        var context = JsonSerializer.Deserialize<DispatchContextSnapshot>(pending.ContextJson!);
+        Assert.NotNull(context);
+        Assert.Equal("recipient", context!.AddressedVia);
+        Assert.Equal("claude-code", context.Recipient);
+        Assert.Equal("reviewer", context.MessageTargetRole);
+    }
+
+    [Fact]
     public async Task MessageDispatch_ExpiresOlderTaskDispatchForSameTarget()
     {
         var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Review cleanup" });
@@ -235,7 +284,7 @@ public class DispatchDetectionServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task MessageWithoutRecipient_NoDispatch()
+    public async Task MessageWithoutRecipientOrTargetRole_NoDispatch()
     {
         var msg = await _messages.CreateAsync(new Message
         {
@@ -248,7 +297,26 @@ public class DispatchDetectionServiceTests : IAsyncLifetime
         await _detection.OnMessageCreatedAsync(msg);
 
         var pending = await _dispatches.ListAsync("proj", statuses: [DispatchStatus.Pending]);
-        Assert.Empty(pending); // Default config requires has_recipient=true
+        Assert.Empty(pending); // Default config requires has_recipient=true or has_target_role=true
+    }
+
+    [Fact]
+    public async Task MessageWithUnknownTargetRole_NoDispatch()
+    {
+        var msg = await _messages.CreateAsync(new Message
+        {
+            ProjectId = "proj",
+            Sender = "claude-code",
+            Content = "This should not route.",
+            Intent = MessageIntent.Handoff,
+            Metadata = JsonSerializer.Deserialize<JsonElement>(
+                """{"target_role":"coordinator","handoff_kind":"planning_summary"}""")
+        });
+
+        await _detection.OnMessageCreatedAsync(msg);
+
+        var pending = await _dispatches.ListAsync("proj", statuses: [DispatchStatus.Pending]);
+        Assert.Empty(pending);
     }
 
     [Fact]

@@ -15,10 +15,12 @@ public sealed class DispatchContextSnapshot
     public required string ProjectId { get; set; }
     public required string TargetAgent { get; set; }
     public string? TargetRole { get; set; }
+    public string? AddressedVia { get; set; }
     public string? ActivityHint { get; set; }
     public int? TaskId { get; set; }
     public string? Sender { get; set; }
     public string? Recipient { get; set; }
+    public string? MessageTargetRole { get; set; }
     public MessageIntent? MessageIntent { get; set; }
     public string? MessageType { get; set; }
     public string? PacketKind { get; set; }

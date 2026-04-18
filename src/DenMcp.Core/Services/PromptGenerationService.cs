@@ -133,6 +133,7 @@ public sealed class PromptGenerationService : IPromptGenerationService
         sb.AppendLine(customOpener ?? $"Review request is ready on {evt.ProjectId} from {evt.Sender}.");
         sb.AppendLine();
         sb.AppendLine($"You are the {role} for {evt.ProjectId}.");
+        AppendAddressingDetails(sb, evt);
         if (branch is not null)
             sb.AppendLine($"**Branch**: {branch}");
         sb.AppendLine();
@@ -190,6 +191,7 @@ public sealed class PromptGenerationService : IPromptGenerationService
 
         sb.AppendLine(customOpener ?? $"You have a {handoffLabel} handoff on {evt.ProjectId} from {evt.Sender}.");
         sb.AppendLine();
+        AppendAddressingDetails(sb, evt);
 
         AppendTriggeringMessage(sb, evt);
         await AppendTaskAndMessages(sb, evt);
@@ -215,6 +217,7 @@ public sealed class PromptGenerationService : IPromptGenerationService
         sb.AppendLine(customOpener ?? $"Review feedback is ready on {evt.ProjectId} from {evt.Sender}.");
         sb.AppendLine();
         sb.AppendLine($"You are the {role} for {evt.ProjectId}.");
+        AppendAddressingDetails(sb, evt);
         sb.AppendLine();
 
         AppendTriggeringMessage(sb, evt);
@@ -242,6 +245,7 @@ public sealed class PromptGenerationService : IPromptGenerationService
         sb.AppendLine(customOpener ?? $"Review approved work on {evt.ProjectId} from {evt.Sender}.");
         sb.AppendLine();
         sb.AppendLine($"You are the {role} for {evt.ProjectId}.");
+        AppendAddressingDetails(sb, evt);
         sb.AppendLine();
 
         AppendTriggeringMessage(sb, evt);
@@ -266,6 +270,7 @@ public sealed class PromptGenerationService : IPromptGenerationService
 
         sb.AppendLine(customOpener ?? $"You have a message on {evt.ProjectId} from {evt.Sender}.");
         sb.AppendLine();
+        AppendAddressingDetails(sb, evt);
 
         AppendTriggeringMessage(sb, evt);
         await AppendTaskAndMessages(sb, evt);
@@ -354,6 +359,29 @@ public sealed class PromptGenerationService : IPromptGenerationService
             sb.AppendLine();
         }
         sb.AppendLine("---");
+    }
+
+    private static void AppendAddressingDetails(StringBuilder sb, DispatchEvent evt)
+    {
+        if (!string.IsNullOrWhiteSpace(evt.Recipient) && !string.IsNullOrWhiteSpace(evt.MessageTargetRole))
+        {
+            sb.AppendLine($"This message explicitly named recipient `{evt.Recipient}` and also carried target role `{evt.MessageTargetRole}`; the explicit recipient took precedence.");
+            sb.AppendLine();
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(evt.Recipient))
+        {
+            sb.AppendLine($"This message explicitly named recipient `{evt.Recipient}`.");
+            sb.AppendLine();
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(evt.MessageTargetRole))
+        {
+            sb.AppendLine($"This message was addressed to role `{evt.MessageTargetRole}` and resolved through the project's routing config.");
+            sb.AppendLine();
+        }
     }
 
     private static void AppendImplementerWorkflowGuidance(StringBuilder sb)

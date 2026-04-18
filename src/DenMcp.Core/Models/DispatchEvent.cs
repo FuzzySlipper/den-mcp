@@ -39,6 +39,9 @@ public sealed class DispatchEvent
     /// <summary>Explicit recipient from message metadata, if present.</summary>
     public string? Recipient { get; set; }
 
+    /// <summary>Explicit target role from message metadata, if present.</summary>
+    public string? MessageTargetRole { get; set; }
+
     /// <summary>The agent/user who sent the message or changed the task status.</summary>
     public string? Sender { get; set; }
 

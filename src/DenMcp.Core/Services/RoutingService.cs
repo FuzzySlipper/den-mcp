@@ -39,7 +39,7 @@ public interface IRoutingService
 
     /// <summary>
     /// Resolve the target agent identity from a trigger's dispatch_to value.
-    /// Handles role lookup, "{recipient}" interpolation, and literal agent names.
+    /// Handles role lookup, "{recipient}" / "{target_role}" interpolation, and literal agent names.
     /// </summary>
     string? ResolveAgent(RoutingConfig config, RoutingTrigger trigger, DispatchEvent evt);
 
@@ -117,6 +117,17 @@ public sealed class RoutingService : IRoutingService
         if (target == "{recipient}")
             return evt.Recipient;
 
+        // {target_role} interpolation — resolve the message's explicit target role via config.Roles
+        if (target == "{target_role}")
+        {
+            if (string.IsNullOrWhiteSpace(evt.MessageTargetRole))
+                return null;
+
+            return config.Roles.TryGetValue(evt.MessageTargetRole, out var agentFromTargetRole)
+                ? agentFromTargetRole
+                : null;
+        }
+
         // Role lookup — check if DispatchTo is a known role name
         if (config.Roles.TryGetValue(target, out var agentFromRole))
             return agentFromRole;
@@ -133,6 +144,7 @@ public sealed class RoutingService : IRoutingService
             .Replace("{task_title}", evt.TaskTitle ?? "")
             .Replace("{branch}", evt.Branch ?? $"task/{evt.TaskId}-*")
             .Replace("{sender}", evt.Sender ?? "")
+            .Replace("{target_role}", evt.MessageTargetRole ?? "")
             .Replace("{message_intent}", evt.MessageIntent?.ToDbValue() ?? "")
             .Replace("{message_type}", evt.MessageType ?? evt.PacketKind ?? evt.HandoffKind ?? evt.MessageIntent?.ToDbValue() ?? "")
             .Replace("{packet_kind}", evt.PacketKind ?? "")
@@ -248,6 +260,10 @@ public sealed class RoutingService : IRoutingService
         if (trigger.HasRecipient == true && string.IsNullOrWhiteSpace(evt.Recipient))
             return false;
 
+        // target_role presence predicate
+        if (trigger.HasTargetRole == true && string.IsNullOrWhiteSpace(evt.MessageTargetRole))
+            return false;
+
         return true;
     }
 
@@ -300,6 +316,14 @@ public sealed class RoutingService : IRoutingService
                 HasRecipient = true,
                 DispatchTo = "{recipient}",
                 PromptTemplate = "You have a message on {project_id} from {sender}. Check your messages and respond."
+            },
+            // Message with explicit target_role → resolve through configured role mapping
+            new RoutingTrigger
+            {
+                Event = DispatchEvent.MessageReceived,
+                HasTargetRole = true,
+                DispatchTo = "{target_role}",
+                PromptTemplate = "You have a message on {project_id} from {sender} for role {target_role}. Check your messages and respond."
             }
         ],
         Defaults = new RoutingDefaults

@@ -285,7 +285,27 @@ public class RoutingServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public void MatchTrigger_MessageReceived_NoMatchWithoutRecipient()
+    public void MatchTrigger_MessageReceived_MatchesWithTargetRole()
+    {
+        var config = RoutingService.CreateDefaultConfig();
+        var evt = new DispatchEvent
+        {
+            EventKind = DispatchEvent.MessageReceived,
+            ProjectId = "proj",
+            MessageTargetRole = "reviewer",
+            Sender = "claude-code",
+            MessageIntent = MessageIntent.ReviewRequest,
+            MessageType = "review_request",
+            MessageId = 100
+        };
+
+        var trigger = _service.MatchTrigger(config, evt);
+        Assert.NotNull(trigger);
+        Assert.Equal("{target_role}", trigger.DispatchTo);
+    }
+
+    [Fact]
+    public void MatchTrigger_MessageReceived_NoMatchWithoutRecipientOrTargetRole()
     {
         var config = RoutingService.CreateDefaultConfig();
         var evt = new DispatchEvent
@@ -293,6 +313,7 @@ public class RoutingServiceTests : IAsyncLifetime
             EventKind = DispatchEvent.MessageReceived,
             ProjectId = "proj",
             Recipient = null,
+            MessageTargetRole = null,
             Sender = "codex",
             MessageIntent = MessageIntent.ReviewFeedback,
             MessageType = "review_feedback",
@@ -556,6 +577,46 @@ public class RoutingServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public void ResolveAgent_TargetRoleInterpolation()
+    {
+        var config = RoutingService.CreateDefaultConfig();
+        var trigger = new RoutingTrigger { Event = "x", DispatchTo = "{target_role}" };
+        var evt = new DispatchEvent
+        {
+            EventKind = "x",
+            ProjectId = "proj",
+            MessageTargetRole = "reviewer"
+        };
+
+        Assert.Equal("codex", _service.ResolveAgent(config, trigger, evt));
+    }
+
+    [Fact]
+    public void ResolveAgent_TargetRoleNull_ReturnsNull()
+    {
+        var config = RoutingService.CreateDefaultConfig();
+        var trigger = new RoutingTrigger { Event = "x", DispatchTo = "{target_role}" };
+        var evt = new DispatchEvent { EventKind = "x", ProjectId = "proj", MessageTargetRole = null };
+
+        Assert.Null(_service.ResolveAgent(config, trigger, evt));
+    }
+
+    [Fact]
+    public void ResolveAgent_TargetRoleUnknownRole_ReturnsNull()
+    {
+        var config = RoutingService.CreateDefaultConfig();
+        var trigger = new RoutingTrigger { Event = "x", DispatchTo = "{target_role}" };
+        var evt = new DispatchEvent
+        {
+            EventKind = "x",
+            ProjectId = "proj",
+            MessageTargetRole = "coordinator"
+        };
+
+        Assert.Null(_service.ResolveAgent(config, trigger, evt));
+    }
+
+    [Fact]
     public void ResolveAgent_LiteralAgent()
     {
         var config = new RoutingConfig { Roles = new Dictionary<string, string>() };
@@ -572,7 +633,7 @@ public class RoutingServiceTests : IAsyncLifetime
     [Fact]
     public void InterpolateTemplate_AllPlaceholders()
     {
-        var template = "Review task #{task_id} ({task_title}) on {branch} in {project_id}. From {sender}, intent: {message_intent}, type: {message_type}, packet: {packet_kind}, handoff: {handoff_kind}.";
+        var template = "Review task #{task_id} ({task_title}) on {branch} in {project_id}. From {sender}, role: {target_role}, intent: {message_intent}, type: {message_type}, packet: {packet_kind}, handoff: {handoff_kind}.";
         var evt = new DispatchEvent
         {
             EventKind = DispatchEvent.TaskStatusChanged,
@@ -581,12 +642,13 @@ public class RoutingServiceTests : IAsyncLifetime
             TaskTitle = "forge-stats lore accounting",
             Branch = "task/546-forge-stats",
             Sender = "codex",
+            MessageTargetRole = "reviewer",
             MessageIntent = MessageIntent.ReviewFeedback,
             MessageType = "review_feedback"
         };
 
         var result = _service.InterpolateTemplate(template, evt);
-        Assert.Equal("Review task #546 (forge-stats lore accounting) on task/546-forge-stats in quillforge. From codex, intent: review_feedback, type: review_feedback, packet: , handoff: .", result);
+        Assert.Equal("Review task #546 (forge-stats lore accounting) on task/546-forge-stats in quillforge. From codex, role: reviewer, intent: review_feedback, type: review_feedback, packet: , handoff: .", result);
     }
 
     [Fact]

@@ -160,6 +160,76 @@ public class DispatchApiTests : IAsyncLifetime
         Assert.Equal("next step", Assert.Single(envelope.Context.NextActions));
     }
 
+    [Fact]
+    public async Task GetContext_FallbackUsesMatchedTriggerToResolveAddressedVia()
+    {
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var docs = scope.ServiceProvider.GetRequiredService<IDocumentRepository>();
+            await docs.UpsertAsync(new Document
+            {
+                ProjectId = ProjectId,
+                Slug = "dispatch-routing",
+                Title = "Dispatch Routing",
+                DocType = DocType.Convention,
+                Content = """
+                    {
+                      "roles": {
+                        "reviewer": "codex"
+                      },
+                      "triggers": [
+                        {
+                          "event": "message_received",
+                          "has_target_role": true,
+                          "dispatch_to": "{target_role}"
+                        }
+                      ],
+                      "defaults": {
+                        "auto_approve": false,
+                        "expiry_minutes": 1440
+                      }
+                    }
+                    """
+            });
+
+            var messages = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+            var message = await messages.CreateAsync(new Message
+            {
+                ProjectId = ProjectId,
+                Sender = "claude-code",
+                Content = "Please review this role-targeted handoff.",
+                Intent = MessageIntent.ReviewRequest,
+                Metadata = JsonSerializer.Deserialize<JsonElement>(
+                    """{"recipient":"claude-code","target_role":"reviewer","handoff_kind":"review_request"}""")
+            });
+
+            var dispatches = scope.ServiceProvider.GetRequiredService<IDispatchRepository>();
+            await dispatches.CreateIfAbsentAsync(new DispatchEntry
+            {
+                ProjectId = ProjectId,
+                TargetAgent = "codex",
+                TriggerType = DispatchTriggerType.Message,
+                TriggerId = message.Id,
+                Summary = "Fallback addressedVia test",
+                ContextJson = null,
+                DedupKey = DispatchEntry.BuildDedupKey(DispatchTriggerType.Message, message.Id, "codex"),
+                ExpiresAt = DateTime.UtcNow.AddHours(24)
+            });
+        }
+
+        var entries = await _client.GetFromJsonAsync<List<DispatchEntry>>("/api/dispatch?targetAgent=codex", JsonOpts);
+        var entry = Assert.Single(entries!);
+
+        var response = await _client.GetAsync($"/api/dispatch/{entry.Id}/context");
+        response.EnsureSuccessStatusCode();
+
+        var envelope = await response.Content.ReadFromJsonAsync<DispatchContextEnvelope>(JsonOpts);
+        Assert.NotNull(envelope);
+        Assert.Equal("target_role", envelope!.Context.AddressedVia);
+        Assert.Equal("reviewer", envelope.Context.MessageTargetRole);
+        Assert.Equal("claude-code", envelope.Context.Recipient);
+    }
+
     #endregion
 
     #region Approve / Reject / Complete

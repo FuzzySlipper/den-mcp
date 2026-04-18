@@ -29,6 +29,46 @@ public sealed class MessageFeedItem
     public DateTime LatestActivityAt { get; set; }
 }
 
+public readonly record struct MessageRoutingMetadata(
+    string? MessageType,
+    string? Recipient,
+    string? TargetRole,
+    string? Branch,
+    string? PacketKind,
+    string? HandoffKind)
+{
+    public static MessageRoutingMetadata From(Message message) => From(message.Metadata);
+
+    public static MessageRoutingMetadata From(JsonElement? metadata)
+    {
+        string? messageType = null;
+        string? recipient = null;
+        string? targetRole = null;
+        string? branch = null;
+        string? packetKind = null;
+        string? handoffKind = null;
+
+        if (metadata is JsonElement meta)
+        {
+            if (meta.TryGetProperty("type", out var typeEl))
+                messageType = typeEl.GetString();
+            if (meta.TryGetProperty("recipient", out var recipientEl))
+                recipient = recipientEl.GetString();
+            if (meta.TryGetProperty("target_role", out var targetRoleEl))
+                targetRole = targetRoleEl.GetString();
+            if (meta.TryGetProperty("branch", out var branchEl))
+                branch = branchEl.GetString();
+            if (meta.TryGetProperty("packet_kind", out var packetKindEl))
+                packetKind = packetKindEl.GetString();
+            if (meta.TryGetProperty("handoff_kind", out var handoffKindEl))
+                handoffKind = handoffKindEl.GetString();
+        }
+
+        messageType ??= packetKind ?? handoffKind;
+        return new MessageRoutingMetadata(messageType, recipient, targetRole, branch, packetKind, handoffKind);
+    }
+}
+
 public static class MessageIntentCompatibility
 {
     private static readonly Dictionary<string, MessageIntent> LegacyTypeToIntent = new(StringComparer.Ordinal)

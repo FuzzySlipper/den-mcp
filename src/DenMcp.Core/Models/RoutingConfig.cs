@@ -74,9 +74,14 @@ public sealed class RoutingTrigger
     [JsonPropertyName("has_recipient")]
     public bool? HasRecipient { get; set; }
 
+    /// <summary>If true, only matches messages with an explicit target_role in metadata.</summary>
+    [JsonPropertyName("has_target_role")]
+    public bool? HasTargetRole { get; set; }
+
     /// <summary>
     /// Dispatch target: a role name (looked up in Roles) or a literal agent identity.
-    /// Supports "{recipient}" to use the message metadata's recipient value.
+    /// Supports "{recipient}" to use the message metadata's recipient value and
+    /// "{target_role}" to resolve the message metadata's target_role through Roles.
     /// </summary>
     [JsonPropertyName("dispatch_to")]
     public required string DispatchTo { get; set; }
@@ -84,6 +89,7 @@ public sealed class RoutingTrigger
     /// <summary>
     /// Prompt template with interpolation placeholders.
     /// Supported: {project_id}, {task_id}, {task_title}, {branch}, {sender},
+    /// {target_role},
     /// {message_intent}, {message_type}, {packet_kind}, {handoff_kind},
     /// {to_status}, {from_status}
     /// </summary>

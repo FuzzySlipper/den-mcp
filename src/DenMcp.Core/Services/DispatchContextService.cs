@@ -8,7 +8,7 @@ namespace DenMcp.Core.Services;
 
 public interface IDispatchContextService
 {
-    Task<DispatchContextSnapshot> BuildSnapshotAsync(DispatchEvent evt, string targetAgent);
+    Task<DispatchContextSnapshot> BuildSnapshotAsync(DispatchEvent evt, string targetAgent, string? addressedVia = null);
     Task<DispatchContextEnvelope?> GetContextAsync(int dispatchId);
 }
 
@@ -17,22 +17,25 @@ public sealed class DispatchContextService : IDispatchContextService
     private readonly IDispatchRepository _dispatches;
     private readonly IMessageRepository _messages;
     private readonly ITaskRepository _tasks;
+    private readonly IRoutingService _routing;
     private readonly ILogger<DispatchContextService> _logger;
 
     public DispatchContextService(
         IDispatchRepository dispatches,
         IMessageRepository messages,
         ITaskRepository tasks,
+        IRoutingService routing,
         ILogger<DispatchContextService> logger)
     {
         _dispatches = dispatches;
         _messages = messages;
         _tasks = tasks;
+        _routing = routing;
         _logger = logger;
     }
 
-    public Task<DispatchContextSnapshot> BuildSnapshotAsync(DispatchEvent evt, string targetAgent)
-        => BuildSnapshotFromEventAsync(evt, targetAgent);
+    public Task<DispatchContextSnapshot> BuildSnapshotAsync(DispatchEvent evt, string targetAgent, string? addressedVia = null)
+        => BuildSnapshotFromEventAsync(evt, targetAgent, addressedVia);
 
     public async Task<DispatchContextEnvelope?> GetContextAsync(int dispatchId)
     {
@@ -69,7 +72,7 @@ public sealed class DispatchContextService : IDispatchContextService
         return await BuildFallbackSnapshotAsync(dispatch);
     }
 
-    private async Task<DispatchContextSnapshot> BuildSnapshotFromEventAsync(DispatchEvent evt, string targetAgent)
+    private async Task<DispatchContextSnapshot> BuildSnapshotFromEventAsync(DispatchEvent evt, string targetAgent, string? addressedVia)
     {
         var triggeringMessage = evt.MessageId.HasValue
             ? await _messages.GetByIdAsync(evt.MessageId.Value)
@@ -90,10 +93,12 @@ public sealed class DispatchContextService : IDispatchContextService
             ProjectId = evt.ProjectId,
             TargetAgent = targetAgent,
             TargetRole = targetRole,
+            AddressedVia = addressedVia,
             ActivityHint = activityHint,
             TaskId = evt.TaskId,
             Sender = evt.Sender,
             Recipient = evt.Recipient,
+            MessageTargetRole = evt.MessageTargetRole,
             MessageIntent = evt.MessageIntent,
             MessageType = evt.MessageType,
             PacketKind = evt.PacketKind,
@@ -116,7 +121,7 @@ public sealed class DispatchContextService : IDispatchContextService
             var message = await _messages.GetByIdAsync(dispatch.TriggerId);
             if (message is not null)
             {
-                var metadata = MessageMetadata.From(message);
+                var metadata = MessageRoutingMetadata.From(message);
                 var evt = new DispatchEvent
                 {
                     EventKind = DispatchEvent.MessageReceived,
@@ -127,12 +132,14 @@ public sealed class DispatchContextService : IDispatchContextService
                     PacketKind = metadata.PacketKind,
                     HandoffKind = metadata.HandoffKind,
                     Recipient = metadata.Recipient,
+                    MessageTargetRole = metadata.TargetRole,
                     Sender = message.Sender,
                     TaskId = message.TaskId,
                     Branch = metadata.Branch,
                     MessageContent = message.Content
                 };
-                return await BuildSnapshotFromEventAsync(evt, dispatch.TargetAgent);
+                var addressedVia = await ResolveAddressedViaAsync(dispatch.ProjectId, evt, dispatch.TargetAgent);
+                return await BuildSnapshotFromEventAsync(evt, dispatch.TargetAgent, addressedVia);
             }
         }
 
@@ -154,6 +161,38 @@ public sealed class DispatchContextService : IDispatchContextService
             TaskDetail = taskDetail,
             WorkflowGuardrails = BuildWorkflowGuardrails(contextKind),
             NextActions = BuildNextActions(contextKind, branch: null)
+        };
+    }
+
+    private async Task<string?> ResolveAddressedViaAsync(string projectId, DispatchEvent evt, string targetAgent)
+    {
+        var configResult = await _routing.GetRoutingConfigAsync(projectId);
+        if (configResult.IsValid)
+        {
+            var trigger = _routing.MatchTrigger(configResult.Config, evt);
+            if (trigger is not null)
+            {
+                var resolvedAgent = _routing.ResolveAgent(configResult.Config, trigger, evt);
+                if (string.Equals(resolvedAgent, targetAgent, StringComparison.OrdinalIgnoreCase))
+                {
+                    return trigger.DispatchTo switch
+                    {
+                        "{recipient}" => "recipient",
+                        "{target_role}" => "target_role",
+                        _ => null
+                    };
+                }
+            }
+        }
+
+        var hasRecipient = !string.IsNullOrWhiteSpace(evt.Recipient);
+        var hasTargetRole = !string.IsNullOrWhiteSpace(evt.MessageTargetRole);
+
+        return (hasRecipient, hasTargetRole) switch
+        {
+            (true, false) => "recipient",
+            (false, true) => "target_role",
+            _ => null
         };
     }
 
@@ -278,39 +317,5 @@ public sealed class DispatchContextService : IDispatchContextService
         }
 
         return actions;
-    }
-
-    private readonly record struct MessageMetadata(
-        string? MessageType,
-        string? Recipient,
-        string? Branch,
-        string? PacketKind,
-        string? HandoffKind)
-    {
-        public static MessageMetadata From(Message message)
-        {
-            string? messageType = null;
-            string? recipient = null;
-            string? branch = null;
-            string? packetKind = null;
-            string? handoffKind = null;
-
-            if (message.Metadata is JsonElement meta)
-            {
-                if (meta.TryGetProperty("type", out var typeEl))
-                    messageType = typeEl.GetString();
-                if (meta.TryGetProperty("recipient", out var recipientEl))
-                    recipient = recipientEl.GetString();
-                if (meta.TryGetProperty("branch", out var branchEl))
-                    branch = branchEl.GetString();
-                if (meta.TryGetProperty("packet_kind", out var packetKindEl))
-                    packetKind = packetKindEl.GetString();
-                if (meta.TryGetProperty("handoff_kind", out var handoffKindEl))
-                    handoffKind = handoffKindEl.GetString();
-            }
-
-            messageType ??= packetKind ?? handoffKind;
-            return new MessageMetadata(messageType, recipient, branch, packetKind, handoffKind);
-        }
     }
 }

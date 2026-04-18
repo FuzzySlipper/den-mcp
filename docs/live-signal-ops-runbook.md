@@ -29,6 +29,10 @@ The script defaults to:
 
 That metadata choice is deliberate: it exercises the explicit handoff path from `AGENTS.md` instead of relying on fallback reviewer-role routing.
 
+For role-targeted routing smoke tests, use metadata such as
+`{"type":"review_request","target_role":"reviewer"}`. Keep `recipient` for
+cases where you want to exercise direct agent addressing instead.
+
 Useful variants:
 
 ```bash

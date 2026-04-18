@@ -45,28 +45,7 @@ public sealed class DispatchDetectionService : IDispatchDetectionService
 
     public async Task OnMessageCreatedAsync(Message message)
     {
-        // Extract structured metadata
-        string? messageType = null;
-        string? recipient = null;
-        string? branch = null;
-        string? packetKind = null;
-        string? handoffKind = null;
-
-        if (message.Metadata is JsonElement meta)
-        {
-            if (meta.TryGetProperty("type", out var typeEl))
-                messageType = typeEl.GetString();
-            if (meta.TryGetProperty("recipient", out var recipientEl))
-                recipient = recipientEl.GetString();
-            if (meta.TryGetProperty("branch", out var branchEl))
-                branch = branchEl.GetString();
-            if (meta.TryGetProperty("packet_kind", out var packetKindEl))
-                packetKind = packetKindEl.GetString();
-            if (meta.TryGetProperty("handoff_kind", out var handoffKindEl))
-                handoffKind = handoffKindEl.GetString();
-        }
-
-        messageType ??= packetKind ?? handoffKind;
+        var metadata = MessageRoutingMetadata.From(message);
 
         var evt = new DispatchEvent
         {
@@ -74,13 +53,14 @@ public sealed class DispatchDetectionService : IDispatchDetectionService
             ProjectId = message.ProjectId,
             MessageId = message.Id,
             MessageIntent = message.Intent ?? MessageIntentCompatibility.ResolveWriteIntent(null, message.Metadata),
-            MessageType = messageType,
-            PacketKind = packetKind,
-            HandoffKind = handoffKind,
-            Recipient = recipient,
+            MessageType = metadata.MessageType,
+            PacketKind = metadata.PacketKind,
+            HandoffKind = metadata.HandoffKind,
+            Recipient = metadata.Recipient,
+            MessageTargetRole = metadata.TargetRole,
             Sender = message.Sender,
             TaskId = message.TaskId,
-            Branch = branch,
+            Branch = metadata.Branch,
             MessageContent = message.Content
         };
 
@@ -150,7 +130,13 @@ public sealed class DispatchDetectionService : IDispatchDetectionService
 
         // Generate prompt
         var promptResult = await _prompts.GenerateAsync(evt, trigger, configResult.Config);
-        var contextSnapshot = await _dispatchContexts.BuildSnapshotAsync(evt, targetAgent);
+        var addressedVia = trigger.DispatchTo switch
+        {
+            "{recipient}" => "recipient",
+            "{target_role}" => "target_role",
+            _ => null
+        };
+        var contextSnapshot = await _dispatchContexts.BuildSnapshotAsync(evt, targetAgent, addressedVia);
 
         var expiryMinutes = configResult.Config.Defaults.ExpiryMinutes;
         var dedupKey = DispatchEntry.BuildDedupKey(triggerType, triggerId, targetAgent);

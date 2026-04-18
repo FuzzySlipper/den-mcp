@@ -295,7 +295,7 @@ Returns: confirmation.
 | `content`    | string | yes      | Markdown body                                   |
 | `task_id`    | int    | no       | Attach to a task. Null = project-level channel  |
 | `thread_id`  | int    | no       | Reply to an existing message (forms thread)     |
-| `metadata`   | object | no       | Freeform JSON, e.g. `{"type":"plan_review"}`    |
+| `metadata`   | object | no       | Freeform JSON, e.g. `{"type":"plan_review"}`. Use `recipient` for a concrete agent identity or `target_role` for a project role like `reviewer` / `implementer`; if both are present, `recipient` wins. |
 
 Returns: the created message record with ID.
 

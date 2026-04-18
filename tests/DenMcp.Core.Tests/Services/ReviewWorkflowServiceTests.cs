@@ -26,7 +26,7 @@ public class ReviewWorkflowServiceTests : IAsyncLifetime
         var docs = new DocumentRepository(_testDb.Db);
         var routing = new RoutingService(docs);
         var prompts = new PromptGenerationService(_tasks, _messages, routing);
-        var contexts = new DispatchContextService(_dispatches, _messages, _tasks,
+        var contexts = new DispatchContextService(_dispatches, _messages, _tasks, routing,
             NullLogger<DispatchContextService>.Instance);
         var detection = new DispatchDetectionService(
             routing,

@@ -186,6 +186,52 @@ public class PromptGenerationServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task MessagePrompt_WithTargetRole_ExplainsRoleAddressing()
+    {
+        var evt = new DispatchEvent
+        {
+            EventKind = DispatchEvent.MessageReceived,
+            ProjectId = "proj",
+            MessageTargetRole = "reviewer",
+            Sender = "claude-code",
+            MessageIntent = MessageIntent.ReviewRequest,
+            MessageType = "review_request",
+            MessageId = 1,
+            MessageContent = "Please review the role-targeted handoff."
+        };
+
+        var trigger = _routing.MatchTrigger(DefaultConfig, evt)!;
+        var result = await _service.GenerateAsync(evt, trigger, DefaultConfig);
+
+        Assert.Contains("addressed to role `reviewer`", result.ContextPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("resolved through the project's routing config", result.ContextPrompt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task MessagePrompt_WithRecipientAndTargetRole_ExplainsRecipientPrecedence()
+    {
+        var evt = new DispatchEvent
+        {
+            EventKind = DispatchEvent.MessageReceived,
+            ProjectId = "proj",
+            Recipient = "claude-code",
+            MessageTargetRole = "reviewer",
+            Sender = "codex",
+            MessageIntent = MessageIntent.Note,
+            MessageType = "note",
+            MessageId = 1,
+            MessageContent = "Please take this directly."
+        };
+
+        var trigger = _routing.MatchTrigger(DefaultConfig, evt)!;
+        var result = await _service.GenerateAsync(evt, trigger, DefaultConfig);
+
+        Assert.Contains("explicitly named recipient `claude-code`", result.ContextPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("target role `reviewer`", result.ContextPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("took precedence", result.ContextPrompt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task MessagePrompt_WithoutTaskOrContent_StillWorks()
     {
         var evt = new DispatchEvent

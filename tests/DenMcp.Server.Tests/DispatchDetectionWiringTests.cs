@@ -122,6 +122,23 @@ public class DispatchDetectionWiringTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RestMessageCreate_WithTargetRole_TriggersDispatchDetection()
+    {
+        var response = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/messages", new
+        {
+            sender = "claude-code",
+            content = "Review feedback via REST role targeting",
+            intent = "review_request",
+            metadata = """{"target_role":"reviewer","handoff_kind":"review_request"}"""
+        });
+        response.EnsureSuccessStatusCode();
+
+        var dispatches = await GetDispatchesAsync();
+        Assert.Single(dispatches);
+        Assert.Equal("codex", dispatches[0].TargetAgent);
+    }
+
+    [Fact]
     public async Task RestTaskUpdate_TriggersDispatchDetection()
     {
         var taskId = await SeedTaskAsync();
@@ -195,6 +212,24 @@ public class DispatchDetectionWiringTests : IAsyncLifetime
         var dispatches = await GetDispatchesAsync();
         Assert.Single(dispatches);
         Assert.Equal("claude-code", dispatches[0].TargetAgent);
+    }
+
+    [Fact]
+    public async Task McpSendMessage_WithTargetRole_TriggersDispatchDetection()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+        var detection = scope.ServiceProvider.GetRequiredService<IDispatchDetectionService>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<MessageTools>>();
+
+        await MessageTools.SendMessage(repo, detection, logger,
+            ProjectId, "claude-code", "MCP role-targeted message",
+            metadata: """{"target_role":"reviewer","handoff_kind":"review_request"}""",
+            intent: "review_request");
+
+        var dispatches = await GetDispatchesAsync();
+        Assert.Single(dispatches);
+        Assert.Equal("codex", dispatches[0].TargetAgent);
     }
 
     [Fact]
