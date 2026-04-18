@@ -24,6 +24,7 @@ PREFERRED_ROLE_ORDER = ("implementer", "reviewer")
 KNOWN_WRAPPED_AGENTS = {
     "claude-code": "claude",
     "codex": "codex",
+    "omp": "omp",
 }
 
 

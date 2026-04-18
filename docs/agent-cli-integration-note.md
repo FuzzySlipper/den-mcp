@@ -1,27 +1,29 @@
 # Agent CLI Integration Note
 
-Date: 2026-04-11
+Date: 2026-04-17
 Task: `#570`
 
-This note verifies what the currently installed `claude` and `codex` CLIs support for startup prompts, session resume, automation, and integration hooks before `den-agent` hard-codes prompt delivery behavior.
+This note verifies what the currently installed `claude`, `codex`, and `omp` CLIs support for startup prompts, session resume, automation, and integration hooks before `den-agent` hard-codes prompt delivery behavior.
 
 ## Versions checked locally
 
 - `claude` `2.1.101`
 - `codex` `0.120.0`
+- `omp` `14.1.2`
 
 ## Reliable capability matrix
 
-| Capability | Claude Code | Codex CLI | Recommendation |
-|---|---|---|---|
-| Start interactive session with initial prompt | Yes. Local help shows `claude [options] [command] [prompt]`. | Yes. Local help shows `codex [OPTIONS] [PROMPT]`. | Treat this as the primary MVP path for dispatch prompt delivery. |
-| Resume prior interactive session | Yes. `--continue`, `--resume`, `--from-pr`, `--fork-session`. Anthropic docs confirm resume workflows. | Yes. `codex resume` and `codex fork`; `codex exec resume` for non-interactive continuation. | Useful for manual workflows, but not a safe basis for automatic prompt injection into a live session. |
-| Non-interactive execution with prompt input | Yes. `claude --print` supports text, JSON, and `stream-json` output. | Yes. `codex exec` accepts a prompt or stdin and supports JSONL plus `--output-last-message` and `--output-schema`. | Keep available for later one-shot automation, not the default interactive wrapper path. |
-| Startup/resume hook can add context | Yes. `SessionStart` hooks run on `startup` and `resume`; stdout or `additionalContext` is injected into context. | Yes. `SessionStart` hooks run on `startup` and `resume`; stdout or `additionalContext` is injected into context. | Real integration seam if we own per-user config, but not something `den-agent` should silently assume exists. |
-| Hook on submitted user prompt can add context | Yes. `UserPromptSubmit` can add context or block. | Yes. `UserPromptSubmit` can add context or block. | Useful for future policy/context augmentation, not required for dispatch MVP. |
-| Native notification hook for permission/idle attention | Yes. `Notification` hook supports permission and idle notification types. | No equivalent hook found in local help or current Codex hook docs. | Den/kitty/Signal should remain the cross-vendor notification path. |
-| Broad tool interception hooks | Partial. Hooks exist, including tool lifecycle events, but they are not a clean external prompt-delivery channel. | Partial. Current Codex docs say `PreToolUse`/`PostToolUse` only emit for `Bash` today. | Do not build dispatch delivery around tool-hook interception. |
-| Documented, supported external prompt injection into an already-running interactive session | Not found. | Not found. | Avoid synthetic keypress or TTY injection as an MVP requirement. |
+| Capability | Claude Code | Codex CLI | OMP | Recommendation |
+|---|---|---|---|---|
+| Start interactive session with initial prompt | Yes. Local help shows `claude [options] [command] [prompt]`. | Yes. Local help shows `codex [OPTIONS] [PROMPT]`. | Yes. Local help shows `omp [COMMAND]` with `MESSAGES`, and examples show `omp "List all .ts files in src/"`. | Treat this as the primary MVP path for dispatch prompt delivery. |
+| Resume prior interactive session | Yes. `--continue`, `--resume`, `--from-pr`, `--fork-session`. Anthropic docs confirm resume workflows. | Yes. `codex resume` and `codex fork`; `codex exec resume` for non-interactive continuation. | Yes. Local help shows `--continue` and `--resume`; upstream README documents resume by ID prefix/path plus picker behavior. | Useful for manual workflows, but not a safe basis for automatic prompt injection into a live session. |
+| Non-interactive execution with prompt input | Yes. `claude --print` supports text, JSON, and `stream-json` output. | Yes. `codex exec` accepts a prompt or stdin and supports JSONL plus `--output-last-message` and `--output-schema`. | Yes. Local help shows `-p, --print` for non-interactive prompt processing. | Keep available for later one-shot automation, not the default interactive wrapper path. |
+| Top-level subcommands that should bypass the interactive harness | Yes. Claude has command-style entrypoints such as `mcp`, `doctor`, and `install`. | Yes. Codex has command-style entrypoints such as `exec`, `review`, and `mcp`. | Yes. Local help shows top-level commands such as `commit`, `plugin`, `setup`, `ssh`, and `stats`. | Treat explicit utility subcommands as passthrough so `den-agent` does not misclassify them as startup messages. |
+| Startup/resume hook can add context | Yes. `SessionStart` hooks run on `startup` and `resume`; stdout or `additionalContext` is injected into context. | Yes. `SessionStart` hooks run on `startup` and `resume`; stdout or `additionalContext` is injected into context. | Not verified from local help in this note. | Real integration seam if we own per-user config, but not something `den-agent` should silently assume exists. |
+| Hook on submitted user prompt can add context | Yes. `UserPromptSubmit` can add context or block. | Yes. `UserPromptSubmit` can add context or block. | Not verified from local help in this note. | Useful for future policy/context augmentation, not required for dispatch MVP. |
+| Native notification hook for permission/idle attention | Yes. `Notification` hook supports permission and idle notification types. | No equivalent hook found in local help or current Codex hook docs. | Not verified from local help in this note. | Den/kitty/Signal should remain the cross-vendor notification path. |
+| Broad tool interception hooks | Partial. Hooks exist, including tool lifecycle events, but they are not a clean external prompt-delivery channel. | Partial. Current Codex docs say `PreToolUse`/`PostToolUse` only emit for `Bash` today. | Not verified from local help in this note. | Do not build dispatch delivery around tool-hook interception. |
+| Documented, supported external prompt injection into an already-running interactive session | Not found. | Not found. | Not found in local help or README. | Avoid synthetic keypress or TTY injection as an MVP requirement. |
 
 ## What this means for `den-agent`
 
@@ -79,6 +81,9 @@ That keeps the kitten useful even when automatic delivery is unavailable.
 - `codex --help`
 - `codex exec --help`
 - `codex resume --help`
+- `env HOME=/tmp XDG_STATE_HOME=/tmp XDG_CONFIG_HOME=/tmp XDG_DATA_HOME=/tmp omp --help`
+- `env HOME=/tmp XDG_STATE_HOME=/tmp XDG_CONFIG_HOME=/tmp XDG_DATA_HOME=/tmp omp commit --help`
+- `env HOME=/tmp XDG_STATE_HOME=/tmp XDG_CONFIG_HOME=/tmp XDG_DATA_HOME=/tmp omp plugin --help`
 
 ### Official docs
 
@@ -91,6 +96,8 @@ That keeps the kitten useful even when automatic delivery is unavailable.
   - command line options: https://developers.openai.com/codex/cli/reference
   - non-interactive mode: https://developers.openai.com/codex/noninteractive
   - hooks: https://developers.openai.com/codex/hooks
+- OMP upstream docs:
+  - README / CLI reference: https://github.com/can1357/oh-my-pi
 
 ## Bottom line
 

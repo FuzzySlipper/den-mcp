@@ -140,6 +140,13 @@ class DenLayoutTests(unittest.TestCase):
         self.assertIn("launch --location=vsplit --title codex", session_text)
         self.assertIn(f"{expected_wrapper} claude --project den-mcp", session_text)
 
+    def test_build_launch_command_wraps_omp_agent_identity(self) -> None:
+        expected_wrapper = str(den_layout.repo_root() / "bin" / "den-agent")
+
+        command = den_layout.build_launch_command("omp", "den-mcp")
+
+        self.assertEqual((expected_wrapper, "omp", "--project", "den-mcp"), command)
+
     def test_apply_layout_reuses_existing_managed_window_and_only_launches_missing_agent(self) -> None:
         api = self.make_api()
         layout = den_layout.build_project_layout("den-mcp", api)

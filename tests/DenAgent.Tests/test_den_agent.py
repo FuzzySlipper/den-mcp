@@ -146,6 +146,7 @@ class DenAgentTests(unittest.TestCase):
         )
         make_executable(self.fake_bin / "claude", vendor_stub)
         make_executable(self.fake_bin / "codex", vendor_stub)
+        make_executable(self.fake_bin / "omp", vendor_stub)
         make_executable(
             self.fake_bin / "kitten",
             textwrap.dedent(
@@ -323,6 +324,31 @@ class DenAgentTests(unittest.TestCase):
         self.assertEqual("", result.stdout)
         self.assertIn("starting claude with approved dispatch #42", result.stderr)
 
+    def test_fresh_omp_dispatch_launch_injects_prompt_and_runs_lifecycle(self) -> None:
+        self.write_projects()
+        self.write_dispatch(prompt="Dispatch prompt from Den", target_agent="omp")
+        self.write_dispatch_context(activity_hint="working", target_agent="omp")
+
+        env = self.base_env()
+        env["DEN_AGENT_HEARTBEAT_SECONDS"] = "0.01"
+        env["DEN_AGENT_TEST_VENDOR_SLEEP"] = "0.05"
+
+        result = self.run_wrapper("omp", env=env)
+
+        self.assertEqual(0, result.returncode, result.stderr)
+
+        vendor_calls = self.read_jsonl(self.vendor_log)
+        self.assertEqual(1, len(vendor_calls))
+        self.assertEqual("omp", vendor_calls[0]["name"])
+        self.assertEqual(["Dispatch prompt from Den"], vendor_calls[0]["argv"])
+
+        curl_calls = self.read_jsonl(self.curl_log)
+        urls = [call["url"] for call in curl_calls]
+        self.assertIn("http://127.0.0.1:5199/api/agents/checkin", urls)
+        self.assertTrue(any("/api/dispatch?" in url for url in urls))
+        self.assertIn("http://127.0.0.1:5199/api/agents/checkout", urls)
+        self.assertIn("starting omp with approved dispatch #42", result.stderr)
+
     def test_review_dispatch_sets_reviewing_status_from_structured_context(self) -> None:
         self.write_projects()
         self.write_dispatch(
@@ -423,6 +449,39 @@ class DenAgentTests(unittest.TestCase):
         self.assertIn("--- den-agent dispatch prompt start ---", result.stderr)
         self.assertIn("Prompt to paste manually", result.stderr)
 
+    def test_omp_resume_path_keeps_vendor_args_and_prints_dispatch_fallback(self) -> None:
+        self.write_projects()
+        self.write_dispatch(prompt="Prompt to paste manually", summary="Resume-safe dispatch", target_agent="omp")
+
+        result = self.run_wrapper("omp", "--continue")
+
+        self.assertEqual(0, result.returncode, result.stderr)
+
+        vendor_calls = self.read_jsonl(self.vendor_log)
+        self.assertEqual(1, len(vendor_calls))
+        self.assertEqual("omp", vendor_calls[0]["name"])
+        self.assertEqual(["--continue"], vendor_calls[0]["argv"])
+
+        self.assertIn("approved dispatch #42 is ready", result.stderr)
+        self.assertIn("--- den-agent dispatch prompt start ---", result.stderr)
+        self.assertIn("Prompt to paste manually", result.stderr)
+
+    def test_omp_subcommand_passthrough_keeps_args_without_den_integration(self) -> None:
+        self.write_projects()
+        self.write_dispatch(prompt="Dispatch prompt from Den", target_agent="omp")
+
+        result = self.run_wrapper("omp", "commit", "-c", "extra context", "--dry-run")
+
+        self.assertEqual(0, result.returncode, result.stderr)
+
+        vendor_calls = self.read_jsonl(self.vendor_log)
+        self.assertEqual(1, len(vendor_calls))
+        self.assertEqual("omp", vendor_calls[0]["name"])
+        self.assertEqual(["commit", "-c", "extra context", "--dry-run"], vendor_calls[0]["argv"])
+
+        self.assertEqual([], self.read_jsonl(self.curl_log))
+        self.assertNotIn("Dispatch prompt from Den", result.stderr)
+
     def test_running_session_reports_newly_approved_dispatch(self) -> None:
         self.write_projects()
         self.write_dispatch_context(activity_hint="working")
@@ -458,6 +517,7 @@ class DenAgentTests(unittest.TestCase):
         self.assertEqual([], vendor_calls[0]["argv"])
 
         self.assertIn("new approved dispatch #42 arrived while claude is running", stderr)
+        self.assertIn("kitty dispatch handoff is disabled because KITTY_WINDOW_ID is not set in this shell", stderr)
         self.assertIn("approved dispatch #42 is ready", stderr)
         self.assertIn("Prompt arriving mid-session", stderr)
         self.assertIn("--- den-agent dispatch prompt start ---", stderr)

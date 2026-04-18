@@ -2,7 +2,7 @@
 
 Centralized MCP server and CLI for task management, agent messaging, and document storage across multiple software projects.
 
-Built for workflows where multiple AI coding agents (Claude Code, Codex, Kimi Code) operate across several projects simultaneously and need shared state, communication, and a single source of truth for tasks and documentation.
+Built for workflows where multiple AI coding agents (Claude Code, Codex, OMP, Kimi Code) operate across several projects simultaneously and need shared state, communication, and a single source of truth for tasks and documentation.
 
 ## Features
 

@@ -12,6 +12,7 @@ PYTHON_BIN="${DEN_AGENT_PYTHON_BIN:-python3}"
 KITTY_BIN="${DEN_AGENT_KITTY_BIN:-kitten}"
 CLAUDE_BIN="${DEN_AGENT_CLAUDE_BIN:-claude}"
 CODEX_BIN="${DEN_AGENT_CODEX_BIN:-codex}"
+OMP_BIN="${DEN_AGENT_OMP_BIN:-omp}"
 
 BASE_URL="${DEN_MCP_URL:-${DEN_MCP_BASE_URL:-http://127.0.0.1:5199}}"
 HEARTBEAT_SECONDS="${DEN_AGENT_HEARTBEAT_SECONDS:-60}"
@@ -25,6 +26,7 @@ VENDOR_MODE=""
 VENDOR_HAS_EXISTING_PROMPT=0
 SESSION_CHECKED_IN=0
 CLEANUP_DONE=0
+KITTY_HANDOFF_WARNING_LOGGED=0
 HEARTBEAT_PID=""
 DISPATCH_POLL_PID=""
 ACTIVE_TASK_ID=""
@@ -38,7 +40,7 @@ declare -a POSITIONALS=()
 
 usage() {
     cat >&2 <<'EOF'
-Usage: den-agent <claude|codex> [wrapper options] [--] [vendor args...]
+Usage: den-agent <claude|codex|omp> [wrapper options] [--] [vendor args...]
 
 Wrapper options:
   --project <id>              Den project id. If omitted, resolves from cwd.
@@ -59,6 +61,23 @@ have_command() {
 
 have_kitty_window() {
     [[ -n "${KITTY_WINDOW_ID:-}" ]] && have_command "${KITTY_BIN}"
+}
+
+log_kitty_handoff_unavailable() {
+    if [[ "${KITTY_HANDOFF_WARNING_LOGGED}" -eq 1 ]]; then
+        return
+    fi
+
+    if [[ -z "${KITTY_WINDOW_ID:-}" ]]; then
+        log "kitty dispatch handoff is disabled because KITTY_WINDOW_ID is not set in this shell"
+        KITTY_HANDOFF_WARNING_LOGGED=1
+        return
+    fi
+
+    if ! have_command "${KITTY_BIN}"; then
+        log "kitty dispatch handoff is disabled because ${KITTY_BIN} is not available"
+        KITTY_HANDOFF_WARNING_LOGGED=1
+    fi
 }
 
 den_signal() {
@@ -113,6 +132,7 @@ vendor_binary() {
     case "${VENDOR}" in
         claude) printf '%s\n' "${CLAUDE_BIN}" ;;
         codex) printf '%s\n' "${CODEX_BIN}" ;;
+        omp) printf '%s\n' "${OMP_BIN}" ;;
         *) return 1 ;;
     esac
 }
@@ -253,10 +273,71 @@ classify_codex_invocation() {
     VENDOR_HAS_EXISTING_PROMPT=0
 }
 
+classify_omp_invocation() {
+    local expect_value=""
+    local arg
+
+    # Keep this in sync with `omp --help` and docs/agent-cli-integration-note.md.
+    for arg in "${VENDOR_ARGS[@]}"; do
+        if [[ -n "${expect_value}" ]]; then
+            if [[ "${expect_value}" == "mode" ]] && [[ "${arg}" == "rpc" ]]; then
+                VENDOR_MODE="passthrough"
+                VENDOR_HAS_EXISTING_PROMPT=0
+                return
+            fi
+            expect_value=""
+            continue
+        fi
+
+        case "${arg}" in
+            -c|--continue|-r|--resume|--resume=*|--session|--session=*)
+                VENDOR_MODE="resume"
+                VENDOR_HAS_EXISTING_PROMPT=0
+                return
+                ;;
+            -p|--print|-h|--help|--export|--export=*|--list-models|--list-models=*)
+                VENDOR_MODE="passthrough"
+                VENDOR_HAS_EXISTING_PROMPT=0
+                return
+                ;;
+            --mode=rpc)
+                VENDOR_MODE="passthrough"
+                VENDOR_HAS_EXISTING_PROMPT=0
+                return
+                ;;
+            --mode)
+                expect_value="mode"
+                ;;
+            --model|--smol|--slow|--plan|--provider|--api-key|--system-prompt|--append-system-prompt|--resume|--session|--session-dir|--tools|--thinking|--hook|--extension|--skills|--export|--list-models|--plugin-dir|-r|-e)
+                expect_value="generic"
+                ;;
+            --)
+                break
+                ;;
+            -*)
+                ;;
+            agents|commit|config|grep|grievances|jupyter|plugin|read|search|setup|shell|ssh|stats|update|help)
+                VENDOR_MODE="passthrough"
+                VENDOR_HAS_EXISTING_PROMPT=0
+                return
+                ;;
+            *)
+                VENDOR_MODE="interactive"
+                VENDOR_HAS_EXISTING_PROMPT=1
+                return
+                ;;
+        esac
+    done
+
+    VENDOR_MODE="interactive"
+    VENDOR_HAS_EXISTING_PROMPT=0
+}
+
 classify_vendor_invocation() {
     case "${VENDOR}" in
         claude) classify_claude_invocation ;;
         codex) classify_codex_invocation ;;
+        omp) classify_omp_invocation ;;
         *) VENDOR_MODE="passthrough"; VENDOR_HAS_EXISTING_PROMPT=0 ;;
     esac
 }
@@ -679,6 +760,9 @@ deliver_active_dispatch_with_kitty() {
 }
 
 show_dispatch_fallback() {
+    if ! have_kitty_window; then
+        log_kitty_handoff_unavailable
+    fi
     log "approved dispatch #${ACTIVE_DISPATCH_ID} is ready for ${AGENT_ID} in ${PROJECT_ID}"
     if [[ -n "${ACTIVE_TASK_ID}" ]]; then
         log "dispatch task: #${ACTIVE_TASK_ID}"
@@ -779,6 +863,11 @@ parse_args() {
         codex)
             VENDOR="codex"
             AGENT_ID="codex"
+            shift
+            ;;
+        omp)
+            VENDOR="omp"
+            AGENT_ID="omp"
             shift
             ;;
         -h|--help)
