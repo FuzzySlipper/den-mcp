@@ -412,7 +412,7 @@ class DenAgentTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual("", result.stdout)
 
-    def test_resume_path_keeps_vendor_args_and_prints_dispatch_fallback(self) -> None:
+    def test_codex_resume_path_appends_dispatch_prompt_when_no_prompt_is_present(self) -> None:
         self.write_projects()
         payload = [
             {
@@ -443,7 +443,23 @@ class DenAgentTests(unittest.TestCase):
         vendor_calls = self.read_jsonl(self.vendor_log)
         self.assertEqual(1, len(vendor_calls))
         self.assertEqual("codex", vendor_calls[0]["name"])
-        self.assertEqual(["resume", "--last"], vendor_calls[0]["argv"])
+        self.assertEqual(["resume", "--last", "Prompt to paste manually"], vendor_calls[0]["argv"])
+
+        self.assertIn("starting codex resume with approved dispatch #42", result.stderr)
+        self.assertNotIn("--- den-agent dispatch prompt start ---", result.stderr)
+
+    def test_codex_resume_path_preserves_existing_prompt_and_prints_dispatch_fallback(self) -> None:
+        self.write_projects()
+        self.write_dispatch(prompt="Prompt to paste manually", summary="Resume-safe dispatch", target_agent="codex")
+
+        result = self.run_wrapper("codex", "resume", "--last", "Existing prompt")
+
+        self.assertEqual(0, result.returncode, result.stderr)
+
+        vendor_calls = self.read_jsonl(self.vendor_log)
+        self.assertEqual(1, len(vendor_calls))
+        self.assertEqual("codex", vendor_calls[0]["name"])
+        self.assertEqual(["resume", "--last", "Existing prompt"], vendor_calls[0]["argv"])
 
         self.assertIn("approved dispatch #42 is ready", result.stderr)
         self.assertIn("--- den-agent dispatch prompt start ---", result.stderr)

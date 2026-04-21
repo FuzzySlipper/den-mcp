@@ -235,6 +235,29 @@ load_positionals_codex() {
     done
 }
 
+codex_resume_or_fork_has_existing_prompt() {
+    local has_last=0
+    local arg
+
+    for arg in "${VENDOR_ARGS[@]}"; do
+        case "${arg}" in
+            --last)
+                has_last=1
+                ;;
+        esac
+    done
+
+    if [[ "${#POSITIONALS[@]}" -ge 3 ]]; then
+        return 0
+    fi
+
+    if [[ "${#POSITIONALS[@]}" -eq 2 ]] && [[ "${has_last}" -eq 1 ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
 classify_codex_invocation() {
     local arg
 
@@ -253,7 +276,11 @@ classify_codex_invocation() {
         case "${POSITIONALS[0]}" in
             resume|fork)
                 VENDOR_MODE="resume"
-                VENDOR_HAS_EXISTING_PROMPT=0
+                if codex_resume_or_fork_has_existing_prompt; then
+                    VENDOR_HAS_EXISTING_PROMPT=1
+                else
+                    VENDOR_HAS_EXISTING_PROMPT=0
+                fi
                 return
                 ;;
             exec|review|login|logout|mcp|mcp-server|app-server|completion|sandbox|debug|apply|cloud|exec-server|features|help)
@@ -366,6 +393,7 @@ resolve_project_from_cwd() {
 
 build_metadata() {
     local mode="$1"
+
     "${JQ_BIN}" -cn \
         --arg wrapper "den-agent" \
         --arg vendor "${VENDOR}" \
@@ -639,7 +667,7 @@ build_dispatch_skill_wakeup() {
 
 focus_dispatch_window_with_kitty() {
     have_kitty_window || return 1
-    "${KITTY_BIN}" @ focus-window --match "id:${KITTY_WINDOW_ID}" >/dev/null 2>&1
+    "${KITTY_BIN}" @ focus-window --match "id:${KITTY_WINDOW_ID}" </dev/null >/dev/null 2>&1
 }
 
 dispatch_overlay_title() {
@@ -699,7 +727,7 @@ launch_dispatch_overlay_with_kitty() {
         --cwd "${REPO_ROOT}" \
         --title "${title}" \
         "${PYTHON_BIN}" "${REPO_ROOT}/kitty/den_approve.py" \
-        --details-file "${details_path}" \
+        --details-file "${details_path}" </dev/null \
         --details-title "${title}" >/dev/null 2>&1; then
         return 0
     fi
@@ -837,6 +865,32 @@ start_dispatch_poll() {
     DISPATCH_POLL_PID=$!
 }
 
+should_inject_dispatch_prompt_on_launch() {
+    [[ -n "${DISPATCH_PROMPT}" ]] || return 1
+    [[ "${VENDOR_HAS_EXISTING_PROMPT}" -eq 0 ]] || return 1
+
+    case "${VENDOR_MODE}" in
+        interactive)
+            return 0
+            ;;
+        resume)
+            [[ "${VENDOR}" == "codex" ]]
+            return
+            ;;
+    esac
+
+    return 1
+}
+
+log_dispatch_launch() {
+    if [[ "${VENDOR_MODE}" == "resume" ]] && [[ "${#POSITIONALS[@]}" -gt 0 ]]; then
+        log "starting ${VENDOR} ${POSITIONALS[0]} with approved dispatch #${ACTIVE_DISPATCH_ID}"
+        return
+    fi
+
+    log "starting ${VENDOR} with approved dispatch #${ACTIVE_DISPATCH_ID}"
+}
+
 run_vendor() {
     local vendor_bin
     vendor_bin="$(vendor_binary)"
@@ -969,8 +1023,8 @@ main() {
             start_dispatch_poll
 
             if [[ -n "${dispatch_json}" ]]; then
-                if [[ "${VENDOR_MODE}" == "interactive" ]] && [[ "${VENDOR_HAS_EXISTING_PROMPT}" -eq 0 ]] && [[ -n "${DISPATCH_PROMPT}" ]]; then
-                    log "starting ${VENDOR} with approved dispatch #${ACTIVE_DISPATCH_ID}"
+                if should_inject_dispatch_prompt_on_launch; then
+                    log_dispatch_launch
                     run_vendor "${VENDOR_ARGS[@]}" "${DISPATCH_PROMPT}"
                     exit_code=$?
                     cleanup "${exit_code}"
