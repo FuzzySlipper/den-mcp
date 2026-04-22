@@ -167,7 +167,12 @@ class JsonRpcClient:
             line = line.strip()
             if not line:
                 continue
-            message = json.loads(line)
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:
+                excerpt = line if len(line) <= 200 else f"{line[:197]}..."
+                self._logger(f"ignoring malformed app-server stdout line: {excerpt}")
+                continue
             if "id" in message and "method" not in message:
                 response_queue = self._responses.get(message["id"])
                 if response_queue is not None:
@@ -426,8 +431,12 @@ class BridgeDaemon:
 
     def record_failure(self, message: str) -> None:
         self.failure_timestamps.append(time.time())
-        degraded = len([stamp for stamp in self.failure_timestamps if time.time() - stamp < FAILURE_WINDOW_SECONDS]) >= FAILURE_LIMIT
-        self.mark_error(message, degraded=degraded)
+        recent_failures = [stamp for stamp in self.failure_timestamps if time.time() - stamp < FAILURE_WINDOW_SECONDS]
+        degraded = len(recent_failures) >= FAILURE_LIMIT
+        self.state.data["last_error"] = message
+        self.status = "degraded" if degraded else "idle"
+        self.log(message)
+        self.update_state()
 
     def drain_queue_async(self) -> None:
         threading.Thread(target=self._drain_queue, daemon=True).start()

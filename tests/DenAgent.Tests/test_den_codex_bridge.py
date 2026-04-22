@@ -132,7 +132,11 @@ class DenCodexBridgeTests(unittest.TestCase):
 
                 thread_id = "thread-1"
                 turn_counter = 0
+                turn_request_counter = 0
                 turn_delay = float(os.environ.get("DEN_CODEX_BRIDGE_TEST_TURN_DELAY", "0.1"))
+                fail_turn_start_count = int(os.environ.get("DEN_CODEX_BRIDGE_TEST_FAIL_TURN_START_COUNT", "0"))
+                emit_bad_json = os.environ.get("DEN_CODEX_BRIDGE_TEST_EMIT_BAD_JSON") == "1"
+                bad_json_emitted = False
 
                 for raw in sys.stdin:
                     message = json.loads(raw)
@@ -148,6 +152,13 @@ class DenCodexBridgeTests(unittest.TestCase):
                         print(json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": {"thread": {"id": thread_id}}}), flush=True)
                         print(json.dumps({"jsonrpc": "2.0", "method": "thread/started", "params": {"thread": {"id": thread_id}}}), flush=True)
                     elif method == "turn/start":
+                        turn_request_counter += 1
+                        if emit_bad_json and not bad_json_emitted:
+                            print("{not valid json", flush=True)
+                            bad_json_emitted = True
+                        if turn_request_counter <= fail_turn_start_count:
+                            print(json.dumps({"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32000, "message": "synthetic turn failure"}}), flush=True)
+                            continue
                         turn_counter += 1
                         turn_id = f"turn-{turn_counter}"
                         text_input = message["params"]["input"][0]["text"]
@@ -239,10 +250,10 @@ class DenCodexBridgeTests(unittest.TestCase):
             time.sleep(0.05)
         self.fail("timed out waiting for condition")
 
-    def test_wake_queues_dispatch_and_drains_when_turn_completes(self) -> None:
-        env = self.base_env()
-        env["DEN_CODEX_BRIDGE_TEST_TURN_DELAY"] = "0.3"
+    def read_state(self) -> dict:
+        return json.loads((self.state_root / "sample" / "state.json").read_text(encoding="utf-8"))
 
+    def start_bridge(self, env: dict[str, str]) -> subprocess.Popen[str]:
         proc = subprocess.Popen(
             [
                 "python3",
@@ -264,56 +275,49 @@ class DenCodexBridgeTests(unittest.TestCase):
             stderr=subprocess.PIPE,
         )
         self.addCleanup(lambda: proc.kill() if proc.poll() is None else None)
+        self.wait_for_state()
+        return proc
+
+    def wake_dispatch(self, env: dict[str, str], dispatch_id: int) -> None:
+        subprocess.run(
+            [
+                "python3",
+                str(BRIDGE_SCRIPT_PATH),
+                "wake",
+                "--project",
+                "sample",
+                "--dispatch-id",
+                str(dispatch_id),
+                "--state-root",
+                str(self.state_root),
+            ],
+            cwd=self.project_root,
+            env=env,
+            check=True,
+        )
+
+    def test_wake_queues_dispatch_and_drains_when_turn_completes(self) -> None:
+        env = self.base_env()
+        env["DEN_CODEX_BRIDGE_TEST_TURN_DELAY"] = "0.3"
+        proc = self.start_bridge(env)
 
         try:
-            self.wait_for_state()
-
-            subprocess.run(
-                [
-                    "python3",
-                    str(BRIDGE_SCRIPT_PATH),
-                    "wake",
-                    "--project",
-                    "sample",
-                    "--dispatch-id",
-                    "41",
-                    "--state-root",
-                    str(self.state_root),
-                ],
-                cwd=self.project_root,
-                env=env,
-                check=True,
-            )
-            subprocess.run(
-                [
-                    "python3",
-                    str(BRIDGE_SCRIPT_PATH),
-                    "wake",
-                    "--project",
-                    "sample",
-                    "--dispatch-id",
-                    "42",
-                    "--state-root",
-                    str(self.state_root),
-                ],
-                cwd=self.project_root,
-                env=env,
-                check=True,
-            )
+            self.wake_dispatch(env, 41)
+            self.wake_dispatch(env, 42)
 
             def have_two_turns() -> bool:
                 starts = [entry for entry in self.read_jsonl(self.codex_log) if entry.get("method") == "turn/start"]
                 return len(starts) == 2
 
             def bridge_is_idle() -> bool:
-                state = json.loads((self.state_root / "sample" / "state.json").read_text(encoding="utf-8"))
+                state = self.read_state()
                 return state.get("status") == "idle" and state.get("pending_dispatch_ids") == []
 
             self.wait_for(have_two_turns)
             self.wait_for(lambda: self.den_server.completions == [41, 42])
             self.wait_for(bridge_is_idle)
 
-            state = json.loads((self.state_root / "sample" / "state.json").read_text(encoding="utf-8"))
+            state = self.read_state()
             self.assertEqual("idle", state["status"])
             self.assertEqual([], state["pending_dispatch_ids"])
 
@@ -321,6 +325,66 @@ class DenCodexBridgeTests(unittest.TestCase):
             self.assertEqual(2, len(turn_starts))
             self.assertIn("Dispatch: #41", turn_starts[0]["params"]["input"][0]["text"])
             self.assertIn("Dispatch: #42", turn_starts[1]["params"]["input"][0]["text"])
+        finally:
+            proc.terminate()
+            proc.communicate(timeout=5)
+
+    def test_malformed_stdout_is_ignored_and_delivered_dispatch_is_not_requeued(self) -> None:
+        env = self.base_env()
+        env["DEN_CODEX_BRIDGE_TEST_EMIT_BAD_JSON"] = "1"
+        proc = self.start_bridge(env)
+
+        try:
+            self.wake_dispatch(env, 41)
+            self.wait_for(lambda: self.den_server.completions == [41])
+            self.wait_for(lambda: self.read_state().get("status") == "idle")
+
+            self.wake_dispatch(env, 41)
+            time.sleep(0.3)
+
+            turn_starts = [entry for entry in self.read_jsonl(self.codex_log) if entry.get("method") == "turn/start"]
+            self.assertEqual(1, len(turn_starts))
+
+            state = self.read_state()
+            self.assertEqual("idle", state["status"])
+            self.assertEqual([], state["pending_dispatch_ids"])
+            self.assertEqual([41], state["delivered_dispatch_ids"])
+        finally:
+            proc.terminate()
+            _stdout, stderr = proc.communicate(timeout=5)
+
+        self.assertIn("ignoring malformed app-server stdout line", stderr)
+
+    def test_repeated_turn_failures_degrade_bridge_and_stop_retrying(self) -> None:
+        env = self.base_env()
+        env["DEN_CODEX_BRIDGE_TEST_FAIL_TURN_START_COUNT"] = "3"
+        proc = self.start_bridge(env)
+
+        try:
+            self.wake_dispatch(env, 41)
+            self.wait_for(lambda: len([entry for entry in self.read_jsonl(self.codex_log) if entry.get("method") == "turn/start"]) == 1)
+            self.wait_for(lambda: self.read_state().get("status") == "idle")
+
+            self.wake_dispatch(env, 41)
+            self.wait_for(lambda: len([entry for entry in self.read_jsonl(self.codex_log) if entry.get("method") == "turn/start"]) == 2)
+            self.wait_for(lambda: self.read_state().get("status") == "idle")
+
+            self.wake_dispatch(env, 41)
+            self.wait_for(lambda: self.read_state().get("status") == "degraded")
+
+            self.wake_dispatch(env, 41)
+            time.sleep(0.3)
+
+            turn_starts = [entry for entry in self.read_jsonl(self.codex_log) if entry.get("method") == "turn/start"]
+            self.assertEqual(3, len(turn_starts))
+            self.assertEqual([], self.den_server.completions)
+
+            state = self.read_state()
+            self.assertEqual("degraded", state["status"])
+            self.assertEqual([41], state["pending_dispatch_ids"])
+            self.assertEqual([], state["delivered_dispatch_ids"])
+            self.assertEqual(3, len(state["failure_timestamps"]))
+            self.assertIn("failed to start turn for dispatch #41", state["last_error"])
         finally:
             proc.terminate()
             proc.communicate(timeout=5)

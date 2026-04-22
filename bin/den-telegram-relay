@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import pathlib
+import sys
 import tempfile
 import time
 import urllib.error
@@ -298,7 +299,7 @@ def main() -> int:
         if args.command == "poll":
             return run_poll(args)
     except (RelayError, urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
-        print(f"den-telegram-relay: {exc}", file=os.sys.stderr)
+        print(f"den-telegram-relay: {exc}", file=sys.stderr)
         return 1
     return 0
 
