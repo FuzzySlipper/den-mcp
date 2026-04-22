@@ -197,6 +197,8 @@ class DenCodexBridgeTests(unittest.TestCase):
                 "dispatch": {
                     "id": 41,
                     "project_id": "sample",
+                    "target_agent": "codex",
+                    "status": "approved",
                     "summary": "First queued task",
                     "context_prompt": "Prompt 41",
                 },
@@ -209,12 +211,56 @@ class DenCodexBridgeTests(unittest.TestCase):
                 "dispatch": {
                     "id": 42,
                     "project_id": "sample",
+                    "target_agent": "codex",
+                    "status": "approved",
                     "summary": "Second queued task",
                     "context_prompt": "Prompt 42",
                 },
                 "context": {
                     "dispatch": {"id": 42, "project_id": "sample", "target_agent": "codex"},
                     "context": {"task_id": 42, "context_kind": "handoff", "next_actions": ["Do second thing"]},
+                },
+            },
+            43: {
+                "dispatch": {
+                    "id": 43,
+                    "project_id": "sample",
+                    "target_agent": "claude-code",
+                    "status": "approved",
+                    "summary": "Wrong target agent",
+                    "context_prompt": "Prompt 43",
+                },
+                "context": {
+                    "dispatch": {"id": 43, "project_id": "sample", "target_agent": "claude-code"},
+                    "context": {"task_id": 43, "context_kind": "handoff", "next_actions": ["Do not run in codex"]},
+                },
+            },
+            44: {
+                "dispatch": {
+                    "id": 44,
+                    "project_id": "sample",
+                    "target_agent": "codex",
+                    "status": "rejected",
+                    "summary": "Rejected dispatch",
+                    "context_prompt": "Prompt 44",
+                },
+                "context": {
+                    "dispatch": {"id": 44, "project_id": "sample", "target_agent": "codex"},
+                    "context": {"task_id": 44, "context_kind": "handoff", "next_actions": ["Should stay rejected"]},
+                },
+            },
+            45: {
+                "dispatch": {
+                    "id": 45,
+                    "project_id": "other-project",
+                    "target_agent": "codex",
+                    "status": "approved",
+                    "summary": "Wrong project",
+                    "context_prompt": "Prompt 45",
+                },
+                "context": {
+                    "dispatch": {"id": 45, "project_id": "other-project", "target_agent": "codex"},
+                    "context": {"task_id": 45, "context_kind": "handoff", "next_actions": ["Wrong bridge"]},
                 },
             },
         }
@@ -294,6 +340,26 @@ class DenCodexBridgeTests(unittest.TestCase):
             cwd=self.project_root,
             env=env,
             check=True,
+        )
+
+    def wake_dispatch_result(self, env: dict[str, str], dispatch_id: int) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                "python3",
+                str(BRIDGE_SCRIPT_PATH),
+                "wake",
+                "--project",
+                "sample",
+                "--dispatch-id",
+                str(dispatch_id),
+                "--state-root",
+                str(self.state_root),
+            ],
+            cwd=self.project_root,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
         )
 
     def test_wake_queues_dispatch_and_drains_when_turn_completes(self) -> None:
@@ -385,6 +451,38 @@ class DenCodexBridgeTests(unittest.TestCase):
             self.assertEqual([], state["delivered_dispatch_ids"])
             self.assertEqual(3, len(state["failure_timestamps"]))
             self.assertIn("failed to start turn for dispatch #41", state["last_error"])
+        finally:
+            proc.terminate()
+            proc.communicate(timeout=5)
+
+    def test_wake_rejects_non_actionable_dispatch_ids(self) -> None:
+        env = self.base_env()
+        proc = self.start_bridge(env)
+
+        try:
+            wrong_target = self.wake_dispatch_result(env, 43)
+            rejected = self.wake_dispatch_result(env, 44)
+            wrong_project = self.wake_dispatch_result(env, 45)
+
+            self.assertNotEqual(0, wrong_target.returncode)
+            self.assertIn("dispatch #43 targets claude-code", wrong_target.stderr)
+
+            self.assertNotEqual(0, rejected.returncode)
+            self.assertIn("dispatch #44 is rejected", rejected.stderr)
+
+            self.assertNotEqual(0, wrong_project.returncode)
+            self.assertIn("dispatch #45 belongs to project other-project", wrong_project.stderr)
+
+            time.sleep(0.3)
+
+            turn_starts = [entry for entry in self.read_jsonl(self.codex_log) if entry.get("method") == "turn/start"]
+            self.assertEqual([], turn_starts)
+
+            state = self.read_state()
+            self.assertEqual("idle", state["status"])
+            self.assertEqual([], state["pending_dispatch_ids"])
+            self.assertEqual([], state["delivered_dispatch_ids"])
+            self.assertEqual([], self.den_server.completions)
         finally:
             proc.terminate()
             proc.communicate(timeout=5)
