@@ -28,6 +28,29 @@ class RelayError(RuntimeError):
     pass
 
 
+def format_chat_label(chat: dict) -> str:
+    pieces: list[str] = []
+    chat_id = chat.get("id")
+    chat_type = chat.get("type")
+    if isinstance(chat_id, int):
+        pieces.append(f"Chat id: {chat_id}")
+    if isinstance(chat_type, str):
+        pieces.append(f"Type: {chat_type}")
+    username = chat.get("username")
+    if isinstance(username, str) and username:
+        pieces.append(f"Username: @{username}")
+    title = chat.get("title")
+    if isinstance(title, str) and title:
+        pieces.append(f"Title: {title}")
+    first_name = chat.get("first_name")
+    if isinstance(first_name, str) and first_name:
+        pieces.append(f"First name: {first_name}")
+    last_name = chat.get("last_name")
+    if isinstance(last_name, str) and last_name:
+        pieces.append(f"Last name: {last_name}")
+    return "\n".join(pieces) if pieces else "Chat details unavailable."
+
+
 def atomic_write_json(path: pathlib.Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", dir=path.parent, delete=False, encoding="utf-8") as handle:
@@ -84,6 +107,75 @@ class TelegramBotApiClient:
         if not data.get("ok", False):
             raise RelayError(f"Telegram Bot API {method} failed: {data.get('description', 'unknown error')}")
         return data.get("result")
+
+
+def require_long_poll_ready(
+    *,
+    client: TelegramBotApiClient,
+    clear_webhook: bool,
+    drop_pending_updates: bool,
+) -> dict:
+    webhook_info = client.call("getWebhookInfo")
+    if not isinstance(webhook_info, dict):
+        raise RelayError("Telegram getWebhookInfo returned a non-object payload")
+    if webhook_info.get("url"):
+        if not clear_webhook:
+            raise RelayError(
+                "Telegram webhook is configured for this bot. getUpdates will not work until the webhook is removed."
+            )
+        client.call(
+            "deleteWebhook",
+            {
+                "drop_pending_updates": drop_pending_updates,
+            },
+        )
+        webhook_info = dict(webhook_info)
+        webhook_info["url"] = ""
+    return webhook_info
+
+
+def fetch_updates(client: TelegramBotApiClient, *, offset: int, timeout: int) -> list[dict]:
+    updates = client.call(
+        "getUpdates",
+        {
+            "offset": offset,
+            "timeout": timeout,
+            "allowed_updates": ["message"],
+        },
+    )
+    if not isinstance(updates, list):
+        raise RelayError("Telegram getUpdates returned a non-list payload")
+    return updates
+
+
+def build_bot_commands(default_project: str | None) -> list[dict[str, str]]:
+    if default_project:
+        wake_description = f"Queue a dispatch id for {default_project}"
+        status_description = f"Show bridge status for {default_project}"
+    else:
+        wake_description = "Queue a dispatch by project and id"
+        status_description = "Show bridge status for a project"
+    return [
+        {"command": "help", "description": "Show Telegram relay commands"},
+        {"command": "status", "description": status_description},
+        {"command": "wake", "description": wake_description},
+        {"command": "chatid", "description": "Show this chat id for allowlisting"},
+    ]
+
+
+def default_description(default_project: str | None) -> str:
+    if default_project:
+        return (
+            f"Wake queued Den work for the {default_project} Codex bridge, "
+            "check bridge status, and bootstrap Telegram allowlisting."
+        )
+    return "Wake queued Den work for local Codex bridges, check bridge status, and bootstrap Telegram allowlisting."
+
+
+def default_short_description(default_project: str | None) -> str:
+    if default_project:
+        return f"Wake Den Codex work for {default_project}."
+    return "Wake Den Codex work from Telegram."
 
 
 def normalize_command(raw: str) -> list[str]:
@@ -169,6 +261,7 @@ def help_text(default_project: str | None) -> str:
             "Supported commands:",
             wake_usage,
             status_usage,
+            "/chatid",
             "/help",
         ]
     )
@@ -204,6 +297,8 @@ def handle_message(
         elif command == "status":
             project = resolve_status_args(args, default_project)
             reply = format_status(project, bridge_state_root)
+        elif command == "chatid":
+            reply = format_chat_label(chat)
         elif command == "help":
             reply = help_text(default_project)
         else:
@@ -223,33 +318,20 @@ def handle_message(
 def run_poll(args: argparse.Namespace) -> int:
     client = TelegramBotApiClient(args.bot_token, args.telegram_api_base)
     relay_state = RelayState(pathlib.Path(args.relay_state_file))
-
-    webhook_info = client.call("getWebhookInfo")
-    if isinstance(webhook_info, dict) and webhook_info.get("url"):
-        if not args.clear_webhook:
-            raise RelayError(
-                "Telegram webhook is configured for this bot. getUpdates will not work until the webhook is removed."
-            )
-        client.call(
-            "deleteWebhook",
-            {
-                "drop_pending_updates": args.drop_pending_updates,
-            },
-        )
+    require_long_poll_ready(
+        client=client,
+        clear_webhook=args.clear_webhook,
+        drop_pending_updates=args.drop_pending_updates,
+    )
 
     allowed_chat_ids = {int(value) for value in args.allowed_chat_id}
 
     while True:
-        updates = client.call(
-            "getUpdates",
-            {
-                "offset": relay_state.offset,
-                "timeout": args.poll_timeout,
-                "allowed_updates": ["message"],
-            },
+        updates = fetch_updates(
+            client,
+            offset=relay_state.offset,
+            timeout=args.poll_timeout,
         )
-        if not isinstance(updates, list):
-            raise RelayError("Telegram getUpdates returned a non-list payload")
 
         highest_offset = relay_state.offset
         for update in updates:
@@ -273,6 +355,99 @@ def run_poll(args: argparse.Namespace) -> int:
             return 0
 
 
+def run_register(args: argparse.Namespace) -> int:
+    client = TelegramBotApiClient(args.bot_token, args.telegram_api_base)
+    me = client.call("getMe")
+    if not isinstance(me, dict):
+        raise RelayError("Telegram getMe returned a non-object payload")
+
+    webhook_info = client.call("getWebhookInfo")
+    if not isinstance(webhook_info, dict):
+        raise RelayError("Telegram getWebhookInfo returned a non-object payload")
+    if webhook_info.get("url") and args.clear_webhook:
+        webhook_info = require_long_poll_ready(
+            client=client,
+            clear_webhook=True,
+            drop_pending_updates=args.drop_pending_updates,
+        )
+
+    client.call(
+        "setMyCommands",
+        {
+            "commands": build_bot_commands(args.project),
+        },
+    )
+    client.call(
+        "setMyDescription",
+        {
+            "description": args.description or default_description(args.project),
+        },
+    )
+    client.call(
+        "setMyShortDescription",
+        {
+            "short_description": args.short_description or default_short_description(args.project),
+        },
+    )
+
+    username = me.get("username")
+    first_name = me.get("first_name") or "unknown"
+    print(f"Bot: {first_name}{f' (@{username})' if username else ''}")
+    if webhook_info.get("url"):
+        print(f"Webhook: {webhook_info['url']}")
+    else:
+        print("Webhook: not configured")
+    print("Commands: help, status, wake, chatid")
+    if username:
+        print(f"Open chat: https://t.me/{username}")
+    return 0
+
+
+def run_discover_chat(args: argparse.Namespace) -> int:
+    client = TelegramBotApiClient(args.bot_token, args.telegram_api_base)
+    relay_state = RelayState(pathlib.Path(args.relay_state_file))
+    require_long_poll_ready(
+        client=client,
+        clear_webhook=args.clear_webhook,
+        drop_pending_updates=args.drop_pending_updates,
+    )
+
+    while True:
+        updates = fetch_updates(
+            client,
+            offset=relay_state.offset,
+            timeout=args.poll_timeout,
+        )
+        highest_offset = relay_state.offset
+        discovered: dict[int, dict] = {}
+        for update in updates:
+            update_id = update.get("update_id")
+            if isinstance(update_id, int):
+                highest_offset = max(highest_offset, update_id + 1)
+            message = update.get("message")
+            if not isinstance(message, dict):
+                continue
+            chat = message.get("chat")
+            if not isinstance(chat, dict):
+                continue
+            chat_id = chat.get("id")
+            if isinstance(chat_id, int) and chat_id not in discovered:
+                discovered[chat_id] = chat
+
+        relay_state.offset = highest_offset
+        relay_state.save()
+
+        if discovered:
+            print("Discovered chats:")
+            for chat_id in sorted(discovered):
+                print("")
+                print(format_chat_label(discovered[chat_id]))
+            return 0
+
+        if args.once:
+            raise RelayError("No chat messages were available to discover. Send the bot a message and try again.")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="den-telegram-relay")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -289,6 +464,24 @@ def build_parser() -> argparse.ArgumentParser:
     poll.add_argument("--clear-webhook", action="store_true")
     poll.add_argument("--drop-pending-updates", action="store_true")
 
+    register = subparsers.add_parser("register")
+    register.add_argument("--bot-token", required=True)
+    register.add_argument("--telegram-api-base", default=DEFAULT_API_BASE)
+    register.add_argument("--project")
+    register.add_argument("--description")
+    register.add_argument("--short-description")
+    register.add_argument("--clear-webhook", action="store_true")
+    register.add_argument("--drop-pending-updates", action="store_true")
+
+    discover = subparsers.add_parser("discover-chat")
+    discover.add_argument("--bot-token", required=True)
+    discover.add_argument("--telegram-api-base", default=DEFAULT_API_BASE)
+    discover.add_argument("--relay-state-file", default=str(DEFAULT_RELAY_STATE_ROOT / "telegram-offset.json"))
+    discover.add_argument("--poll-timeout", type=int, default=30)
+    discover.add_argument("--once", action="store_true")
+    discover.add_argument("--clear-webhook", action="store_true")
+    discover.add_argument("--drop-pending-updates", action="store_true")
+
     return parser
 
 
@@ -298,6 +491,10 @@ def main() -> int:
     try:
         if args.command == "poll":
             return run_poll(args)
+        if args.command == "register":
+            return run_register(args)
+        if args.command == "discover-chat":
+            return run_discover_chat(args)
     except (RelayError, urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
         print(f"den-telegram-relay: {exc}", file=sys.stderr)
         return 1

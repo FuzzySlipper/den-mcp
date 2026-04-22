@@ -74,11 +74,20 @@ class FakeBridgeServer:
 
 class FakeTelegramApiServer:
     def __init__(self):
+        self.bot_user = {
+            "id": 777,
+            "is_bot": True,
+            "first_name": "Den Bridge",
+            "username": "den_bridge_bot",
+        }
         self.webhook_url = ""
         self.updates: list[dict] = []
         self.sent_messages: list[dict] = []
         self.delete_webhook_calls: list[dict] = []
         self.get_updates_calls: list[dict] = []
+        self.set_my_commands_calls: list[dict] = []
+        self.set_my_description_calls: list[dict] = []
+        self.set_my_short_description_calls: list[dict] = []
         self.server: ThreadedTcpServer | None = None
         self.thread: threading.Thread | None = None
 
@@ -101,11 +110,22 @@ class FakeTelegramApiServer:
                 length = int(self.headers.get("Content-Length", "0"))
                 payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
                 _, method = self.path.rsplit("/", 1)
+                if method == "getMe":
+                    return self._json({"ok": True, "result": outer.bot_user})
                 if method == "getWebhookInfo":
                     return self._json({"ok": True, "result": {"url": outer.webhook_url}})
                 if method == "deleteWebhook":
                     outer.delete_webhook_calls.append(payload)
                     outer.webhook_url = ""
+                    return self._json({"ok": True, "result": True})
+                if method == "setMyCommands":
+                    outer.set_my_commands_calls.append(payload)
+                    return self._json({"ok": True, "result": True})
+                if method == "setMyDescription":
+                    outer.set_my_description_calls.append(payload)
+                    return self._json({"ok": True, "result": True})
+                if method == "setMyShortDescription":
+                    outer.set_my_short_description_calls.append(payload)
                     return self._json({"ok": True, "result": True})
                 if method == "getUpdates":
                     outer.get_updates_calls.append(payload)
@@ -189,7 +209,7 @@ class DenTelegramRelayTests(unittest.TestCase):
             check=False,
         )
 
-    def test_poll_handles_status_and_wake_commands(self) -> None:
+    def test_poll_handles_status_wake_and_chatid_commands(self) -> None:
         self.telegram.webhook_url = "https://example.test/webhook"
         self.telegram.updates = [
             {
@@ -208,6 +228,13 @@ class DenTelegramRelayTests(unittest.TestCase):
             },
             {
                 "update_id": 102,
+                "message": {
+                    "chat": {"id": 123, "type": "private", "username": "patch", "first_name": "Pat"},
+                    "text": "/chatid",
+                },
+            },
+            {
+                "update_id": 103,
                 "message": {
                     "chat": {"id": 999},
                     "text": "/wake 999",
@@ -236,11 +263,13 @@ class DenTelegramRelayTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual([{"drop_pending_updates": False}], self.telegram.delete_webhook_calls)
         self.assertEqual([41], self.bridge.wake_requests)
-        self.assertEqual(2, len(self.telegram.sent_messages))
+        self.assertEqual(3, len(self.telegram.sent_messages))
         self.assertIn("Project: sample", self.telegram.sent_messages[0]["text"])
         self.assertEqual("Queued dispatch #41 for sample.", self.telegram.sent_messages[1]["text"])
+        self.assertIn("Chat id: 123", self.telegram.sent_messages[2]["text"])
+        self.assertIn("Username: @patch", self.telegram.sent_messages[2]["text"])
         offset_state = json.loads(self.relay_state_file.read_text(encoding="utf-8"))
-        self.assertEqual(103, offset_state["offset"])
+        self.assertEqual(104, offset_state["offset"])
 
     def test_poll_rejects_active_webhook_without_clear_flag(self) -> None:
         self.telegram.webhook_url = "https://example.test/webhook"
@@ -265,6 +294,67 @@ class DenTelegramRelayTests(unittest.TestCase):
         self.assertNotEqual(0, result.returncode)
         self.assertIn("getUpdates will not work", result.stderr)
         self.assertEqual([], self.telegram.delete_webhook_calls)
+
+    def test_register_sets_commands_and_profile_metadata(self) -> None:
+        self.telegram.webhook_url = "https://example.test/webhook"
+
+        result = self.run_relay(
+            "register",
+            "--bot-token",
+            "test-token",
+            "--telegram-api-base",
+            self.telegram.base_url,
+            "--project",
+            "sample",
+        )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual([], self.telegram.delete_webhook_calls)
+        self.assertEqual(1, len(self.telegram.set_my_commands_calls))
+        self.assertEqual(1, len(self.telegram.set_my_description_calls))
+        self.assertEqual(1, len(self.telegram.set_my_short_description_calls))
+
+        commands = self.telegram.set_my_commands_calls[0]["commands"]
+        self.assertEqual(["help", "status", "wake", "chatid"], [entry["command"] for entry in commands])
+        self.assertIn("sample", commands[1]["description"])
+        self.assertIn("sample", commands[2]["description"])
+        self.assertIn("sample", self.telegram.set_my_description_calls[0]["description"])
+        self.assertIn("Wake Den Codex work for sample.", self.telegram.set_my_short_description_calls[0]["short_description"])
+        self.assertIn("@den_bridge_bot", result.stdout)
+        self.assertIn("Webhook: https://example.test/webhook", result.stdout)
+        self.assertIn("Open chat: https://t.me/den_bridge_bot", result.stdout)
+
+    def test_discover_chat_reports_chat_and_advances_offset(self) -> None:
+        self.telegram.webhook_url = "https://example.test/webhook"
+        self.telegram.updates = [
+            {
+                "update_id": 100,
+                "message": {
+                    "chat": {"id": 321, "type": "private", "username": "patch", "first_name": "Pat"},
+                    "text": "hello bot",
+                },
+            }
+        ]
+
+        result = self.run_relay(
+            "discover-chat",
+            "--bot-token",
+            "test-token",
+            "--telegram-api-base",
+            self.telegram.base_url,
+            "--relay-state-file",
+            str(self.relay_state_file),
+            "--clear-webhook",
+            "--once",
+        )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual([{"drop_pending_updates": False}], self.telegram.delete_webhook_calls)
+        self.assertIn("Discovered chats:", result.stdout)
+        self.assertIn("Chat id: 321", result.stdout)
+        self.assertIn("Username: @patch", result.stdout)
+        offset_state = json.loads(self.relay_state_file.read_text(encoding="utf-8"))
+        self.assertEqual(101, offset_state["offset"])
 
 
 if __name__ == "__main__":
