@@ -1,0 +1,11 @@
+{
+  "output_file": "AGENTS.md",
+  "local_fragment_file": "agents-project.md",
+  "shared_fragments": [
+    "agents/shared/task-management.md",
+    "agents/shared/review-loop.md",
+    "agents/shared/agent-expectations.md",
+    "agents/shared/git-workflow.md",
+    "agents/shared/code-quality.md"
+  ]
+}

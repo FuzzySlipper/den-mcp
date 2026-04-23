@@ -89,8 +89,5 @@ src/DenMcp.Server/wwwroot/
 src/DenMcp.Server/ClientApp/node_modules/
 .codex
 .codex/
-# Agent guidance files (local-only, not committed)
-AGENTS.md
-CLAUDE.md
 !/bin/
 !/bin/den-agent
