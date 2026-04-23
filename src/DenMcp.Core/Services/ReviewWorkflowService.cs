@@ -634,7 +634,7 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
             sb.AppendLine($"- Confirm `{round.Branch}` is still at reviewed head `{round.HeadCommit}`.");
             sb.AppendLine($"- If it matches, merge to `{round.BaseBranch}`, mark the task done, and pick up your next task.");
             sb.AppendLine("- If the branch has new commits beyond that reviewed head, request review again with the new head SHA and tests run instead of merging.");
-            sb.AppendLine("- If there is no next task, send a work-complete Signal message.");
+            sb.AppendLine("- If there is no next task, send a work-complete update through your configured operator-notification path.");
         }
         else
         {
