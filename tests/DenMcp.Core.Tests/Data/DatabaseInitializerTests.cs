@@ -47,6 +47,7 @@ public class DatabaseInitializerTests : IDisposable
         Assert.Contains("documents", tables);
         Assert.Contains("documents_fts", tables);
         Assert.Contains("agent_stream_entries", tables);
+        Assert.Contains("agent_instance_bindings", tables);
     }
 
     [Fact]
@@ -247,6 +248,36 @@ public class DatabaseInitializerTests : IDisposable
         var result = await checkCmd.ExecuteScalarAsync();
 
         Assert.Equal("agent_stream_entries", result);
+    }
+
+    [Fact]
+    public async Task InitializeAsync_AddsAgentInstanceBindingsTableToExistingDatabase()
+    {
+        await using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                CREATE TABLE projects (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT
+                );
+                """;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var initializer = new DatabaseInitializer(_dbPath, NullLogger<DatabaseInitializer>.Instance);
+        await initializer.InitializeAsync();
+
+        await using var verify = new SqliteConnection(initializer.ConnectionString);
+        await verify.OpenAsync();
+
+        await using var checkCmd = verify.CreateCommand();
+        checkCmd.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'agent_instance_bindings'";
+        var result = await checkCmd.ExecuteScalarAsync();
+
+        Assert.Equal("agent_instance_bindings", result);
     }
 
     [Fact]
