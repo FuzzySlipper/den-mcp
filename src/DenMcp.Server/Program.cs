@@ -68,6 +68,7 @@ builder.Services.AddSingleton<IMessageRepository, MessageRepository>();
 builder.Services.AddSingleton<IDocumentRepository, DocumentRepository>();
 builder.Services.AddSingleton<IAgentSessionRepository, AgentSessionRepository>();
 builder.Services.AddSingleton<IDispatchRepository, DispatchRepository>();
+builder.Services.AddSingleton<IAgentStreamRepository, AgentStreamRepository>();
 builder.Services.AddSingleton<INotificationMessageRepository, NotificationMessageRepository>();
 builder.Services.AddSingleton<IReviewWorkflowService, ReviewWorkflowService>();
 
@@ -126,6 +127,7 @@ app.MapMessageRoutes();
 app.MapDocumentRoutes();
 app.MapAgentRoutes();
 app.MapDispatchRoutes();
+app.MapAgentStreamRoutes();
 app.MapLibrarianRoutes();
 
 // MCP endpoint

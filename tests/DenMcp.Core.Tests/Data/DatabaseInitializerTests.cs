@@ -46,6 +46,7 @@ public class DatabaseInitializerTests : IDisposable
         Assert.Contains("notification_message_links", tables);
         Assert.Contains("documents", tables);
         Assert.Contains("documents_fts", tables);
+        Assert.Contains("agent_stream_entries", tables);
     }
 
     [Fact]
@@ -216,6 +217,36 @@ public class DatabaseInitializerTests : IDisposable
             columns.Add(reader.GetString(1));
 
         Assert.Contains("completed_by", columns);
+    }
+
+    [Fact]
+    public async Task InitializeAsync_AddsAgentStreamTableToExistingDatabase()
+    {
+        await using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                CREATE TABLE projects (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT
+                );
+                """;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var initializer = new DatabaseInitializer(_dbPath, NullLogger<DatabaseInitializer>.Instance);
+        await initializer.InitializeAsync();
+
+        await using var verify = new SqliteConnection(initializer.ConnectionString);
+        await verify.OpenAsync();
+
+        await using var checkCmd = verify.CreateCommand();
+        checkCmd.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'agent_stream_entries'";
+        var result = await checkCmd.ExecuteScalarAsync();
+
+        Assert.Equal("agent_stream_entries", result);
     }
 
     [Fact]
