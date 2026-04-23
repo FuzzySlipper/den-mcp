@@ -94,6 +94,33 @@ public class AgentRecipientResolverTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ResolveAsync_UsesGlobalAgentWhenSingleMatch()
+    {
+        await _bindings.UpsertAsync(new AgentInstanceBinding
+        {
+            InstanceId = "codex-global-1",
+            ProjectId = "proj",
+            AgentIdentity = "codex",
+            AgentFamily = "codex",
+            Role = "implementer",
+            TransportKind = "codex_app_server",
+            Status = AgentInstanceBindingStatus.Active
+        });
+
+        var resolution = await _resolver.ResolveAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Message,
+            EventType = "nudge",
+            Sender = "user",
+            RecipientAgent = "codex",
+            DeliveryMode = AgentStreamDeliveryMode.Wake
+        }, recordFailures: false);
+
+        Assert.Equal(AgentRecipientResolutionStatus.Resolved, resolution.Status);
+        Assert.Equal("codex-global-1", resolution.Binding!.InstanceId);
+    }
+
+    [Fact]
     public async Task ResolveAsync_WhenRoleAmbiguous_RecordsWakeDropped()
     {
         await _bindings.UpsertAsync(new AgentInstanceBinding

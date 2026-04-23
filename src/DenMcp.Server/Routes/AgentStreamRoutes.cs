@@ -1,5 +1,7 @@
+using System.Text.Json;
 using DenMcp.Core.Data;
 using DenMcp.Core.Models;
+using DenMcp.Core.Services;
 
 namespace DenMcp.Server.Routes;
 
@@ -41,6 +43,23 @@ public static class AgentStreamRoutes
             });
 
             return Results.Ok(entries);
+        });
+
+        app.MapPost("/api/agent-stream/messages", async (IAgentStreamMessageService service, SendAgentStreamMessageRequest req) =>
+        {
+            try
+            {
+                var result = await service.CreateAsync(ToCreateRequest(req, req.ProjectId));
+                return Results.Created($"/api/agent-stream/{result.Entry.Id}", result);
+            }
+            catch (JsonException ex)
+            {
+                return Results.BadRequest(new { error = $"Invalid metadata JSON: {ex.Message}" });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
         });
 
         app.MapGet("/api/agent-stream/{entryId:int}", async (IAgentStreamRepository repo, int entryId) =>
@@ -89,6 +108,32 @@ public static class AgentStreamRoutes
             return Results.Ok(entries);
         });
 
+        group.MapPost("/messages", async (IAgentStreamMessageService service, string projectId, SendAgentStreamMessageRequest req) =>
+        {
+            if (!string.IsNullOrWhiteSpace(req.ProjectId) &&
+                !string.Equals(req.ProjectId, projectId, StringComparison.Ordinal))
+            {
+                return Results.BadRequest(new
+                {
+                    error = $"project_id '{req.ProjectId}' does not match route project '{projectId}'."
+                });
+            }
+
+            try
+            {
+                var result = await service.CreateAsync(ToCreateRequest(req, projectId));
+                return Results.Created($"/api/projects/{projectId}/agent-stream/{result.Entry.Id}", result);
+            }
+            catch (JsonException ex)
+            {
+                return Results.BadRequest(new { error = $"Invalid metadata JSON: {ex.Message}" });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+
         group.MapGet("/{entryId:int}", async (IAgentStreamRepository repo, string projectId, int entryId) =>
         {
             var entry = await repo.GetByIdAsync(entryId);
@@ -118,4 +163,45 @@ public static class AgentStreamRoutes
             return false;
         }
     }
+
+    private static AgentStreamMessageCreateRequest ToCreateRequest(SendAgentStreamMessageRequest req, string? projectId)
+    {
+        JsonElement? metadata = null;
+        if (!string.IsNullOrWhiteSpace(req.Metadata))
+            metadata = JsonSerializer.Deserialize<JsonElement>(req.Metadata);
+
+        return new AgentStreamMessageCreateRequest
+        {
+            ProjectId = projectId,
+            TaskId = req.TaskId,
+            ThreadId = req.ThreadId,
+            DispatchId = req.DispatchId,
+            Sender = req.Sender,
+            SenderInstanceId = req.SenderInstanceId,
+            EventType = req.EventType,
+            RecipientAgent = req.RecipientAgent,
+            RecipientRole = req.RecipientRole,
+            RecipientInstanceId = req.RecipientInstanceId,
+            DeliveryMode = req.DeliveryMode,
+            Body = req.Body,
+            Metadata = metadata,
+            DedupKey = req.DedupKey
+        };
+    }
 }
+
+public sealed record SendAgentStreamMessageRequest(
+    string Sender,
+    string EventType,
+    string Body,
+    string? ProjectId = null,
+    int? TaskId = null,
+    int? ThreadId = null,
+    int? DispatchId = null,
+    string? SenderInstanceId = null,
+    string? RecipientAgent = null,
+    string? RecipientRole = null,
+    string? RecipientInstanceId = null,
+    AgentStreamDeliveryMode? DeliveryMode = null,
+    string? Metadata = null,
+    string? DedupKey = null);
