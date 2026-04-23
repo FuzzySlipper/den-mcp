@@ -353,6 +353,25 @@ public class SignalNotificationChannelTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task StartListeningAsync_WhenSignalDisabled_WaitsForCancellationWithoutPollingDaemon()
+    {
+        var handler = new StubSignalHandler(_ => throw new InvalidOperationException("Should not call daemon when disabled."));
+
+        await using var channel = CreateChannel(handler, signal => signal.Enabled = false);
+        using var cts = new CancellationTokenSource();
+
+        var listenTask = channel.StartListeningAsync(cts.Token);
+        var completedTask = await Task.WhenAny(listenTask, Task.Delay(100));
+
+        Assert.NotSame(listenTask, completedTask);
+        Assert.Empty(handler.Requests);
+        Assert.Empty(handler.RequestedClientNames);
+
+        cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await listenTask);
+    }
+
+    [Fact]
     public async Task SendDispatchNotificationAsync_WhenDaemonUnavailable_DoesNotThrow()
     {
         var dispatch = await CreateDispatchAsync();
