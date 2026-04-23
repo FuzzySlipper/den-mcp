@@ -13,6 +13,8 @@ export type MessageIntent =
   | 'task_ready'
   | 'task_blocked';
 export type AgentSessionStatus = 'active' | 'inactive';
+export type AgentStreamKind = 'ops' | 'message';
+export type AgentStreamDeliveryMode = 'record_only' | 'notify' | 'wake';
 export type DispatchStatus = 'pending' | 'approved' | 'rejected' | 'completed' | 'expired';
 export type DispatchTriggerType = 'message' | 'task_status';
 export type ReviewVerdict = 'changes_requested' | 'looks_good' | 'follow_up_needed' | 'blocked_by_dependency';
@@ -261,6 +263,26 @@ export interface AgentSession {
   checked_in_at: string;
   last_heartbeat: string;
   metadata: string | null;
+}
+
+export interface AgentStreamEntry {
+  id: number;
+  stream_kind: AgentStreamKind;
+  event_type: string;
+  project_id: string | null;
+  task_id: number | null;
+  thread_id: number | null;
+  dispatch_id: number | null;
+  sender: string;
+  sender_instance_id: string | null;
+  recipient_agent: string | null;
+  recipient_role: string | null;
+  recipient_instance_id: string | null;
+  delivery_mode: AgentStreamDeliveryMode;
+  body: string | null;
+  metadata: Record<string, unknown> | null;
+  dedup_key: string | null;
+  created_at: string;
 }
 
 export interface DispatchEntry {
