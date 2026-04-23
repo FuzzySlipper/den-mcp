@@ -108,6 +108,22 @@ public static class EnumExtensions
         _ => throw new ArgumentException($"Unknown agent stream delivery mode: {value}", nameof(value))
     };
 
+    public static string ToDbValue(this AgentInstanceBindingStatus status) => status switch
+    {
+        AgentInstanceBindingStatus.Active => "active",
+        AgentInstanceBindingStatus.Inactive => "inactive",
+        AgentInstanceBindingStatus.Degraded => "degraded",
+        _ => throw new ArgumentOutOfRangeException(nameof(status), status, null)
+    };
+
+    public static AgentInstanceBindingStatus ParseAgentInstanceBindingStatus(string value) => value switch
+    {
+        "active" => AgentInstanceBindingStatus.Active,
+        "inactive" => AgentInstanceBindingStatus.Inactive,
+        "degraded" => AgentInstanceBindingStatus.Degraded,
+        _ => throw new ArgumentException($"Unknown agent instance binding status: {value}", nameof(value))
+    };
+
     public static string ToDbValue(this AgentSessionStatus status) => status switch
     {
         AgentSessionStatus.Active => "active",

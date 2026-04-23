@@ -228,6 +228,35 @@ public sealed class DatabaseInitializer
             ON agent_sessions(project_id, status);
 
         ------------------------------------------------------------
+        -- AGENT INSTANCE BINDINGS
+        ------------------------------------------------------------
+        CREATE TABLE IF NOT EXISTS agent_instance_bindings (
+            instance_id      TEXT PRIMARY KEY,
+            project_id       TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            agent_identity   TEXT NOT NULL,
+            agent_family     TEXT NOT NULL,
+            role             TEXT,
+            transport_kind   TEXT NOT NULL,
+            session_id       TEXT,
+            status           TEXT NOT NULL DEFAULT 'active'
+                             CHECK (status IN ('active', 'inactive', 'degraded')),
+            metadata         TEXT,
+            checked_in_at    TEXT NOT NULL DEFAULT (datetime('now')),
+            last_heartbeat   TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_agent_bindings_project_status
+            ON agent_instance_bindings(project_id, status, last_heartbeat DESC);
+        CREATE INDEX IF NOT EXISTS idx_agent_bindings_project_role_status
+            ON agent_instance_bindings(project_id, role, status, last_heartbeat DESC)
+            WHERE role IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_agent_bindings_project_agent_status
+            ON agent_instance_bindings(project_id, agent_identity, status, last_heartbeat DESC);
+        CREATE INDEX IF NOT EXISTS idx_agent_bindings_session
+            ON agent_instance_bindings(session_id)
+            WHERE session_id IS NOT NULL;
+
+        ------------------------------------------------------------
         -- REVIEW ROUNDS
         ------------------------------------------------------------
         CREATE TABLE IF NOT EXISTS review_rounds (
@@ -463,6 +492,22 @@ public sealed class DatabaseInitializer
             "INTEGER CHECK (task_local_commit_count IS NULL OR task_local_commit_count >= 0)");
         await EnsureIndexAsync(connection, "idx_messages_project_intent",
             "CREATE INDEX IF NOT EXISTS idx_messages_project_intent ON messages(project_id, intent)");
+        await EnsureIndexAsync(connection, "idx_agent_bindings_project_status",
+            "CREATE INDEX IF NOT EXISTS idx_agent_bindings_project_status ON agent_instance_bindings(project_id, status, last_heartbeat DESC)");
+        await EnsureIndexAsync(connection, "idx_agent_bindings_project_role_status",
+            """
+            CREATE INDEX IF NOT EXISTS idx_agent_bindings_project_role_status
+            ON agent_instance_bindings(project_id, role, status, last_heartbeat DESC)
+            WHERE role IS NOT NULL
+            """);
+        await EnsureIndexAsync(connection, "idx_agent_bindings_project_agent_status",
+            "CREATE INDEX IF NOT EXISTS idx_agent_bindings_project_agent_status ON agent_instance_bindings(project_id, agent_identity, status, last_heartbeat DESC)");
+        await EnsureIndexAsync(connection, "idx_agent_bindings_session",
+            """
+            CREATE INDEX IF NOT EXISTS idx_agent_bindings_session
+            ON agent_instance_bindings(session_id)
+            WHERE session_id IS NOT NULL
+            """);
         await EnsureIndexAsync(connection, "idx_agent_stream_sender_created",
             "CREATE INDEX IF NOT EXISTS idx_agent_stream_sender_created ON agent_stream_entries(sender, created_at DESC, id DESC)");
         await EnsureIndexAsync(connection, "idx_agent_stream_sender_instance_created",

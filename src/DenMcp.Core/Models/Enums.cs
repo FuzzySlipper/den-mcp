@@ -48,6 +48,13 @@ public enum AgentStreamDeliveryMode
     Wake
 }
 
+public enum AgentInstanceBindingStatus
+{
+    Active,
+    Inactive,
+    Degraded
+}
+
 public enum AgentSessionStatus
 {
     Active,

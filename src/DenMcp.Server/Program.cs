@@ -67,10 +67,12 @@ builder.Services.AddSingleton<IReviewFindingRepository, ReviewFindingRepository>
 builder.Services.AddSingleton<IMessageRepository, MessageRepository>();
 builder.Services.AddSingleton<IDocumentRepository, DocumentRepository>();
 builder.Services.AddSingleton<IAgentSessionRepository, AgentSessionRepository>();
+builder.Services.AddSingleton<IAgentInstanceBindingRepository, AgentInstanceBindingRepository>();
 builder.Services.AddSingleton<IDispatchRepository, DispatchRepository>();
 builder.Services.AddSingleton<IAgentStreamRepository, AgentStreamRepository>();
 builder.Services.AddSingleton<INotificationMessageRepository, NotificationMessageRepository>();
 builder.Services.AddSingleton<IReviewWorkflowService, ReviewWorkflowService>();
+builder.Services.AddSingleton<IAgentRecipientResolver, AgentRecipientResolver>();
 
 // Dispatch
 builder.Services.AddSingleton<IRoutingService, RoutingService>();
