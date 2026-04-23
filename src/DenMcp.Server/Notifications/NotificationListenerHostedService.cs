@@ -5,25 +5,19 @@ namespace DenMcp.Server.Notifications;
 
 public sealed class NotificationListenerHostedService : BackgroundService
 {
-    private readonly DenMcpOptions _options;
     private readonly INotificationChannel _channel;
     private readonly ILogger<NotificationListenerHostedService> _logger;
 
     public NotificationListenerHostedService(
-        DenMcpOptions options,
         INotificationChannel channel,
         ILogger<NotificationListenerHostedService> logger)
     {
-        _options = options;
         _channel = channel;
         _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!_options.Signal.Enabled)
-            return;
-
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -36,7 +30,7 @@ public sealed class NotificationListenerHostedService : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Signal notification listener crashed; retrying.");
+                _logger.LogError(ex, "Notification listener crashed; retrying.");
             }
 
             try

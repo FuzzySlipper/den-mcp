@@ -254,7 +254,7 @@ public sealed class PromptGenerationService : IPromptGenerationService
         sb.AppendLine();
         sb.AppendLine("If the branch still matches the reviewed head commit in the thread, merge it and mark the task done.");
         sb.AppendLine("If the branch has new commits since that review, request review again with the new head SHA and tests run.");
-        sb.AppendLine("After merging, request your next task. If nothing is available, send a work-complete Signal message.");
+        sb.AppendLine("After merging, request your next task. If nothing is available, send a work-complete update through your configured operator-notification path.");
 
         var summaryTask = evt.TaskId.HasValue ? $" on #{evt.TaskId}" : "";
         return new PromptResult
