@@ -250,6 +250,77 @@ public class DatabaseInitializerTests : IDisposable
     }
 
     [Fact]
+    public async Task InitializeAsync_AddsAgentStreamIndexesAndDeduplicatesExistingRows()
+    {
+        await using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                CREATE TABLE projects (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT
+                );
+
+                INSERT INTO projects (id, name) VALUES ('proj', 'Project');
+
+                CREATE TABLE agent_stream_entries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    stream_kind TEXT NOT NULL CHECK (stream_kind IN ('ops', 'message')),
+                    event_type TEXT NOT NULL,
+                    project_id TEXT,
+                    task_id INTEGER,
+                    thread_id INTEGER,
+                    dispatch_id INTEGER,
+                    sender TEXT NOT NULL,
+                    sender_instance_id TEXT,
+                    recipient_agent TEXT,
+                    recipient_role TEXT,
+                    recipient_instance_id TEXT,
+                    delivery_mode TEXT NOT NULL CHECK (delivery_mode IN ('record_only', 'notify', 'wake')),
+                    body TEXT,
+                    metadata TEXT,
+                    dedup_key TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+
+                INSERT INTO agent_stream_entries (
+                    stream_kind, event_type, project_id, sender, recipient_agent, delivery_mode, dedup_key, body
+                ) VALUES
+                    ('ops', 'review_requested', 'proj', 'codex', 'claude-code', 'wake', 'dup-key', 'first'),
+                    ('ops', 'review_requested', 'proj', 'codex', 'claude-code', 'wake', 'dup-key', 'second');
+                """;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var initializer = new DatabaseInitializer(_dbPath, NullLogger<DatabaseInitializer>.Instance);
+        await initializer.InitializeAsync();
+
+        await using var verify = new SqliteConnection(initializer.ConnectionString);
+        await verify.OpenAsync();
+
+        await using var countCmd = verify.CreateCommand();
+        countCmd.CommandText = "SELECT COUNT(*) FROM agent_stream_entries WHERE dedup_key = 'dup-key'";
+        var duplicateCount = (long)(await countCmd.ExecuteScalarAsync())!;
+        Assert.Equal(1, duplicateCount);
+
+        var indexes = new List<string>();
+        await using var indexCmd = verify.CreateCommand();
+        indexCmd.CommandText = "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'agent_stream_entries'";
+        await using var reader = await indexCmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            indexes.Add(reader.GetString(0));
+
+        Assert.Contains("idx_agent_stream_sender_created", indexes);
+        Assert.Contains("idx_agent_stream_sender_instance_created", indexes);
+        Assert.Contains("idx_agent_stream_recipient_agent_created", indexes);
+        Assert.Contains("idx_agent_stream_recipient_role_created", indexes);
+        Assert.Contains("idx_agent_stream_recipient_instance_created", indexes);
+        Assert.Contains("idx_agent_stream_dedup", indexes);
+    }
+
+    [Fact]
     public async Task InitializeAsync_AddsIntentColumnAndBackfillsLegacyMessageTypes()
     {
         await using (var conn = new SqliteConnection($"Data Source={_dbPath}"))

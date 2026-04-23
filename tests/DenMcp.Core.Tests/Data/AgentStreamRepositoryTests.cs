@@ -117,4 +117,46 @@ public class AgentStreamRepositoryTests : IAsyncLifetime
         var entry = Assert.Single(scoped);
         Assert.Equal(firstOps.Id, entry.Id);
     }
+
+    [Fact]
+    public async Task Append_WithDuplicateDedupKey_ReturnsExistingEntry()
+    {
+        var first = await _repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "wake_requested",
+            ProjectId = "proj",
+            Sender = "codex",
+            RecipientAgent = "claude-code",
+            DeliveryMode = AgentStreamDeliveryMode.Wake,
+            Body = "first payload",
+            DedupKey = "dup-key"
+        });
+
+        var second = await _repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "wake_requested",
+            ProjectId = "proj",
+            Sender = "codex",
+            RecipientAgent = "claude-code",
+            DeliveryMode = AgentStreamDeliveryMode.Wake,
+            Body = "second payload",
+            DedupKey = "dup-key"
+        });
+
+        Assert.Equal(first.Id, second.Id);
+        Assert.Equal("first payload", second.Body);
+
+        var entries = await _repo.ListAsync(new AgentStreamListOptions
+        {
+            ProjectId = "proj",
+            Sender = "codex",
+            EventType = "wake_requested"
+        });
+
+        var entry = Assert.Single(entries);
+        Assert.Equal(first.Id, entry.Id);
+        Assert.Equal("dup-key", entry.DedupKey);
+    }
 }

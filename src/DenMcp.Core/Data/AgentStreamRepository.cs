@@ -77,9 +77,20 @@ public sealed class AgentStreamRepository : IAgentStreamRepository
             """;
         AddParameters(cmd, entry);
 
-        await using var reader = await cmd.ExecuteReaderAsync();
-        await reader.ReadAsync();
-        return ReadEntry(reader);
+        try
+        {
+            await using var reader = await cmd.ExecuteReaderAsync();
+            await reader.ReadAsync();
+            return ReadEntry(reader);
+        }
+        catch (SqliteException ex) when (ex.SqliteErrorCode == 19 && entry.DedupKey is not null)
+        {
+            var existing = await GetByDedupKeyAsync(conn, entry.DedupKey);
+            if (existing is not null)
+                return existing;
+
+            throw;
+        }
     }
 
     public async Task<AgentStreamEntry?> GetByIdAsync(int id)
@@ -237,6 +248,39 @@ public sealed class AgentStreamRepository : IAgentStreamRepository
         cmd.Parameters.AddWithValue("@metadata",
             entry.Metadata.HasValue ? entry.Metadata.Value.GetRawText() : DBNull.Value);
         cmd.Parameters.AddWithValue("@dedupKey", (object?)entry.DedupKey ?? DBNull.Value);
+    }
+
+    private static async Task<AgentStreamEntry?> GetByDedupKeyAsync(SqliteConnection conn, string dedupKey)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT
+                id,
+                stream_kind,
+                event_type,
+                project_id,
+                task_id,
+                thread_id,
+                dispatch_id,
+                sender,
+                sender_instance_id,
+                recipient_agent,
+                recipient_role,
+                recipient_instance_id,
+                delivery_mode,
+                body,
+                metadata,
+                dedup_key,
+                created_at
+            FROM agent_stream_entries
+            WHERE dedup_key = @dedupKey
+            ORDER BY id ASC
+            LIMIT 1
+            """;
+        cmd.Parameters.AddWithValue("@dedupKey", dedupKey);
+
+        await using var reader = await cmd.ExecuteReaderAsync();
+        return await reader.ReadAsync() ? ReadEntry(reader) : null;
     }
 
     private static AgentStreamEntry ReadEntry(SqliteDataReader reader)
