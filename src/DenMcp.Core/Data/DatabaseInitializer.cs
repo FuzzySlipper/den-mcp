@@ -408,6 +408,20 @@ public sealed class DatabaseInitializer
             ON agent_stream_entries(task_id, created_at DESC, id DESC);
         CREATE INDEX IF NOT EXISTS idx_agent_stream_dispatch
             ON agent_stream_entries(dispatch_id);
+        CREATE INDEX IF NOT EXISTS idx_agent_stream_sender_created
+            ON agent_stream_entries(sender, created_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_agent_stream_sender_instance_created
+            ON agent_stream_entries(sender_instance_id, created_at DESC, id DESC)
+            WHERE sender_instance_id IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_agent_stream_recipient_agent_created
+            ON agent_stream_entries(recipient_agent, created_at DESC, id DESC)
+            WHERE recipient_agent IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_agent_stream_recipient_role_created
+            ON agent_stream_entries(recipient_role, created_at DESC, id DESC)
+            WHERE recipient_role IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_agent_stream_recipient_instance_created
+            ON agent_stream_entries(recipient_instance_id, created_at DESC, id DESC)
+            WHERE recipient_instance_id IS NOT NULL;
         """;
 
     private async Task RunMigrationsAsync(SqliteConnection connection)
@@ -449,8 +463,40 @@ public sealed class DatabaseInitializer
             "INTEGER CHECK (task_local_commit_count IS NULL OR task_local_commit_count >= 0)");
         await EnsureIndexAsync(connection, "idx_messages_project_intent",
             "CREATE INDEX IF NOT EXISTS idx_messages_project_intent ON messages(project_id, intent)");
+        await EnsureIndexAsync(connection, "idx_agent_stream_sender_created",
+            "CREATE INDEX IF NOT EXISTS idx_agent_stream_sender_created ON agent_stream_entries(sender, created_at DESC, id DESC)");
+        await EnsureIndexAsync(connection, "idx_agent_stream_sender_instance_created",
+            """
+            CREATE INDEX IF NOT EXISTS idx_agent_stream_sender_instance_created
+            ON agent_stream_entries(sender_instance_id, created_at DESC, id DESC)
+            WHERE sender_instance_id IS NOT NULL
+            """);
+        await EnsureIndexAsync(connection, "idx_agent_stream_recipient_agent_created",
+            """
+            CREATE INDEX IF NOT EXISTS idx_agent_stream_recipient_agent_created
+            ON agent_stream_entries(recipient_agent, created_at DESC, id DESC)
+            WHERE recipient_agent IS NOT NULL
+            """);
+        await EnsureIndexAsync(connection, "idx_agent_stream_recipient_role_created",
+            """
+            CREATE INDEX IF NOT EXISTS idx_agent_stream_recipient_role_created
+            ON agent_stream_entries(recipient_role, created_at DESC, id DESC)
+            WHERE recipient_role IS NOT NULL
+            """);
+        await EnsureIndexAsync(connection, "idx_agent_stream_recipient_instance_created",
+            """
+            CREATE INDEX IF NOT EXISTS idx_agent_stream_recipient_instance_created
+            ON agent_stream_entries(recipient_instance_id, created_at DESC, id DESC)
+            WHERE recipient_instance_id IS NOT NULL
+            """);
         await BackfillMessageIntentsAsync(connection);
         await BackfillHistoricalDispatchCleanupAsync(connection);
+        await BackfillAgentStreamDedupAsync(connection);
+        await EnsureIndexAsync(connection, "idx_agent_stream_dedup",
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_stream_dedup
+            ON agent_stream_entries(dedup_key) WHERE dedup_key IS NOT NULL
+            """);
     }
 
     private static async Task TryAddColumnAsync(SqliteConnection connection, string table, string column, string columnDefinition)
@@ -537,6 +583,25 @@ public sealed class DatabaseInitializer
             "Expired {TerminalTaskDispatchCount} historical dispatches for terminal tasks and {SupersededDispatchCount} superseded task-target dispatches during startup backfill",
             expiredTerminalTaskDispatches,
             expiredSupersededDispatches);
+    }
+
+    private async Task BackfillAgentStreamDedupAsync(SqliteConnection connection)
+    {
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            DELETE FROM agent_stream_entries
+            WHERE dedup_key IS NOT NULL
+              AND id NOT IN (
+                  SELECT MIN(id)
+                  FROM agent_stream_entries
+                  WHERE dedup_key IS NOT NULL
+                  GROUP BY dedup_key
+              )
+            """;
+
+        var removed = await cmd.ExecuteNonQueryAsync();
+        if (removed > 0)
+            _logger.LogInformation("Removed {DuplicateAgentStreamCount} duplicate agent stream rows during dedup backfill", removed);
     }
 
     private static async Task<int> ExpireHistoricalDispatchesForTerminalTasksAsync(SqliteConnection connection)
