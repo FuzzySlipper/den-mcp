@@ -35,6 +35,19 @@ public enum MessageIntent
     TaskBlocked
 }
 
+public enum AgentStreamKind
+{
+    Ops,
+    Message
+}
+
+public enum AgentStreamDeliveryMode
+{
+    RecordOnly,
+    Notify,
+    Wake
+}
+
 public enum AgentSessionStatus
 {
     Active,

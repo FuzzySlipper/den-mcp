@@ -78,6 +78,36 @@ public static class EnumExtensions
         _ => throw new ArgumentException($"Unknown message intent: {value}", nameof(value))
     };
 
+    public static string ToDbValue(this AgentStreamKind kind) => kind switch
+    {
+        AgentStreamKind.Ops => "ops",
+        AgentStreamKind.Message => "message",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null)
+    };
+
+    public static AgentStreamKind ParseAgentStreamKind(string value) => value switch
+    {
+        "ops" => AgentStreamKind.Ops,
+        "message" => AgentStreamKind.Message,
+        _ => throw new ArgumentException($"Unknown agent stream kind: {value}", nameof(value))
+    };
+
+    public static string ToDbValue(this AgentStreamDeliveryMode deliveryMode) => deliveryMode switch
+    {
+        AgentStreamDeliveryMode.RecordOnly => "record_only",
+        AgentStreamDeliveryMode.Notify => "notify",
+        AgentStreamDeliveryMode.Wake => "wake",
+        _ => throw new ArgumentOutOfRangeException(nameof(deliveryMode), deliveryMode, null)
+    };
+
+    public static AgentStreamDeliveryMode ParseAgentStreamDeliveryMode(string value) => value switch
+    {
+        "record_only" => AgentStreamDeliveryMode.RecordOnly,
+        "notify" => AgentStreamDeliveryMode.Notify,
+        "wake" => AgentStreamDeliveryMode.Wake,
+        _ => throw new ArgumentException($"Unknown agent stream delivery mode: {value}", nameof(value))
+    };
+
     public static string ToDbValue(this AgentSessionStatus status) => status switch
     {
         AgentSessionStatus.Active => "active",

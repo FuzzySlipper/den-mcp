@@ -372,6 +372,42 @@ public sealed class DatabaseInitializer
             ON dispatch_entries(project_id, status);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_dispatch_dedup
             ON dispatch_entries(dedup_key) WHERE status = 'pending';
+
+        ------------------------------------------------------------
+        -- AGENT STREAM
+        ------------------------------------------------------------
+        CREATE TABLE IF NOT EXISTS agent_stream_entries (
+            id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+            stream_kind             TEXT NOT NULL
+                                    CHECK (stream_kind IN ('ops', 'message')),
+            event_type              TEXT NOT NULL,
+            project_id              TEXT REFERENCES projects(id) ON DELETE SET NULL,
+            task_id                 INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+            thread_id               INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+            dispatch_id             INTEGER REFERENCES dispatch_entries(id) ON DELETE SET NULL,
+            sender                  TEXT NOT NULL,
+            sender_instance_id      TEXT,
+            recipient_agent         TEXT,
+            recipient_role          TEXT,
+            recipient_instance_id   TEXT,
+            delivery_mode           TEXT NOT NULL
+                                    CHECK (delivery_mode IN ('record_only', 'notify', 'wake')),
+            body                    TEXT,
+            metadata                TEXT,
+            dedup_key               TEXT,
+            created_at              TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_agent_stream_created
+            ON agent_stream_entries(created_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_agent_stream_project_created
+            ON agent_stream_entries(project_id, created_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_agent_stream_kind_event_created
+            ON agent_stream_entries(stream_kind, event_type, created_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_agent_stream_task_created
+            ON agent_stream_entries(task_id, created_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_agent_stream_dispatch
+            ON agent_stream_entries(dispatch_id);
         """;
 
     private async Task RunMigrationsAsync(SqliteConnection connection)
