@@ -209,8 +209,17 @@ def post_bridge_wake(project: str, dispatch_id: int, bridge_state_root: pathlib.
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=10) as response:
-        return json.loads(response.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        try:
+            payload = json.loads(exc.read().decode("utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            payload = None
+        if isinstance(payload, dict) and isinstance(payload.get("error"), str):
+            raise RelayError(payload["error"]) from exc
+        raise RelayError(f"wake for dispatch #{dispatch_id} failed") from exc
 
 
 def format_status(project: str, bridge_state_root: pathlib.Path) -> str:

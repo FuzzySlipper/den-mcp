@@ -29,6 +29,7 @@ def make_executable(path: pathlib.Path, content: str) -> None:
 class FakeBridgeServer:
     def __init__(self):
         self.wake_requests: list[int] = []
+        self.wake_errors: dict[int, tuple[int, str]] = {}
         self.server: ThreadedTcpServer | None = None
         self.thread: threading.Thread | None = None
 
@@ -47,8 +48,18 @@ class FakeBridgeServer:
                     return
                 length = int(self.headers.get("Content-Length", "0"))
                 payload = json.loads(self.rfile.read(length).decode("utf-8"))
-                outer.wake_requests.append(payload["dispatch_id"])
-                body = json.dumps({"status": "queued", "dispatch_id": payload["dispatch_id"]}).encode("utf-8")
+                dispatch_id = payload["dispatch_id"]
+                if dispatch_id in outer.wake_errors:
+                    status_code, message = outer.wake_errors[dispatch_id]
+                    body = json.dumps({"error": message}).encode("utf-8")
+                    self.send_response(status_code)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                outer.wake_requests.append(dispatch_id)
+                body = json.dumps({"status": "queued", "dispatch_id": dispatch_id}).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(body)))
@@ -270,6 +281,54 @@ class DenTelegramRelayTests(unittest.TestCase):
         self.assertIn("Username: @patch", self.telegram.sent_messages[2]["text"])
         offset_state = json.loads(self.relay_state_file.read_text(encoding="utf-8"))
         self.assertEqual(104, offset_state["offset"])
+
+    def test_poll_replies_with_bridge_validation_error_for_invalid_wake(self) -> None:
+        self.bridge.wake_errors[44] = (
+            400,
+            "dispatch #44 is rejected; only approved codex dispatches can be woken",
+        )
+        self.telegram.updates = [
+            {
+                "update_id": 100,
+                "message": {
+                    "chat": {"id": 123},
+                    "text": "/wake 44",
+                },
+            },
+            {
+                "update_id": 101,
+                "message": {
+                    "chat": {"id": 123},
+                    "text": "/wake 41",
+                },
+            },
+        ]
+
+        result = self.run_relay(
+            "poll",
+            "--bot-token",
+            "test-token",
+            "--telegram-api-base",
+            self.telegram.base_url,
+            "--bridge-state-root",
+            str(self.bridge_state_root),
+            "--relay-state-file",
+            str(self.relay_state_file),
+            "--allowed-chat-id",
+            "123",
+            "--project",
+            "sample",
+            "--once",
+        )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual([41], self.bridge.wake_requests)
+        self.assertEqual(2, len(self.telegram.sent_messages))
+        self.assertEqual(
+            "dispatch #44 is rejected; only approved codex dispatches can be woken",
+            self.telegram.sent_messages[0]["text"],
+        )
+        self.assertEqual("Queued dispatch #41 for sample.", self.telegram.sent_messages[1]["text"])
 
     def test_poll_rejects_active_webhook_without_clear_flag(self) -> None:
         self.telegram.webhook_url = "https://example.test/webhook"
