@@ -67,6 +67,23 @@ public sealed class AgentRecipientResolver : IAgentRecipientResolver
                 $"No active binding found for agent '{entry.RecipientAgent}' in project '{entry.ProjectId}'.",
                 $"Multiple active bindings found for agent '{entry.RecipientAgent}' in project '{entry.ProjectId}'.");
         }
+        else if (!string.IsNullOrWhiteSpace(entry.RecipientAgent))
+        {
+            var candidates = await _bindings.ListAsync(new AgentInstanceBindingListOptions
+            {
+                AgentIdentity = entry.RecipientAgent,
+                Statuses =
+                [
+                    AgentInstanceBindingStatus.Active,
+                    AgentInstanceBindingStatus.Degraded
+                ]
+            });
+
+            result = ResolveCandidates(
+                candidates,
+                $"No active binding found for agent '{entry.RecipientAgent}'.",
+                $"Multiple active bindings found for agent '{entry.RecipientAgent}'.");
+        }
         else
         {
             result = new AgentRecipientResolution

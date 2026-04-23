@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using DenMcp.Core.Data;
 using DenMcp.Core.Llm;
 using DenMcp.Core.Models;
+using DenMcp.Core.Services;
 using DenMcp.Server.Tools;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -150,6 +151,132 @@ public class AgentStreamApiTests : IAsyncLifetime
 
         var scopedMissJson = await AgentStreamTools.GetAgentStreamEntry(repo, entry.Id, project_id: OtherProjectId);
         Assert.Contains("not found", scopedMissJson, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RestAgentStream_ProjectMessagePostCreatesWakeableQuestion()
+    {
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var bindings = scope.ServiceProvider.GetRequiredService<IAgentInstanceBindingRepository>();
+            await bindings.UpsertAsync(new AgentInstanceBinding
+            {
+                InstanceId = "codex-impl-1",
+                ProjectId = ProjectId,
+                AgentIdentity = "codex",
+                AgentFamily = "codex",
+                Role = "implementer",
+                TransportKind = "codex_app_server",
+                Status = AgentInstanceBindingStatus.Active
+            });
+        }
+
+        var response = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/agent-stream/messages", new
+        {
+            sender = "user",
+            event_type = "question",
+            recipient_agent = "codex",
+            delivery_mode = "wake",
+            body = "Can you take another pass at this?"
+        });
+        response.EnsureSuccessStatusCode();
+
+        var result = await response.Content.ReadFromJsonAsync<AgentStreamMessageCreateResult>(JsonOpts);
+        Assert.NotNull(result);
+        Assert.Equal("question", result!.Entry.EventType);
+        Assert.Equal(AgentStreamDeliveryMode.Wake, result.Entry.DeliveryMode);
+        Assert.NotNull(result.WakeResolution);
+        Assert.Equal(AgentRecipientResolutionStatus.Resolved, result.WakeResolution!.Status);
+        Assert.Equal("codex-impl-1", result.WakeResolution.Binding!.InstanceId);
+    }
+
+    [Fact]
+    public async Task RestAgentStream_ProjectMessagePost_RecordOnlyNoteDoesNotWake()
+    {
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var bindings = scope.ServiceProvider.GetRequiredService<IAgentInstanceBindingRepository>();
+            await bindings.UpsertAsync(new AgentInstanceBinding
+            {
+                InstanceId = "codex-reviewer-1",
+                ProjectId = ProjectId,
+                AgentIdentity = "codex",
+                AgentFamily = "codex",
+                Role = "reviewer",
+                TransportKind = "codex_app_server",
+                Status = AgentInstanceBindingStatus.Active
+            });
+            await bindings.UpsertAsync(new AgentInstanceBinding
+            {
+                InstanceId = "claude-reviewer-1",
+                ProjectId = ProjectId,
+                AgentIdentity = "claude-code",
+                AgentFamily = "claude",
+                Role = "reviewer",
+                TransportKind = "claude_channel",
+                Status = AgentInstanceBindingStatus.Active
+            });
+        }
+
+        var response = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/agent-stream/messages", new
+        {
+            sender = "codex",
+            event_type = "note",
+            recipient_role = "reviewer",
+            delivery_mode = "record_only",
+            body = "FYI only."
+        });
+        response.EnsureSuccessStatusCode();
+
+        var result = await response.Content.ReadFromJsonAsync<AgentStreamMessageCreateResult>(JsonOpts);
+        Assert.NotNull(result);
+        Assert.Equal(AgentStreamDeliveryMode.RecordOnly, result!.Entry.DeliveryMode);
+        Assert.Null(result.WakeResolution);
+
+        using var verificationScope = _factory.Services.CreateScope();
+        var stream = verificationScope.ServiceProvider.GetRequiredService<IAgentStreamRepository>();
+        var wakeDrops = await stream.ListAsync(new AgentStreamListOptions
+        {
+            ProjectId = ProjectId,
+            EventType = "wake_dropped"
+        });
+
+        Assert.Empty(wakeDrops);
+    }
+
+    [Fact]
+    public async Task McpAgentStreamTools_SendMessageSupportsWakeableAnswer()
+    {
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var bindings = scope.ServiceProvider.GetRequiredService<IAgentInstanceBindingRepository>();
+            await bindings.UpsertAsync(new AgentInstanceBinding
+            {
+                InstanceId = "codex-reviewer-2",
+                ProjectId = ProjectId,
+                AgentIdentity = "codex",
+                AgentFamily = "codex",
+                Role = "reviewer",
+                TransportKind = "codex_app_server",
+                Status = AgentInstanceBindingStatus.Active
+            });
+        }
+
+        using var serviceScope = _factory.Services.CreateScope();
+        var service = serviceScope.ServiceProvider.GetRequiredService<IAgentStreamMessageService>();
+        var json = await AgentStreamTools.SendAgentStreamMessage(
+            service,
+            sender: "user",
+            event_type: "answer",
+            body: "Yes, proceed.",
+            recipient_instance_id: "codex-reviewer-2",
+            delivery_mode: "wake");
+
+        var result = JsonSerializer.Deserialize<AgentStreamMessageCreateResult>(json, JsonOpts);
+        Assert.NotNull(result);
+        Assert.Equal("answer", result!.Entry.EventType);
+        Assert.NotNull(result.WakeResolution);
+        Assert.Equal(AgentRecipientResolutionStatus.Resolved, result.WakeResolution!.Status);
     }
 
     private sealed class AgentStreamAppFactory : WebApplicationFactory<Program>

@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text.Json;
 using DenMcp.Core.Data;
 using DenMcp.Core.Models;
+using DenMcp.Core.Services;
 using ModelContextProtocol.Server;
 
 namespace DenMcp.Server.Tools;
@@ -66,5 +67,79 @@ public sealed class AgentStreamTools
             return JsonSerializer.Serialize(new { error = $"Agent stream entry {entry_id} not found" }, JsonOpts.Default);
 
         return JsonSerializer.Serialize(entry, JsonOpts.Default);
+    }
+
+    [McpServerTool(Name = "send_agent_stream_message"), Description(
+        "Append a targeted agent-stream message entry for clarification or nudge flows. " +
+        "Use this for question, answer, note, or nudge entries; detailed work context should stay in task-thread messages.")]
+    public static async Task<string> SendAgentStreamMessage(
+        IAgentStreamMessageService service,
+        [Description("Sender identity, e.g. user, codex, or claude-code.")] string sender,
+        [Description("Message subtype: question, answer, note, or nudge.")] string event_type,
+        [Description("Short freeform message body.")] string body,
+        [Description("Optional project scope. Required for recipient_role routing unless recipient_instance_id is provided.")] string? project_id = null,
+        [Description("Optional task link.")] int? task_id = null,
+        [Description("Optional thread link.")] int? thread_id = null,
+        [Description("Optional dispatch link.")] int? dispatch_id = null,
+        [Description("Optional sender instance id.")] string? sender_instance_id = null,
+        [Description("Optional target agent identity.")] string? recipient_agent = null,
+        [Description("Optional target role within a project.")] string? recipient_role = null,
+        [Description("Optional exact target instance id.")] string? recipient_instance_id = null,
+        [Description("Optional delivery mode: record_only, notify, or wake. Defaults to record_only for note and notify otherwise.")] string? delivery_mode = null,
+        [Description("Optional metadata JSON object string.")] string? metadata = null,
+        [Description("Optional dedup key for retry-safe appends.")] string? dedup_key = null)
+    {
+        AgentStreamDeliveryMode? parsedDeliveryMode = null;
+        if (!string.IsNullOrWhiteSpace(delivery_mode))
+        {
+            try
+            {
+                parsedDeliveryMode = EnumExtensions.ParseAgentStreamDeliveryMode(delivery_mode);
+            }
+            catch (ArgumentException ex)
+            {
+                return JsonSerializer.Serialize(new { error = ex.Message }, JsonOpts.Default);
+            }
+        }
+
+        JsonElement? parsedMetadata = null;
+        if (!string.IsNullOrWhiteSpace(metadata))
+        {
+            try
+            {
+                parsedMetadata = JsonSerializer.Deserialize<JsonElement>(metadata);
+            }
+            catch (JsonException ex)
+            {
+                return JsonSerializer.Serialize(new { error = $"Invalid metadata JSON: {ex.Message}" }, JsonOpts.Default);
+            }
+        }
+
+        try
+        {
+            var result = await service.CreateAsync(new AgentStreamMessageCreateRequest
+            {
+                ProjectId = project_id,
+                TaskId = task_id,
+                ThreadId = thread_id,
+                DispatchId = dispatch_id,
+                Sender = sender,
+                SenderInstanceId = sender_instance_id,
+                EventType = event_type,
+                RecipientAgent = recipient_agent,
+                RecipientRole = recipient_role,
+                RecipientInstanceId = recipient_instance_id,
+                DeliveryMode = parsedDeliveryMode,
+                Body = body,
+                Metadata = parsedMetadata,
+                DedupKey = dedup_key
+            });
+
+            return JsonSerializer.Serialize(result, JsonOpts.Default);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, JsonOpts.Default);
+        }
     }
 }
