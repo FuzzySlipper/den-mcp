@@ -96,6 +96,7 @@ class BridgeState:
                 "current_stream_entry_id": None,
                 "delivered_dispatch_ids": [],
                 "delivered_stream_entry_ids": [],
+                "next_queue_kind": "dispatch",
                 "failure_timestamps": [],
                 "last_error": None,
                 "instance_id": None,
@@ -244,6 +245,13 @@ class BridgeDaemon:
         self.delivered_stream_entry_ids: list[int] = [
             int(value) for value in self.state.data.get("delivered_stream_entry_ids", [])
         ]
+        self.pending_dispatch_id_set: set[int] = set(self.pending_dispatch_ids)
+        self.pending_stream_entry_id_set: set[int] = set(self.pending_stream_entry_ids)
+        self.delivered_dispatch_id_set: set[int] = set(self.delivered_dispatch_ids)
+        self.delivered_stream_entry_id_set: set[int] = set(self.delivered_stream_entry_ids)
+        self.next_queue_kind = self.state.data.get("next_queue_kind")
+        if self.next_queue_kind not in ("dispatch", "stream"):
+            self.next_queue_kind = "dispatch"
         self.failure_timestamps: list[float] = [float(value) for value in self.state.data.get("failure_timestamps", [])]
         self._notification_thread: threading.Thread | None = None
         self._request_thread: threading.Thread | None = None
@@ -254,6 +262,7 @@ class BridgeDaemon:
         print(f"den-codex-bridge[{self.project_id}]: {message}", file=sys.stderr)
 
     def update_state(self) -> None:
+        self.trim_tracking_lists()
         self.state.data.update(
             {
                 "project_id": self.project_id,
@@ -268,6 +277,7 @@ class BridgeDaemon:
                 "current_stream_entry_id": self.current_stream_entry_id,
                 "delivered_dispatch_ids": self.delivered_dispatch_ids[-50:],
                 "delivered_stream_entry_ids": self.delivered_stream_entry_ids[-50:],
+                "next_queue_kind": self.next_queue_kind,
                 "failure_timestamps": self.failure_timestamps[-10:],
                 "instance_id": self.instance_id,
                 "role": self.role,
@@ -277,6 +287,12 @@ class BridgeDaemon:
             }
         )
         self.state.save()
+
+    def trim_tracking_lists(self) -> None:
+        self.delivered_dispatch_ids = self.delivered_dispatch_ids[-50:]
+        self.delivered_stream_entry_ids = self.delivered_stream_entry_ids[-50:]
+        self.delivered_dispatch_id_set = set(self.delivered_dispatch_ids)
+        self.delivered_stream_entry_id_set = set(self.delivered_stream_entry_ids)
 
     def mark_error(self, message: str, *, degraded: bool = False) -> None:
         self.state.data["last_error"] = message
@@ -543,33 +559,42 @@ class BridgeDaemon:
             return False
         if entry_id == self.current_stream_entry_id:
             return False
-        if entry_id in self.delivered_stream_entry_ids or entry_id in self.pending_stream_entry_ids:
+        if entry_id in self.delivered_stream_entry_id_set or entry_id in self.pending_stream_entry_id_set:
             return False
         if entry.get("project_id") != self.project_id:
             return False
         if entry.get("stream_kind") != "message" or entry.get("delivery_mode") != "wake":
             return False
 
-        return self.stream_entry_targets_this_bridge(entry)
+        target = self.resolve_stream_entry_target(entry)
+        if target["status"] == "resolved":
+            return True
+        if target["status"] in ("missing_binding", "ambiguous"):
+            if self.mark_stream_wake_dropped(entry, target):
+                self.remember_delivered_stream_entry(entry_id)
+                self.update_state()
+        return False
 
-    def stream_entry_targets_this_bridge(self, entry: dict) -> bool:
+    def resolve_stream_entry_target(self, entry: dict) -> dict:
         recipient_agent = entry.get("recipient_agent")
         recipient_role = entry.get("recipient_role")
 
         if recipient_agent and recipient_agent != "codex":
-            return False
+            return {"status": "not_target"}
         if recipient_role and self.role and recipient_role != self.role:
-            return False
+            return {"status": "not_target"}
         if recipient_role and not self.role:
-            return False
+            return {"status": "not_target"}
 
         recipient_instance_id = entry.get("recipient_instance_id")
         if recipient_instance_id:
-            return recipient_instance_id == self.instance_id
+            if recipient_instance_id == self.instance_id:
+                return {"status": "resolved"}
+            return {"status": "not_target"}
 
-        return self.stream_entry_resolution_targets_this_bridge(entry)
+        return self.resolve_stream_entry_binding_target(entry)
 
-    def stream_entry_resolution_targets_this_bridge(self, entry: dict) -> bool:
+    def resolve_stream_entry_binding_target(self, entry: dict) -> dict:
         query_params = {"projectId": self.project_id}
         recipient_role = entry.get("recipient_role")
         recipient_agent = entry.get("recipient_agent")
@@ -579,13 +604,35 @@ class BridgeDaemon:
         elif recipient_agent:
             query_params["agentIdentity"] = recipient_agent
         else:
-            return False
+            return {"status": "not_target"}
 
         query = urllib.parse.urlencode(query_params)
         bindings = self.http_get_json(f"/api/agents/bindings?{query}")
         if not isinstance(bindings, list):
             raise BridgeError("agent bindings returned an unexpected payload")
-        return len(bindings) == 1 and bindings[0].get("instance_id") == self.instance_id
+        candidate_ids = [
+            binding.get("instance_id")
+            for binding in bindings
+            if isinstance(binding, dict) and isinstance(binding.get("instance_id"), str)
+        ]
+        if len(candidate_ids) == 1 and candidate_ids[0] == self.instance_id:
+            return {"status": "resolved"}
+        if len(candidate_ids) == 0:
+            target = f"role '{recipient_role}'" if recipient_role else f"agent '{recipient_agent}'"
+            return {
+                "status": "missing_binding",
+                "reason": f"No active binding found for {target} in project '{self.project_id}'.",
+                "candidate_instance_ids": [],
+            }
+        return {
+            "status": "ambiguous",
+            "reason": (
+                f"Multiple active bindings found for role '{recipient_role}' in project '{self.project_id}'."
+                if recipient_role
+                else f"Multiple active bindings found for agent '{recipient_agent}' in project '{self.project_id}'."
+            ),
+            "candidate_instance_ids": candidate_ids,
+        }
 
     def validate_dispatch_for_wake(self, dispatch_id: int) -> dict:
         try:
@@ -623,22 +670,34 @@ class BridgeDaemon:
     def enqueue_dispatch(self, dispatch_id: int) -> None:
         if dispatch_id == self.current_dispatch_id:
             return
-        if dispatch_id in self.delivered_dispatch_ids:
+        if dispatch_id in self.delivered_dispatch_id_set:
             return
-        if dispatch_id not in self.pending_dispatch_ids:
+        if dispatch_id not in self.pending_dispatch_id_set:
             self.pending_dispatch_ids.append(dispatch_id)
+            self.pending_dispatch_id_set.add(dispatch_id)
             self.update_state()
 
     def enqueue_stream_entry(self, entry_id: int) -> bool:
         if entry_id == self.current_stream_entry_id:
             return False
-        if entry_id in self.delivered_stream_entry_ids:
+        if entry_id in self.delivered_stream_entry_id_set:
             return False
-        if entry_id not in self.pending_stream_entry_ids:
+        if entry_id not in self.pending_stream_entry_id_set:
             self.pending_stream_entry_ids.append(entry_id)
+            self.pending_stream_entry_id_set.add(entry_id)
             self.update_state()
             return True
         return False
+
+    def remember_delivered_dispatch(self, dispatch_id: int) -> None:
+        if dispatch_id not in self.delivered_dispatch_id_set:
+            self.delivered_dispatch_ids.append(dispatch_id)
+            self.delivered_dispatch_id_set.add(dispatch_id)
+
+    def remember_delivered_stream_entry(self, entry_id: int) -> None:
+        if entry_id not in self.delivered_stream_entry_id_set:
+            self.delivered_stream_entry_ids.append(entry_id)
+            self.delivered_stream_entry_id_set.add(entry_id)
 
     def can_start_turn(self) -> bool:
         self.failure_timestamps = [stamp for stamp in self.failure_timestamps if time.time() - stamp < FAILURE_WINDOW_SECONDS]
@@ -673,14 +732,30 @@ class BridgeDaemon:
                 if not has_dispatch and not has_stream:
                     self.update_state()
                     return
-                if has_dispatch:
-                    self._start_dispatch_turn(self.pending_dispatch_ids.pop(0))
+                queue_kind = self.choose_queue_kind(has_dispatch, has_stream)
+                if queue_kind == "dispatch":
+                    dispatch_id = self.pending_dispatch_ids.pop(0)
+                    self.pending_dispatch_id_set.discard(dispatch_id)
+                    self.next_queue_kind = "stream"
+                    self._start_dispatch_turn(dispatch_id)
                     return
-                if has_stream:
-                    self._start_stream_turn(self.pending_stream_entry_ids.pop(0))
+                if queue_kind == "stream":
+                    entry_id = self.pending_stream_entry_ids.pop(0)
+                    self.pending_stream_entry_id_set.discard(entry_id)
+                    self.next_queue_kind = "dispatch"
+                    self._start_stream_turn(entry_id)
                     return
         finally:
             self.drain_lock.release()
+
+    def choose_queue_kind(self, has_dispatch: bool, has_stream: bool) -> str | None:
+        if has_dispatch and has_stream:
+            return self.next_queue_kind
+        if has_dispatch:
+            return "dispatch"
+        if has_stream:
+            return "stream"
+        return None
 
     def _start_dispatch_turn(self, dispatch_id: int) -> None:
         try:
@@ -698,11 +773,12 @@ class BridgeDaemon:
                 },
             )
             self.mark_dispatch_completed(dispatch_id)
-            self.delivered_dispatch_ids.append(dispatch_id)
+            self.remember_delivered_dispatch(dispatch_id)
             self.update_state()
         except Exception as exc:  # noqa: BLE001
             self.current_dispatch_id = None
             self.pending_dispatch_ids.insert(0, dispatch_id)
+            self.pending_dispatch_id_set.add(dispatch_id)
             self.status = "idle"
             self.record_failure(f"failed to start turn for dispatch #{dispatch_id}: {exc}")
 
@@ -712,7 +788,7 @@ class BridgeDaemon:
             if not isinstance(entry, dict):
                 raise BridgeError(f"agent stream entry #{entry_id} returned an unexpected payload")
             if not self.is_actionable_stream_entry_for_start(entry, entry_id):
-                self.delivered_stream_entry_ids.append(entry_id)
+                self.remember_delivered_stream_entry(entry_id)
                 self.update_state()
                 return
             prompt = self.build_stream_prompt(entry)
@@ -729,11 +805,12 @@ class BridgeDaemon:
                 },
             )
             self.mark_stream_wake_delivered(entry)
-            self.delivered_stream_entry_ids.append(entry_id)
+            self.remember_delivered_stream_entry(entry_id)
             self.update_state()
         except Exception as exc:  # noqa: BLE001
             self.current_stream_entry_id = None
             self.pending_stream_entry_ids.insert(0, entry_id)
+            self.pending_stream_entry_id_set.add(entry_id)
             self.status = "idle"
             self.record_failure(f"failed to start turn for agent stream entry #{entry_id}: {exc}")
 
@@ -741,14 +818,20 @@ class BridgeDaemon:
         entry_id = entry.get("id")
         if entry_id != expected_entry_id:
             return False
-        if entry_id == self.current_stream_entry_id or entry_id in self.delivered_stream_entry_ids:
+        if entry_id == self.current_stream_entry_id or entry_id in self.delivered_stream_entry_id_set:
             return False
         if entry.get("project_id") != self.project_id:
             return False
         if entry.get("stream_kind") != "message" or entry.get("delivery_mode") != "wake":
             return False
 
-        return self.stream_entry_targets_this_bridge(entry)
+        target = self.resolve_stream_entry_target(entry)
+        if target["status"] == "resolved":
+            return True
+        if target["status"] in ("missing_binding", "ambiguous"):
+            if not self.mark_stream_wake_dropped(entry, target):
+                raise BridgeError(f"failed to record wake_dropped for agent stream entry #{entry_id}")
+        return False
 
     def build_stream_prompt(self, entry: dict) -> str:
         entry_id = entry["id"]
@@ -806,6 +889,41 @@ class BridgeDaemon:
             )
         except Exception as exc:  # noqa: BLE001
             self.log(f"failed to record wake_delivered for agent stream entry #{entry_id}: {exc}")
+
+    def mark_stream_wake_dropped(self, entry: dict, resolution: dict) -> bool:
+        entry_id = entry["id"]
+        status = resolution["status"]
+        candidate_instance_ids = resolution.get("candidate_instance_ids") or []
+        reason = resolution.get("reason") or f"Could not resolve recipient for agent stream entry #{entry_id}."
+        metadata = {
+            "source_entry_id": entry_id,
+            "resolution_status": status,
+            "candidate_instance_ids": candidate_instance_ids,
+            "recorded_by_instance_id": self.instance_id,
+        }
+        try:
+            self.http_post_json(
+                f"/api/projects/{self.project_id}/agent-stream/ops",
+                {
+                    "sender": "den-codex-bridge",
+                    "sender_instance_id": self.instance_id,
+                    "event_type": "wake_dropped",
+                    "task_id": entry.get("task_id"),
+                    "thread_id": entry.get("thread_id"),
+                    "dispatch_id": entry.get("dispatch_id"),
+                    "recipient_agent": entry.get("recipient_agent"),
+                    "recipient_role": entry.get("recipient_role"),
+                    "recipient_instance_id": entry.get("recipient_instance_id"),
+                    "delivery_mode": "record_only",
+                    "body": reason,
+                    "metadata": json.dumps(metadata, sort_keys=True),
+                    "dedup_key": f"wake-dropped:{entry_id}:{status}",
+                },
+            )
+            return True
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"failed to record wake_dropped for agent stream entry #{entry_id}: {exc}")
+            return False
 
     def build_prompt(self, dispatch_id: int) -> str:
         dispatch = self.http_get_json(f"/api/dispatch/{dispatch_id}")

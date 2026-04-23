@@ -45,7 +45,7 @@ public static class AgentStreamRoutes
             return Results.Ok(entries);
         });
 
-        app.MapPost("/api/agent-stream/messages", async (IAgentStreamMessageService service, SendAgentStreamMessageRequest req) =>
+        app.MapPost("/api/agent-stream/messages", async (IAgentStreamMessageService service, SendAgentStreamEntryRequest req) =>
         {
             try
             {
@@ -62,11 +62,11 @@ public static class AgentStreamRoutes
             }
         });
 
-        app.MapPost("/api/agent-stream/ops", async (IAgentStreamRepository repo, SendAgentStreamOpsRequest req) =>
+        app.MapPost("/api/agent-stream/ops", async (IAgentStreamOpsService ops, SendAgentStreamEntryRequest req) =>
         {
             try
             {
-                var result = await repo.AppendAsync(ToOpsEntry(req, req.ProjectId));
+                var result = await ops.AppendOpsAsync(ToOpsEntry(req, req.ProjectId));
                 return Results.Created($"/api/agent-stream/{result.Id}", result);
             }
             catch (JsonException ex)
@@ -125,7 +125,7 @@ public static class AgentStreamRoutes
             return Results.Ok(entries);
         });
 
-        group.MapPost("/messages", async (IAgentStreamMessageService service, string projectId, SendAgentStreamMessageRequest req) =>
+        group.MapPost("/messages", async (IAgentStreamMessageService service, string projectId, SendAgentStreamEntryRequest req) =>
         {
             if (!string.IsNullOrWhiteSpace(req.ProjectId) &&
                 !string.Equals(req.ProjectId, projectId, StringComparison.Ordinal))
@@ -151,7 +151,7 @@ public static class AgentStreamRoutes
             }
         });
 
-        group.MapPost("/ops", async (IAgentStreamRepository repo, string projectId, SendAgentStreamOpsRequest req) =>
+        group.MapPost("/ops", async (IAgentStreamOpsService ops, string projectId, SendAgentStreamEntryRequest req) =>
         {
             if (!string.IsNullOrWhiteSpace(req.ProjectId) &&
                 !string.Equals(req.ProjectId, projectId, StringComparison.Ordinal))
@@ -164,7 +164,7 @@ public static class AgentStreamRoutes
 
             try
             {
-                var result = await repo.AppendAsync(ToOpsEntry(req, projectId));
+                var result = await ops.AppendOpsAsync(ToOpsEntry(req, projectId));
                 return Results.Created($"/api/projects/{projectId}/agent-stream/{result.Id}", result);
             }
             catch (JsonException ex)
@@ -207,7 +207,7 @@ public static class AgentStreamRoutes
         }
     }
 
-    private static AgentStreamMessageCreateRequest ToCreateRequest(SendAgentStreamMessageRequest req, string? projectId)
+    private static AgentStreamMessageCreateRequest ToCreateRequest(SendAgentStreamEntryRequest req, string? projectId)
     {
         JsonElement? metadata = null;
         if (!string.IsNullOrWhiteSpace(req.Metadata))
@@ -226,13 +226,13 @@ public static class AgentStreamRoutes
             RecipientRole = req.RecipientRole,
             RecipientInstanceId = req.RecipientInstanceId,
             DeliveryMode = req.DeliveryMode,
-            Body = req.Body,
+            Body = req.Body ?? string.Empty,
             Metadata = metadata,
             DedupKey = req.DedupKey
         };
     }
 
-    private static AgentStreamEntry ToOpsEntry(SendAgentStreamOpsRequest req, string? projectId)
+    private static AgentStreamEntry ToOpsEntry(SendAgentStreamEntryRequest req, string? projectId)
     {
         var eventType = NormalizeRequired(req.EventType, nameof(req.EventType));
         var sender = NormalizeRequired(req.Sender, nameof(req.Sender));
@@ -271,34 +271,18 @@ public static class AgentStreamRoutes
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }
 
-public sealed record SendAgentStreamMessageRequest(
+public sealed record SendAgentStreamEntryRequest(
     string Sender,
     string EventType,
-    string Body,
-    string? ProjectId = null,
-    int? TaskId = null,
-    int? ThreadId = null,
-    int? DispatchId = null,
-    string? SenderInstanceId = null,
-    string? RecipientAgent = null,
-    string? RecipientRole = null,
-    string? RecipientInstanceId = null,
-    AgentStreamDeliveryMode? DeliveryMode = null,
-    string? Metadata = null,
-    string? DedupKey = null);
-
-public sealed record SendAgentStreamOpsRequest(
-    string Sender,
-    string EventType,
-    string? ProjectId = null,
-    int? TaskId = null,
-    int? ThreadId = null,
-    int? DispatchId = null,
-    string? SenderInstanceId = null,
-    string? RecipientAgent = null,
-    string? RecipientRole = null,
-    string? RecipientInstanceId = null,
-    AgentStreamDeliveryMode? DeliveryMode = null,
     string? Body = null,
+    string? ProjectId = null,
+    int? TaskId = null,
+    int? ThreadId = null,
+    int? DispatchId = null,
+    string? SenderInstanceId = null,
+    string? RecipientAgent = null,
+    string? RecipientRole = null,
+    string? RecipientInstanceId = null,
+    AgentStreamDeliveryMode? DeliveryMode = null,
     string? Metadata = null,
     string? DedupKey = null);
