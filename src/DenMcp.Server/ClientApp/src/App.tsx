@@ -1,9 +1,12 @@
 import { useState, useCallback, useMemo } from 'react';
-import type { Message, DocumentSummary, MessageIntent, DispatchEntry } from './api/types';
+import type { AgentStreamEntry, DispatchEntry, DocumentSummary, Message, MessageIntent } from './api/types';
 import {
+  getDispatch,
   listProjects,
   listTasks,
   getMessageFeed,
+  getThread,
+  listAgentStream,
   listDocuments,
   listActiveAgents,
   listDispatches,
@@ -17,20 +20,32 @@ import { TaskDetail } from './components/TaskDetail';
 import { FilterBar } from './components/FilterBar';
 import { MessageFeed } from './components/MessageFeed';
 import { MessageDetail } from './components/MessageDetail';
+import { AgentStreamFeed } from './components/AgentStreamFeed';
+import { AgentStreamDetail } from './components/AgentStreamDetail';
 import { DocumentList } from './components/DocumentList';
 import { DocumentDetail } from './components/DocumentDetail';
 import { AgentBar } from './components/AgentBar';
 import { DispatchPanel } from './components/DispatchPanel';
+import { DispatchDetail } from './components/DispatchDetail';
 import { MESSAGE_INTENT_OPTIONS, messageIntentLabel } from './messageIntents';
 
 export default function App() {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
+  const [selectedStreamEntry, setSelectedStreamEntry] = useState<AgentStreamEntry | null>(null);
+  const [selectedDispatch, setSelectedDispatch] = useState<DispatchEntry | null>(null);
   const [selectedDoc, setSelectedDoc] = useState<DocumentSummary | null>(null);
   const [viewMode, setViewMode] = useState<'tasks' | 'documents'>('tasks');
+  const [feedMode, setFeedMode] = useState<'stream' | 'messages'>('stream');
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [messageIntentFilter, setMessageIntentFilter] = useState<MessageIntent | ''>('');
+  const [streamKindFilter, setStreamKindFilter] = useState<'ops' | 'message'>('ops');
+  const [streamEventFilter, setStreamEventFilter] = useState('');
+  const [streamProjectFilter, setStreamProjectFilter] = useState('');
+  const [streamSenderFilter, setStreamSenderFilter] = useState('');
+  const [streamRecipientFilter, setStreamRecipientFilter] = useState('');
+  const [streamTaskFilter, setStreamTaskFilter] = useState('');
   const [sortMode, setSortMode] = useState('priority');
   const [pendingDispatchActionId, setPendingDispatchActionId] = useState<number | null>(null);
   const [dispatchActionError, setDispatchActionError] = useState<string | null>(null);
@@ -62,6 +77,34 @@ export default function App() {
     [effectiveProject, messageIntentFilter],
   );
   const { data: messages } = usePolling(fetchMessages, 5000);
+
+  const parsedStreamTaskId = useMemo(() => {
+    const trimmed = streamTaskFilter.trim();
+    return /^\d+$/.test(trimmed) ? Number(trimmed) : undefined;
+  }, [streamTaskFilter]);
+
+  const fetchAgentStream = useCallback(
+    () => effectiveProject
+      ? listAgentStream({
+        projectId: isGlobal ? (streamProjectFilter.trim() || undefined) : effectiveProject,
+        taskId: parsedStreamTaskId,
+        streamKind: streamKindFilter,
+        eventType: streamEventFilter || undefined,
+        sender: streamSenderFilter.trim() || undefined,
+        limit: 60,
+      })
+      : Promise.resolve([]),
+    [
+      effectiveProject,
+      isGlobal,
+      parsedStreamTaskId,
+      streamEventFilter,
+      streamKindFilter,
+      streamProjectFilter,
+      streamSenderFilter,
+    ],
+  );
+  const { data: agentStream } = usePolling(fetchAgentStream, 5000);
 
   const fetchDocs = useCallback(
     () => effectiveProject
@@ -96,6 +139,30 @@ export default function App() {
     () => documents ? [...documents].sort((a, b) => b.updated_at.localeCompare(a.updated_at)) : [],
     [documents],
   );
+  const filteredAgentStream = useMemo(() => {
+    const recipientFilter = streamRecipientFilter.trim().toLowerCase();
+    if (!recipientFilter) {
+      return agentStream ?? [];
+    }
+
+    return (agentStream ?? []).filter(entry => {
+      const recipients = [
+        entry.recipient_agent,
+        entry.recipient_role,
+        entry.recipient_instance_id,
+      ]
+        .filter((value): value is string => Boolean(value))
+        .map(value => value.toLowerCase());
+      return recipients.some(value => value.includes(recipientFilter));
+    });
+  }, [agentStream, streamRecipientFilter]);
+  const streamEventOptions = useMemo(() => {
+    const options = new Set((agentStream ?? []).map(entry => entry.event_type));
+    if (streamEventFilter) {
+      options.add(streamEventFilter);
+    }
+    return Array.from(options).sort((left, right) => left.localeCompare(right));
+  }, [agentStream, streamEventFilter]);
 
   const taskCount = tasks?.length ?? 0;
   const filterLabel = statusFilter ? ` [${statusFilter}]` : '';
@@ -106,18 +173,57 @@ export default function App() {
     setSelectedProject(id);
     setSelectedTaskId(null);
     setSelectedMessage(null);
+    setSelectedStreamEntry(null);
+    setSelectedDispatch(null);
     setSelectedDoc(null);
   }, []);
 
   const handleTaskSelect = useCallback((taskId: number) => {
     setSelectedTaskId(taskId);
     setSelectedMessage(null);
+    setSelectedStreamEntry(null);
+    setSelectedDispatch(null);
     setSelectedDoc(null);
   }, []);
 
   const handleMessageSelect = useCallback((message: Message) => {
     setSelectedMessage(message);
+    setSelectedStreamEntry(null);
+    setSelectedDispatch(null);
     setSelectedDoc(null);
+  }, []);
+
+  const handleStreamSelect = useCallback((entry: AgentStreamEntry) => {
+    setSelectedStreamEntry(entry);
+    setSelectedDispatch(null);
+    setSelectedDoc(null);
+  }, []);
+
+  const handleDispatchSelect = useCallback(async (dispatchId: number) => {
+    try {
+      const dispatch = await getDispatch(dispatchId);
+      setSelectedDispatch(dispatch);
+      setSelectedStreamEntry(null);
+      setSelectedDoc(null);
+    } catch (error) {
+      console.error('Failed to load dispatch detail', error);
+    }
+  }, []);
+
+  const handleStreamThreadOpen = useCallback(async (entry: AgentStreamEntry) => {
+    if (!entry.project_id || entry.thread_id == null) {
+      return;
+    }
+
+    try {
+      const thread = await getThread(entry.project_id, entry.thread_id);
+      setSelectedMessage(thread.root);
+      setSelectedStreamEntry(null);
+      setSelectedDispatch(null);
+      setSelectedDoc(null);
+    } catch (error) {
+      console.error('Failed to load thread detail', error);
+    }
   }, []);
 
   const handleDispatchDecision = useCallback(async (
@@ -150,34 +256,129 @@ export default function App() {
   }, [refreshDispatches]);
 
   const visibleDispatchError = dispatchActionError ?? (dispatchError ? dispatchError.message : null);
+  const feedCount = feedMode === 'stream'
+    ? filteredAgentStream.length
+    : (messages?.length ?? 0);
 
   return (
     <div className="dashboard">
-      {/* Messages — top, full width */}
+      {/* Feed — top, full width */}
       <div className="panel panel-messages">
         <div className="panel-header">
-          Messages {effectiveProject && <span className="count">({messages?.length ?? 0}{messageFilterLabel})</span>}
-          <span className="header-spacer" />
-          <label className="panel-filter-label" htmlFor="message-intent-filter">Intent</label>
-          <select
-            id="message-intent-filter"
-            className="panel-filter-select"
-            value={messageIntentFilter}
-            onChange={e => setMessageIntentFilter((e.target.value as MessageIntent) || '')}
-            title={messageIntentFilter ? `Filtering messages by ${messageIntentLabel(messageIntentFilter)}` : 'Show all message intents'}
-          >
-            <option value="">All</option>
-            {MESSAGE_INTENT_OPTIONS.map(option => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
+          {feedMode === 'stream' ? 'Agent Stream' : 'Messages'}
+          {effectiveProject && (
+            <span className="count">
+              ({feedCount}{feedMode === 'messages' ? messageFilterLabel : ''})
+            </span>
+          )}
+        </div>
+        <div className="feed-toolbar">
+          <div className="feed-toggle">
+            <button
+              className={feedMode === 'stream' ? 'active' : ''}
+              onClick={() => setFeedMode('stream')}
+            >
+              Stream
+            </button>
+            <button
+              className={feedMode === 'messages' ? 'active' : ''}
+              onClick={() => setFeedMode('messages')}
+            >
+              Messages
+            </button>
+          </div>
+
+          {feedMode === 'stream' ? (
+            <>
+              <label className="panel-filter-label" htmlFor="stream-kind-filter">Kind</label>
+              <select
+                id="stream-kind-filter"
+                className="panel-filter-select"
+                value={streamKindFilter}
+                onChange={e => setStreamKindFilter(e.target.value as 'ops' | 'message')}
+              >
+                <option value="ops">Ops</option>
+                <option value="message">Messages</option>
+              </select>
+
+              <label className="panel-filter-label" htmlFor="stream-event-filter">Event</label>
+              <select
+                id="stream-event-filter"
+                className="panel-filter-select"
+                value={streamEventFilter}
+                onChange={e => setStreamEventFilter(e.target.value)}
+              >
+                <option value="">All</option>
+                {streamEventOptions.map(eventType => (
+                  <option key={eventType} value={eventType}>{eventType}</option>
+                ))}
+              </select>
+
+              {isGlobal && (
+                <input
+                  className="feed-text-filter"
+                  value={streamProjectFilter}
+                  onChange={e => setStreamProjectFilter(e.target.value)}
+                  placeholder="Project"
+                />
+              )}
+
+              <input
+                className="feed-text-filter"
+                value={streamSenderFilter}
+                onChange={e => setStreamSenderFilter(e.target.value)}
+                placeholder="Sender"
+              />
+
+              <input
+                className="feed-text-filter"
+                value={streamRecipientFilter}
+                onChange={e => setStreamRecipientFilter(e.target.value)}
+                placeholder="Recipient"
+              />
+
+              <input
+                className="feed-text-filter feed-text-filter-short"
+                value={streamTaskFilter}
+                onChange={e => setStreamTaskFilter(e.target.value)}
+                placeholder="Task #"
+              />
+            </>
+          ) : (
+            <>
+              <label className="panel-filter-label" htmlFor="message-intent-filter">Intent</label>
+              <select
+                id="message-intent-filter"
+                className="panel-filter-select"
+                value={messageIntentFilter}
+                onChange={e => setMessageIntentFilter((e.target.value as MessageIntent) || '')}
+                title={messageIntentFilter ? `Filtering messages by ${messageIntentLabel(messageIntentFilter)}` : 'Show all message intents'}
+              >
+                <option value="">All</option>
+                {MESSAGE_INTENT_OPTIONS.map(option => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </>
+          )}
         </div>
         <div className="panel-body">
-          <MessageFeed
-            messages={messages ?? []}
-            isGlobal={isGlobal}
-            onSelect={handleMessageSelect}
-          />
+          {feedMode === 'stream' ? (
+            <AgentStreamFeed
+              entries={filteredAgentStream}
+              isGlobal={isGlobal}
+              onSelect={handleStreamSelect}
+              onOpenTask={handleTaskSelect}
+              onOpenThread={entry => void handleStreamThreadOpen(entry)}
+              onOpenDispatch={dispatchId => void handleDispatchSelect(dispatchId)}
+            />
+          ) : (
+            <MessageFeed
+              messages={messages ?? []}
+              isGlobal={isGlobal}
+              onSelect={handleMessageSelect}
+            />
+          )}
         </div>
       </div>
 
@@ -269,6 +470,25 @@ export default function App() {
           key={`${selectedMessage.project_id}:${selectedMessage.id}`}
           message={selectedMessage}
           onClose={() => setSelectedMessage(null)}
+        />
+      )}
+
+      {selectedStreamEntry && (
+        <AgentStreamDetail
+          key={selectedStreamEntry.id}
+          entry={selectedStreamEntry}
+          onClose={() => setSelectedStreamEntry(null)}
+          onOpenTask={handleTaskSelect}
+          onOpenThread={entry => void handleStreamThreadOpen(entry)}
+          onOpenDispatch={dispatchId => void handleDispatchSelect(dispatchId)}
+        />
+      )}
+
+      {selectedDispatch && (
+        <DispatchDetail
+          dispatch={selectedDispatch}
+          onClose={() => setSelectedDispatch(null)}
+          onOpenTask={handleTaskSelect}
         />
       )}
 

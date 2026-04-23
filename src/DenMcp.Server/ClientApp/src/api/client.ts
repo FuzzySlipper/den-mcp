@@ -11,6 +11,7 @@ import type {
   Document,
   DocumentSearchResult,
   AgentSession,
+  AgentStreamEntry,
   DispatchEntry,
   ReviewPacketResult,
 } from './types';
@@ -191,6 +192,39 @@ export function listActiveAgents(projectId?: string): Promise<AgentSession[]> {
   return get(`/api/agents/active${q}`);
 }
 
+// Agent stream
+
+export interface ListAgentStreamOpts {
+  projectId?: string;
+  taskId?: number;
+  dispatchId?: number;
+  streamKind?: string;
+  eventType?: string;
+  sender?: string;
+  senderInstanceId?: string;
+  recipientAgent?: string;
+  recipientRole?: string;
+  recipientInstanceId?: string;
+  limit?: number;
+}
+
+export function listAgentStream(opts: ListAgentStreamOpts = {}): Promise<AgentStreamEntry[]> {
+  const q = buildQuery({
+    projectId: opts.projectId,
+    taskId: opts.taskId,
+    dispatchId: opts.dispatchId,
+    streamKind: opts.streamKind,
+    eventType: opts.eventType,
+    sender: opts.sender,
+    senderInstanceId: opts.senderInstanceId,
+    recipientAgent: opts.recipientAgent,
+    recipientRole: opts.recipientRole,
+    recipientInstanceId: opts.recipientInstanceId,
+    limit: opts.limit,
+  });
+  return get(`/api/agent-stream${q}`);
+}
+
 // Dispatches
 
 export interface ListDispatchesOpts {
@@ -206,6 +240,10 @@ export function listDispatches(opts: ListDispatchesOpts = {}): Promise<DispatchE
     status: opts.status,
   });
   return get(`/api/dispatch${q}`);
+}
+
+export function getDispatch(dispatchId: number): Promise<DispatchEntry> {
+  return get(`/api/dispatch/${dispatchId}`);
 }
 
 export function approveDispatch(dispatchId: number, decidedBy: string): Promise<DispatchEntry> {

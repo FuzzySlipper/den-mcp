@@ -92,6 +92,59 @@ html, body, #root {
   scrollbar-color: var(--border) transparent;
 }
 
+.feed-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.feed-toggle {
+  display: inline-flex;
+  gap: 6px;
+  margin-right: 4px;
+}
+
+.feed-toggle button {
+  background: var(--bg);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.feed-toggle button:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.feed-toggle button.active {
+  background: var(--bg-selected);
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
+
+.feed-text-filter {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-family: var(--font-sans);
+  min-width: 88px;
+}
+
+.feed-text-filter-short {
+  min-width: 64px;
+  width: 72px;
+}
+
 /* Messages panel — spans full width top */
 .panel-messages { grid-column: 1 / -1; grid-row: 1; }
 
@@ -753,6 +806,102 @@ html, body, #root {
 
 .message-feed-bottomline {
   padding-left: 2px;
+}
+
+.stream-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.stream-item {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+}
+
+.stream-item:hover { background: var(--bg-hover); }
+
+.stream-item:last-child {
+  border-bottom: 0;
+}
+
+.stream-topline {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.stream-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.stream-chip-ops {
+  background: #1a2744;
+  color: var(--accent);
+}
+
+.stream-chip-message {
+  background: #2a1f44;
+  color: var(--purple);
+}
+
+.stream-chip-event {
+  background: #233029;
+  color: var(--cyan);
+}
+
+.stream-sender,
+.stream-recipient {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.stream-sender { color: var(--text-bright); }
+.stream-recipient { color: var(--accent); }
+.stream-arrow { color: var(--text-muted); }
+
+.stream-summary {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.stream-links,
+.detail-action-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.stream-link {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--cyan);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.stream-link:hover {
+  background: var(--bg-hover);
 }
 
 .message-thread-badge {
