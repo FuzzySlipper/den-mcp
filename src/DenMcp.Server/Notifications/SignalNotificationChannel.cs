@@ -92,7 +92,7 @@ public sealed class SignalNotificationChannel : INotificationChannel, IAsyncDisp
     public async Task StartListeningAsync(CancellationToken cancellationToken)
     {
         if (!_options.Signal.Enabled)
-            return;
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
 
         if (!HasConfiguredRecipient())
         {
