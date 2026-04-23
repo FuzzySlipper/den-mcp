@@ -117,6 +117,15 @@ public class ReviewWorkflowApiTests : IAsyncLifetime
         Assert.Contains(stillOpen.FindingKey, result.Packet.Content);
         Assert.Contains("Tests run by implementer:", result.Packet.Content);
         Assert.Equal("claude-code", result.Message.Sender);
+        Assert.Equal("reviewer", result.Message.Metadata!.Value.GetProperty("target_role").GetString());
+
+        var dispatches = await ListDispatchesAsync(targetAgent: "codex", statuses: [DispatchStatus.Pending]);
+        Assert.Single(dispatches);
+        Assert.Equal(task.Id, dispatches[0].TaskId);
+
+        var streamEntries = await ListAgentStreamAsync(taskId: task.Id);
+        Assert.Contains(streamEntries, entry => entry.EventType == "rereview_requested" && entry.RecipientRole == "reviewer");
+        Assert.Contains(streamEntries, entry => entry.EventType == "dispatch_created" && entry.DispatchId == dispatches[0].Id);
     }
 
     [Fact]
@@ -208,6 +217,11 @@ public class ReviewWorkflowApiTests : IAsyncLifetime
 
         var completedReviewerDispatch = await dispatches.GetByIdAsync(reviewerDispatch.Id);
         Assert.Equal(DispatchStatus.Completed, completedReviewerDispatch!.Status);
+
+        var streamEntries = await ListAgentStreamAsync(taskId: task.Id);
+        Assert.Contains(streamEntries, entry => entry.EventType == "changes_requested" && entry.RecipientAgent == "claude-code");
+        Assert.Contains(streamEntries, entry => entry.EventType == "dispatch_created" && entry.DispatchId == implementerDispatches[0].Id);
+        Assert.DoesNotContain(streamEntries, entry => entry.EventType == "merge_handoff");
     }
 
     [Fact]
@@ -246,7 +260,40 @@ public class ReviewWorkflowApiTests : IAsyncLifetime
             var implementerDispatches = await dispatches.ListAsync(ProjectId, "claude-code", [DispatchStatus.Pending]);
             Assert.Single(implementerDispatches);
             Assert.Contains("mark the task done", implementerDispatches[0].ContextPrompt!, StringComparison.OrdinalIgnoreCase);
+
+            var stream = scope.ServiceProvider.GetRequiredService<IAgentStreamRepository>();
+            var streamEntries = await stream.ListAsync(new AgentStreamListOptions
+            {
+                ProjectId = ProjectId,
+                TaskId = task.Id,
+                StreamKind = AgentStreamKind.Ops,
+                Limit = 20
+            });
+
+            Assert.Contains(streamEntries, entry => entry.EventType == "review_approved" && entry.RecipientAgent == "claude-code");
+            Assert.Contains(streamEntries, entry => entry.EventType == "merge_handoff" && entry.RecipientAgent == "claude-code");
+            Assert.Contains(streamEntries, entry => entry.EventType == "dispatch_created" && entry.DispatchId == implementerDispatches[0].Id);
         }
+    }
+
+    private async Task<List<DispatchEntry>> ListDispatchesAsync(string? targetAgent = null, DispatchStatus[]? statuses = null)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var dispatches = scope.ServiceProvider.GetRequiredService<IDispatchRepository>();
+        return await dispatches.ListAsync(ProjectId, targetAgent, statuses);
+    }
+
+    private async Task<List<AgentStreamEntry>> ListAgentStreamAsync(int? taskId = null)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var stream = scope.ServiceProvider.GetRequiredService<IAgentStreamRepository>();
+        return await stream.ListAsync(new AgentStreamListOptions
+        {
+            ProjectId = ProjectId,
+            TaskId = taskId,
+            StreamKind = AgentStreamKind.Ops,
+            Limit = 50
+        });
     }
 
     private async Task<ProjectTask> CreateTaskAsync(string title, string? assignedTo = null)

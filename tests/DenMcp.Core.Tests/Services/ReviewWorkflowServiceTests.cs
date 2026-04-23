@@ -13,6 +13,7 @@ public class ReviewWorkflowServiceTests : IAsyncLifetime
     private ReviewFindingRepository _findings = null!;
     private MessageRepository _messages = null!;
     private DispatchRepository _dispatches = null!;
+    private AgentStreamRepository _stream = null!;
     private ReviewWorkflowService _workflow = null!;
 
     public async Task InitializeAsync()
@@ -23,6 +24,7 @@ public class ReviewWorkflowServiceTests : IAsyncLifetime
         _findings = new ReviewFindingRepository(_testDb.Db);
         _messages = new MessageRepository(_testDb.Db);
         _dispatches = new DispatchRepository(_testDb.Db);
+        _stream = new AgentStreamRepository(_testDb.Db);
         var docs = new DocumentRepository(_testDb.Db);
         var routing = new RoutingService(docs);
         var prompts = new PromptGenerationService(_tasks, _messages, routing);
@@ -42,6 +44,7 @@ public class ReviewWorkflowServiceTests : IAsyncLifetime
             _messages,
             _dispatches,
             detection,
+            new AgentStreamOpsService(_stream, NullLogger<AgentStreamOpsService>.Instance),
             NullLogger<ReviewWorkflowService>.Instance);
 
         var projects = new ProjectRepository(_testDb.Db);

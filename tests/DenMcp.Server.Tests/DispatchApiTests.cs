@@ -246,6 +246,11 @@ public class DispatchApiTests : IAsyncLifetime
         var approved = await response.Content.ReadFromJsonAsync<DispatchEntry>(JsonOpts);
         Assert.Equal(DispatchStatus.Approved, approved!.Status);
         Assert.Equal("george", approved.DecidedBy);
+
+        var streamEntries = await ListAgentStreamAsync(entry.Id);
+        Assert.Contains(streamEntries, streamEntry => streamEntry.EventType == "dispatch_created");
+        Assert.Contains(streamEntries, streamEntry => streamEntry.EventType == "dispatch_approved");
+        Assert.Contains(streamEntries, streamEntry => streamEntry.EventType == "wake_requested");
     }
 
     [Fact]
@@ -259,6 +264,10 @@ public class DispatchApiTests : IAsyncLifetime
 
         var rejected = await response.Content.ReadFromJsonAsync<DispatchEntry>(JsonOpts);
         Assert.Equal(DispatchStatus.Rejected, rejected!.Status);
+
+        var streamEntries = await ListAgentStreamAsync(entry.Id);
+        Assert.Contains(streamEntries, streamEntry => streamEntry.EventType == "dispatch_created");
+        Assert.Contains(streamEntries, streamEntry => streamEntry.EventType == "dispatch_rejected");
     }
 
     [Fact]
@@ -288,6 +297,19 @@ public class DispatchApiTests : IAsyncLifetime
     }
 
     #endregion
+
+    private async Task<List<AgentStreamEntry>> ListAgentStreamAsync(int dispatchId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var stream = scope.ServiceProvider.GetRequiredService<IAgentStreamRepository>();
+        return await stream.ListAsync(new AgentStreamListOptions
+        {
+            ProjectId = ProjectId,
+            DispatchId = dispatchId,
+            StreamKind = AgentStreamKind.Ops,
+            Limit = 20
+        });
+    }
 
     #region Pending count
 

@@ -21,6 +21,7 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
     private readonly IMessageRepository _messages;
     private readonly IDispatchRepository _dispatches;
     private readonly IDispatchDetectionService _detection;
+    private readonly IAgentStreamOpsService _ops;
     private readonly ILogger<ReviewWorkflowService> _logger;
 
     public ReviewWorkflowService(
@@ -30,6 +31,7 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
         IMessageRepository messages,
         IDispatchRepository dispatches,
         IDispatchDetectionService detection,
+        IAgentStreamOpsService ops,
         ILogger<ReviewWorkflowService> logger)
     {
         _tasks = tasks;
@@ -38,6 +40,7 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
         _messages = messages;
         _dispatches = dispatches;
         _detection = detection;
+        _ops = ops;
         _logger = logger;
     }
 
@@ -96,6 +99,7 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
             {
                 type = packet.Kind == ReviewPacketKind.RereviewRequest ? "rereview_packet" : "review_request_packet",
                 packet_kind = packet.Kind == ReviewPacketKind.RereviewRequest ? "rereview_request" : "review_request",
+                target_role = "reviewer",
                 review_round_id = round.Id,
                 review_round_number = round.RoundNumber,
                 branch = round.Branch,
@@ -124,6 +128,17 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
                 tests_run = round.TestsRun
             })
         });
+
+        try
+        {
+            await _detection.OnMessageCreatedAsync(message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Dispatch detection failed for review request message {MessageId}", message.Id);
+        }
+
+        await _ops.RecordReviewRequestedAsync(message, round, packet.Kind, recipientRole: "reviewer");
 
         return new ReviewPacketResult
         {
@@ -227,6 +242,9 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
             if (previousVerdict != updated.Verdict || handoffMessage is null)
                 handoffMessage = await CreateVerdictHandoffMessageAsync(detail, updated);
         }
+
+        if (ShouldEmitVerdictHandoff(updated.Verdict))
+            await _ops.RecordReviewVerdictAsync(detail.Task, updated, ResolveImplementer(detail.Task, updated), handoffMessage);
 
         var completedDispatches = await ResolveReviewerDispatchesAsync(
             detail.Task.ProjectId,
