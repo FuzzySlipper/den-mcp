@@ -110,9 +110,10 @@ review packet helpers, and richer run records are still follow-up slices.
 
 `/den-config` opens a Pi TUI configuration menu. The initial menu supports
 project-local and global sub-agent role defaults for `coder`, `reviewer`, and
-`planner`. It lists models from Pi's model registry and saves provider-qualified
-model IDs such as `openai-codex/gpt-5.5` or
-`anthropic/claude-sonnet-4-6`, avoiding ambiguous unqualified model resolution.
+`planner`, plus a shared fallback model for failed sub-agent runs. It lists
+models from Pi's model registry and saves provider-qualified model IDs such as
+`openai-codex/gpt-5.5` or `anthropic/claude-sonnet-4-6`, avoiding ambiguous
+unqualified model resolution.
 
 `den_run_coder` and `den_run_reviewer` load prompt templates from Den documents
 before launching the sub-agent:
@@ -159,6 +160,7 @@ Example:
 ```json
 {
   "version": 1,
+  "fallback_model": "zai/glm-5.1",
   "subagents": {
     "coder": { "model": "openai-codex/gpt-5.5" },
     "reviewer": { "model": "anthropic/claude-sonnet-4-6" }
@@ -167,7 +169,10 @@ Example:
 ```
 
 Explicit `model` arguments on `den_run_subagent`, `den_run_coder`, or
-`den_run_reviewer` still take precedence over config defaults. The project-local
+`den_run_reviewer` still take precedence over config defaults and suppress
+automatic fallback retry. If a configured/default model run exits non-zero and a
+`fallback_model` is configured, the extension records `subagent_fallback_started`
+and retries once with that provider-qualified fallback model. The project-local
 file is gitignored because model choices are user/machine-specific.
 
 For compatibility with existing Codex-targeted dispatches during migration,
