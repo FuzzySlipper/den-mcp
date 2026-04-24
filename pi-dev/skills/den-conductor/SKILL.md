@@ -1,6 +1,9 @@
 ---
 name: den-conductor
-description: Use when acting as the user-facing Pi conductor for a Den project: load live Den conductor guidance, inspect Den inbox/task state, coordinate coder/reviewer sub-agents, and escalate drift or ambiguity to the user.
+description: >-
+  Use when acting as the user-facing Pi conductor for a Den project: load live
+  Den conductor guidance, inspect Den inbox/task state, coordinate
+  coder/reviewer sub-agents, and escalate drift or ambiguity to the user.
 ---
 
 # Den Conductor

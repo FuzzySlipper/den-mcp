@@ -6,16 +6,17 @@ Task: `#757`
 This spike starts the pivot from per-vendor live-session bridges toward one
 project-facing Pi conductor with Den-backed state.
 
-The first project-local extension lives at:
+The first git-tracked Pi resources live at:
 
 ```text
-.pi/extensions/den.ts
-.pi/extensions/den-subagent.ts
-.pi/skills/den-conductor/SKILL.md
+pi-dev/extensions/den.ts
+pi-dev/extensions/den-subagent.ts
+pi-dev/skills/den-conductor/SKILL.md
 ```
 
-Pi auto-discovers project-local extensions from `.pi/extensions`, so starting
-`pi` in this repo should load the extension.
+Keep these resources outside project-local `.pi` discovery so they can be
+installed into Pi once and reused across projects without double-loading when
+Pi starts inside this repo.
 
 ## Goals for this slice
 
@@ -144,13 +145,23 @@ targeted at `codex`.
 
 ## Run
 
+Install or link the tracked resources into Pi from this repo path:
+
+```bash
+pi install /home/patch/dev/den-mcp/pi-dev
+```
+
+If Pi is already loading that path from user settings, leave the project root
+without a local `.pi` copy. The important bit is that `pi-dev` remains the
+tracked source and Pi sees it through one discovery path.
+
 Start Den:
 
 ```bash
 dotnet run --project src/DenMcp.Server
 ```
 
-In another terminal, start Pi from this repo:
+In another terminal, start Pi from the target project directory:
 
 ```bash
 pi
