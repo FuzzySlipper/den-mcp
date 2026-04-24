@@ -62,6 +62,7 @@ It also updates the binding metadata on Pi agent start/end with a lightweight
 /den-run-subagent [--continue|--fork <session>|--session <session>] <role> <task_id|-> <prompt>
 /den-run-coder [--continue|--fork <session>|--session <session>] <task_id> [extra notes]
 /den-run-reviewer [--fork <session>|--session <session>] <task_id> [review target/notes]
+/den-config
 ```
 
 `/den-inbox` summarizes:
@@ -107,6 +108,12 @@ Sub-agent session policy is explicit:
 It supports a single bounded run only; parallel fanout, worktree isolation,
 review packet helpers, and richer run records are still follow-up slices.
 
+`/den-config` opens a Pi TUI configuration menu. The initial menu supports
+project-local and global sub-agent role defaults for `coder`, `reviewer`, and
+`planner`. It lists models from Pi's model registry and saves provider-qualified
+model IDs such as `openai-codex/gpt-5.5` or
+`anthropic/claude-sonnet-4-6`, avoiding ambiguous unqualified model resolution.
+
 `den_run_coder` and `den_run_reviewer` load prompt templates from Den documents
 before launching the sub-agent:
 
@@ -138,6 +145,30 @@ DEN_PI_AGENT            default pi
 DEN_PI_ROLE             default conductor
 DEN_PI_INSTANCE_ID      optional stable instance id
 ```
+
+Sub-agent role defaults are read from JSON config with project-local values
+overriding global values:
+
+```text
+.pi/den-config.json
+~/.pi/agent/den-config.json
+```
+
+Example:
+
+```json
+{
+  "version": 1,
+  "subagents": {
+    "coder": { "model": "openai-codex/gpt-5.5" },
+    "reviewer": { "model": "anthropic/claude-sonnet-4-6" }
+  }
+}
+```
+
+Explicit `model` arguments on `den_run_subagent`, `den_run_coder`, or
+`den_run_reviewer` still take precedence over config defaults. The project-local
+file is gitignored because model choices are user/machine-specific.
 
 For compatibility with existing Codex-targeted dispatches during migration,
 launching with `DEN_PI_AGENT=codex` lets the Pi conductor see work currently
@@ -176,6 +207,7 @@ Then try:
 /den-claim-next
 /skill:den-conductor
 /den-conductor-guidance
+/den-config
 /den-run-subagent planner - "Summarize the next useful Den follow-up task."
 /den-run-subagent --continue coder 123 "Continue from the prior coder run."
 /den-run-coder 123 "Keep the change scoped to the CLI wrapper."
@@ -202,8 +234,8 @@ sub-agent run, not "coder terminal" versus "reviewer terminal."
 
 - Persist richer sub-agent session IDs and run metadata, possibly in an
   `agent_runs` table after the stream-ops spike proves useful.
-- Add parallel fanout, worktree isolation, and role-specific model defaults for
-  coder/reviewer runs.
+- Add parallel fanout, worktree isolation, and richer role-specific defaults
+  beyond model/tools for coder/reviewer runs.
 - Add conductor prompts for drift detection using task intent, acceptance
   criteria, review findings, and coder responses.
 - Decide whether the long-term Den agent identity should be `pi`, `conductor`,

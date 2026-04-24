@@ -67,6 +67,9 @@ __pycache__/
 *.pyc
 # Environment variables
 .env
+
+# Local Pi/Den config
+.pi/den-config.json
 # Editor directories and files
 .idea
 .vscode

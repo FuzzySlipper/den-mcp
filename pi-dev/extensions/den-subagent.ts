@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
@@ -38,12 +40,30 @@ type SubagentResult = {
   message_count: number;
 };
 
+type DenExtensionConfig = {
+  version?: number;
+  subagents?: Record<string, {
+    model?: string;
+    tools?: string;
+  }>;
+};
+
+type ConfigScope = "project" | "global";
+
 const DEFAULT_BASE_URL = "http://192.168.1.10:5199";
 const CODER_PROMPT_SLUG = "pi-coder-subagent-prompt";
 const REVIEWER_PROMPT_SLUG = "pi-reviewer-subagent-prompt";
 const GLOBAL_SUFFIX = "-default";
+const DEN_CONFIG_FILENAME = "den-config.json";
 
 export default function denSubagent(pi: ExtensionAPI) {
+  pi.registerCommand("den-config", {
+    description: "Configure Den Pi integration settings, including sub-agent role defaults.",
+    handler: async (_args, ctx) => {
+      await runDenConfigCommand(ctx);
+    },
+  });
+
   pi.registerCommand("den-run-subagent", {
     description: "Run a Pi sub-agent. Usage: /den-run-subagent [--continue|--fork <session>|--session <session>] <role> <task_id|-> <prompt>",
     handler: async (args, ctx) => {
@@ -199,6 +219,118 @@ export default function denSubagent(pi: ExtensionAPI) {
   });
 }
 
+async function runDenConfigCommand(ctx: any) {
+  if (!ctx.hasUI) {
+    throw new Error("/den-config requires an interactive Pi UI.");
+  }
+
+  while (true) {
+    const current = await loadMergedDenExtensionConfig(ctx.cwd);
+    const projectPath = denConfigPath("project", ctx.cwd);
+    const globalPath = denConfigPath("global", ctx.cwd);
+    const choice = await ctx.ui.select("Den config", [
+      `Sub-agent defaults (project-local: ${projectPath})`,
+      `Sub-agent defaults (global: ${globalPath})`,
+      "View current config",
+      "Done",
+    ]);
+
+    if (!choice || choice === "Done") return;
+    if (choice === "View current config") {
+      ctx.ui.setWidget("den-config", formatConfigPreview(current, projectPath, globalPath));
+      continue;
+    }
+
+    const scope: ConfigScope = choice.includes("project-local") ? "project" : "global";
+    await configureSubagentDefaults(ctx, scope);
+  }
+}
+
+async function configureSubagentDefaults(ctx: any, scope: ConfigScope) {
+  const roleChoices = ["coder", "reviewer", "planner"];
+  const current = await loadDenExtensionConfig(scope, ctx.cwd);
+  const role = await ctx.ui.select(
+    `Configure ${scope} sub-agent role`,
+    roleChoices.map((candidate) => `${candidate}${current.subagents?.[candidate]?.model ? ` — ${current.subagents[candidate].model}` : ""}`),
+  );
+  if (!role) return;
+  const roleName = role.split(" — ")[0];
+
+  const model = await selectModelForRole(ctx, roleName);
+  if (model === undefined) return;
+
+  const config = await loadDenExtensionConfig(scope, ctx.cwd);
+  const subagents = { ...(config.subagents ?? {}) };
+  const roleConfig = { ...(subagents[roleName] ?? {}) };
+  if (model === null) delete roleConfig.model;
+  else roleConfig.model = model;
+  if (Object.keys(roleConfig).length === 0) delete subagents[roleName];
+  else subagents[roleName] = roleConfig;
+
+  await saveDenExtensionConfig(scope, ctx.cwd, {
+    ...config,
+    version: 1,
+    subagents,
+  });
+  ctx.ui.notify(
+    model === null
+      ? `Cleared ${scope} default model for ${roleName}`
+      : `Saved ${scope} ${roleName} model: ${model}`,
+    "info",
+  );
+}
+
+async function selectModelForRole(ctx: any, role: string): Promise<string | null | undefined> {
+  const models = await availableModels(ctx);
+  const modelChoices = models.map((model) => ({
+    id: providerQualifiedModelId(model),
+    label: `${providerQualifiedModelId(model)}${model.name && model.name !== model.id ? ` — ${model.name}` : ""}`,
+  }));
+  const choices = [
+    ...modelChoices.map((model) => model.label),
+    "Clear configured model",
+    "Cancel",
+  ];
+  const choice = await ctx.ui.select(`Select default model for ${role}`, choices);
+  if (!choice || choice === "Cancel") return undefined;
+  if (choice === "Clear configured model") return null;
+  return modelChoices.find((model) => model.label === choice)?.id;
+}
+
+async function availableModels(ctx: any): Promise<any[]> {
+  if (ctx.modelRegistry?.getAvailable) {
+    const available = await ctx.modelRegistry.getAvailable();
+    if (Array.isArray(available) && available.length > 0) return sortModels(available);
+  }
+  const current = ctx.model ? [ctx.model] : [];
+  return sortModels(current);
+}
+
+function sortModels(models: any[]): any[] {
+  return [...models].sort((a, b) => providerQualifiedModelId(a).localeCompare(providerQualifiedModelId(b)));
+}
+
+function providerQualifiedModelId(model: any): string {
+  const provider = String(model.provider ?? "").trim();
+  const id = String(model.id ?? model.model ?? "").trim();
+  return provider && id ? `${provider}/${id}` : id || provider;
+}
+
+function formatConfigPreview(config: DenExtensionConfig, projectPath: string, globalPath: string): string[] {
+  const lines = [
+    "Den config",
+    `Project config: ${projectPath}`,
+    `Global config: ${globalPath}`,
+    "",
+    "Sub-agent defaults:",
+  ];
+  for (const role of ["coder", "reviewer", "planner"]) {
+    const roleConfig = config.subagents?.[role];
+    lines.push(`- ${role}: ${roleConfig?.model ?? "(not configured)"}`);
+  }
+  return lines;
+}
+
 async function runPromptedSubagent(
   cfg: DenConfig,
   role: "coder" | "reviewer",
@@ -256,32 +388,33 @@ async function runDenSubagent(
   signal: AbortSignal | undefined,
   onUpdate: ((partial: string) => void) | undefined,
 ): Promise<SubagentResult> {
-  const runId = makeRunId(cfg, options);
   const cwd = options.cwd ? path.resolve(options.cwd) : defaultCwd;
+  const effectiveOptions = await applyConfiguredDefaults(options, cwd);
+  const runId = makeRunId(cfg, effectiveOptions);
   await appendOps(cfg, "subagent_started", {
-    taskId: options.taskId,
-    body: `Started ${options.role} sub-agent${options.taskId ? ` for task #${options.taskId}` : ""}.`,
+    taskId: effectiveOptions.taskId,
+    body: `Started ${effectiveOptions.role} sub-agent${effectiveOptions.taskId ? ` for task #${effectiveOptions.taskId}` : ""}.`,
     metadata: {
       run_id: runId,
-      role: options.role,
+      role: effectiveOptions.role,
       cwd,
-      model: options.model ?? null,
-      tools: options.tools ?? defaultToolsForRole(options.role),
-      session_mode: options.sessionMode ?? "fresh",
-      session: options.session ?? null,
+      model: effectiveOptions.model ?? null,
+      tools: effectiveOptions.tools ?? defaultToolsForRole(effectiveOptions.role),
+      session_mode: effectiveOptions.sessionMode ?? "fresh",
+      session: effectiveOptions.session ?? null,
     },
   });
 
-  const result = await spawnPiSubagent(cfg, options, cwd, runId, signal, onUpdate);
+  const result = await spawnPiSubagent(cfg, effectiveOptions, cwd, runId, signal, onUpdate);
 
   await appendOps(cfg, "subagent_completed", {
-    taskId: options.taskId,
-    body: `Completed ${options.role} sub-agent with exit code ${result.exit_code}.`,
+    taskId: effectiveOptions.taskId,
+    body: `Completed ${effectiveOptions.role} sub-agent with exit code ${result.exit_code}.`,
     metadata: {
       run_id: runId,
-      role: options.role,
+      role: effectiveOptions.role,
       cwd,
-      model: result.model ?? options.model ?? null,
+      model: result.model ?? effectiveOptions.model ?? null,
       session_mode: result.session_mode,
       session: result.session ?? null,
       exit_code: result.exit_code,
@@ -290,11 +423,11 @@ async function runDenSubagent(
     },
   });
 
-  const shouldPostResult = options.postResult ?? options.taskId !== undefined;
-  if (shouldPostResult && options.taskId !== undefined) {
-    await sendTaskMessage(cfg, options.taskId, formatResultMessage(result), {
+  const shouldPostResult = effectiveOptions.postResult ?? effectiveOptions.taskId !== undefined;
+  if (shouldPostResult && effectiveOptions.taskId !== undefined) {
+    await sendTaskMessage(cfg, effectiveOptions.taskId, formatResultMessage(result), {
       type: "subagent_result",
-      role: options.role,
+      role: effectiveOptions.role,
       run_id: runId,
       exit_code: result.exit_code,
       session_mode: result.session_mode,
@@ -513,6 +646,59 @@ function parseRunFlags(input: string): { rest: string; sessionMode?: "fresh" | "
   }
 
   return { rest: rest.join(" "), sessionMode, session };
+}
+
+async function applyConfiguredDefaults(options: RunOptions, cwd: string): Promise<RunOptions> {
+  const roleConfig = (await loadMergedDenExtensionConfig(cwd)).subagents?.[options.role.toLowerCase()];
+  return {
+    ...options,
+    model: options.model ?? normalizeString(roleConfig?.model),
+    tools: options.tools ?? normalizeString(roleConfig?.tools),
+  };
+}
+
+async function loadMergedDenExtensionConfig(cwd: string): Promise<DenExtensionConfig> {
+  const globalConfig = await loadDenExtensionConfig("global", cwd);
+  const projectConfig = await loadDenExtensionConfig("project", cwd);
+  const roles = new Set([
+    ...Object.keys(globalConfig.subagents ?? {}),
+    ...Object.keys(projectConfig.subagents ?? {}),
+  ]);
+  const subagents: NonNullable<DenExtensionConfig["subagents"]> = {};
+  for (const role of roles) {
+    subagents[role] = {
+      ...(globalConfig.subagents?.[role] ?? {}),
+      ...(projectConfig.subagents?.[role] ?? {}),
+    };
+  }
+  return {
+    version: 1,
+    ...globalConfig,
+    ...projectConfig,
+    subagents,
+  };
+}
+
+async function loadDenExtensionConfig(scope: ConfigScope, cwd: string): Promise<DenExtensionConfig> {
+  try {
+    const text = await readFile(denConfigPath(scope, cwd), "utf8");
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object") return parsed;
+  } catch (error: any) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  return { version: 1, subagents: {} };
+}
+
+async function saveDenExtensionConfig(scope: ConfigScope, cwd: string, config: DenExtensionConfig) {
+  const file = denConfigPath(scope, cwd);
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+}
+
+function denConfigPath(scope: ConfigScope, cwd: string): string {
+  if (scope === "global") return path.join(os.homedir(), ".pi", "agent", DEN_CONFIG_FILENAME);
+  return path.join(cwd, ".pi", DEN_CONFIG_FILENAME);
 }
 
 function parseSessionMode(value: string | undefined): "fresh" | "continue" | "fork" | "session" | undefined {
