@@ -23,6 +23,7 @@ type RunOptions = {
   sessionMode?: "fresh" | "continue" | "fork" | "session";
   session?: string;
   model?: string;
+  fallbackModel?: string;
   tools?: string;
   cwd?: string;
   postResult?: boolean;
@@ -38,10 +39,13 @@ type SubagentResult = {
   stderr: string;
   model?: string;
   message_count: number;
+  fallback_from_model?: string;
+  fallback_from_exit_code?: number;
 };
 
 type DenExtensionConfig = {
   version?: number;
+  fallback_model?: string;
   subagents?: Record<string, {
     model?: string;
     tools?: string;
@@ -231,6 +235,8 @@ async function runDenConfigCommand(ctx: any) {
     const choice = await ctx.ui.select("Den config", [
       `Sub-agent defaults (project-local: ${projectPath})`,
       `Sub-agent defaults (global: ${globalPath})`,
+      `Fallback model (project-local: ${projectPath})`,
+      `Fallback model (global: ${globalPath})`,
       "View current config",
       "Done",
     ]);
@@ -242,8 +248,32 @@ async function runDenConfigCommand(ctx: any) {
     }
 
     const scope: ConfigScope = choice.includes("project-local") ? "project" : "global";
+    if (choice.startsWith("Fallback model")) {
+      await configureFallbackModel(ctx, scope);
+      continue;
+    }
     await configureSubagentDefaults(ctx, scope);
   }
+}
+
+async function configureFallbackModel(ctx: any, scope: ConfigScope) {
+  const model = await selectModel(ctx, `${scope} fallback model`);
+  if (model === undefined) return;
+
+  const config = await loadDenExtensionConfig(scope, ctx.cwd);
+  if (model === null) delete config.fallback_model;
+  else config.fallback_model = model;
+
+  await saveDenExtensionConfig(scope, ctx.cwd, {
+    ...config,
+    version: 1,
+  });
+  ctx.ui.notify(
+    model === null
+      ? `Cleared ${scope} fallback model`
+      : `Saved ${scope} fallback model: ${model}`,
+    "info",
+  );
 }
 
 async function configureSubagentDefaults(ctx: any, scope: ConfigScope) {
@@ -256,7 +286,7 @@ async function configureSubagentDefaults(ctx: any, scope: ConfigScope) {
   if (!role) return;
   const roleName = role.split(" — ")[0];
 
-  const model = await selectModelForRole(ctx, roleName);
+  const model = await selectModel(ctx, `default model for ${roleName}`);
   if (model === undefined) return;
 
   const config = await loadDenExtensionConfig(scope, ctx.cwd);
@@ -280,7 +310,7 @@ async function configureSubagentDefaults(ctx: any, scope: ConfigScope) {
   );
 }
 
-async function selectModelForRole(ctx: any, role: string): Promise<string | null | undefined> {
+async function selectModel(ctx: any, label: string): Promise<string | null | undefined> {
   const models = await availableModels(ctx);
   const modelChoices = models.map((model) => ({
     id: providerQualifiedModelId(model),
@@ -291,7 +321,7 @@ async function selectModelForRole(ctx: any, role: string): Promise<string | null
     "Clear configured model",
     "Cancel",
   ];
-  const choice = await ctx.ui.select(`Select default model for ${role}`, choices);
+  const choice = await ctx.ui.select(`Select ${label}`, choices);
   if (!choice || choice === "Cancel") return undefined;
   if (choice === "Clear configured model") return null;
   return modelChoices.find((model) => model.label === choice)?.id;
@@ -321,6 +351,8 @@ function formatConfigPreview(config: DenExtensionConfig, projectPath: string, gl
     "Den config",
     `Project config: ${projectPath}`,
     `Global config: ${globalPath}`,
+    "",
+    `Fallback model: ${config.fallback_model ?? "(not configured)"}`,
     "",
     "Sub-agent defaults:",
   ];
@@ -405,8 +437,32 @@ async function runDenSubagent(
     },
   });
 
-  const result = await spawnPiSubagent(cfg, effectiveOptions, cwd, runId, signal, onUpdate);
+  let result = await spawnPiSubagent(cfg, effectiveOptions, cwd, runId, signal, onUpdate);
+  const fallbackModel = shouldRetryWithFallback(options, effectiveOptions, result, signal)
+    ? effectiveOptions.fallbackModel
+    : undefined;
 
+  if (fallbackModel) {
+    await appendOps(cfg, "subagent_fallback_started", {
+      taskId: effectiveOptions.taskId,
+      body: `Retrying ${effectiveOptions.role} sub-agent with fallback model ${fallbackModel} after exit code ${result.exit_code}.`,
+      metadata: {
+        run_id: runId,
+        role: effectiveOptions.role,
+        cwd,
+        failed_model: result.model ?? effectiveOptions.model ?? null,
+        failed_exit_code: result.exit_code,
+        fallback_model: fallbackModel,
+        stderr_preview: result.stderr.slice(0, 1000),
+      },
+    });
+    const failed = result;
+    result = await spawnPiSubagent(cfg, { ...effectiveOptions, model: fallbackModel }, cwd, runId, signal, onUpdate);
+    result.fallback_from_model = failed.model ?? effectiveOptions.model;
+    result.fallback_from_exit_code = failed.exit_code;
+  }
+
+  const finalRequestedModel = fallbackModel ?? effectiveOptions.model;
   await appendOps(cfg, "subagent_completed", {
     taskId: effectiveOptions.taskId,
     body: `Completed ${effectiveOptions.role} sub-agent with exit code ${result.exit_code}.`,
@@ -414,7 +470,10 @@ async function runDenSubagent(
       run_id: runId,
       role: effectiveOptions.role,
       cwd,
-      model: result.model ?? effectiveOptions.model ?? null,
+      model: result.model ?? finalRequestedModel ?? null,
+      fallback_model: effectiveOptions.fallbackModel ?? null,
+      fallback_from_model: result.fallback_from_model ?? null,
+      fallback_from_exit_code: result.fallback_from_exit_code ?? null,
       session_mode: result.session_mode,
       session: result.session ?? null,
       exit_code: result.exit_code,
@@ -432,10 +491,27 @@ async function runDenSubagent(
       exit_code: result.exit_code,
       session_mode: result.session_mode,
       session: result.session ?? null,
+      fallback_from_model: result.fallback_from_model ?? null,
+      fallback_from_exit_code: result.fallback_from_exit_code ?? null,
     });
   }
 
   return result;
+}
+
+function shouldRetryWithFallback(
+  originalOptions: RunOptions,
+  effectiveOptions: RunOptions,
+  result: SubagentResult,
+  signal: AbortSignal | undefined,
+): boolean {
+  if (signal?.aborted) return false;
+  if (originalOptions.model) return false;
+  if (result.exit_code === 0) return false;
+  const fallback = normalizeString(effectiveOptions.fallbackModel);
+  if (!fallback) return false;
+  const attempted = normalizeString(result.model) ?? normalizeString(effectiveOptions.model);
+  return attempted !== fallback;
 }
 
 async function getTask(cfg: DenConfig, taskId: number) {
@@ -649,10 +725,12 @@ function parseRunFlags(input: string): { rest: string; sessionMode?: "fresh" | "
 }
 
 async function applyConfiguredDefaults(options: RunOptions, cwd: string): Promise<RunOptions> {
-  const roleConfig = (await loadMergedDenExtensionConfig(cwd)).subagents?.[options.role.toLowerCase()];
+  const config = await loadMergedDenExtensionConfig(cwd);
+  const roleConfig = config.subagents?.[options.role.toLowerCase()];
   return {
     ...options,
     model: options.model ?? normalizeString(roleConfig?.model),
+    fallbackModel: options.fallbackModel ?? normalizeString(config.fallback_model),
     tools: options.tools ?? normalizeString(roleConfig?.tools),
   };
 }
@@ -826,6 +904,7 @@ function formatResultMessage(result: SubagentResult): string {
     "",
     `Exit code: ${result.exit_code}`,
     result.model ? `Model: ${result.model}` : null,
+    result.fallback_from_model ? `Fallback retry from: ${result.fallback_from_model} (exit ${result.fallback_from_exit_code ?? "unknown"})` : null,
     "",
     output,
     stderr ? `\nStderr:\n${stderr.slice(0, 2000)}` : null,
