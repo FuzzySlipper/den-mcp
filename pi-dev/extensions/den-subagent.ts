@@ -877,15 +877,10 @@ function resultTool(result: SubagentResult) {
   };
 }
 
-function defaultToolsForRole(role: string): string | undefined {
-  switch (role.toLowerCase()) {
-    case "reviewer":
-      return "read,grep,find,ls,bash,den_get_task,den_inbox,den_next_task";
-    case "planner":
-      return "read,grep,find,ls,den_get_task,den_inbox,den_next_task";
-    default:
-      return undefined;
-  }
+function defaultToolsForRole(_role: string): string | undefined {
+  // Leave the tool allowlist open by default so MCP-provided Den tools remain
+  // available. Users can pin stricter role-specific allowlists later via config.
+  return undefined;
 }
 
 function formatResultLines(result: SubagentResult): string[] {
