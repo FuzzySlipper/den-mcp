@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Type } from "typebox";
 
 type JsonObject = Record<string, unknown>;
 
@@ -227,166 +226,8 @@ export default function denExtension(pi: ExtensionAPI) {
     },
   });
 
-  pi.registerTool({
-    name: "den_get_task",
-    label: "Den Task",
-    description: "Fetch a Den task detail, including dependencies, subtasks, and recent messages.",
-    parameters: Type.Object({
-      task_id: Type.Number({ description: "Den task ID." }),
-      project_id: Type.Optional(Type.String({ description: "Den project ID. Defaults to the current Pi project binding." })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const cfg = await requireConfig(ctx);
-      const projectId = normalizeString(params.project_id) ?? cfg.projectId;
-      const task = await denFetch(cfg, `/api/projects/${esc(projectId)}/tasks/${params.task_id}`);
-      return toolJson(task);
-    },
-  });
-
-  pi.registerTool({
-    name: "den_next_task",
-    label: "Den Next Task",
-    description: "Get the next unblocked Den task for a project.",
-    parameters: Type.Object({
-      project_id: Type.Optional(Type.String({ description: "Den project ID. Defaults to the current Pi project binding." })),
-      assigned_to: Type.Optional(Type.String({ description: "Optional assignee filter." })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const cfg = await requireConfig(ctx);
-      const projectId = normalizeString(params.project_id) ?? cfg.projectId;
-      const assignedTo = normalizeString(params.assigned_to);
-      const next = await getNextTask({ ...cfg, projectId }, assignedTo);
-      return toolJson(next);
-    },
-  });
-
-  pi.registerTool({
-    name: "den_inbox",
-    label: "Den Inbox",
-    description: "Summarize pending dispatches, unread messages, wakeable stream messages, and next task for this Pi binding.",
-    parameters: Type.Object({
-      project_id: Type.Optional(Type.String({ description: "Den project ID. Defaults to the current Pi project binding." })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const cfg = await requireConfig(ctx);
-      const projectId = normalizeString(params.project_id) ?? cfg.projectId;
-      const lines = await buildInboxLines({ ...cfg, projectId });
-      return toolJson({ project_id: projectId, lines });
-    },
-  });
-
-  pi.registerTool({
-    name: "den_claim_next_task",
-    label: "Den Claim Next Task",
-    description: "Claim the next unblocked Den task by assigning it to this Pi agent and marking it in progress.",
-    parameters: Type.Object({
-      project_id: Type.Optional(Type.String({ description: "Den project ID. Defaults to the current Pi project binding." })),
-      assigned_to: Type.Optional(Type.String({ description: "Optional filter for the next task lookup." })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const cfg = await requireConfig(ctx);
-      const projectId = normalizeString(params.project_id) ?? cfg.projectId;
-      const assignedTo = normalizeString(params.assigned_to);
-      const result = await claimNextTask({ ...cfg, projectId }, assignedTo);
-      return toolJson(result);
-    },
-  });
-
-  pi.registerTool({
-    name: "den_update_task",
-    label: "Den Update Task",
-    description: "Update Den task fields such as status, assigned_to, priority, title, description, tags, or parent_id.",
-    parameters: Type.Object({
-      task_id: Type.Number({ description: "Den task ID." }),
-      project_id: Type.Optional(Type.String({ description: "Den project ID. Defaults to the current Pi project binding." })),
-      status: Type.Optional(Type.String({ description: "Optional status: planned, in_progress, review, blocked, done, cancelled." })),
-      assigned_to: Type.Optional(Type.String({ description: "Optional assignee." })),
-      title: Type.Optional(Type.String({ description: "Optional new title." })),
-      description: Type.Optional(Type.String({ description: "Optional new description." })),
-      priority: Type.Optional(Type.Number({ description: "Optional priority 1-5." })),
-      tags: Type.Optional(Type.Array(Type.String(), { description: "Optional full replacement tag list." })),
-      parent_id: Type.Optional(Type.Number({ description: "Optional parent task ID." })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const cfg = await requireConfig(ctx);
-      const projectId = normalizeString(params.project_id) ?? cfg.projectId;
-      const updated = await updateTask({ ...cfg, projectId }, params.task_id, buildTaskChanges(params));
-      return toolJson(updated);
-    },
-  });
-
-  pi.registerTool({
-    name: "den_send_message",
-    label: "Den Send Message",
-    description: "Post a Den task-thread or project message.",
-    parameters: Type.Object({
-      content: Type.String({ description: "Message body." }),
-      project_id: Type.Optional(Type.String({ description: "Den project ID. Defaults to the current Pi project binding." })),
-      task_id: Type.Optional(Type.Number({ description: "Optional task ID." })),
-      thread_id: Type.Optional(Type.Number({ description: "Optional thread/root message ID." })),
-      intent: Type.Optional(Type.String({ description: "Optional intent, e.g. note, status_update, question, answer, handoff, task_blocked." })),
-      metadata_json: Type.Optional(Type.String({ description: "Optional metadata JSON string." })),
-      sender: Type.Optional(Type.String({ description: "Optional sender. Defaults to current Pi agent." })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const cfg = await requireConfig(ctx);
-      const projectId = normalizeString(params.project_id) ?? cfg.projectId;
-      const message = await sendMessage({ ...cfg, projectId }, {
-        content: params.content,
-        taskId: optionalNumber(params.task_id),
-        threadId: optionalNumber(params.thread_id),
-        intent: normalizeString(params.intent),
-        metadataJson: normalizeString(params.metadata_json),
-        sender: normalizeString(params.sender),
-      });
-      return toolJson(message);
-    },
-  });
-
-  pi.registerTool({
-    name: "den_mark_read",
-    label: "Den Mark Read",
-    description: "Mark Den messages as read for this Pi agent.",
-    parameters: Type.Object({
-      message_ids: Type.Array(Type.Number(), { description: "Message IDs to mark read." }),
-      agent: Type.Optional(Type.String({ description: "Agent identity. Defaults to current Pi agent." })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const cfg = await requireConfig(ctx);
-      const result = await markMessagesRead(cfg, params.message_ids, normalizeString(params.agent));
-      return toolJson(result);
-    },
-  });
-
-  pi.registerTool({
-    name: "den_complete_dispatch",
-    label: "Den Complete Dispatch",
-    description: "Mark a Den dispatch completed.",
-    parameters: Type.Object({
-      dispatch_id: Type.Number({ description: "Dispatch ID." }),
-      completed_by: Type.Optional(Type.String({ description: "Completer identity. Defaults to current Pi agent." })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const cfg = await requireConfig(ctx);
-      const result = await completeDispatch(cfg, params.dispatch_id, normalizeString(params.completed_by));
-      return toolJson(result);
-    },
-  });
-
-  pi.registerTool({
-    name: "den_get_conductor_guidance",
-    label: "Den Conductor Guidance",
-    description: "Fetch the Den-managed Pi conductor guidance, using project guidance first and global default as fallback.",
-    parameters: Type.Object({
-      project_id: Type.Optional(Type.String({ description: "Den project ID. Defaults to the current Pi project binding." })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const cfg = await requireConfig(ctx);
-      const projectId = normalizeString(params.project_id) ?? cfg.projectId;
-      const guidance = await getConductorGuidance({ ...cfg, projectId });
-      return toolJson(guidance);
-    },
-  });
+  // General Den data access is intentionally provided by the configured Den MCP server.
+  // This extension keeps Pi-native session binding, TUI commands, and conductor UX only.
 }
 
 async function resolveConfig(ctx: any): Promise<DenConfig> {
@@ -644,22 +485,6 @@ function formatTaskDetail(detail: any): string[] {
   return lines;
 }
 
-function buildTaskChanges(params: any): JsonObject {
-  const changes: JsonObject = {};
-  copyDefined(changes, "status", normalizeString(params.status));
-  copyDefined(changes, "assigned_to", normalizeString(params.assigned_to));
-  copyDefined(changes, "title", normalizeString(params.title));
-  copyDefined(changes, "description", normalizeString(params.description));
-  copyDefined(changes, "priority", optionalNumber(params.priority));
-  copyDefined(changes, "tags", Array.isArray(params.tags) ? params.tags : undefined);
-  copyDefined(changes, "parent_id", optionalNumber(params.parent_id));
-  return changes;
-}
-
-function copyDefined(target: JsonObject, key: string, value: unknown) {
-  if (value !== undefined) target[key] = value;
-}
-
 function parseRequiredId(args: string | undefined, label: string): number {
   const first = args?.trim().split(/\s+/, 1)[0];
   const value = Number(first);
@@ -717,27 +542,12 @@ function query(values: Record<string, string | number | undefined>): string {
   return params.toString();
 }
 
-function toolJson(value: unknown) {
-  return {
-    content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
-    details: {},
-  };
-}
-
 function take(value: unknown, count: number): any[] {
   return Array.isArray(value) ? value.slice(0, count) : [];
 }
 
 function oneLine(value: string): string {
   return value.replace(/\s+/g, " ").trim().slice(0, 140);
-}
-
-function normalizeString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
-function optionalNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function normalizeBaseUrl(value: string): string {

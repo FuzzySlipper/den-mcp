@@ -74,24 +74,17 @@ It also updates the binding metadata on Pi agent start/end with a lightweight
 
 ## Model-callable tools
 
+General Den data access should come from the configured Den MCP server. That
+keeps task/message/thread/document tools consistent with other agents and avoids
+a confusing partial set of Pi-local REST wrappers.
+
+The Pi Den extension still exposes Pi-native sub-agent tools:
+
 ```text
-den_get_task
-den_next_task
-den_inbox
-den_claim_next_task
-den_update_task
-den_send_message
-den_mark_read
-den_complete_dispatch
-den_get_conductor_guidance
 den_run_subagent
 den_run_coder
 den_run_reviewer
 ```
-
-The write tools cover the minimum single-conductor work loop: claim a task,
-update task status/assignee fields, post task-thread messages, clear read
-state, and complete consumed dispatches.
 
 `den_run_subagent` is the first sub-agent spike. It launches a fresh
 `pi --mode json -p --no-session` process by default, records
@@ -129,10 +122,9 @@ Templates use simple `{{placeholder}}` replacement for values such as
 `{{task_context}}`, `{{review_target}}`, and `{{extra_notes}}`.
 
 The `den-conductor` Pi skill is the user/agent-invokable entry point for
-conductor mode. It does not duplicate the policy text. It tells Pi to call
-`den_get_conductor_guidance`, which resolves project document
-`pi-conductor-guidance`, then `_global/pi-conductor-guidance-default`, then a
-built-in fallback.
+conductor mode. It does not duplicate the policy text. It tells Pi to use Den
+MCP document tools to resolve project document `pi-conductor-guidance`, then
+`_global/pi-conductor-guidance-default`, then this skill's built-in fallback.
 
 ## Configuration
 
