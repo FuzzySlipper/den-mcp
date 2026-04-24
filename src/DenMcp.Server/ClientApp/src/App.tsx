@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from 'react';
-import type { AgentStreamEntry, DispatchEntry, DocumentSummary, Message, MessageIntent } from './api/types';
+import type { AgentStreamEntry, DispatchEntry, Document, DocumentSummary, Message, MessageIntent } from './api/types';
 import {
   getDispatch,
   listProjects,
@@ -112,7 +112,7 @@ export default function App() {
       : Promise.resolve([]),
     [effectiveProject, isGlobal],
   );
-  const { data: documents } = usePolling(fetchDocs, 5000);
+  const { data: documents, refresh: refreshDocs } = usePolling(fetchDocs, 5000);
 
   const fetchAgents = useCallback(
     () => listActiveAgents(isGlobal ? undefined : (effectiveProject ?? undefined)),
@@ -209,6 +209,19 @@ export default function App() {
       console.error('Failed to load dispatch detail', error);
     }
   }, []);
+
+  const handleDocumentSaved = useCallback((doc: Document) => {
+    setSelectedDoc({
+      id: doc.id,
+      project_id: doc.project_id,
+      slug: doc.slug,
+      title: doc.title,
+      doc_type: doc.doc_type,
+      tags: doc.tags,
+      updated_at: doc.updated_at,
+    });
+    refreshDocs();
+  }, [refreshDocs]);
 
   const handleStreamThreadOpen = useCallback(async (entry: AgentStreamEntry) => {
     if (!entry.project_id || entry.thread_id == null) {
@@ -496,6 +509,7 @@ export default function App() {
         <DocumentDetail
           summary={selectedDoc}
           onClose={() => setSelectedDoc(null)}
+          onSaved={handleDocumentSaved}
         />
       )}
     </div>
