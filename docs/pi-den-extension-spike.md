@@ -11,6 +11,7 @@ The first project-local extension lives at:
 ```text
 .pi/extensions/den.ts
 .pi/extensions/den-subagent.ts
+.pi/skills/den-conductor/SKILL.md
 ```
 
 Pi auto-discovers project-local extensions from `.pi/extensions`, so starting
@@ -56,6 +57,7 @@ It also updates the binding metadata on Pi agent start/end with a lightweight
 /den-blocked [task_id] <reason>
 /den-mark-read <message_id> [message_id...]
 /den-complete-dispatch <dispatch_id>
+/den-conductor-guidance
 /den-run-subagent [--continue|--fork <session>|--session <session>] <role> <task_id|-> <prompt>
 /den-run-coder [--continue|--fork <session>|--session <session>] <task_id> [extra notes]
 /den-run-reviewer [--fork <session>|--session <session>] <task_id> [review target/notes]
@@ -79,6 +81,7 @@ den_update_task
 den_send_message
 den_mark_read
 den_complete_dispatch
+den_get_conductor_guidance
 den_run_subagent
 den_run_coder
 den_run_reviewer
@@ -115,6 +118,12 @@ before launching the sub-agent:
 Templates use simple `{{placeholder}}` replacement for values such as
 `{{project_id}}`, `{{task_id}}`, `{{task_title}}`, `{{task_description}}`,
 `{{task_context}}`, `{{review_target}}`, and `{{extra_notes}}`.
+
+The `den-conductor` Pi skill is the user/agent-invokable entry point for
+conductor mode. It does not duplicate the policy text. It tells Pi to call
+`den_get_conductor_guidance`, which resolves project document
+`pi-conductor-guidance`, then `_global/pi-conductor-guidance-default`, then a
+built-in fallback.
 
 ## Configuration
 
@@ -154,6 +163,8 @@ Then try:
 /den-inbox
 /den-next
 /den-claim-next
+/skill:den-conductor
+/den-conductor-guidance
 /den-run-subagent planner - "Summarize the next useful Den follow-up task."
 /den-run-subagent --continue coder 123 "Continue from the prior coder run."
 /den-run-coder 123 "Keep the change scoped to the CLI wrapper."

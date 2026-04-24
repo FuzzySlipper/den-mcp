@@ -21,6 +21,8 @@ let currentTaskId: number | undefined;
 
 const DEFAULT_BASE_URL = "http://192.168.1.10:5199";
 const HEARTBEAT_SECONDS = 60;
+const CONDUCTOR_GUIDANCE_SLUG = "pi-conductor-guidance";
+const GLOBAL_CONDUCTOR_GUIDANCE_SLUG = "pi-conductor-guidance-default";
 
 export default function denExtension(pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
@@ -215,6 +217,16 @@ export default function denExtension(pi: ExtensionAPI) {
     },
   });
 
+  pi.registerCommand("den-conductor-guidance", {
+    description: "Load the Den-managed Pi conductor guidance.",
+    handler: async (_args, ctx) => {
+      const cfg = await requireConfig(ctx);
+      const guidance = await getConductorGuidance(cfg);
+      ctx.ui.setWidget("den-conductor-guidance", guidance.content.split("\n").slice(0, 40));
+      ctx.ui.notify(`Loaded conductor guidance from ${guidance.project_id}/${guidance.slug}.`, "info");
+    },
+  });
+
   pi.registerTool({
     name: "den_get_task",
     label: "Den Task",
@@ -358,6 +370,21 @@ export default function denExtension(pi: ExtensionAPI) {
       const cfg = await requireConfig(ctx);
       const result = await completeDispatch(cfg, params.dispatch_id, normalizeString(params.completed_by));
       return toolJson(result);
+    },
+  });
+
+  pi.registerTool({
+    name: "den_get_conductor_guidance",
+    label: "Den Conductor Guidance",
+    description: "Fetch the Den-managed Pi conductor guidance, using project guidance first and global default as fallback.",
+    parameters: Type.Object({
+      project_id: Type.Optional(Type.String({ description: "Den project ID. Defaults to the current Pi project binding." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const cfg = await requireConfig(ctx);
+      const projectId = normalizeString(params.project_id) ?? cfg.projectId;
+      const guidance = await getConductorGuidance({ ...cfg, projectId });
+      return toolJson(guidance);
     },
   });
 }
@@ -562,6 +589,35 @@ async function completeDispatch(cfg: DenConfig, dispatchId: number, completedBy?
       completed_by: completedBy ?? cfg.agent,
     },
   });
+}
+
+async function getConductorGuidance(cfg: DenConfig) {
+  const projectDoc = await tryGetDocument(cfg, cfg.projectId, CONDUCTOR_GUIDANCE_SLUG);
+  if (projectDoc) return projectDoc;
+  const globalDoc = await tryGetDocument(cfg, "_global", GLOBAL_CONDUCTOR_GUIDANCE_SLUG);
+  if (globalDoc) return globalDoc;
+  return {
+    project_id: cfg.projectId,
+    slug: CONDUCTOR_GUIDANCE_SLUG,
+    title: "Built-in Pi Conductor Guidance",
+    content: [
+      "# Built-in Pi Conductor Guidance",
+      "",
+      "You are the user-facing Pi conductor for this Den project.",
+      "Use Den as the durable record for tasks, messages, documents, and sub-agent results.",
+      "Delegate bounded implementation to coder sub-agents and independent review to reviewer sub-agents.",
+      "Do not re-review every line yourself; compare coder/reviewer communication against task intent and ask the user when ambiguity or drift needs judgment.",
+    ].join("\n"),
+  };
+}
+
+async function tryGetDocument(cfg: DenConfig, projectId: string, slug: string) {
+  try {
+    return await denFetch(cfg, `/api/projects/${esc(projectId)}/documents/${esc(slug)}`);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("failed with 404")) return undefined;
+    throw error;
+  }
 }
 
 function formatNextTask(next: any): string[] {
