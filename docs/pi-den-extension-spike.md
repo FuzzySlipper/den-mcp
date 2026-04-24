@@ -56,7 +56,7 @@ It also updates the binding metadata on Pi agent start/end with a lightweight
 /den-blocked [task_id] <reason>
 /den-mark-read <message_id> [message_id...]
 /den-complete-dispatch <dispatch_id>
-/den-run-subagent <role> <task_id|-> <prompt>
+/den-run-subagent [--continue|--fork <session>|--session <session>] <role> <task_id|-> <prompt>
 ```
 
 `/den-inbox` summarizes:
@@ -85,11 +85,19 @@ update task status/assignee fields, post task-thread messages, clear read
 state, and complete consumed dispatches.
 
 `den_run_subagent` is the first sub-agent spike. It launches a fresh
-`pi --mode json -p --no-session` process, records `subagent_started` and
-`subagent_completed` ops entries, and posts the final output back to the task
-thread when `task_id` is present. It supports a single bounded run only; parallel
-fanout, worktree isolation, review packet helpers, and richer run records are
-still follow-up slices.
+`pi --mode json -p --no-session` process by default, records
+`subagent_started` and `subagent_completed` ops entries, and posts the final
+output back to the task thread when `task_id` is present.
+
+Sub-agent session policy is explicit:
+
+- `fresh`: default; best for reviewers, arbitration, and independent planning
+- `continue`: reuse Pi's previous session; useful for ongoing coder work
+- `fork`: fork a named session for follow-up while keeping the original intact
+- `session`: resume a specific named session directly
+
+It supports a single bounded run only; parallel fanout, worktree isolation,
+review packet helpers, and richer run records are still follow-up slices.
 
 ## Configuration
 
@@ -130,6 +138,7 @@ Then try:
 /den-next
 /den-claim-next
 /den-run-subagent planner - "Summarize the next useful Den follow-up task."
+/den-run-subagent --continue coder 123 "Continue from the prior coder run."
 ```
 
 ## Conductor direction

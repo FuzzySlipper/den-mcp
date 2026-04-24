@@ -18,6 +18,8 @@ type RunOptions = {
   role: string;
   prompt: string;
   taskId?: number;
+  sessionMode?: "fresh" | "continue" | "fork" | "session";
+  session?: string;
   model?: string;
   tools?: string;
   cwd?: string;
@@ -27,6 +29,8 @@ type RunOptions = {
 type SubagentResult = {
   role: string;
   task_id?: number;
+  session_mode: string;
+  session?: string;
   exit_code: number;
   final_output: string;
   stderr: string;
@@ -38,7 +42,7 @@ const DEFAULT_BASE_URL = "http://192.168.1.10:5199";
 
 export default function denSubagent(pi: ExtensionAPI) {
   pi.registerCommand("den-run-subagent", {
-    description: "Run a fresh Pi sub-agent. Usage: /den-run-subagent <role> <task_id|-> <prompt>",
+    description: "Run a Pi sub-agent. Usage: /den-run-subagent [--continue|--fork <session>|--session <session>] <role> <task_id|-> <prompt>",
     handler: async (args, ctx) => {
       const cfg = resolveConfig(ctx);
       const options = parseRunCommand(args, ctx.cwd);
@@ -60,6 +64,8 @@ export default function denSubagent(pi: ExtensionAPI) {
       tools: Type.Optional(Type.String({ description: "Optional comma-separated Pi tool allowlist. Defaults by role." })),
       cwd: Type.Optional(Type.String({ description: "Optional working directory. Defaults to current Pi cwd." })),
       post_result: Type.Optional(Type.Boolean({ description: "Post final output back to Den task thread. Default true when task_id is provided." })),
+      session_mode: Type.Optional(Type.String({ description: "fresh, continue, fork, or session. Defaults to fresh." })),
+      session: Type.Optional(Type.String({ description: "Session path/id for fork or session modes." })),
     }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const cfg = resolveConfig(ctx);
@@ -69,6 +75,8 @@ export default function denSubagent(pi: ExtensionAPI) {
           role: params.role,
           prompt: params.prompt,
           taskId: optionalNumber(params.task_id),
+          sessionMode: parseSessionMode(normalizeString(params.session_mode)),
+          session: normalizeString(params.session),
           model: normalizeString(params.model),
           tools: normalizeString(params.tools),
           cwd: normalizeString(params.cwd),
@@ -110,6 +118,8 @@ async function runDenSubagent(
       cwd,
       model: options.model ?? null,
       tools: options.tools ?? defaultToolsForRole(options.role),
+      session_mode: options.sessionMode ?? "fresh",
+      session: options.session ?? null,
     },
   });
 
@@ -123,6 +133,8 @@ async function runDenSubagent(
       role: options.role,
       cwd,
       model: result.model ?? options.model ?? null,
+      session_mode: result.session_mode,
+      session: result.session ?? null,
       exit_code: result.exit_code,
       message_count: result.message_count,
       stderr_preview: result.stderr.slice(0, 1000),
@@ -136,6 +148,8 @@ async function runDenSubagent(
       role: options.role,
       run_id: runId,
       exit_code: result.exit_code,
+      session_mode: result.session_mode,
+      session: result.session ?? null,
     });
   }
 
@@ -150,7 +164,9 @@ async function spawnPiSubagent(
   signal: AbortSignal | undefined,
   onUpdate: ((partial: string) => void) | undefined,
 ): Promise<SubagentResult> {
-  const args = ["--mode", "json", "-p", "--no-session"];
+  const sessionMode = options.sessionMode ?? "fresh";
+  const args = ["--mode", "json", "-p"];
+  addSessionArgs(args, sessionMode, options.session);
   if (options.model) args.push("--model", options.model);
   const tools = options.tools ?? defaultToolsForRole(options.role);
   if (tools) args.push("--tools", tools);
@@ -218,6 +234,8 @@ async function spawnPiSubagent(
   return {
     role: options.role,
     task_id: options.taskId,
+    session_mode: sessionMode,
+    session: options.session,
     exit_code: exitCode,
     final_output: finalOutput,
     stderr,
@@ -257,9 +275,12 @@ function buildSubagentPrompt(cfg: DenConfig, options: RunOptions): string {
 }
 
 function parseRunCommand(args: string | undefined, cwd: string): RunOptions {
-  const trimmed = args?.trim() ?? "";
+  const parsed = parseRunFlags(args?.trim() ?? "");
+  const trimmed = parsed.rest;
   const match = trimmed.match(/^(\S+)\s+(\S+)\s+([\s\S]+)$/);
-  if (!match) throw new Error("Usage: /den-run-subagent <role> <task_id|-> <prompt>");
+  if (!match) {
+    throw new Error("Usage: /den-run-subagent [--continue|--fork <session>|--session <session>] <role> <task_id|-> <prompt>");
+  }
   const taskId = match[2] === "-" ? undefined : Number(match[2]);
   if (taskId !== undefined && (!Number.isInteger(taskId) || taskId <= 0)) throw new Error("Expected task_id or '-'.");
   return {
@@ -267,7 +288,66 @@ function parseRunCommand(args: string | undefined, cwd: string): RunOptions {
     taskId,
     prompt: match[3].trim(),
     cwd,
+    sessionMode: parsed.sessionMode,
+    session: parsed.session,
   };
+}
+
+function parseRunFlags(input: string): { rest: string; sessionMode?: "fresh" | "continue" | "fork" | "session"; session?: string } {
+  const parts = input.split(/\s+/).filter(Boolean);
+  let sessionMode: "fresh" | "continue" | "fork" | "session" | undefined;
+  let session: string | undefined;
+  const rest: string[] = [];
+
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (part === "--fresh") {
+      sessionMode = "fresh";
+      continue;
+    }
+    if (part === "--continue") {
+      sessionMode = "continue";
+      continue;
+    }
+    if (part === "--fork" || part === "--session") {
+      const value = parts[++i];
+      if (!value) throw new Error(`${part} requires a session id or path.`);
+      sessionMode = part === "--fork" ? "fork" : "session";
+      session = value;
+      continue;
+    }
+    rest.push(part, ...parts.slice(i + 1));
+    break;
+  }
+
+  return { rest: rest.join(" "), sessionMode, session };
+}
+
+function parseSessionMode(value: string | undefined): "fresh" | "continue" | "fork" | "session" | undefined {
+  if (!value) return undefined;
+  if (value === "fresh" || value === "continue" || value === "fork" || value === "session") return value;
+  throw new Error("session_mode must be fresh, continue, fork, or session.");
+}
+
+function addSessionArgs(args: string[], sessionMode: string, session: string | undefined) {
+  switch (sessionMode) {
+    case "fresh":
+      args.push("--no-session");
+      return;
+    case "continue":
+      args.push("--continue");
+      return;
+    case "fork":
+      if (!session) throw new Error("session is required for fork mode.");
+      args.push("--fork", session);
+      return;
+    case "session":
+      if (!session) throw new Error("session is required for session mode.");
+      args.push("--session", session);
+      return;
+    default:
+      throw new Error("session_mode must be fresh, continue, fork, or session.");
+  }
 }
 
 function defaultToolsForRole(role: string): string | undefined {
