@@ -71,6 +71,8 @@ Before substantial work:
 - Check unread task-thread messages.
 - Check the current task status if you are working from a task.
 
+For Den state, prefer Den tools over shell. Shell, `curl`, database searches, and source-code inspection are fallback paths only after the relevant Den read tool is missing or fails.
+
 When using Den task-thread handoffs:
 - Prefer task-thread messages over project-wide chat.
 - Use `metadata.type` for structured handoffs such as `planning_summary`, `review_request`, `review_feedback`, and `merge_request`.
