@@ -48,6 +48,13 @@ It also updates the binding metadata on Pi agent start/end with a lightweight
 /den-status
 /den-inbox
 /den-next [assigned_to]
+/den-claim-next [assigned_to]
+/den-task <task_id>
+/den-note [task_id] <text>
+/den-done [task_id] [note]
+/den-blocked [task_id] <reason>
+/den-mark-read <message_id> [message_id...]
+/den-complete-dispatch <dispatch_id>
 ```
 
 `/den-inbox` summarizes:
@@ -63,12 +70,17 @@ It also updates the binding metadata on Pi agent start/end with a lightweight
 den_get_task
 den_next_task
 den_inbox
+den_claim_next_task
+den_update_task
+den_send_message
+den_mark_read
+den_complete_dispatch
 ```
 
-These are intentionally read-only for the first spike. Mutation tools such as
-posting review packets, responding to findings, marking messages read, and
-recording sub-agent run state should be added after the conductor shape is
-validated in a real Pi session.
+The write tools cover the minimum single-conductor work loop: claim a task,
+update task status/assignee fields, post task-thread messages, clear read
+state, and complete consumed dispatches. Review packet helpers and sub-agent run
+records are still follow-up slices.
 
 ## Configuration
 
@@ -107,6 +119,7 @@ Then try:
 /den-status
 /den-inbox
 /den-next
+/den-claim-next
 ```
 
 ## Conductor direction

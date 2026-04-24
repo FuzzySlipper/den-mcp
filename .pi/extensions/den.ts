@@ -17,6 +17,7 @@ type DenConfig = {
 let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
 let config: DenConfig | undefined;
 let lastInboxLines: string[] = [];
+let currentTaskId: number | undefined;
 
 const DEFAULT_BASE_URL = "http://192.168.1.10:5199";
 const HEARTBEAT_SECONDS = 60;
@@ -117,6 +118,103 @@ export default function denExtension(pi: ExtensionAPI) {
     },
   });
 
+  pi.registerCommand("den-claim-next", {
+    description: "Claim the next unblocked Den task and mark it in progress.",
+    handler: async (args, ctx) => {
+      const cfg = await requireConfig(ctx);
+      const assignedTo = args?.trim() || undefined;
+      const result = await claimNextTask(cfg, assignedTo);
+      const lines = formatClaimResult(result);
+      ctx.ui.setWidget("den-task", lines);
+      ctx.ui.notify(lines.join("\n"), "info");
+    },
+  });
+
+  pi.registerCommand("den-task", {
+    description: "Show a Den task detail and make it the current task for note/done commands.",
+    handler: async (args, ctx) => {
+      const cfg = await requireConfig(ctx);
+      const taskId = parseRequiredId(args, "task id");
+      const detail = await getTask(cfg, taskId);
+      currentTaskId = taskId;
+      const lines = formatTaskDetail(detail);
+      ctx.ui.setWidget("den-task", lines);
+      ctx.ui.notify(lines.join("\n"), "info");
+    },
+  });
+
+  pi.registerCommand("den-note", {
+    description: "Post a note to the current Den task, or /den-note <task_id> <text>.",
+    handler: async (args, ctx) => {
+      const cfg = await requireConfig(ctx);
+      const scoped = parseTaskScopedText(args, currentTaskId, "note text");
+      const message = await sendTaskMessage(cfg, {
+        taskId: scoped.taskId,
+        content: scoped.text,
+        intent: "note",
+        metadata: { type: "note" },
+      });
+      currentTaskId = scoped.taskId;
+      ctx.ui.notify(`Posted note #${message.id} on task #${scoped.taskId}.`, "info");
+    },
+  });
+
+  pi.registerCommand("den-done", {
+    description: "Mark the current Den task done, or /den-done <task_id> [note].",
+    handler: async (args, ctx) => {
+      const cfg = await requireConfig(ctx);
+      const scoped = parseOptionalTaskScopedText(args, currentTaskId);
+      if (scoped.text) {
+        await sendTaskMessage(cfg, {
+          taskId: scoped.taskId,
+          content: scoped.text,
+          intent: "status_update",
+          metadata: { type: "status_update" },
+        });
+      }
+      const updated = await updateTask(cfg, scoped.taskId, { status: "done" });
+      currentTaskId = scoped.taskId;
+      ctx.ui.notify(`Marked task #${updated.id} done.`, "info");
+    },
+  });
+
+  pi.registerCommand("den-blocked", {
+    description: "Mark the current Den task blocked, or /den-blocked <task_id> <reason>.",
+    handler: async (args, ctx) => {
+      const cfg = await requireConfig(ctx);
+      const scoped = parseTaskScopedText(args, currentTaskId, "block reason");
+      await sendTaskMessage(cfg, {
+        taskId: scoped.taskId,
+        content: scoped.text,
+        intent: "task_blocked",
+        metadata: { type: "task_blocked" },
+      });
+      const updated = await updateTask(cfg, scoped.taskId, { status: "blocked" });
+      currentTaskId = scoped.taskId;
+      ctx.ui.notify(`Marked task #${updated.id} blocked.`, "info");
+    },
+  });
+
+  pi.registerCommand("den-mark-read", {
+    description: "Mark Den messages read. Usage: /den-mark-read <id> [id...]",
+    handler: async (args, ctx) => {
+      const cfg = await requireConfig(ctx);
+      const messageIds = parseIds(args);
+      const result = await markMessagesRead(cfg, messageIds);
+      ctx.ui.notify(`Marked ${result.marked ?? messageIds.length} message(s) read.`, "info");
+    },
+  });
+
+  pi.registerCommand("den-complete-dispatch", {
+    description: "Mark a Den dispatch complete. Usage: /den-complete-dispatch <dispatch_id>",
+    handler: async (args, ctx) => {
+      const cfg = await requireConfig(ctx);
+      const dispatchId = parseRequiredId(args, "dispatch id");
+      const result = await completeDispatch(cfg, dispatchId);
+      ctx.ui.notify(`Completed dispatch #${result.id ?? dispatchId}.`, "info");
+    },
+  });
+
   pi.registerTool({
     name: "den_get_task",
     label: "Den Task",
@@ -162,6 +260,104 @@ export default function denExtension(pi: ExtensionAPI) {
       const projectId = normalizeString(params.project_id) ?? cfg.projectId;
       const lines = await buildInboxLines({ ...cfg, projectId });
       return toolJson({ project_id: projectId, lines });
+    },
+  });
+
+  pi.registerTool({
+    name: "den_claim_next_task",
+    label: "Den Claim Next Task",
+    description: "Claim the next unblocked Den task by assigning it to this Pi agent and marking it in progress.",
+    parameters: Type.Object({
+      project_id: Type.Optional(Type.String({ description: "Den project ID. Defaults to the current Pi project binding." })),
+      assigned_to: Type.Optional(Type.String({ description: "Optional filter for the next task lookup." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const cfg = await requireConfig(ctx);
+      const projectId = normalizeString(params.project_id) ?? cfg.projectId;
+      const assignedTo = normalizeString(params.assigned_to);
+      const result = await claimNextTask({ ...cfg, projectId }, assignedTo);
+      return toolJson(result);
+    },
+  });
+
+  pi.registerTool({
+    name: "den_update_task",
+    label: "Den Update Task",
+    description: "Update Den task fields such as status, assigned_to, priority, title, description, tags, or parent_id.",
+    parameters: Type.Object({
+      task_id: Type.Number({ description: "Den task ID." }),
+      project_id: Type.Optional(Type.String({ description: "Den project ID. Defaults to the current Pi project binding." })),
+      status: Type.Optional(Type.String({ description: "Optional status: planned, in_progress, review, blocked, done, cancelled." })),
+      assigned_to: Type.Optional(Type.String({ description: "Optional assignee." })),
+      title: Type.Optional(Type.String({ description: "Optional new title." })),
+      description: Type.Optional(Type.String({ description: "Optional new description." })),
+      priority: Type.Optional(Type.Number({ description: "Optional priority 1-5." })),
+      tags: Type.Optional(Type.Array(Type.String(), { description: "Optional full replacement tag list." })),
+      parent_id: Type.Optional(Type.Number({ description: "Optional parent task ID." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const cfg = await requireConfig(ctx);
+      const projectId = normalizeString(params.project_id) ?? cfg.projectId;
+      const updated = await updateTask({ ...cfg, projectId }, params.task_id, buildTaskChanges(params));
+      return toolJson(updated);
+    },
+  });
+
+  pi.registerTool({
+    name: "den_send_message",
+    label: "Den Send Message",
+    description: "Post a Den task-thread or project message.",
+    parameters: Type.Object({
+      content: Type.String({ description: "Message body." }),
+      project_id: Type.Optional(Type.String({ description: "Den project ID. Defaults to the current Pi project binding." })),
+      task_id: Type.Optional(Type.Number({ description: "Optional task ID." })),
+      thread_id: Type.Optional(Type.Number({ description: "Optional thread/root message ID." })),
+      intent: Type.Optional(Type.String({ description: "Optional intent, e.g. note, status_update, question, answer, handoff, task_blocked." })),
+      metadata_json: Type.Optional(Type.String({ description: "Optional metadata JSON string." })),
+      sender: Type.Optional(Type.String({ description: "Optional sender. Defaults to current Pi agent." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const cfg = await requireConfig(ctx);
+      const projectId = normalizeString(params.project_id) ?? cfg.projectId;
+      const message = await sendMessage({ ...cfg, projectId }, {
+        content: params.content,
+        taskId: optionalNumber(params.task_id),
+        threadId: optionalNumber(params.thread_id),
+        intent: normalizeString(params.intent),
+        metadataJson: normalizeString(params.metadata_json),
+        sender: normalizeString(params.sender),
+      });
+      return toolJson(message);
+    },
+  });
+
+  pi.registerTool({
+    name: "den_mark_read",
+    label: "Den Mark Read",
+    description: "Mark Den messages as read for this Pi agent.",
+    parameters: Type.Object({
+      message_ids: Type.Array(Type.Number(), { description: "Message IDs to mark read." }),
+      agent: Type.Optional(Type.String({ description: "Agent identity. Defaults to current Pi agent." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const cfg = await requireConfig(ctx);
+      const result = await markMessagesRead(cfg, params.message_ids, normalizeString(params.agent));
+      return toolJson(result);
+    },
+  });
+
+  pi.registerTool({
+    name: "den_complete_dispatch",
+    label: "Den Complete Dispatch",
+    description: "Mark a Den dispatch completed.",
+    parameters: Type.Object({
+      dispatch_id: Type.Number({ description: "Dispatch ID." }),
+      completed_by: Type.Optional(Type.String({ description: "Completer identity. Defaults to current Pi agent." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const cfg = await requireConfig(ctx);
+      const result = await completeDispatch(cfg, params.dispatch_id, normalizeString(params.completed_by));
+      return toolJson(result);
     },
   });
 }
@@ -287,10 +483,159 @@ async function getNextTask(cfg: DenConfig, assignedTo?: string) {
   return denFetch(cfg, `/api/projects/${esc(cfg.projectId)}/tasks/next?${query({ assignedTo })}`);
 }
 
+async function getTask(cfg: DenConfig, taskId: number) {
+  return denFetch(cfg, `/api/projects/${esc(cfg.projectId)}/tasks/${taskId}`);
+}
+
+async function claimNextTask(cfg: DenConfig, assignedTo?: string) {
+  const next = await getNextTask(cfg, assignedTo);
+  if (next?.message || !next?.id) return { claimed: false, next };
+  const task = await updateTask(cfg, next.id, {
+    status: "in_progress",
+    assigned_to: cfg.agent,
+  });
+  currentTaskId = task.id;
+  const detail = await getTask(cfg, task.id);
+  return { claimed: true, task, detail };
+}
+
+async function updateTask(cfg: DenConfig, taskId: number, changes: JsonObject) {
+  return denFetch(cfg, `/api/projects/${esc(cfg.projectId)}/tasks/${taskId}`, {
+    method: "PUT",
+    body: {
+      agent: cfg.agent,
+      ...changes,
+    },
+  });
+}
+
+async function sendTaskMessage(
+  cfg: DenConfig,
+  options: { taskId: number; content: string; intent?: string; metadata?: JsonObject },
+) {
+  return sendMessage(cfg, {
+    taskId: options.taskId,
+    content: options.content,
+    intent: options.intent,
+    metadataJson: options.metadata ? JSON.stringify(options.metadata) : undefined,
+  });
+}
+
+async function sendMessage(
+  cfg: DenConfig,
+  options: {
+    content: string;
+    taskId?: number;
+    threadId?: number;
+    intent?: string;
+    metadataJson?: string;
+    sender?: string;
+  },
+) {
+  return denFetch(cfg, `/api/projects/${esc(cfg.projectId)}/messages`, {
+    method: "POST",
+    body: {
+      sender: options.sender ?? cfg.agent,
+      content: options.content,
+      task_id: options.taskId,
+      thread_id: options.threadId,
+      intent: options.intent,
+      metadata: options.metadataJson,
+    },
+  });
+}
+
+async function markMessagesRead(cfg: DenConfig, messageIds: number[], agent?: string) {
+  return denFetch(cfg, "/api/messages/mark-read", {
+    method: "POST",
+    body: {
+      agent: agent ?? cfg.agent,
+      message_ids: messageIds,
+    },
+  });
+}
+
+async function completeDispatch(cfg: DenConfig, dispatchId: number, completedBy?: string) {
+  return denFetch(cfg, `/api/dispatch/${dispatchId}/complete`, {
+    method: "POST",
+    body: {
+      completed_by: completedBy ?? cfg.agent,
+    },
+  });
+}
+
 function formatNextTask(next: any): string[] {
   if (next?.message) return [`Next task: ${next.message}`];
   if (next?.id) return [`Next task: #${next.id} [P${next.priority}] ${next.title}`];
   return ["Next task: unavailable"];
+}
+
+function formatClaimResult(result: any): string[] {
+  if (!result?.claimed) return ["No task claimed.", ...formatNextTask(result?.next)];
+  return formatTaskDetail(result.detail ?? { task: result.task });
+}
+
+function formatTaskDetail(detail: any): string[] {
+  const task = detail?.task ?? detail;
+  if (!task?.id) return ["Task detail unavailable."];
+  const lines = [
+    `Task #${task.id} [${task.status ?? "unknown"}] P${task.priority ?? "?"}: ${task.title}`,
+  ];
+  if (task.assigned_to) lines.push(`Assigned: ${task.assigned_to}`);
+  if (task.description) lines.push(oneLine(task.description));
+  const messages = Array.isArray(detail?.messages) ? detail.messages : [];
+  if (messages.length > 0) lines.push(`Recent messages: ${messages.length}`);
+  return lines;
+}
+
+function buildTaskChanges(params: any): JsonObject {
+  const changes: JsonObject = {};
+  copyDefined(changes, "status", normalizeString(params.status));
+  copyDefined(changes, "assigned_to", normalizeString(params.assigned_to));
+  copyDefined(changes, "title", normalizeString(params.title));
+  copyDefined(changes, "description", normalizeString(params.description));
+  copyDefined(changes, "priority", optionalNumber(params.priority));
+  copyDefined(changes, "tags", Array.isArray(params.tags) ? params.tags : undefined);
+  copyDefined(changes, "parent_id", optionalNumber(params.parent_id));
+  return changes;
+}
+
+function copyDefined(target: JsonObject, key: string, value: unknown) {
+  if (value !== undefined) target[key] = value;
+}
+
+function parseRequiredId(args: string | undefined, label: string): number {
+  const first = args?.trim().split(/\s+/, 1)[0];
+  const value = Number(first);
+  if (!Number.isInteger(value) || value <= 0) throw new Error(`Expected ${label}.`);
+  return value;
+}
+
+function parseIds(args: string | undefined): number[] {
+  const values = (args ?? "")
+    .split(/[,\s]+/)
+    .map((value) => Number(value))
+    .filter((value) => Number.isInteger(value) && value > 0);
+  if (values.length === 0) throw new Error("Expected at least one message id.");
+  return values;
+}
+
+function parseTaskScopedText(args: string | undefined, fallbackTaskId: number | undefined, label: string) {
+  const scoped = parseOptionalTaskScopedText(args, fallbackTaskId);
+  if (!scoped.text) throw new Error(`Expected ${label}.`);
+  return scoped;
+}
+
+function parseOptionalTaskScopedText(args: string | undefined, fallbackTaskId: number | undefined) {
+  const trimmed = args?.trim() ?? "";
+  const match = trimmed.match(/^(\d+)(?:\s+([\s\S]*))?$/);
+  if (match) {
+    const taskId = Number(match[1]);
+    if (!Number.isInteger(taskId) || taskId <= 0) throw new Error("Expected task id.");
+    return { taskId, text: (match[2] ?? "").trim() };
+  }
+  if (!fallbackTaskId) throw new Error("No current Den task. Run /den-task <id> or pass a task id.");
+  return { taskId: fallbackTaskId, text: trimmed };
 }
 
 async function denFetch(cfg: DenConfig, pathAndQuery: string, options: { method?: string; body?: JsonObject } = {}) {
@@ -333,6 +678,10 @@ function oneLine(value: string): string {
 
 function normalizeString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function normalizeBaseUrl(value: string): string {
