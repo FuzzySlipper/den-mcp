@@ -10,6 +10,7 @@ The first project-local extension lives at:
 
 ```text
 .pi/extensions/den.ts
+.pi/extensions/den-subagent.ts
 ```
 
 Pi auto-discovers project-local extensions from `.pi/extensions`, so starting
@@ -55,6 +56,7 @@ It also updates the binding metadata on Pi agent start/end with a lightweight
 /den-blocked [task_id] <reason>
 /den-mark-read <message_id> [message_id...]
 /den-complete-dispatch <dispatch_id>
+/den-run-subagent <role> <task_id|-> <prompt>
 ```
 
 `/den-inbox` summarizes:
@@ -75,12 +77,19 @@ den_update_task
 den_send_message
 den_mark_read
 den_complete_dispatch
+den_run_subagent
 ```
 
 The write tools cover the minimum single-conductor work loop: claim a task,
 update task status/assignee fields, post task-thread messages, clear read
-state, and complete consumed dispatches. Review packet helpers and sub-agent run
-records are still follow-up slices.
+state, and complete consumed dispatches.
+
+`den_run_subagent` is the first sub-agent spike. It launches a fresh
+`pi --mode json -p --no-session` process, records `subagent_started` and
+`subagent_completed` ops entries, and posts the final output back to the task
+thread when `task_id` is present. It supports a single bounded run only; parallel
+fanout, worktree isolation, review packet helpers, and richer run records are
+still follow-up slices.
 
 ## Configuration
 
@@ -120,6 +129,7 @@ Then try:
 /den-inbox
 /den-next
 /den-claim-next
+/den-run-subagent planner - "Summarize the next useful Den follow-up task."
 ```
 
 ## Conductor direction
@@ -140,9 +150,10 @@ sub-agent run, not "coder terminal" versus "reviewer terminal."
 
 ## Open follow-ups
 
-- Add a Pi sub-agent runner command or tool backed by Pi RPC/SDK.
-- Persist sub-agent session IDs and run metadata, initially in stream ops
-  entries and later possibly in an `agent_runs` table.
+- Persist richer sub-agent session IDs and run metadata, possibly in an
+  `agent_runs` table after the stream-ops spike proves useful.
+- Add parallel fanout, worktree isolation, and role-specific model defaults for
+  coder/reviewer runs.
 - Add conductor prompts for drift detection using task intent, acceptance
   criteria, review findings, and coder responses.
 - Decide whether the long-term Den agent identity should be `pi`, `conductor`,
