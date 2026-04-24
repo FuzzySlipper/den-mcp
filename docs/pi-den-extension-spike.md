@@ -57,6 +57,8 @@ It also updates the binding metadata on Pi agent start/end with a lightweight
 /den-mark-read <message_id> [message_id...]
 /den-complete-dispatch <dispatch_id>
 /den-run-subagent [--continue|--fork <session>|--session <session>] <role> <task_id|-> <prompt>
+/den-run-coder [--continue|--fork <session>|--session <session>] <task_id> [extra notes]
+/den-run-reviewer [--fork <session>|--session <session>] <task_id> [review target/notes]
 ```
 
 `/den-inbox` summarizes:
@@ -78,6 +80,8 @@ den_send_message
 den_mark_read
 den_complete_dispatch
 den_run_subagent
+den_run_coder
+den_run_reviewer
 ```
 
 The write tools cover the minimum single-conductor work loop: claim a task,
@@ -98,6 +102,19 @@ Sub-agent session policy is explicit:
 
 It supports a single bounded run only; parallel fanout, worktree isolation,
 review packet helpers, and richer run records are still follow-up slices.
+
+`den_run_coder` and `den_run_reviewer` load prompt templates from Den documents
+before launching the sub-agent:
+
+- project document `pi-coder-subagent-prompt`, falling back to global
+  `_global/pi-coder-subagent-prompt-default`
+- project document `pi-reviewer-subagent-prompt`, falling back to global
+  `_global/pi-reviewer-subagent-prompt-default`
+- built-in fallback text if neither document exists
+
+Templates use simple `{{placeholder}}` replacement for values such as
+`{{project_id}}`, `{{task_id}}`, `{{task_title}}`, `{{task_description}}`,
+`{{task_context}}`, `{{review_target}}`, and `{{extra_notes}}`.
 
 ## Configuration
 
@@ -139,6 +156,8 @@ Then try:
 /den-claim-next
 /den-run-subagent planner - "Summarize the next useful Den follow-up task."
 /den-run-subagent --continue coder 123 "Continue from the prior coder run."
+/den-run-coder 123 "Keep the change scoped to the CLI wrapper."
+/den-run-reviewer 123 "Review main...task/123-example."
 ```
 
 ## Conductor direction

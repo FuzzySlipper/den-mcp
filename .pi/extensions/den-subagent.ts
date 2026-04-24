@@ -39,6 +39,9 @@ type SubagentResult = {
 };
 
 const DEFAULT_BASE_URL = "http://192.168.1.10:5199";
+const CODER_PROMPT_SLUG = "pi-coder-subagent-prompt";
+const REVIEWER_PROMPT_SLUG = "pi-reviewer-subagent-prompt";
+const GLOBAL_SUFFIX = "-default";
 
 export default function denSubagent(pi: ExtensionAPI) {
   pi.registerCommand("den-run-subagent", {
@@ -47,6 +50,28 @@ export default function denSubagent(pi: ExtensionAPI) {
       const cfg = resolveConfig(ctx);
       const options = parseRunCommand(args, ctx.cwd);
       const result = await runDenSubagent(cfg, options, ctx.cwd, undefined, undefined);
+      ctx.ui.setWidget("den-subagent", formatResultLines(result));
+      ctx.ui.notify(formatResultLines(result).join("\n"), result.exit_code === 0 ? "info" : "error");
+    },
+  });
+
+  pi.registerCommand("den-run-coder", {
+    description: "Run a coder sub-agent using the Den-managed coder prompt. Usage: /den-run-coder [--continue|--fork <session>|--session <session>] <task_id> [extra notes]",
+    handler: async (args, ctx) => {
+      const cfg = resolveConfig(ctx);
+      const parsed = parseTaskWrapperCommand(args, "coder");
+      const result = await runPromptedSubagent(cfg, "coder", parsed, ctx.cwd, undefined, undefined);
+      ctx.ui.setWidget("den-subagent", formatResultLines(result));
+      ctx.ui.notify(formatResultLines(result).join("\n"), result.exit_code === 0 ? "info" : "error");
+    },
+  });
+
+  pi.registerCommand("den-run-reviewer", {
+    description: "Run a reviewer sub-agent using the Den-managed reviewer prompt. Usage: /den-run-reviewer [--fork <session>|--session <session>] <task_id> [review target/notes]",
+    handler: async (args, ctx) => {
+      const cfg = resolveConfig(ctx);
+      const parsed = parseTaskWrapperCommand(args, "reviewer");
+      const result = await runPromptedSubagent(cfg, "reviewer", parsed, ctx.cwd, undefined, undefined);
       ctx.ui.setWidget("den-subagent", formatResultLines(result));
       ctx.ui.notify(formatResultLines(result).join("\n"), result.exit_code === 0 ? "info" : "error");
     },
@@ -98,6 +123,130 @@ export default function denSubagent(pi: ExtensionAPI) {
       };
     },
   });
+
+  pi.registerTool({
+    name: "den_run_coder",
+    label: "Den Run Coder",
+    description: "Load the Den-managed coder prompt template for a task and run a coder sub-agent.",
+    parameters: Type.Object({
+      task_id: Type.Number({ description: "Den task ID." }),
+      extra_notes: Type.Optional(Type.String({ description: "Optional extra conductor notes." })),
+      model: Type.Optional(Type.String({ description: "Optional Pi model pattern/provider id." })),
+      tools: Type.Optional(Type.String({ description: "Optional comma-separated Pi tool allowlist." })),
+      cwd: Type.Optional(Type.String({ description: "Optional working directory." })),
+      post_result: Type.Optional(Type.Boolean({ description: "Post final output back to Den task thread. Default true." })),
+      session_mode: Type.Optional(Type.String({ description: "fresh, continue, fork, or session. Defaults to fresh." })),
+      session: Type.Optional(Type.String({ description: "Session path/id for fork or session modes." })),
+    }),
+    async execute(_toolCallId, params, signal, onUpdate, ctx) {
+      const cfg = resolveConfig(ctx);
+      const result = await runPromptedSubagent(
+        cfg,
+        "coder",
+        {
+          taskId: params.task_id,
+          extraNotes: normalizeString(params.extra_notes),
+          model: normalizeString(params.model),
+          tools: normalizeString(params.tools),
+          cwd: normalizeString(params.cwd),
+          postResult: typeof params.post_result === "boolean" ? params.post_result : undefined,
+          sessionMode: parseSessionMode(normalizeString(params.session_mode)),
+          session: normalizeString(params.session),
+        },
+        ctx.cwd,
+        signal,
+        onUpdateText(onUpdate, "coder", params.task_id),
+      );
+      return resultTool(result);
+    },
+  });
+
+  pi.registerTool({
+    name: "den_run_reviewer",
+    label: "Den Run Reviewer",
+    description: "Load the Den-managed reviewer prompt template for a task and run a reviewer sub-agent.",
+    parameters: Type.Object({
+      task_id: Type.Number({ description: "Den task ID." }),
+      review_target: Type.Optional(Type.String({ description: "Branch, diff range, commit, or review target notes." })),
+      model: Type.Optional(Type.String({ description: "Optional Pi model pattern/provider id." })),
+      tools: Type.Optional(Type.String({ description: "Optional comma-separated Pi tool allowlist." })),
+      cwd: Type.Optional(Type.String({ description: "Optional working directory." })),
+      post_result: Type.Optional(Type.Boolean({ description: "Post final output back to Den task thread. Default true." })),
+      session_mode: Type.Optional(Type.String({ description: "fresh, continue, fork, or session. Defaults to fresh." })),
+      session: Type.Optional(Type.String({ description: "Session path/id for fork or session modes." })),
+    }),
+    async execute(_toolCallId, params, signal, onUpdate, ctx) {
+      const cfg = resolveConfig(ctx);
+      const result = await runPromptedSubagent(
+        cfg,
+        "reviewer",
+        {
+          taskId: params.task_id,
+          reviewTarget: normalizeString(params.review_target),
+          model: normalizeString(params.model),
+          tools: normalizeString(params.tools),
+          cwd: normalizeString(params.cwd),
+          postResult: typeof params.post_result === "boolean" ? params.post_result : undefined,
+          sessionMode: parseSessionMode(normalizeString(params.session_mode)),
+          session: normalizeString(params.session),
+        },
+        ctx.cwd,
+        signal,
+        onUpdateText(onUpdate, "reviewer", params.task_id),
+      );
+      return resultTool(result);
+    },
+  });
+}
+
+async function runPromptedSubagent(
+  cfg: DenConfig,
+  role: "coder" | "reviewer",
+  options: {
+    taskId: number;
+    extraNotes?: string;
+    reviewTarget?: string;
+    model?: string;
+    tools?: string;
+    cwd?: string;
+    postResult?: boolean;
+    sessionMode?: "fresh" | "continue" | "fork" | "session";
+    session?: string;
+  },
+  defaultCwd: string,
+  signal: AbortSignal | undefined,
+  onUpdate: ((partial: string) => void) | undefined,
+) {
+  const task = await getTask(cfg, options.taskId);
+  const promptDoc = await resolvePromptDoc(cfg, role === "coder" ? CODER_PROMPT_SLUG : REVIEWER_PROMPT_SLUG);
+  const prompt = renderTemplate(promptDoc.content, {
+    project_id: cfg.projectId,
+    task_id: String(options.taskId),
+    task_title: String(task.task?.title ?? task.title ?? ""),
+    task_description: String(task.task?.description ?? task.description ?? "(no task description)"),
+    task_context: summarizeTaskContext(task),
+    review_target: options.reviewTarget ?? options.extraNotes ?? "(no review target provided)",
+    extra_notes: options.extraNotes ?? "",
+    role,
+  });
+
+  return runDenSubagent(
+    cfg,
+    {
+      role,
+      prompt,
+      taskId: options.taskId,
+      model: options.model,
+      tools: options.tools,
+      cwd: options.cwd,
+      postResult: options.postResult ?? true,
+      sessionMode: role === "reviewer" && !options.sessionMode ? "fresh" : options.sessionMode,
+      session: options.session,
+    },
+    defaultCwd,
+    signal,
+    onUpdate,
+  );
 }
 
 async function runDenSubagent(
@@ -154,6 +303,27 @@ async function runDenSubagent(
   }
 
   return result;
+}
+
+async function getTask(cfg: DenConfig, taskId: number) {
+  return denFetch(cfg, `/api/projects/${esc(cfg.projectId)}/tasks/${taskId}`);
+}
+
+async function resolvePromptDoc(cfg: DenConfig, slug: string): Promise<{ content: string }> {
+  const projectDoc = await tryGetDocument(cfg, cfg.projectId, slug);
+  if (projectDoc?.content) return projectDoc;
+  const globalDoc = await tryGetDocument(cfg, "_global", `${slug}${GLOBAL_SUFFIX}`);
+  if (globalDoc?.content) return globalDoc;
+  return { content: fallbackPrompt(slug) };
+}
+
+async function tryGetDocument(cfg: DenConfig, projectId: string, slug: string): Promise<{ content: string } | undefined> {
+  try {
+    return await denFetch(cfg, `/api/projects/${esc(projectId)}/documents/${esc(slug)}`);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("failed with 404")) return undefined;
+    throw error;
+  }
 }
 
 async function spawnPiSubagent(
@@ -293,6 +463,28 @@ function parseRunCommand(args: string | undefined, cwd: string): RunOptions {
   };
 }
 
+function parseTaskWrapperCommand(args: string | undefined, role: "coder" | "reviewer") {
+  const parsed = parseRunFlags(args?.trim() ?? "");
+  const match = parsed.rest.match(/^(\d+)(?:\s+([\s\S]*))?$/);
+  if (!match) {
+    throw new Error(
+      role === "coder"
+        ? "Usage: /den-run-coder [--continue|--fork <session>|--session <session>] <task_id> [extra notes]"
+        : "Usage: /den-run-reviewer [--fork <session>|--session <session>] <task_id> [review target/notes]",
+    );
+  }
+  const taskId = Number(match[1]);
+  if (!Number.isInteger(taskId) || taskId <= 0) throw new Error("Expected task_id.");
+  const notes = (match[2] ?? "").trim();
+  return {
+    taskId,
+    extraNotes: role === "coder" ? notes || undefined : undefined,
+    reviewTarget: role === "reviewer" ? notes || undefined : undefined,
+    sessionMode: parsed.sessionMode,
+    session: parsed.session,
+  };
+}
+
 function parseRunFlags(input: string): { rest: string; sessionMode?: "fresh" | "continue" | "fork" | "session"; session?: string } {
   const parts = input.split(/\s+/).filter(Boolean);
   let sessionMode: "fresh" | "continue" | "fork" | "session" | undefined;
@@ -348,6 +540,77 @@ function addSessionArgs(args: string[], sessionMode: string, session: string | u
     default:
       throw new Error("session_mode must be fresh, continue, fork, or session.");
   }
+}
+
+function summarizeTaskContext(detail: any): string {
+  const parts: string[] = [];
+  const task = detail?.task ?? detail;
+  if (task?.status) parts.push(`Status: ${task.status}`);
+  if (task?.assigned_to) parts.push(`Assigned to: ${task.assigned_to}`);
+  if (task?.tags?.length) parts.push(`Tags: ${task.tags.join(", ")}`);
+  if (Array.isArray(detail?.dependencies) && detail.dependencies.length > 0) {
+    parts.push(`Dependencies: ${detail.dependencies.map((dep: any) => `#${dep.id} ${dep.title}`).join("; ")}`);
+  }
+  if (Array.isArray(detail?.subtasks) && detail.subtasks.length > 0) {
+    parts.push(`Subtasks: ${detail.subtasks.map((subtask: any) => `#${subtask.id} [${subtask.status}] ${subtask.title}`).join("; ")}`);
+  }
+  if (Array.isArray(detail?.messages) && detail.messages.length > 0) {
+    parts.push("Recent messages:");
+    for (const message of detail.messages.slice(0, 8)) {
+      parts.push(`- #${message.id} ${message.sender} (${message.intent ?? "general"}): ${oneLine(message.content ?? "")}`);
+    }
+  }
+  return parts.join("\n") || "(no additional Den context)";
+}
+
+function renderTemplate(template: string, values: Record<string, string>): string {
+  return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key) => values[key] ?? "");
+}
+
+function fallbackPrompt(slug: string): string {
+  if (slug === CODER_PROMPT_SLUG) {
+    return [
+      "You are a fresh coder sub-agent launched by the Den Pi conductor.",
+      "Project: {{project_id}}",
+      "Task: #{{task_id}} {{task_title}}",
+      "",
+      "{{task_description}}",
+      "",
+      "{{task_context}}",
+      "",
+      "Work only on this bounded task. Report changed files, tests run, and known gaps.",
+    ].join("\n");
+  }
+  return [
+    "You are a fresh reviewer sub-agent launched by the Den Pi conductor.",
+    "Project: {{project_id}}",
+    "Task: #{{task_id}} {{task_title}}",
+    "",
+    "{{task_description}}",
+    "",
+    "{{task_context}}",
+    "",
+    "Review target: {{review_target}}",
+    "",
+    "Prioritize blocking bugs, acceptance gaps, regressions, and missing tests. Finish with a concise verdict.",
+  ].join("\n");
+}
+
+function onUpdateText(onUpdate: any, role: string, taskId: number) {
+  return (partial: string) => {
+    onUpdate?.({
+      content: [{ type: "text", text: partial || "(sub-agent running...)" }],
+      details: { role, task_id: taskId },
+    });
+  };
+}
+
+function resultTool(result: SubagentResult) {
+  return {
+    content: [{ type: "text", text: result.final_output || "(no output)" }],
+    details: result,
+    isError: result.exit_code !== 0,
+  };
 }
 
 function defaultToolsForRole(role: string): string | undefined {
