@@ -28,8 +28,8 @@ Pi auto-discovers project-local extensions from `.pi/extensions`, so starting
 
 On `session_start`, the extension:
 
-- infers the Den project from `DEN_PI_PROJECT_ID` or by matching the current
-  working directory against registered Den project roots
+- infers the Den project from `DEN_PI_PROJECT_ID` or the basename of Pi's
+  current working directory
 - calls `/api/agents/checkin`
 - registers an `agent_instance_binding` with:
   - `agent_family`: `pi`
@@ -77,7 +77,7 @@ Environment variables:
 ```text
 DEN_MCP_URL             default http://192.168.1.10:5199
 DEN_MCP_BASE_URL        fallback if DEN_MCP_URL is unset
-DEN_PI_PROJECT_ID       optional explicit project id
+DEN_PI_PROJECT_ID       optional explicit project id; defaults to cwd basename
 DEN_PI_AGENT            default pi
 DEN_PI_ROLE             default conductor
 DEN_PI_INSTANCE_ID      optional stable instance id

@@ -168,7 +168,7 @@ export default function denExtension(pi: ExtensionAPI) {
 
 async function resolveConfig(ctx: any): Promise<DenConfig> {
   const baseUrl = normalizeBaseUrl(process.env.DEN_MCP_URL ?? process.env.DEN_MCP_BASE_URL ?? DEFAULT_BASE_URL);
-  const projectId = process.env.DEN_PI_PROJECT_ID ?? await inferProjectId(baseUrl, ctx.cwd);
+  const projectId = process.env.DEN_PI_PROJECT_ID ?? inferProjectIdFromCwd(ctx.cwd);
   const agent = process.env.DEN_PI_AGENT ?? "pi";
   const role = process.env.DEN_PI_ROLE ?? "conductor";
   const cwdHash = createHash("sha256").update(`${projectId}:${ctx.cwd}`).digest("hex").slice(0, 12);
@@ -190,25 +190,14 @@ async function ensureConfig(ctx: any): Promise<DenConfig | undefined> {
 
 async function requireConfig(ctx: any): Promise<DenConfig> {
   const cfg = await ensureConfig(ctx);
-  if (!cfg) throw new Error("Den project could not be resolved. Set DEN_PI_PROJECT_ID or register this repo in Den.");
+  if (!cfg) throw new Error("Den project could not be resolved. Set DEN_PI_PROJECT_ID or start Pi from a project directory.");
   return cfg;
 }
 
-async function inferProjectId(baseUrl: string, cwd: string): Promise<string> {
-  const response = await fetch(`${baseUrl}/api/projects`);
-  if (!response.ok) throw new Error(`GET /api/projects failed with ${response.status}`);
-  const projects = await response.json() as Array<{ id: string; root_path?: string | null }>;
-  const cwdResolved = path.resolve(cwd);
-  const matches = projects
-    .filter((project) => project.root_path && isWithin(path.resolve(project.root_path), cwdResolved))
-    .sort((a, b) => (b.root_path?.length ?? 0) - (a.root_path?.length ?? 0));
-  if (matches[0]?.id) return matches[0].id;
-  throw new Error(`No Den project root matched ${cwd}`);
-}
-
-function isWithin(root: string, candidate: string): boolean {
-  const relative = path.relative(root, candidate);
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+function inferProjectIdFromCwd(cwd: string): string {
+  const projectId = path.basename(path.resolve(cwd)).trim();
+  if (!projectId) throw new Error(`Could not infer Den project id from cwd: ${cwd}`);
+  return projectId;
 }
 
 function startHeartbeat(cfg: DenConfig, ctx: any) {
