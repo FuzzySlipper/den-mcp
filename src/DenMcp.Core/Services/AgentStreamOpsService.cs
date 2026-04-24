@@ -7,6 +7,7 @@ namespace DenMcp.Core.Services;
 
 public interface IAgentStreamOpsService
 {
+    Task<AgentStreamEntry> AppendOpsAsync(AgentStreamEntry entry);
     Task RecordDispatchCreatedAsync(DispatchEntry dispatch);
     Task RecordDispatchApprovedAsync(DispatchEntry dispatch, string decidedBy);
     Task RecordDispatchRejectedAsync(DispatchEntry dispatch, string decidedBy);
@@ -23,6 +24,22 @@ public sealed class AgentStreamOpsService : IAgentStreamOpsService
     {
         _stream = stream;
         _logger = logger;
+    }
+
+    public async Task<AgentStreamEntry> AppendOpsAsync(AgentStreamEntry entry)
+    {
+        if (entry.StreamKind != AgentStreamKind.Ops)
+            throw new InvalidOperationException("Only ops entries can be appended through AgentStreamOpsService.");
+
+        try
+        {
+            return await _stream.AppendAsync(entry);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to append agent stream ops event {EventType}", entry.EventType);
+            throw;
+        }
     }
 
     public Task RecordDispatchCreatedAsync(DispatchEntry dispatch) =>

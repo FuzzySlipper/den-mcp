@@ -119,6 +119,42 @@ public class AgentStreamApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RestAgentStream_ProjectOpsPostCreatesAuditableWakeDelivery()
+    {
+        var payload = new
+        {
+            sender = "den-codex-bridge",
+            sender_instance_id = "codex-agent-stream-api-test-bridge",
+            event_type = "wake_delivered",
+            recipient_agent = "codex",
+            recipient_role = "implementer",
+            recipient_instance_id = "codex-agent-stream-api-test-bridge",
+            delivery_mode = "record_only",
+            body = "Delivered agent stream entry #101 to Codex bridge.",
+            metadata = """{"source_entry_id":101,"thread_id":"thread-1"}""",
+            dedup_key = "wake-delivered:agent-stream:101:codex-agent-stream-api-test-bridge"
+        };
+
+        var response = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/agent-stream/ops", payload);
+        response.EnsureSuccessStatusCode();
+
+        var entry = await response.Content.ReadFromJsonAsync<AgentStreamEntry>(JsonOpts);
+        Assert.NotNull(entry);
+        Assert.Equal(AgentStreamKind.Ops, entry!.StreamKind);
+        Assert.Equal("wake_delivered", entry.EventType);
+        Assert.Equal(ProjectId, entry.ProjectId);
+        Assert.Equal(AgentStreamDeliveryMode.RecordOnly, entry.DeliveryMode);
+        Assert.Equal("codex-agent-stream-api-test-bridge", entry.RecipientInstanceId);
+        Assert.Equal(101, entry.Metadata!.Value.GetProperty("source_entry_id").GetInt32());
+
+        var repeat = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/agent-stream/ops", payload);
+        repeat.EnsureSuccessStatusCode();
+
+        var repeatedEntry = await repeat.Content.ReadFromJsonAsync<AgentStreamEntry>(JsonOpts);
+        Assert.Equal(entry.Id, repeatedEntry!.Id);
+    }
+
+    [Fact]
     public async Task McpAgentStreamTools_ListAndGetSupportProjectScope()
     {
         using var scope = _factory.Services.CreateScope();

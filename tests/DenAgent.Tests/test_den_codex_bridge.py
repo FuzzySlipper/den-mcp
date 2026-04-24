@@ -11,6 +11,7 @@ import tempfile
 import textwrap
 import threading
 import time
+import urllib.parse
 import unittest
 
 
@@ -27,7 +28,12 @@ class DenServer:
     def __init__(self, root_path: pathlib.Path):
         self.root_path = root_path
         self.dispatches: dict[int, dict] = {}
+        self.approved_dispatch_ids: list[int] = []
         self.completions: list[int] = []
+        self.stream_entries: dict[int, dict] = {}
+        self.ops_entries: list[dict] = []
+        self.checkins: list[dict] = []
+        self.heartbeats: list[dict] = []
         self.project_id = "sample"
         self._server: socketserver.TCPServer | None = None
         self._thread: threading.Thread | None = None
@@ -52,8 +58,27 @@ class DenServer:
                             }
                         ]
                     )
+                parsed = urllib.parse.urlparse(self.path)
+                if parsed.path == "/api/agents/bindings":
+                    query = urllib.parse.parse_qs(parsed.query)
+                    bindings = self._filter_bindings(outer.checkins, query)
+                    return self._json(bindings)
+                if parsed.path == "/api/agent-stream":
+                    query = urllib.parse.parse_qs(parsed.query)
+                    entries = list(outer.stream_entries.values())
+                    entries = self._filter_entries(entries, query)
+                    entries.sort(key=lambda entry: entry["id"], reverse=True)
+                    limit = int(query.get("limit", ["50"])[0])
+                    return self._json(entries[:limit])
+                if parsed.path.startswith("/api/agent-stream/"):
+                    entry_id = int(parsed.path.split("/")[3])
+                    entry = outer.stream_entries.get(entry_id)
+                    if entry is None:
+                        self.send_error(404)
+                        return
+                    return self._json(entry)
                 if self.path.startswith("/api/dispatch?"):
-                    return self._json([])
+                    return self._json([outer.dispatches[dispatch_id]["dispatch"] for dispatch_id in outer.approved_dispatch_ids])
                 if self.path.startswith("/api/dispatch/") and self.path.endswith("/context"):
                     dispatch_id = int(self.path.split("/")[3])
                     payload = outer.dispatches[dispatch_id]["context"]
@@ -65,15 +90,74 @@ class DenServer:
                 self.send_error(404)
 
             def do_POST(self):  # noqa: N802
+                if self.path == "/api/agents/checkin":
+                    payload = self._read_json()
+                    outer.checkins.append(payload)
+                    return self._json({"agent": payload["agent"], "project_id": payload["project_id"]})
+                if self.path == "/api/agents/heartbeat":
+                    payload = self._read_json()
+                    outer.heartbeats.append(payload)
+                    return self._json({"status": "ok"})
+                if self.path.startswith("/api/projects/") and self.path.endswith("/agent-stream/ops"):
+                    project_id = self.path.split("/")[3]
+                    payload = self._read_json()
+                    entry = dict(payload)
+                    entry.setdefault("id", max([0, *outer.stream_entries.keys()]) + 1)
+                    entry["project_id"] = entry.get("project_id") or project_id
+                    entry["stream_kind"] = "ops"
+                    entry.setdefault("created_at", "2026-04-23T00:00:00Z")
+                    outer.ops_entries.append(entry)
+                    outer.stream_entries[entry["id"]] = entry
+                    return self._json(entry, status=201)
                 if self.path.startswith("/api/dispatch/") and self.path.endswith("/complete"):
                     dispatch_id = int(self.path.split("/")[3])
                     outer.completions.append(dispatch_id)
                     return self._json({"id": dispatch_id, "status": "completed"})
                 self.send_error(404)
 
-            def _json(self, payload):
+            def _filter_entries(self, entries, query):
+                filters = {
+                    "projectId": "project_id",
+                    "streamKind": "stream_kind",
+                    "eventType": "event_type",
+                    "recipientAgent": "recipient_agent",
+                    "recipientRole": "recipient_role",
+                    "recipientInstanceId": "recipient_instance_id",
+                }
+                for query_name, entry_name in filters.items():
+                    expected = query.get(query_name, [None])[0]
+                    if expected:
+                        entries = [entry for entry in entries if entry.get(entry_name) == expected]
+                return entries
+
+            def _filter_bindings(self, checkins, query):
+                bindings = []
+                for checkin in checkins:
+                    binding = {
+                        "instance_id": checkin.get("instance_id"),
+                        "project_id": checkin.get("project_id"),
+                        "agent_identity": checkin.get("agent"),
+                        "role": checkin.get("role"),
+                        "transport_kind": checkin.get("transport_kind"),
+                        "status": "active",
+                    }
+                    if query.get("projectId", [binding["project_id"]])[0] != binding["project_id"]:
+                        continue
+                    if query.get("agentIdentity", [binding["agent_identity"]])[0] != binding["agent_identity"]:
+                        continue
+                    if query.get("role", [binding["role"]])[0] != binding["role"]:
+                        continue
+                    bindings.append(binding)
+                return bindings
+
+            def _read_json(self):
+                length = int(self.headers.get("Content-Length", "0"))
+                body = self.rfile.read(length)
+                return json.loads(body.decode("utf-8") or "{}")
+
+            def _json(self, payload, status=200):
                 body = json.dumps(payload).encode("utf-8")
-                self.send_response(200)
+                self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
@@ -299,6 +383,33 @@ class DenCodexBridgeTests(unittest.TestCase):
     def read_state(self) -> dict:
         return json.loads((self.state_root / "sample" / "state.json").read_text(encoding="utf-8"))
 
+    def add_stream_entry(self, entry_id: int, **overrides) -> dict:
+        entry = {
+            "id": entry_id,
+            "stream_kind": "message",
+            "event_type": "question",
+            "project_id": "sample",
+            "task_id": None,
+            "thread_id": None,
+            "dispatch_id": None,
+            "sender": "user",
+            "sender_instance_id": None,
+            "recipient_agent": "codex",
+            "recipient_role": None,
+            "recipient_instance_id": "codex-sample-bridge",
+            "delivery_mode": "wake",
+            "body": "Can you check the stream path?",
+            "metadata": {"source": "test"},
+            "dedup_key": None,
+            "created_at": "2026-04-23T00:00:00Z",
+        }
+        entry.update(overrides)
+        self.den_server.stream_entries[entry_id] = entry
+        return entry
+
+    def turn_starts(self) -> list[dict]:
+        return [entry for entry in self.read_jsonl(self.codex_log) if entry.get("method") == "turn/start"]
+
     def start_bridge(self, env: dict[str, str]) -> subprocess.Popen[str]:
         proc = subprocess.Popen(
             [
@@ -313,6 +424,12 @@ class DenCodexBridgeTests(unittest.TestCase):
                 self.den_server.base_url,
                 "--state-root",
                 str(self.state_root),
+                "--instance-id",
+                "codex-sample-bridge",
+                "--role",
+                "implementer",
+                "--stream-poll-interval",
+                "0.1",
             ],
             cwd=self.project_root,
             env=env,
@@ -483,6 +600,155 @@ class DenCodexBridgeTests(unittest.TestCase):
             self.assertEqual([], state["pending_dispatch_ids"])
             self.assertEqual([], state["delivered_dispatch_ids"])
             self.assertEqual([], self.den_server.completions)
+        finally:
+            proc.terminate()
+            proc.communicate(timeout=5)
+
+    def test_stream_wake_message_is_polled_and_delivered(self) -> None:
+        self.add_stream_entry(101, recipient_instance_id=None, recipient_agent=None, recipient_role="implementer")
+        env = self.base_env()
+        proc = self.start_bridge(env)
+
+        try:
+            self.wait_for(lambda: len(self.turn_starts()) == 1)
+            self.wait_for(
+                lambda: self.read_state().get("status") == "idle"
+                and self.read_state().get("delivered_stream_entry_ids") == [101]
+            )
+            self.wait_for(lambda: len(self.den_server.ops_entries) == 1)
+
+            turn_start = self.turn_starts()[0]
+            prompt = turn_start["params"]["input"][0]["text"]
+            self.assertIn("Agent stream entry: #101", prompt)
+            self.assertIn("Can you check the stream path?", prompt)
+
+            state = self.read_state()
+            self.assertEqual([], state["pending_stream_entry_ids"])
+            self.assertEqual([101], state["delivered_stream_entry_ids"])
+            self.assertEqual("codex-sample-bridge", state["instance_id"])
+            self.assertEqual("implementer", state["role"])
+
+            checkin = self.den_server.checkins[0]
+            self.assertEqual("codex-sample-bridge", checkin["instance_id"])
+            self.assertEqual("implementer", checkin["role"])
+            self.assertEqual("codex_app_server", checkin["transport_kind"])
+
+            ops_entry = self.den_server.ops_entries[0]
+            self.assertEqual("wake_delivered", ops_entry["event_type"])
+            self.assertEqual("record_only", ops_entry["delivery_mode"])
+            self.assertEqual("codex-sample-bridge", ops_entry["recipient_instance_id"])
+            self.assertEqual("wake-delivered:agent-stream:101:codex-sample-bridge", ops_entry["dedup_key"])
+            self.assertEqual(101, json.loads(ops_entry["metadata"])["source_entry_id"])
+        finally:
+            proc.terminate()
+            proc.communicate(timeout=5)
+
+    def test_stream_wake_message_is_not_replayed_after_restart(self) -> None:
+        self.add_stream_entry(101)
+        env = self.base_env()
+        proc = self.start_bridge(env)
+
+        try:
+            self.wait_for(lambda: len(self.turn_starts()) == 1)
+            self.wait_for(lambda: self.read_state().get("delivered_stream_entry_ids") == [101])
+        finally:
+            proc.terminate()
+            proc.communicate(timeout=5)
+
+        proc = self.start_bridge(env)
+        try:
+            time.sleep(0.4)
+            self.assertEqual(1, len(self.turn_starts()))
+            state = self.read_state()
+            self.assertEqual("idle", state["status"])
+            self.assertEqual([], state["pending_stream_entry_ids"])
+            self.assertEqual([101], state["delivered_stream_entry_ids"])
+            self.assertEqual(1, len(self.den_server.ops_entries))
+        finally:
+            proc.terminate()
+            proc.communicate(timeout=5)
+
+    def test_stream_poll_ignores_non_target_entries(self) -> None:
+        self.add_stream_entry(101, recipient_instance_id="codex-other-bridge")
+        self.add_stream_entry(102, recipient_instance_id=None, recipient_agent="claude-code")
+        self.add_stream_entry(103, recipient_instance_id=None, delivery_mode="notify")
+        self.add_stream_entry(104, recipient_instance_id=None, recipient_agent=None, recipient_role="reviewer")
+        self.add_stream_entry(105, project_id="other-project")
+
+        env = self.base_env()
+        proc = self.start_bridge(env)
+
+        try:
+            time.sleep(0.4)
+            self.assertEqual([], self.turn_starts())
+            self.assertEqual([], self.den_server.ops_entries)
+            state = self.read_state()
+            self.assertEqual("idle", state["status"])
+            self.assertEqual([], state["pending_stream_entry_ids"])
+            self.assertEqual([], state["delivered_stream_entry_ids"])
+        finally:
+            proc.terminate()
+            proc.communicate(timeout=5)
+
+    def test_stream_poll_records_wake_dropped_for_ambiguous_binding_resolution(self) -> None:
+        self.den_server.checkins.append(
+            {
+                "agent": "codex",
+                "project_id": "sample",
+                "instance_id": "codex-other-implementer",
+                "role": "implementer",
+                "transport_kind": "codex_app_server",
+            }
+        )
+        self.add_stream_entry(106, recipient_instance_id=None, recipient_agent=None, recipient_role="implementer")
+
+        env = self.base_env()
+        proc = self.start_bridge(env)
+
+        try:
+            self.wait_for(lambda: len(self.den_server.ops_entries) == 1)
+            self.assertEqual([], self.turn_starts())
+            state = self.read_state()
+            self.assertEqual("idle", state["status"])
+            self.assertEqual([], state["pending_stream_entry_ids"])
+            self.assertEqual([106], state["delivered_stream_entry_ids"])
+
+            ops_entry = self.den_server.ops_entries[0]
+            self.assertEqual("wake_dropped", ops_entry["event_type"])
+            self.assertEqual("record_only", ops_entry["delivery_mode"])
+            self.assertEqual("wake-dropped:106:ambiguous", ops_entry["dedup_key"])
+            metadata = json.loads(ops_entry["metadata"])
+            self.assertEqual(106, metadata["source_entry_id"])
+            self.assertEqual("ambiguous", metadata["resolution_status"])
+            self.assertEqual(
+                ["codex-other-implementer", "codex-sample-bridge"],
+                sorted(metadata["candidate_instance_ids"]),
+            )
+        finally:
+            proc.terminate()
+            proc.communicate(timeout=5)
+
+    def test_dispatch_and_stream_queues_alternate_when_both_are_pending(self) -> None:
+        self.den_server.approved_dispatch_ids = [41, 42]
+        self.add_stream_entry(101)
+        env = self.base_env()
+        proc = self.start_bridge(env)
+
+        try:
+            self.wait_for(lambda: len(self.turn_starts()) == 3)
+            prompts = [entry["params"]["input"][0]["text"] for entry in self.turn_starts()]
+            self.assertIn("Dispatch: #41", prompts[0])
+            self.assertIn("Agent stream entry: #101", prompts[1])
+            self.assertIn("Dispatch: #42", prompts[2])
+            self.wait_for(lambda: self.den_server.completions == [41, 42])
+            self.wait_for(lambda: self.read_state().get("status") == "idle")
+
+            state = self.read_state()
+            self.assertEqual("idle", state["status"])
+            self.assertEqual([], state["pending_dispatch_ids"])
+            self.assertEqual([], state["pending_stream_entry_ids"])
+            self.assertEqual([41, 42], state["delivered_dispatch_ids"])
+            self.assertEqual([101], state["delivered_stream_entry_ids"])
         finally:
             proc.terminate()
             proc.communicate(timeout=5)
