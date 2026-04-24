@@ -75,7 +75,7 @@ validated in a real Pi session.
 Environment variables:
 
 ```text
-DEN_MCP_URL             default http://127.0.0.1:5199
+DEN_MCP_URL             default http://192.168.1.10:5199
 DEN_MCP_BASE_URL        fallback if DEN_MCP_URL is unset
 DEN_PI_PROJECT_ID       optional explicit project id
 DEN_PI_AGENT            default pi

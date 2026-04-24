@@ -18,7 +18,7 @@ let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
 let config: DenConfig | undefined;
 let lastInboxLines: string[] = [];
 
-const DEFAULT_BASE_URL = "http://127.0.0.1:5199";
+const DEFAULT_BASE_URL = "http://192.168.1.10:5199";
 const HEARTBEAT_SECONDS = 60;
 
 export default function denExtension(pi: ExtensionAPI) {
