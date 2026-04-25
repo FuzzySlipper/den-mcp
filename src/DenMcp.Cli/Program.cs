@@ -25,6 +25,7 @@ try
         "docs" => await DocumentCommands.List(client, router),
         "doc" => await DocumentCommands.Get(client, router),
         "search" => await DocumentCommands.Search(client, router),
+        "guidance" => await AgentGuidanceCommands.Run(client, router),
         "dashboard" or "watch" => await DashboardCommand.Run(client, router),
         "--version" or "-v" => ShowVersion(),
         "help" or "--help" or "-h" or null => ShowHelp(),
@@ -68,6 +69,7 @@ static int ShowHelp()
           docs                           List documents
           doc <slug>                     Show a document
           search <query>                 Full-text search documents
+          guidance                       Resolve/list/manage agent guidance
           dashboard                      Live TUI dashboard
 
         Global options:

@@ -178,6 +178,33 @@ public sealed class DenApiClient : IDisposable
             $"api/documents/search?query={Uri.EscapeDataString(query)}");
     }
 
+    // Agent guidance
+    public async Task<ResolvedAgentGuidance> ResolveAgentGuidanceAsync(string projectId) =>
+        await GetAsync<ResolvedAgentGuidance>($"api/projects/{Esc(projectId)}/agent-guidance");
+
+    public async Task<List<AgentGuidanceEntry>> ListAgentGuidanceEntriesAsync(string projectId, bool includeGlobal = false)
+    {
+        var query = BuildQuery(("includeGlobal", includeGlobal ? "true" : null));
+        return await GetAsync<List<AgentGuidanceEntry>>($"api/projects/{Esc(projectId)}/agent-guidance/entries{query}");
+    }
+
+    public async Task<AgentGuidanceEntry> StoreAgentGuidanceEntryAsync(string projectId, AgentGuidanceEntry entry)
+    {
+        var body = new
+        {
+            document_project_id = entry.DocumentProjectId,
+            document_slug = entry.DocumentSlug,
+            importance = entry.Importance.ToDbValue(),
+            audience = entry.Audience,
+            sort_order = entry.SortOrder,
+            notes = entry.Notes
+        };
+        return await PostAsync<AgentGuidanceEntry>($"api/projects/{Esc(projectId)}/agent-guidance/entries", body);
+    }
+
+    public async Task DeleteAgentGuidanceEntryAsync(string projectId, int entryId) =>
+        await DeleteAsync<object>($"api/projects/{Esc(projectId)}/agent-guidance/entries/{entryId}");
+
     // Librarian
     public async Task<LibrarianResponse> QueryLibrarianAsync(string projectId, string query,
         int? taskId = null, bool includeGlobal = true)
@@ -218,6 +245,14 @@ public sealed class DenApiClient : IDisposable
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<T>(JsonOpts)
             ?? throw new InvalidOperationException($"Null response from PUT {url}");
+    }
+
+    private async Task<T> DeleteAsync<T>(string url)
+    {
+        var response = await _http.DeleteAsync(url);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<T>(JsonOpts)
+            ?? throw new InvalidOperationException($"Null response from DELETE {url}");
     }
 
     private static string Esc(string s) => Uri.EscapeDataString(s);
