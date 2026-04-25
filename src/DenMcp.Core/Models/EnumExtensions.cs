@@ -46,6 +46,20 @@ public static class EnumExtensions
         _ => throw new ArgumentException($"Unknown doc type: {value}", nameof(value))
     };
 
+    public static string ToDbValue(this AgentGuidanceImportance importance) => importance switch
+    {
+        AgentGuidanceImportance.Required => "required",
+        AgentGuidanceImportance.Important => "important",
+        _ => throw new ArgumentOutOfRangeException(nameof(importance), importance, null)
+    };
+
+    public static AgentGuidanceImportance ParseAgentGuidanceImportance(string value) => value switch
+    {
+        "required" => AgentGuidanceImportance.Required,
+        "important" => AgentGuidanceImportance.Important,
+        _ => throw new ArgumentException($"Unknown agent guidance importance: {value}", nameof(value))
+    };
+
     public static string ToDbValue(this MessageIntent intent) => intent switch
     {
         MessageIntent.General => "general",

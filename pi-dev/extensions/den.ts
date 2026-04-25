@@ -17,6 +17,7 @@ let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
 let config: DenConfig | undefined;
 let lastInboxLines: string[] = [];
 let currentTaskId: number | undefined;
+let resolvedAgentGuidance: any | undefined;
 
 const DEFAULT_BASE_URL = "http://192.168.1.10:5199";
 const HEARTBEAT_SECONDS = 60;
@@ -28,13 +29,26 @@ export default function denExtension(pi: ExtensionAPI) {
     try {
       config = await resolveConfig(ctx);
       await checkIn(config, ctx, "idle");
+      resolvedAgentGuidance = await getAgentGuidanceQuietly(config, ctx);
       startHeartbeat(config, ctx);
       ctx.ui.setStatus("den", `Den ${config.projectId}/${config.role}`);
       ctx.ui.notify(`Den connected: ${config.projectId} (${config.instanceId})`, "info");
     } catch (error) {
+      resolvedAgentGuidance = undefined;
       ctx.ui.setStatus("den", "Den offline");
+      ctx.ui.setStatus("den-guidance", undefined);
       ctx.ui.notify(`Den check-in failed: ${errorMessage(error)}`, "error");
     }
+  });
+
+  pi.on("before_agent_start", async (event) => {
+    if (!resolvedAgentGuidance?.content || !Array.isArray(resolvedAgentGuidance.sources) || resolvedAgentGuidance.sources.length === 0) {
+      return;
+    }
+
+    return {
+      systemPrompt: `${event.systemPrompt}\n\n${resolvedAgentGuidance.content}`,
+    };
   });
 
   pi.on("agent_start", async (_event, ctx) => {
@@ -213,6 +227,21 @@ export default function denExtension(pi: ExtensionAPI) {
       const dispatchId = parseRequiredId(args, "dispatch id");
       const result = await completeDispatch(cfg, dispatchId);
       ctx.ui.notify(`Completed dispatch #${result.id ?? dispatchId}.`, "info");
+    },
+  });
+
+  pi.registerCommand("den-agent-guidance", {
+    description: "Load and display the resolved Den-native agent guidance packet.",
+    handler: async (_args, ctx) => {
+      const cfg = await requireConfig(ctx);
+      resolvedAgentGuidance = await getAgentGuidance(cfg);
+      const sources = Array.isArray(resolvedAgentGuidance.sources) ? resolvedAgentGuidance.sources : [];
+      ctx.ui.setWidget("den-agent-guidance", [
+        `Resolved guidance for ${resolvedAgentGuidance.project_id ?? cfg.projectId}`,
+        `Sources: ${sources.length}`,
+        ...String(resolvedAgentGuidance.content ?? "").split("\n").slice(0, 38),
+      ]);
+      ctx.ui.notify(`Loaded ${sources.length} Den agent guidance source(s).`, "info");
     },
   });
 
@@ -430,6 +459,29 @@ async function completeDispatch(cfg: DenConfig, dispatchId: number, completedBy?
       completed_by: completedBy ?? cfg.agent,
     },
   });
+}
+
+async function getAgentGuidanceQuietly(cfg: DenConfig, ctx: any) {
+  try {
+    const guidance = await getAgentGuidance(cfg);
+    const count = Array.isArray(guidance.sources) ? guidance.sources.length : 0;
+    if (count > 0) {
+      ctx.ui.setStatus("den-guidance", `Guidance ${count}`);
+    } else {
+      ctx.ui.setStatus("den-guidance", undefined);
+    }
+    return guidance;
+  } catch (error) {
+    // Guidance resolution is additive. Keep Pi usable against older Den servers
+    // or projects without guidance entries configured yet.
+    ctx.ui.setStatus("den-guidance", undefined);
+    ctx.ui.notify(`Den guidance not loaded: ${errorMessage(error)}`, "warning");
+    return undefined;
+  }
+}
+
+async function getAgentGuidance(cfg: DenConfig) {
+  return denFetch(cfg, `/api/projects/${esc(cfg.projectId)}/agent-guidance`);
 }
 
 async function getConductorGuidance(cfg: DenConfig) {

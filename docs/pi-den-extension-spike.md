@@ -39,6 +39,8 @@ On `session_start`, the extension:
   - `agent_identity`: `pi` by default
   - `role`: `conductor` by default
   - `transport_kind`: `pi_extension`
+- resolves Den-native agent guidance from `/api/projects/{projectId}/agent-guidance`
+  and appends the packet to Pi's system prompt when guidance sources exist
 - starts a heartbeat loop against `/api/agents/heartbeat`
 - checks out on `session_shutdown`
 
@@ -58,6 +60,7 @@ It also updates the binding metadata on Pi agent start/end with a lightweight
 /den-blocked [task_id] <reason>
 /den-mark-read <message_id> [message_id...]
 /den-complete-dispatch <dispatch_id>
+/den-agent-guidance
 /den-conductor-guidance
 /den-run-subagent [--continue|--fork <session>|--session <session>] <role> <task_id|-> <prompt>
 /den-run-coder [--continue|--fork <session>|--session <session>] <task_id> [extra notes]
@@ -125,6 +128,13 @@ The `den-conductor` Pi skill is the user/agent-invokable entry point for
 conductor mode. It does not duplicate the policy text. It tells Pi to use Den
 MCP document tools to resolve project document `pi-conductor-guidance`, then
 `_global/pi-conductor-guidance-default`, then this skill's built-in fallback.
+
+Den-native guidance is the broader project guidance path. Operators mark Den
+documents as required or important with first-class guidance entries, then Pi
+loads the resolved `_global` + project packet on startup and `/reload`. Use
+`/den-agent-guidance` to refresh/display the packet without restarting the
+session. See `docs/agent-guidance.md` for API, MCP, CLI, and bootstrap
+`AGENTS.md` guidance.
 
 ## Configuration
 
@@ -203,6 +213,7 @@ Then try:
 /den-next
 /den-claim-next
 /skill:den-conductor
+/den-agent-guidance
 /den-conductor-guidance
 /den-config
 /den-run-subagent planner - "Summarize the next useful Den follow-up task."

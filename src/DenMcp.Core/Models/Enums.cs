@@ -20,6 +20,12 @@ public enum DocType
     Note
 }
 
+public enum AgentGuidanceImportance
+{
+    Required,
+    Important
+}
+
 public enum MessageIntent
 {
     General,
