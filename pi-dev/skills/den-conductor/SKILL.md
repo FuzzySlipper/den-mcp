@@ -49,7 +49,7 @@ After loading guidance:
 ## Default Bias
 
 When the user asks to start, continue, pick up, or otherwise work through Den
-project tasks, prefer acting directly over over-planning:
+project tasks, prefer acting directly rather than over-planning:
 
 1. Check dispatches, unread Den task-thread messages, and the next unblocked task.
 2. If the task is clear and unblocked, claim it and implement on a task branch.
