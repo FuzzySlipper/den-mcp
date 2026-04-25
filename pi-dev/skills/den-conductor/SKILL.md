@@ -1,10 +1,14 @@
 ---
 name: den-conductor
 description: >-
-  Use when the user asks you to coordinate Den project work as conductor:
-  inspect Den task/message state, delegate coder/reviewer sub-agents, manage
-  review/merge handoffs, or escalate drift/ambiguity. Do not use solely to read
-  or summarize a Den message/document; use the Den MCP tools directly for that.
+  Use when the user asks you to work through Den-managed project workflow:
+  start, claim, or continue the next Den task; inspect Den inbox, dispatches,
+  messages, or task state; coordinate or perform task implementation; request
+  review, handle review feedback, or manage merge handoffs; or delegate
+  coder/reviewer sub-agents. Bias toward doing clear unblocked work directly on
+  a task branch, then requesting review and preparing to merge. Do not use for
+  ordinary non-Den coding prompts, and do not use solely to read or summarize a
+  Den message/document; use Den MCP tools directly for that.
 ---
 
 # Den Conductor
@@ -31,7 +35,8 @@ Fetch and follow the live Den-managed conductor guidance from Den documents:
 3. If neither exists, use this skill's workflow as the fallback.
 
 Use the returned guidance as operating policy. The Den document is the source of
-truth; this skill is only the stable entry point.
+truth for conductor responsibilities; this skill is the stable entry point and
+provides workflow mechanics unless live guidance explicitly overrides them.
 
 ## Startup Routine
 
@@ -40,6 +45,22 @@ After loading guidance:
 1. Inspect Den messages/dispatches/tasks through MCP tools or `/den-inbox` if the user needs the UI summary.
 2. Read the next relevant task/thread/message through MCP tools.
 3. Decide whether to act directly, spawn a coder sub-agent, spawn a reviewer sub-agent, or ask the user for a decision.
+
+## Default Bias
+
+When the user asks to start, continue, pick up, or otherwise work through Den
+project tasks, prefer acting directly over over-planning:
+
+1. Check dispatches, unread Den task-thread messages, and the next unblocked task.
+2. If the task is clear and unblocked, claim it and implement on a task branch.
+3. Run relevant tests.
+4. Commit the reviewable diff.
+5. Move the task to review and post a structured review packet.
+6. Use reviewer sub-agents for independent review when appropriate.
+7. After approval, merge only if the branch still matches the reviewed head.
+
+Ask the user only when the task is ambiguous, blocked, risky, or requires
+product judgment.
 
 ## Delegation
 
