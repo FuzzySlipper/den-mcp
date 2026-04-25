@@ -34,7 +34,7 @@ html, body, #root {
 .dashboard {
   display: grid;
   grid-template-columns: 200px 1fr;
-  grid-template-rows: 35% 14% 1fr;
+  grid-template-rows: 34% 18% 1fr;
   height: 100vh;
   gap: 1px;
   background: var(--border);
@@ -153,7 +153,7 @@ html, body, #root {
   grid-column: 1 / -1;
   grid-row: 2;
   display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.6fr);
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.25fr) minmax(0, 1.65fr);
   gap: 1px;
   background: var(--border);
 }
@@ -1017,6 +1017,161 @@ html, body, #root {
 
 .stream-link:hover {
   background: var(--bg-hover);
+}
+
+.subagent-run-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.subagent-run-item {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.subagent-run-item:hover {
+  background: var(--bg-hover);
+}
+
+.subagent-run-item:last-child {
+  border-bottom: 0;
+}
+
+.subagent-run-topline,
+.subagent-run-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.subagent-state {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.subagent-state-running,
+.subagent-state-retrying {
+  background: #3b2a14;
+  color: var(--yellow);
+}
+
+.subagent-state-complete {
+  background: #1a2e1a;
+  color: var(--green);
+}
+
+.subagent-state-failed,
+.subagent-state-timeout,
+.subagent-state-aborted {
+  background: #3a1a24;
+  color: var(--red);
+}
+
+.subagent-state-unknown {
+  background: #2a2b3d;
+  color: var(--text-muted);
+}
+
+.subagent-role {
+  color: var(--text-bright);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.subagent-run-id,
+.subagent-run-time,
+.subagent-run-meta,
+.subagent-artifact-path {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.subagent-run-id,
+.subagent-artifact-path {
+  font-family: var(--font-mono);
+}
+
+.subagent-run-time {
+  margin-left: auto;
+}
+
+.subagent-run-summary {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.subagent-artifact-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.mono-value,
+.subagent-detail-artifact {
+  font-family: var(--font-mono);
+}
+
+.subagent-detail-artifact {
+  color: var(--text-muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.subagent-event-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.subagent-event-item {
+  appearance: none;
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 7px 8px;
+  display: grid;
+  grid-template-columns: minmax(112px, auto) auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.subagent-event-item:hover {
+  background: var(--bg-hover);
+}
+
+.subagent-event-time {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.subagent-event-body {
+  color: var(--text);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .message-thread-badge {

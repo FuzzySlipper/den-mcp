@@ -195,6 +195,12 @@ public sealed class AgentStreamRepository : IAgentStreamRepository
             cmd.Parameters.AddWithValue("@recipientInstanceId", options.RecipientInstanceId);
         }
 
+        if (!string.IsNullOrWhiteSpace(options.MetadataRunId))
+        {
+            where.Add("json_extract(metadata, '$.run_id') = @metadataRunId");
+            cmd.Parameters.AddWithValue("@metadataRunId", options.MetadataRunId);
+        }
+
         var whereClause = where.Count > 0 ? $"WHERE {string.Join(" AND ", where)}" : string.Empty;
         cmd.CommandText = $"""
             SELECT

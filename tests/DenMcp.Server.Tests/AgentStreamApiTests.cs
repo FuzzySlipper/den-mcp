@@ -100,6 +100,97 @@ public class AgentStreamApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RestSubagentRuns_GroupsOpsByRunId()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IAgentStreamRepository>();
+        var tasks = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+        var task = await tasks.CreateAsync(new ProjectTask
+        {
+            ProjectId = ProjectId,
+            Title = "Sub-agent run host task"
+        });
+
+        await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_started",
+            ProjectId = ProjectId,
+            TaskId = task.Id,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+            Body = "Started planner sub-agent.",
+            Metadata = Metadata("""{"run_id":"run-a","role":"planner","backend":"pi-cli","model":"gpt-5.5","artifacts":{"dir":"/tmp/run-a"}}""")
+        });
+
+        var timeout = await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_timeout",
+            ProjectId = ProjectId,
+            TaskId = task.Id,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+            Body = "planner sub-agent failed: startup timeout.",
+            Metadata = Metadata("""{"run_id":"run-a","role":"planner","backend":"pi-cli","duration_ms":1014,"timeout_kind":"startup","output_status":"no_assistant_final"}""")
+        });
+
+        await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_started",
+            ProjectId = OtherProjectId,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+            Metadata = Metadata("""{"run_id":"other-run","role":"coder"}""")
+        });
+
+        await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "dispatch_created",
+            ProjectId = ProjectId,
+            Sender = "codex",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+            Metadata = Metadata("""{"run_id":"not-a-subagent-run"}""")
+        });
+
+        var response = await _client.GetAsync($"/api/projects/{ProjectId}/subagent-runs?taskId={task.Id}");
+        response.EnsureSuccessStatusCode();
+
+        var runs = await response.Content.ReadFromJsonAsync<List<SubagentRunSummary>>(JsonOpts);
+        var run = Assert.Single(runs!);
+        Assert.Equal("run-a", run.RunId);
+        Assert.Equal("timeout", run.State);
+        Assert.Equal(timeout.Id, run.Latest.Id);
+        Assert.NotNull(run.Started);
+        Assert.Equal("planner", run.Role);
+        Assert.Equal(task.Id, run.TaskId);
+        Assert.Equal(ProjectId, run.ProjectId);
+        Assert.Equal("pi-cli", run.Backend);
+        Assert.Equal("gpt-5.5", run.Model);
+        Assert.Equal("no_assistant_final", run.OutputStatus);
+        Assert.Equal("startup", run.TimeoutKind);
+        Assert.Equal(1014, run.DurationMs);
+        Assert.Equal("/tmp/run-a", run.ArtifactDir);
+        Assert.Equal(2, run.EventCount);
+
+        var detailResponse = await _client.GetAsync($"/api/projects/{ProjectId}/subagent-runs/run-a?taskId={task.Id}");
+        detailResponse.EnsureSuccessStatusCode();
+
+        var detail = await detailResponse.Content.ReadFromJsonAsync<SubagentRunDetail>(JsonOpts);
+        Assert.NotNull(detail);
+        Assert.Equal("run-a", detail!.Summary.RunId);
+        Assert.Equal("timeout", detail.Summary.State);
+        Assert.Equal(2, detail.Events.Count);
+        Assert.Equal("subagent_started", detail.Events[0].EventType);
+        Assert.Equal("subagent_timeout", detail.Events[1].EventType);
+
+        var scopedMiss = await _client.GetAsync($"/api/projects/{OtherProjectId}/subagent-runs/run-a");
+        Assert.Equal(HttpStatusCode.NotFound, scopedMiss.StatusCode);
+    }
+
+    [Fact]
     public async Task RestAgentStream_ProjectScopedGetRejectsEntryFromAnotherProject()
     {
         using var scope = _factory.Services.CreateScope();
@@ -358,5 +449,11 @@ public class AgentStreamApiTests : IAsyncLifetime
             public Task<string> CompleteAsync(string systemPrompt, string userMessage, CancellationToken ct = default)
                 => Task.FromResult(string.Empty);
         }
+    }
+
+    private static JsonElement Metadata(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        return doc.RootElement.Clone();
     }
 }

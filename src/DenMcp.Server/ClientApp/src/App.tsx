@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from 'react';
-import type { AgentStreamEntry, DispatchEntry, Document, DocumentSummary, Message, MessageIntent } from './api/types';
+import type { AgentStreamEntry, DispatchEntry, Document, DocumentSummary, Message, MessageIntent, SubagentRunSummary } from './api/types';
 import {
   getDispatch,
   listProjects,
@@ -7,6 +7,7 @@ import {
   getMessageFeed,
   getThread,
   listAgentStream,
+  listSubagentRuns,
   listDocuments,
   listActiveAgents,
   listDispatches,
@@ -22,6 +23,8 @@ import { MessageFeed } from './components/MessageFeed';
 import { MessageDetail } from './components/MessageDetail';
 import { AgentStreamFeed } from './components/AgentStreamFeed';
 import { AgentStreamDetail } from './components/AgentStreamDetail';
+import { SubagentRunPanel } from './components/SubagentRunPanel';
+import { SubagentRunDetail } from './components/SubagentRunDetail';
 import { DocumentList } from './components/DocumentList';
 import { DocumentDetail } from './components/DocumentDetail';
 import { AgentBar } from './components/AgentBar';
@@ -34,6 +37,7 @@ export default function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
   const [selectedStreamEntry, setSelectedStreamEntry] = useState<AgentStreamEntry | null>(null);
+  const [selectedSubagentRun, setSelectedSubagentRun] = useState<SubagentRunSummary | null>(null);
   const [selectedDispatch, setSelectedDispatch] = useState<DispatchEntry | null>(null);
   const [selectedDoc, setSelectedDoc] = useState<DocumentSummary | null>(null);
   const [viewMode, setViewMode] = useState<'tasks' | 'documents'>('tasks');
@@ -106,6 +110,18 @@ export default function App() {
   );
   const { data: agentStream } = usePolling(fetchAgentStream, 5000);
 
+  const fetchSubagentRuns = useCallback(
+    () => effectiveProject
+      ? listSubagentRuns({
+        projectId: isGlobal ? (streamProjectFilter.trim() || undefined) : effectiveProject,
+        taskId: parsedStreamTaskId,
+        limit: 8,
+      })
+      : Promise.resolve([]),
+    [effectiveProject, isGlobal, parsedStreamTaskId, streamProjectFilter],
+  );
+  const { data: subagentRuns } = usePolling(fetchSubagentRuns, 2000);
+
   const fetchDocs = useCallback(
     () => effectiveProject
       ? listDocuments(isGlobal ? undefined : effectiveProject)
@@ -174,6 +190,7 @@ export default function App() {
     setSelectedTaskId(null);
     setSelectedMessage(null);
     setSelectedStreamEntry(null);
+    setSelectedSubagentRun(null);
     setSelectedDispatch(null);
     setSelectedDoc(null);
   }, []);
@@ -182,6 +199,7 @@ export default function App() {
     setSelectedTaskId(taskId);
     setSelectedMessage(null);
     setSelectedStreamEntry(null);
+    setSelectedSubagentRun(null);
     setSelectedDispatch(null);
     setSelectedDoc(null);
   }, []);
@@ -189,12 +207,21 @@ export default function App() {
   const handleMessageSelect = useCallback((message: Message) => {
     setSelectedMessage(message);
     setSelectedStreamEntry(null);
+    setSelectedSubagentRun(null);
     setSelectedDispatch(null);
     setSelectedDoc(null);
   }, []);
 
   const handleStreamSelect = useCallback((entry: AgentStreamEntry) => {
     setSelectedStreamEntry(entry);
+    setSelectedSubagentRun(null);
+    setSelectedDispatch(null);
+    setSelectedDoc(null);
+  }, []);
+
+  const handleSubagentRunSelect = useCallback((run: SubagentRunSummary) => {
+    setSelectedSubagentRun(run);
+    setSelectedStreamEntry(null);
     setSelectedDispatch(null);
     setSelectedDoc(null);
   }, []);
@@ -204,6 +231,7 @@ export default function App() {
       const dispatch = await getDispatch(dispatchId);
       setSelectedDispatch(dispatch);
       setSelectedStreamEntry(null);
+      setSelectedSubagentRun(null);
       setSelectedDoc(null);
     } catch (error) {
       console.error('Failed to load dispatch detail', error);
@@ -232,6 +260,7 @@ export default function App() {
       const thread = await getThread(entry.project_id, entry.thread_id);
       setSelectedMessage(thread.root);
       setSelectedStreamEntry(null);
+      setSelectedSubagentRun(null);
       setSelectedDispatch(null);
       setSelectedDoc(null);
     } catch (error) {
@@ -421,6 +450,20 @@ export default function App() {
             />
           </div>
         </div>
+
+        <div className="panel panel-subagents">
+          <div className="panel-header">
+            Sub-agent Runs
+          </div>
+          <div className="panel-body">
+            <SubagentRunPanel
+              runs={subagentRuns ?? []}
+              isGlobal={isGlobal}
+              onSelectRun={handleSubagentRunSelect}
+              onOpenTask={handleTaskSelect}
+            />
+          </div>
+        </div>
       </div>
 
       {/* Projects sidebar — bottom left */}
@@ -494,6 +537,16 @@ export default function App() {
           onOpenTask={handleTaskSelect}
           onOpenThread={entry => void handleStreamThreadOpen(entry)}
           onOpenDispatch={dispatchId => void handleDispatchSelect(dispatchId)}
+        />
+      )}
+
+      {selectedSubagentRun && (
+        <SubagentRunDetail
+          key={selectedSubagentRun.run_id}
+          run={selectedSubagentRun}
+          onClose={() => setSelectedSubagentRun(null)}
+          onOpenTask={handleTaskSelect}
+          onOpenEntry={handleStreamSelect}
         />
       )}
 

@@ -1,0 +1,70 @@
+import type { SubagentRunSummary } from '../api/types';
+import {
+  formatSubagentDuration,
+  summarizeSubagentRunEntry,
+} from '../subagentRuns';
+import { formatTimeAgo, truncate } from '../utils';
+
+interface Props {
+  runs: SubagentRunSummary[];
+  isGlobal: boolean;
+  onSelectRun: (run: SubagentRunSummary) => void;
+  onOpenTask: (taskId: number) => void;
+}
+
+export function SubagentRunPanel({ runs, isGlobal, onSelectRun, onOpenTask }: Props) {
+  if (runs.length === 0) {
+    return <div className="empty">No sub-agent runs.</div>;
+  }
+
+  return (
+    <div className="subagent-run-list">
+      {runs.map(run => (
+        <div
+          key={run.run_id}
+          className="subagent-run-item"
+          onClick={() => onSelectRun(run)}
+        >
+          <div className="subagent-run-topline">
+            <span className={`subagent-state subagent-state-${run.state}`}>{run.state}</span>
+            <span className="subagent-role">{run.role ?? 'subagent'}</span>
+            <span className="subagent-run-id">{run.run_id.slice(0, 12)}</span>
+            <span className="subagent-run-time">{formatTimeAgo(run.latest.created_at)}</span>
+          </div>
+
+          <div className="subagent-run-summary">
+            {truncate(summarizeSubagentRunEntry(run.latest), isGlobal ? 118 : 132)}
+          </div>
+
+          <div className="subagent-run-meta">
+            {isGlobal && run.project_id && <span>{truncate(run.project_id, 16)}</span>}
+            {run.backend && <span>{run.backend}</span>}
+            {run.model && <span>{truncate(run.model, 24)}</span>}
+            {run.output_status && <span>{run.output_status}</span>}
+            {run.timeout_kind && <span>{run.timeout_kind}</span>}
+            {run.duration_ms != null && <span>{formatSubagentDuration(run.duration_ms)}</span>}
+            <span>{run.event_count} events</span>
+          </div>
+
+          {(run.task_id != null || run.artifact_dir) && (
+            <div className="stream-links">
+              {run.task_id != null && (
+                <button
+                  type="button"
+                  className="stream-link"
+                  onClick={event => {
+                    event.stopPropagation();
+                    onOpenTask(run.task_id!);
+                  }}
+                >
+                  Task #{run.task_id}
+                </button>
+              )}
+              {run.artifact_dir && <span className="subagent-artifact-path">{truncate(run.artifact_dir, 68)}</span>}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}

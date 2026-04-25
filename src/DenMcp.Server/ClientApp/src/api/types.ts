@@ -285,6 +285,30 @@ export interface AgentStreamEntry {
   created_at: string;
 }
 
+export type SubagentRunState = 'running' | 'retrying' | 'complete' | 'failed' | 'timeout' | 'aborted' | 'unknown';
+
+export interface SubagentRunSummary {
+  run_id: string;
+  state: SubagentRunState;
+  latest: AgentStreamEntry;
+  started: AgentStreamEntry | null;
+  role: string | null;
+  task_id: number | null;
+  project_id: string | null;
+  backend: string | null;
+  model: string | null;
+  output_status: string | null;
+  timeout_kind: string | null;
+  duration_ms: number | null;
+  artifact_dir: string | null;
+  event_count: number;
+}
+
+export interface SubagentRunDetail {
+  summary: SubagentRunSummary;
+  events: AgentStreamEntry[];
+}
+
 export interface DispatchEntry {
   id: number;
   project_id: string;

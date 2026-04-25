@@ -1,12 +1,17 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
-
-type JsonObject = Record<string, unknown>;
+import {
+  createSubagentOutputExtractor,
+  isSubagentInfrastructureFailure,
+  isTerminalAssistantMessage,
+  parsePiStdoutLine,
+  type JsonObject,
+} from "./den-subagent-pipeline.ts";
 
 type DenConfig = {
   baseUrl: string;
@@ -30,17 +35,67 @@ type RunOptions = {
 };
 
 type SubagentResult = {
+  run_id: string;
   role: string;
   task_id?: number;
   session_mode: string;
   session?: string;
   exit_code: number;
+  signal?: string;
+  pid?: number;
+  backend: string;
+  started_at: string;
+  ended_at: string;
+  duration_ms: number;
+  aborted: boolean;
+  timeout_kind?: "startup" | "terminal_drain";
+  forced_kill: boolean;
   final_output: string;
+  assistant_final_found: boolean;
+  prompt_echo_detected: boolean;
+  output_status: "assistant_final" | "prompt_echo_only" | "no_assistant_final";
   stderr: string;
+  stderr_tail: string;
   model?: string;
   message_count: number;
+  assistant_message_count: number;
+  child_error_message?: string;
+  artifacts: SubagentArtifacts;
   fallback_from_model?: string;
   fallback_from_exit_code?: number;
+};
+
+type SubagentArtifacts = {
+  dir: string;
+  stdout_jsonl_path: string;
+  stderr_log_path: string;
+  status_json_path: string;
+  events_jsonl_path: string;
+};
+
+type SubagentBackendInput = {
+  cfg: DenConfig;
+  options: RunOptions;
+  cwd: string;
+  runId: string;
+  recorder: SubagentRunRecorder;
+  startedAt: string;
+  signal: AbortSignal | undefined;
+  onUpdate: ((partial: string) => void) | undefined;
+};
+
+type SubagentBackend = {
+  name: string;
+  run(input: SubagentBackendInput): Promise<SubagentResult>;
+};
+
+type SubagentRunRecorder = {
+  artifacts: SubagentArtifacts;
+  writeStatus(payload: JsonObject): Promise<void>;
+  appendEvent(event: JsonObject): Promise<void>;
+  appendStdoutLine(line: string): Promise<void>;
+  appendRawStdout(line: string): Promise<void>;
+  appendStderr(text: string): Promise<void>;
 };
 
 type DenExtensionConfig = {
@@ -59,6 +114,9 @@ const CODER_PROMPT_SLUG = "pi-coder-subagent-prompt";
 const REVIEWER_PROMPT_SLUG = "pi-reviewer-subagent-prompt";
 const GLOBAL_SUFFIX = "-default";
 const DEN_CONFIG_FILENAME = "den-config.json";
+const DEFAULT_STARTUP_TIMEOUT_MS = 60_000;
+const DEFAULT_FINAL_DRAIN_MS = 5_000;
+const DEFAULT_FORCE_KILL_MS = 5_000;
 
 export default function denSubagent(pi: ExtensionAPI) {
   pi.registerCommand("den-config", {
@@ -71,33 +129,33 @@ export default function denSubagent(pi: ExtensionAPI) {
   pi.registerCommand("den-run-subagent", {
     description: "Run a Pi sub-agent. Usage: /den-run-subagent [--continue|--fork <session>|--session <session>] <role> <task_id|-> <prompt>",
     handler: async (args, ctx) => {
-      const cfg = resolveConfig(ctx);
+      const cfg = await resolveConfig(ctx);
       const options = parseRunCommand(args, ctx.cwd);
       const result = await runDenSubagent(cfg, options, ctx.cwd, undefined, undefined);
       ctx.ui.setWidget("den-subagent", formatResultLines(result));
-      ctx.ui.notify(formatResultLines(result).join("\n"), result.exit_code === 0 ? "info" : "error");
+      ctx.ui.notify(formatResultLines(result).join("\n"), subagentSucceeded(result) ? "info" : "error");
     },
   });
 
   pi.registerCommand("den-run-coder", {
     description: "Run a coder sub-agent using the Den-managed coder prompt. Usage: /den-run-coder [--continue|--fork <session>|--session <session>] <task_id> [extra notes]",
     handler: async (args, ctx) => {
-      const cfg = resolveConfig(ctx);
+      const cfg = await resolveConfig(ctx);
       const parsed = parseTaskWrapperCommand(args, "coder");
       const result = await runPromptedSubagent(cfg, "coder", parsed, ctx.cwd, undefined, undefined);
       ctx.ui.setWidget("den-subagent", formatResultLines(result));
-      ctx.ui.notify(formatResultLines(result).join("\n"), result.exit_code === 0 ? "info" : "error");
+      ctx.ui.notify(formatResultLines(result).join("\n"), subagentSucceeded(result) ? "info" : "error");
     },
   });
 
   pi.registerCommand("den-run-reviewer", {
     description: "Run a reviewer sub-agent using the Den-managed reviewer prompt. Usage: /den-run-reviewer [--fork <session>|--session <session>] <task_id> [review target/notes]",
     handler: async (args, ctx) => {
-      const cfg = resolveConfig(ctx);
+      const cfg = await resolveConfig(ctx);
       const parsed = parseTaskWrapperCommand(args, "reviewer");
       const result = await runPromptedSubagent(cfg, "reviewer", parsed, ctx.cwd, undefined, undefined);
       ctx.ui.setWidget("den-subagent", formatResultLines(result));
-      ctx.ui.notify(formatResultLines(result).join("\n"), result.exit_code === 0 ? "info" : "error");
+      ctx.ui.notify(formatResultLines(result).join("\n"), subagentSucceeded(result) ? "info" : "error");
     },
   });
 
@@ -117,7 +175,7 @@ export default function denSubagent(pi: ExtensionAPI) {
       session: Type.Optional(Type.String({ description: "Session path/id for fork or session modes." })),
     }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
-      const cfg = resolveConfig(ctx);
+      const cfg = await resolveConfig(ctx);
       const result = await runDenSubagent(
         cfg,
         {
@@ -140,11 +198,7 @@ export default function denSubagent(pi: ExtensionAPI) {
           });
         },
       );
-      return {
-        content: [{ type: "text", text: result.final_output || "(no output)" }],
-        details: result,
-        isError: result.exit_code !== 0,
-      };
+      return resultTool(result);
     },
   });
 
@@ -163,7 +217,7 @@ export default function denSubagent(pi: ExtensionAPI) {
       session: Type.Optional(Type.String({ description: "Session path/id for fork or session modes." })),
     }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
-      const cfg = resolveConfig(ctx);
+      const cfg = await resolveConfig(ctx);
       const result = await runPromptedSubagent(
         cfg,
         "coder",
@@ -200,7 +254,7 @@ export default function denSubagent(pi: ExtensionAPI) {
       session: Type.Optional(Type.String({ description: "Session path/id for fork or session modes." })),
     }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
-      const cfg = resolveConfig(ctx);
+      const cfg = await resolveConfig(ctx);
       const result = await runPromptedSubagent(
         cfg,
         "reviewer",
@@ -423,6 +477,19 @@ async function runDenSubagent(
   const cwd = options.cwd ? path.resolve(options.cwd) : defaultCwd;
   const effectiveOptions = await applyConfiguredDefaults(options, cwd);
   const runId = makeRunId(cfg, effectiveOptions);
+  const backend = createSubagentBackend();
+  const recorder = await createRunRecorder(runId);
+  const artifacts = recorder.artifacts;
+  const startedAt = new Date().toISOString();
+  await recorder.writeStatus({
+    state: "starting",
+    run_id: runId,
+    role: effectiveOptions.role,
+    task_id: effectiveOptions.taskId ?? null,
+    backend: backend.name,
+    cwd,
+    started_at: startedAt,
+  });
   await appendOps(cfg, "subagent_started", {
     taskId: effectiveOptions.taskId,
     body: `Started ${effectiveOptions.role} sub-agent${effectiveOptions.taskId ? ` for task #${effectiveOptions.taskId}` : ""}.`,
@@ -430,14 +497,26 @@ async function runDenSubagent(
       run_id: runId,
       role: effectiveOptions.role,
       cwd,
+      backend: backend.name,
       model: effectiveOptions.model ?? null,
       tools: effectiveOptions.tools ?? defaultToolsForRole(effectiveOptions.role),
       session_mode: effectiveOptions.sessionMode ?? "fresh",
       session: effectiveOptions.session ?? null,
+      started_at: startedAt,
+      artifacts,
     },
   });
 
-  let result = await spawnPiSubagent(cfg, effectiveOptions, cwd, runId, signal, onUpdate);
+  let result = await backend.run({
+    cfg,
+    options: effectiveOptions,
+    cwd,
+    runId,
+    recorder,
+    startedAt,
+    signal,
+    onUpdate,
+  });
   const fallbackModel = shouldRetryWithFallback(options, effectiveOptions, result, signal)
     ? effectiveOptions.fallbackModel
     : undefined;
@@ -453,23 +532,47 @@ async function runDenSubagent(
         failed_model: result.model ?? effectiveOptions.model ?? null,
         failed_exit_code: result.exit_code,
         fallback_model: fallbackModel,
-        stderr_preview: result.stderr.slice(0, 1000),
+        stderr_preview: result.stderr_tail,
+        artifacts: result.artifacts,
       },
     });
+    await recorder.appendEvent({
+      type: "subagent.fallback_started",
+      ts: Date.now(),
+      failed_exit_code: result.exit_code,
+      fallback_model: fallbackModel,
+    });
     const failed = result;
-    result = await spawnPiSubagent(cfg, { ...effectiveOptions, model: fallbackModel }, cwd, runId, signal, onUpdate);
+    result = await backend.run({
+      cfg,
+      options: { ...effectiveOptions, model: fallbackModel },
+      cwd,
+      runId,
+      recorder,
+      startedAt,
+      signal,
+      onUpdate,
+    });
     result.fallback_from_model = failed.model ?? effectiveOptions.model;
     result.fallback_from_exit_code = failed.exit_code;
   }
 
   const finalRequestedModel = fallbackModel ?? effectiveOptions.model;
-  await appendOps(cfg, "subagent_completed", {
+  const completionEventType = subagentSucceeded(result)
+    ? "subagent_completed"
+    : result.aborted
+      ? "subagent_aborted"
+      : result.timeout_kind
+        ? "subagent_timeout"
+        : "subagent_failed";
+  await appendOps(cfg, completionEventType, {
     taskId: effectiveOptions.taskId,
-    body: `Completed ${effectiveOptions.role} sub-agent with exit code ${result.exit_code}.`,
+    body: formatCompletionOpsBody(result),
     metadata: {
       run_id: runId,
       role: effectiveOptions.role,
       cwd,
+      backend: result.backend,
       model: result.model ?? finalRequestedModel ?? null,
       fallback_model: effectiveOptions.fallbackModel ?? null,
       fallback_from_model: result.fallback_from_model ?? null,
@@ -477,20 +580,45 @@ async function runDenSubagent(
       session_mode: result.session_mode,
       session: result.session ?? null,
       exit_code: result.exit_code,
+      signal: result.signal ?? null,
+      pid: result.pid ?? null,
+      started_at: result.started_at,
+      ended_at: result.ended_at,
+      duration_ms: result.duration_ms,
+      aborted: result.aborted,
+      timeout_kind: result.timeout_kind ?? null,
+      forced_kill: result.forced_kill,
+      assistant_final_found: result.assistant_final_found,
+      prompt_echo_detected: result.prompt_echo_detected,
+      output_status: result.output_status,
       message_count: result.message_count,
-      stderr_preview: result.stderr.slice(0, 1000),
+      assistant_message_count: result.assistant_message_count,
+      child_error_message: result.child_error_message ?? null,
+      stderr_preview: result.stderr_tail,
+      artifacts: result.artifacts,
     },
   });
 
   const shouldPostResult = effectiveOptions.postResult ?? effectiveOptions.taskId !== undefined;
   if (shouldPostResult && effectiveOptions.taskId !== undefined) {
-    await sendTaskMessage(cfg, effectiveOptions.taskId, formatResultMessage(result), {
-      type: "subagent_result",
+    const ok = subagentSucceeded(result);
+    await sendTaskMessage(cfg, effectiveOptions.taskId, ok ? formatResultMessage(result) : formatFailureMessage(result), {
+      type: ok ? "subagent_result" : "subagent_failure",
       role: effectiveOptions.role,
       run_id: runId,
       exit_code: result.exit_code,
+      signal: result.signal ?? null,
       session_mode: result.session_mode,
       session: result.session ?? null,
+      backend: result.backend,
+      duration_ms: result.duration_ms,
+      timeout_kind: result.timeout_kind ?? null,
+      aborted: result.aborted,
+      forced_kill: result.forced_kill,
+      assistant_final_found: result.assistant_final_found,
+      prompt_echo_detected: result.prompt_echo_detected,
+      output_status: result.output_status,
+      artifacts: result.artifacts,
       fallback_from_model: result.fallback_from_model ?? null,
       fallback_from_exit_code: result.fallback_from_exit_code ?? null,
     });
@@ -507,7 +635,8 @@ function shouldRetryWithFallback(
 ): boolean {
   if (signal?.aborted) return false;
   if (originalOptions.model) return false;
-  if (result.exit_code === 0) return false;
+  if (subagentSucceeded(result)) return false;
+  if (isSubagentInfrastructureFailure(result)) return false;
   const fallback = normalizeString(effectiveOptions.fallbackModel);
   if (!fallback) return false;
   const attempted = normalizeString(result.model) ?? normalizeString(effectiveOptions.model);
@@ -535,21 +664,26 @@ async function tryGetDocument(cfg: DenConfig, projectId: string, slug: string): 
   }
 }
 
-async function spawnPiSubagent(
-  cfg: DenConfig,
-  options: RunOptions,
-  cwd: string,
-  runId: string,
-  signal: AbortSignal | undefined,
-  onUpdate: ((partial: string) => void) | undefined,
-): Promise<SubagentResult> {
+function createSubagentBackend(): SubagentBackend {
+  return piCliSubagentBackend;
+}
+
+const piCliSubagentBackend: SubagentBackend = {
+  name: "pi-cli",
+  run: runPiCliSubagent,
+};
+
+async function runPiCliSubagent(input: SubagentBackendInput): Promise<SubagentResult> {
+  const { cfg, options, cwd, runId, recorder, startedAt, signal, onUpdate } = input;
+  const artifacts = recorder.artifacts;
   const sessionMode = options.sessionMode ?? "fresh";
   const args = ["--mode", "json", "-p"];
   addSessionArgs(args, sessionMode, options.session);
   if (options.model) args.push("--model", options.model);
   const tools = options.tools ?? defaultToolsForRole(options.role);
   if (tools) args.push("--tools", tools);
-  args.push(buildSubagentPrompt(cfg, options));
+  const prompt = buildSubagentPrompt(cfg, options);
+  args.push(prompt);
 
   const env = {
     ...process.env,
@@ -561,78 +695,246 @@ async function spawnPiSubagent(
 
   let stderr = "";
   let buffer = "";
-  let finalOutput = "";
-  let model: string | undefined;
-  let messageCount = 0;
+  let pid: number | undefined;
+  let aborted = false;
+  let timeoutKind: SubagentResult["timeout_kind"];
+  let forcedKill = false;
+  const outputExtractor = createSubagentOutputExtractor(prompt, recorder);
 
-  const exitCode = await new Promise<number>((resolve) => {
-    const proc = spawn("pi", args, {
+  const command = normalizeString(process.env.DEN_PI_SUBAGENT_PI_BIN) ?? "pi";
+  const startupTimeoutMs = envMillis("DEN_PI_SUBAGENT_STARTUP_TIMEOUT_MS", DEFAULT_STARTUP_TIMEOUT_MS);
+  const finalDrainMs = envMillis("DEN_PI_SUBAGENT_FINAL_DRAIN_MS", DEFAULT_FINAL_DRAIN_MS);
+  const forceKillMs = envMillis("DEN_PI_SUBAGENT_FORCE_KILL_MS", DEFAULT_FORCE_KILL_MS);
+
+  const termination = await new Promise<{ exitCode: number; signal?: string }>((resolve) => {
+    const proc = spawn(command, args, {
       cwd,
       env,
+      detached: process.platform !== "win32",
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
     });
+    pid = proc.pid;
+    let settled = false;
+    let sawJsonEvent = false;
+    let startupTimer: ReturnType<typeof setTimeout> | undefined;
+    let finalDrainTimer: ReturnType<typeof setTimeout> | undefined;
+    let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
+    let abortHandler: (() => void) | undefined;
+
+    const clearTimer = (timer: ReturnType<typeof setTimeout> | undefined) => {
+      if (timer) clearTimeout(timer);
+    };
+
+    const clearTimers = () => {
+      clearTimer(startupTimer);
+      clearTimer(finalDrainTimer);
+      clearTimer(forceKillTimer);
+      startupTimer = undefined;
+      finalDrainTimer = undefined;
+      forceKillTimer = undefined;
+    };
+
+    const resolveOnce = (code: number | null, closeSignal?: NodeJS.Signals | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimers();
+      if (abortHandler && signal) signal.removeEventListener("abort", abortHandler);
+      const exitCode = exitCodeFromProcess(code, closeSignal);
+      resolve({ exitCode, signal: closeSignal ?? undefined });
+    };
+
+    const armForceKill = () => {
+      clearTimer(forceKillTimer);
+      forceKillTimer = setTimeout(() => {
+        if (settled) return;
+        forcedKill = true;
+        killProcessTree(proc, "SIGKILL");
+      }, forceKillMs);
+      forceKillTimer.unref?.();
+    };
+
+    const terminate = (kind: SubagentResult["timeout_kind"], markAborted = false) => {
+      if (settled) return;
+      if (kind) timeoutKind = kind;
+      if (markAborted) aborted = true;
+      void recorder.appendEvent({
+        type: kind ? `subagent.${kind}_timeout` : "subagent.abort",
+        ts: Date.now(),
+        pid: proc.pid ?? null,
+      });
+      killProcessTree(proc, "SIGTERM");
+      armForceKill();
+    };
+
+    void recorder.writeStatus({
+      state: "running",
+      run_id: runId,
+      role: options.role,
+      task_id: options.taskId ?? null,
+      backend: piCliSubagentBackend.name,
+      cwd,
+      pid: proc.pid ?? null,
+      started_at: startedAt,
+      command,
+      model: options.model ?? null,
+      tools: tools ?? null,
+      session_mode: sessionMode,
+      session: options.session ?? null,
+      process_group: process.platform !== "win32" && proc.pid ? -proc.pid : null,
+    });
+    void recorder.appendEvent({
+      type: "subagent.process_started",
+      ts: Date.now(),
+      pid: proc.pid ?? null,
+      command,
+      process_group: process.platform !== "win32" && proc.pid ? -proc.pid : null,
+    });
+
+    if (startupTimeoutMs > 0) {
+      startupTimer = setTimeout(() => {
+        if (settled || sawJsonEvent) return;
+        stderr += `\n[den-subagent] Killed: no JSON output after ${startupTimeoutMs}ms (startup timeout).`;
+        terminate("startup");
+      }, startupTimeoutMs);
+      startupTimer.unref?.();
+    }
 
     proc.stdout.on("data", (chunk) => {
       buffer += chunk.toString();
       const lines = buffer.split("\n");
       buffer = lines.pop() ?? "";
       for (const line of lines) {
-        const parsed = parseJsonLine(line);
+        const parsed = processStdoutLine(line);
         if (!parsed) continue;
-        const output = updateFromEvent(parsed);
+        if (!sawJsonEvent) {
+          sawJsonEvent = true;
+          clearTimer(startupTimer);
+          startupTimer = undefined;
+        }
+        const output = outputExtractor.updateFromEvent(parsed);
         if (output) onUpdate?.(output);
+        if (isTerminalAssistantMessage(parsed.message)) {
+          clearTimer(finalDrainTimer);
+          finalDrainTimer = setTimeout(() => terminate("terminal_drain"), finalDrainMs);
+          finalDrainTimer.unref?.();
+        }
       }
     });
 
     proc.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
+      const text = chunk.toString();
+      stderr += text;
+      void recorder.appendStderr(text);
     });
 
     proc.on("error", (error) => {
       stderr += `${error.message}\n`;
-      resolve(1);
+      outputExtractor.recordChildError(error.message);
+      void recorder.appendEvent({
+        type: "subagent.spawn_error",
+        ts: Date.now(),
+        error: error.message,
+      });
+      resolveOnce(1);
     });
 
-    proc.on("close", (code) => {
-      const parsed = parseJsonLine(buffer);
-      if (parsed) updateFromEvent(parsed);
-      resolve(code ?? 0);
+    proc.on("close", (code, closeSignal) => {
+      const parsed = processStdoutLine(buffer);
+      if (parsed) outputExtractor.updateFromEvent(parsed);
+      resolveOnce(code, closeSignal);
     });
 
-    const abort = () => {
-      proc.kill("SIGTERM");
-      setTimeout(() => {
-        if (!proc.killed) proc.kill("SIGKILL");
-      }, 5000);
+    abortHandler = () => {
+      terminate(undefined, true);
     };
-    if (signal?.aborted) abort();
-    else signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abortHandler();
+    else signal?.addEventListener("abort", abortHandler, { once: true });
   });
 
-  return {
+  const endedAt = new Date().toISOString();
+  const durationMs = Math.max(0, Date.parse(endedAt) - Date.parse(startedAt));
+  const output = outputExtractor.snapshot();
+  const outputStatus: SubagentResult["output_status"] = output.finalOutput
+    ? "assistant_final"
+    : output.promptEchoDetected
+      ? "prompt_echo_only"
+      : "no_assistant_final";
+  const stderrTail = tail(stderr.trim(), 2000);
+  const result: SubagentResult = {
+    run_id: runId,
     role: options.role,
     task_id: options.taskId,
     session_mode: sessionMode,
     session: options.session,
-    exit_code: exitCode,
-    final_output: finalOutput,
+    exit_code: termination.exitCode,
+    signal: termination.signal,
+    pid,
+    backend: piCliSubagentBackend.name,
+    started_at: startedAt,
+    ended_at: endedAt,
+    duration_ms: durationMs,
+    aborted,
+    timeout_kind: timeoutKind,
+    forced_kill: forcedKill,
+    final_output: output.finalOutput,
+    assistant_final_found: Boolean(output.finalOutput),
+    prompt_echo_detected: output.promptEchoDetected,
+    output_status: outputStatus,
     stderr,
-    model,
-    message_count: messageCount,
+    stderr_tail: stderrTail,
+    model: output.model,
+    message_count: output.messageCount,
+    assistant_message_count: output.assistantMessageCount,
+    child_error_message: output.childErrorMessage,
+    artifacts,
   };
 
-  function updateFromEvent(event: any): string | undefined {
-    const message = event.message;
-    if (!message) return undefined;
-    if (event.type !== "message_end" && event.type !== "tool_result_end") return undefined;
-    messageCount++;
-    if (message.model && typeof message.model === "string") model = message.model;
-    const text = extractText(message);
-    if (text) {
-      finalOutput = text;
-      return text;
+  await recorder.writeStatus({
+    state: subagentSucceeded(result) ? "complete" : "failed",
+    run_id: runId,
+    role: options.role,
+    task_id: options.taskId ?? null,
+    backend: result.backend,
+    cwd,
+    pid: pid ?? null,
+    started_at: startedAt,
+    ended_at: endedAt,
+    duration_ms: durationMs,
+    exit_code: result.exit_code,
+    signal: result.signal ?? null,
+    aborted: result.aborted,
+    timeout_kind: result.timeout_kind ?? null,
+    forced_kill: result.forced_kill,
+    assistant_final_found: result.assistant_final_found,
+    prompt_echo_detected: result.prompt_echo_detected,
+    output_status: result.output_status,
+    message_count: result.message_count,
+    assistant_message_count: result.assistant_message_count,
+    model: result.model ?? null,
+    child_error_message: result.child_error_message ?? null,
+  });
+  await recorder.appendEvent({
+    type: "subagent.process_finished",
+    ts: Date.now(),
+    exit_code: result.exit_code,
+    signal: result.signal ?? null,
+    timeout_kind: result.timeout_kind ?? null,
+    forced_kill: result.forced_kill,
+    output_status: result.output_status,
+  });
+
+  return result;
+
+  function processStdoutLine(line: string): any | undefined {
+    const parsed = parsePiStdoutLine(line);
+    if (!parsed) return undefined;
+    if (parsed.kind === "json") {
+      void recorder.appendStdoutLine(parsed.line);
+      return parsed.event;
     }
+
+    void recorder.appendRawStdout(parsed.line);
     return undefined;
   }
 }
@@ -870,10 +1172,11 @@ function onUpdateText(onUpdate: any, role: string, taskId: number) {
 }
 
 function resultTool(result: SubagentResult) {
+  const ok = subagentSucceeded(result);
   return {
-    content: [{ type: "text", text: result.final_output || "(no output)" }],
+    content: [{ type: "text", text: ok ? result.final_output : formatFailureSummary(result) }],
     details: result,
-    isError: result.exit_code !== 0,
+    isError: !ok,
   };
 }
 
@@ -884,44 +1187,213 @@ function defaultToolsForRole(_role: string): string | undefined {
 }
 
 function formatResultLines(result: SubagentResult): string[] {
+  const status = subagentSucceeded(result) ? "completed" : "failed";
   return [
-    `${result.role} sub-agent exited ${result.exit_code}`,
+    `${result.role} sub-agent ${status} (exit ${result.exit_code}${result.signal ? `, ${result.signal}` : ""})`,
     result.task_id ? `Task #${result.task_id}` : "No linked task",
-    oneLine(result.final_output || result.stderr || "(no output)"),
+    oneLine(subagentSucceeded(result) ? result.final_output : formatFailureSummary(result)),
   ];
 }
 
 function formatResultMessage(result: SubagentResult): string {
   const output = result.final_output || "(no output)";
-  const stderr = result.stderr.trim();
   return [
     `Sub-agent result (${result.role})`,
     "",
     `Exit code: ${result.exit_code}`,
+    result.signal ? `Signal: ${result.signal}` : null,
+    `Duration: ${formatDuration(result.duration_ms)}`,
     result.model ? `Model: ${result.model}` : null,
+    result.timeout_kind ? `Termination note: ${result.timeout_kind}${result.forced_kill ? " (forced kill)" : ""}` : null,
     result.fallback_from_model ? `Fallback retry from: ${result.fallback_from_model} (exit ${result.fallback_from_exit_code ?? "unknown"})` : null,
+    `Artifacts: ${result.artifacts.dir}`,
     "",
     output,
-    stderr ? `\nStderr:\n${stderr.slice(0, 2000)}` : null,
+    result.stderr_tail ? `\nStderr tail:\n${result.stderr_tail}` : null,
   ].filter((line): line is string => line !== null).join("\n");
 }
 
-function extractText(message: any): string | undefined {
-  if (!Array.isArray(message.content)) return undefined;
-  for (let i = message.content.length - 1; i >= 0; i--) {
-    const part = message.content[i];
-    if (part?.type === "text" && typeof part.text === "string") return part.text;
-  }
-  return undefined;
+function formatFailureMessage(result: SubagentResult): string {
+  return [
+    `Sub-agent failure (${result.role})`,
+    "",
+    formatFailureSummary(result),
+    "",
+    `Exit code: ${result.exit_code}`,
+    result.signal ? `Signal: ${result.signal}` : null,
+    `Duration: ${formatDuration(result.duration_ms)}`,
+    result.timeout_kind ? `Timeout: ${result.timeout_kind}` : null,
+    result.aborted ? "Aborted: true" : null,
+    result.forced_kill ? "Forced kill: true" : null,
+    result.child_error_message ? `Child error: ${result.child_error_message}` : null,
+    result.fallback_from_model ? `Fallback retry from: ${result.fallback_from_model} (exit ${result.fallback_from_exit_code ?? "unknown"})` : null,
+    `Artifacts: ${result.artifacts.dir}`,
+    "",
+    result.role === "reviewer"
+      ? "No valid review verdict was produced; the review remains pending."
+      : "No valid assistant final output was produced.",
+    result.stderr_tail ? `\nStderr tail:\n${result.stderr_tail}` : null,
+  ].filter((line): line is string => line !== null).join("\n");
 }
 
-function parseJsonLine(line: string): any | undefined {
-  if (!line.trim()) return undefined;
-  try {
-    return JSON.parse(line);
-  } catch {
-    return undefined;
+function formatFailureSummary(result: SubagentResult): string {
+  if (result.output_status === "prompt_echo_only") {
+    return "Sub-agent did not produce an assistant final answer; only prompt-echo-like output was observed.";
   }
+  if (result.timeout_kind === "startup") return "Sub-agent timed out before emitting JSON output.";
+  if (result.aborted) return "Sub-agent was aborted before producing a usable final answer.";
+  if (result.timeout_kind === "terminal_drain") return "Sub-agent produced output but did not exit cleanly after the terminal message.";
+  if (!result.assistant_final_found) return "Sub-agent did not produce an assistant final answer.";
+  return `Sub-agent process exited ${result.exit_code}${result.signal ? ` (${result.signal})` : ""}.`;
+}
+
+function formatCompletionOpsBody(result: SubagentResult): string {
+  if (subagentSucceeded(result)) {
+    const suffix = result.timeout_kind === "terminal_drain" ? " after forced terminal-drain cleanup" : "";
+    return `Completed ${result.role} sub-agent with exit code ${result.exit_code}${suffix}.`;
+  }
+  return `${result.role} sub-agent failed: ${formatFailureSummary(result)}`;
+}
+
+function subagentSucceeded(result: SubagentResult): boolean {
+  if (!result.assistant_final_found || result.aborted) return false;
+  if (result.exit_code === 0) return true;
+  return result.timeout_kind === "terminal_drain";
+}
+
+async function createRunArtifacts(runId: string): Promise<SubagentArtifacts> {
+  const dir = path.join(runArtifactRoot(), runId);
+  await mkdir(dir, { recursive: true });
+  const artifacts = {
+    dir,
+    stdout_jsonl_path: path.join(dir, "stdout.jsonl"),
+    stderr_log_path: path.join(dir, "stderr.log"),
+    status_json_path: path.join(dir, "status.json"),
+    events_jsonl_path: path.join(dir, "events.jsonl"),
+  };
+  await Promise.all([
+    writeFile(artifacts.stdout_jsonl_path, "", "utf8"),
+    writeFile(artifacts.stderr_log_path, "", "utf8"),
+    writeFile(artifacts.events_jsonl_path, "", "utf8"),
+  ]);
+  return artifacts;
+}
+
+async function createRunRecorder(runId: string): Promise<SubagentRunRecorder> {
+  const artifacts = await createRunArtifacts(runId);
+  return {
+    artifacts,
+    writeStatus(payload: JsonObject) {
+      return writeRunStatus(artifacts, payload);
+    },
+    appendEvent(event: JsonObject) {
+      return appendRunEvent(artifacts, event);
+    },
+    appendStdoutLine(line: string) {
+      return appendText(artifacts.stdout_jsonl_path, `${line}\n`);
+    },
+    appendRawStdout(line: string) {
+      return appendJsonl(artifacts.stdout_jsonl_path, {
+        type: "raw_stdout",
+        ts: Date.now(),
+        line,
+      });
+    },
+    appendStderr(text: string) {
+      return appendText(artifacts.stderr_log_path, text);
+    },
+  };
+}
+
+function runArtifactRoot(): string {
+  const agentDir = normalizeString(process.env.PI_CODING_AGENT_DIR);
+  return path.join(agentDir ?? path.join(os.homedir(), ".pi", "agent"), "den-subagent-runs");
+}
+
+async function writeRunStatus(artifacts: SubagentArtifacts, payload: JsonObject) {
+  try {
+    await writeFile(artifacts.status_json_path, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  } catch {
+    // Artifact writes should not break the sub-agent run.
+  }
+}
+
+async function appendRunEvent(artifacts: SubagentArtifacts, event: JsonObject) {
+  return appendJsonl(artifacts.events_jsonl_path, event);
+}
+
+async function appendJsonl(filePath: string, payload: JsonObject) {
+  return appendText(filePath, `${JSON.stringify(payload)}\n`);
+}
+
+async function appendText(filePath: string, text: string) {
+  try {
+    await appendFile(filePath, text, "utf8");
+  } catch {
+    // Artifact writes are best-effort.
+  }
+}
+
+function exitCodeFromProcess(code: number | null, signal: NodeJS.Signals | null | undefined): number {
+  if (typeof code === "number") return code;
+  if (!signal) return 1;
+  const signalNumber = signalToNumber(signal);
+  return signalNumber ? 128 + signalNumber : 1;
+}
+
+function signalToNumber(signal: string): number | undefined {
+  const signals: Record<string, number> = {
+    SIGHUP: 1,
+    SIGINT: 2,
+    SIGQUIT: 3,
+    SIGILL: 4,
+    SIGTRAP: 5,
+    SIGABRT: 6,
+    SIGBUS: 7,
+    SIGFPE: 8,
+    SIGKILL: 9,
+    SIGUSR1: 10,
+    SIGSEGV: 11,
+    SIGUSR2: 12,
+    SIGPIPE: 13,
+    SIGALRM: 14,
+    SIGTERM: 15,
+  };
+  return signals[signal];
+}
+
+function envMillis(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function killProcessTree(proc: { pid?: number; kill(signal?: NodeJS.Signals | number): boolean }, signal: NodeJS.Signals) {
+  if (process.platform !== "win32" && proc.pid) {
+    try {
+      process.kill(-proc.pid, signal);
+      return;
+    } catch {
+      // Fall through to the direct child; the process may not be a group leader.
+    }
+  }
+  try {
+    proc.kill(signal);
+  } catch {
+    // The process may already be gone.
+  }
+}
+
+function tail(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value;
+  return value.slice(value.length - maxChars);
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.floor((ms % 60_000) / 1000);
+  return `${minutes}m${seconds}s`;
 }
 
 async function appendOps(
@@ -959,7 +1431,11 @@ async function sendTaskMessage(cfg: DenConfig, taskId: number, content: string, 
 }
 
 async function denFetch(cfg: DenConfig, pathAndQuery: string, options: { method?: string; body?: JsonObject } = {}) {
-  const response = await fetch(`${cfg.baseUrl}${pathAndQuery}`, {
+  return denFetchBase(cfg.baseUrl, pathAndQuery, options);
+}
+
+async function denFetchBase(baseUrl: string, pathAndQuery: string, options: { method?: string; body?: JsonObject } = {}) {
+  const response = await fetch(`${baseUrl}${pathAndQuery}`, {
     method: options.method ?? "GET",
     headers: options.body ? { "Content-Type": "application/json" } : undefined,
     body: options.body ? JSON.stringify(options.body) : undefined,
@@ -973,14 +1449,31 @@ async function denFetch(cfg: DenConfig, pathAndQuery: string, options: { method?
   return payload;
 }
 
-function resolveConfig(ctx: any): DenConfig {
-  const baseUrl = normalizeBaseUrl(process.env.DEN_MCP_URL ?? process.env.DEN_MCP_BASE_URL ?? DEFAULT_BASE_URL);
-  const projectId = process.env.DEN_PI_PROJECT_ID ?? path.basename(path.resolve(ctx.cwd));
+async function resolveConfig(ctx: any): Promise<DenConfig> {
+  const baseUrl = baseUrlFromEnv();
+  const projectId = await resolveProjectId(baseUrl, ctx.cwd);
   const agent = process.env.DEN_PI_AGENT ?? "pi";
   const role = process.env.DEN_PI_ROLE ?? "conductor";
   const cwdHash = createHash("sha256").update(`${projectId}:${ctx.cwd}`).digest("hex").slice(0, 12);
   const instanceId = process.env.DEN_PI_INSTANCE_ID ?? `pi-${projectId}-${cwdHash}`;
   return { baseUrl, projectId, agent, role, instanceId };
+}
+
+async function resolveProjectId(baseUrl: string, cwd: string): Promise<string> {
+  const explicitProjectId = normalizeString(process.env.DEN_PI_PROJECT_ID);
+  if (explicitProjectId) return explicitProjectId;
+
+  const projects = await denFetchBase(baseUrl, "/api/projects/");
+  const cwdPath = path.resolve(cwd);
+  const matches = (Array.isArray(projects) ? projects : [])
+    .map((project) => ({ project, rootPath: normalizeString(project.root_path ?? project.rootPath) }))
+    .filter((entry) => entry.rootPath && isPathInside(cwdPath, entry.rootPath))
+    .sort((a, b) => b.rootPath!.length - a.rootPath!.length);
+
+  const projectId = normalizeString(matches[0]?.project?.id);
+  if (projectId) return projectId;
+
+  throw new Error(`Den is not bound to a project for cwd '${cwdPath}'. Start Pi inside a registered Den project root or set DEN_PI_PROJECT_ID explicitly.`);
 }
 
 function makeRunId(cfg: DenConfig, options: RunOptions): string {
@@ -1004,6 +1497,15 @@ function optionalNumber(value: unknown): number | undefined {
 
 function normalizeBaseUrl(value: string): string {
   return value.replace(/\/+$/, "");
+}
+
+function baseUrlFromEnv(): string {
+  return normalizeBaseUrl(process.env.DEN_MCP_URL ?? process.env.DEN_MCP_BASE_URL ?? DEFAULT_BASE_URL);
+}
+
+function isPathInside(cwd: string, rootPath: string): boolean {
+  const normalizedRoot = path.resolve(rootPath);
+  return cwd === normalizedRoot || cwd.startsWith(`${normalizedRoot}${path.sep}`);
 }
 
 function oneLine(value: string): string {
