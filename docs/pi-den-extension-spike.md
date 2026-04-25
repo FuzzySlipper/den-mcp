@@ -31,9 +31,13 @@ Pi starts inside this repo.
 
 On `session_start`, the extension:
 
-- infers the Den project from `DEN_PI_PROJECT_ID` or the basename of Pi's
+- binds to the explicit `DEN_PI_PROJECT_ID` when set; otherwise it lists Den
+  projects and chooses the registered project whose `root_path` contains Pi's
   current working directory
-- calls `/api/agents/checkin`
+- enters a quiet unbound state (`Den: no project bound`) when no registered
+  project root matches; it does not infer a project from the directory basename
+  and does not check in or start project-specific polling while unbound
+- calls `/api/agents/checkin` only after a project binding is resolved
 - registers an `agent_instance_binding` with:
   - `agent_family`: `pi`
   - `agent_identity`: `pi` by default
@@ -41,11 +45,13 @@ On `session_start`, the extension:
   - `transport_kind`: `pi_extension`
 - resolves Den-native agent guidance from `/api/projects/{projectId}/agent-guidance`
   and appends the packet to Pi's system prompt when guidance sources exist
-- starts a heartbeat loop against `/api/agents/heartbeat`
+- starts a heartbeat loop against `/api/agents/heartbeat` only while bound
 - checks out on `session_shutdown`
 
 It also updates the binding metadata on Pi agent start/end with a lightweight
-`state` value of `busy` or `idle`.
+`state` value of `busy` or `idle`. In unbound mode, project-specific commands
+fail with an actionable message; `/den-status` explains how to bind, and
+`/den-conductor-guidance` can still load global conductor guidance.
 
 ## Commands
 
@@ -143,7 +149,7 @@ Environment variables:
 ```text
 DEN_MCP_URL             default http://192.168.1.10:5199
 DEN_MCP_BASE_URL        fallback if DEN_MCP_URL is unset
-DEN_PI_PROJECT_ID       optional explicit project id; defaults to cwd basename
+DEN_PI_PROJECT_ID       optional explicit project id; when unset, bind by registered project root_path
 DEN_PI_AGENT            default pi
 DEN_PI_ROLE             default conductor
 DEN_PI_INSTANCE_ID      optional stable instance id
@@ -203,6 +209,12 @@ In another terminal, start Pi from the target project directory:
 
 ```bash
 pi
+```
+
+Smoke unbound startup from a temp directory (requires Den and Pi/model access):
+
+```bash
+scripts/smoke-pi-den-unbound-startup.sh
 ```
 
 Then try:

@@ -71,7 +71,7 @@ export default function denSubagent(pi: ExtensionAPI) {
   pi.registerCommand("den-run-subagent", {
     description: "Run a Pi sub-agent. Usage: /den-run-subagent [--continue|--fork <session>|--session <session>] <role> <task_id|-> <prompt>",
     handler: async (args, ctx) => {
-      const cfg = resolveConfig(ctx);
+      const cfg = await resolveConfig(ctx);
       const options = parseRunCommand(args, ctx.cwd);
       const result = await runDenSubagent(cfg, options, ctx.cwd, undefined, undefined);
       ctx.ui.setWidget("den-subagent", formatResultLines(result));
@@ -82,7 +82,7 @@ export default function denSubagent(pi: ExtensionAPI) {
   pi.registerCommand("den-run-coder", {
     description: "Run a coder sub-agent using the Den-managed coder prompt. Usage: /den-run-coder [--continue|--fork <session>|--session <session>] <task_id> [extra notes]",
     handler: async (args, ctx) => {
-      const cfg = resolveConfig(ctx);
+      const cfg = await resolveConfig(ctx);
       const parsed = parseTaskWrapperCommand(args, "coder");
       const result = await runPromptedSubagent(cfg, "coder", parsed, ctx.cwd, undefined, undefined);
       ctx.ui.setWidget("den-subagent", formatResultLines(result));
@@ -93,7 +93,7 @@ export default function denSubagent(pi: ExtensionAPI) {
   pi.registerCommand("den-run-reviewer", {
     description: "Run a reviewer sub-agent using the Den-managed reviewer prompt. Usage: /den-run-reviewer [--fork <session>|--session <session>] <task_id> [review target/notes]",
     handler: async (args, ctx) => {
-      const cfg = resolveConfig(ctx);
+      const cfg = await resolveConfig(ctx);
       const parsed = parseTaskWrapperCommand(args, "reviewer");
       const result = await runPromptedSubagent(cfg, "reviewer", parsed, ctx.cwd, undefined, undefined);
       ctx.ui.setWidget("den-subagent", formatResultLines(result));
@@ -117,7 +117,7 @@ export default function denSubagent(pi: ExtensionAPI) {
       session: Type.Optional(Type.String({ description: "Session path/id for fork or session modes." })),
     }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
-      const cfg = resolveConfig(ctx);
+      const cfg = await resolveConfig(ctx);
       const result = await runDenSubagent(
         cfg,
         {
@@ -163,7 +163,7 @@ export default function denSubagent(pi: ExtensionAPI) {
       session: Type.Optional(Type.String({ description: "Session path/id for fork or session modes." })),
     }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
-      const cfg = resolveConfig(ctx);
+      const cfg = await resolveConfig(ctx);
       const result = await runPromptedSubagent(
         cfg,
         "coder",
@@ -200,7 +200,7 @@ export default function denSubagent(pi: ExtensionAPI) {
       session: Type.Optional(Type.String({ description: "Session path/id for fork or session modes." })),
     }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
-      const cfg = resolveConfig(ctx);
+      const cfg = await resolveConfig(ctx);
       const result = await runPromptedSubagent(
         cfg,
         "reviewer",
@@ -959,7 +959,11 @@ async function sendTaskMessage(cfg: DenConfig, taskId: number, content: string, 
 }
 
 async function denFetch(cfg: DenConfig, pathAndQuery: string, options: { method?: string; body?: JsonObject } = {}) {
-  const response = await fetch(`${cfg.baseUrl}${pathAndQuery}`, {
+  return denFetchBase(cfg.baseUrl, pathAndQuery, options);
+}
+
+async function denFetchBase(baseUrl: string, pathAndQuery: string, options: { method?: string; body?: JsonObject } = {}) {
+  const response = await fetch(`${baseUrl}${pathAndQuery}`, {
     method: options.method ?? "GET",
     headers: options.body ? { "Content-Type": "application/json" } : undefined,
     body: options.body ? JSON.stringify(options.body) : undefined,
@@ -973,14 +977,31 @@ async function denFetch(cfg: DenConfig, pathAndQuery: string, options: { method?
   return payload;
 }
 
-function resolveConfig(ctx: any): DenConfig {
-  const baseUrl = normalizeBaseUrl(process.env.DEN_MCP_URL ?? process.env.DEN_MCP_BASE_URL ?? DEFAULT_BASE_URL);
-  const projectId = process.env.DEN_PI_PROJECT_ID ?? path.basename(path.resolve(ctx.cwd));
+async function resolveConfig(ctx: any): Promise<DenConfig> {
+  const baseUrl = baseUrlFromEnv();
+  const projectId = await resolveProjectId(baseUrl, ctx.cwd);
   const agent = process.env.DEN_PI_AGENT ?? "pi";
   const role = process.env.DEN_PI_ROLE ?? "conductor";
   const cwdHash = createHash("sha256").update(`${projectId}:${ctx.cwd}`).digest("hex").slice(0, 12);
   const instanceId = process.env.DEN_PI_INSTANCE_ID ?? `pi-${projectId}-${cwdHash}`;
   return { baseUrl, projectId, agent, role, instanceId };
+}
+
+async function resolveProjectId(baseUrl: string, cwd: string): Promise<string> {
+  const explicitProjectId = normalizeString(process.env.DEN_PI_PROJECT_ID);
+  if (explicitProjectId) return explicitProjectId;
+
+  const projects = await denFetchBase(baseUrl, "/api/projects/");
+  const cwdPath = path.resolve(cwd);
+  const matches = (Array.isArray(projects) ? projects : [])
+    .map((project) => ({ project, rootPath: normalizeString(project.root_path ?? project.rootPath) }))
+    .filter((entry) => entry.rootPath && isPathInside(cwdPath, entry.rootPath))
+    .sort((a, b) => b.rootPath!.length - a.rootPath!.length);
+
+  const projectId = normalizeString(matches[0]?.project?.id);
+  if (projectId) return projectId;
+
+  throw new Error(`Den is not bound to a project for cwd '${cwdPath}'. Start Pi inside a registered Den project root or set DEN_PI_PROJECT_ID explicitly.`);
 }
 
 function makeRunId(cfg: DenConfig, options: RunOptions): string {
@@ -1004,6 +1025,15 @@ function optionalNumber(value: unknown): number | undefined {
 
 function normalizeBaseUrl(value: string): string {
   return value.replace(/\/+$/, "");
+}
+
+function baseUrlFromEnv(): string {
+  return normalizeBaseUrl(process.env.DEN_MCP_URL ?? process.env.DEN_MCP_BASE_URL ?? DEFAULT_BASE_URL);
+}
+
+function isPathInside(cwd: string, rootPath: string): boolean {
+  const normalizedRoot = path.resolve(rootPath);
+  return cwd === normalizedRoot || cwd.startsWith(`${normalizedRoot}${path.sep}`);
 }
 
 function oneLine(value: string): string {

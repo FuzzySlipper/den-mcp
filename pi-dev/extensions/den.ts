@@ -15,6 +15,8 @@ type DenConfig = {
 
 let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
 let config: DenConfig | undefined;
+let bindingState: "unknown" | "bound" | "unbound" | "offline" = "unknown";
+let bindingMessage: string | undefined;
 let lastInboxLines: string[] = [];
 let currentTaskId: number | undefined;
 let resolvedAgentGuidance: any | undefined;
@@ -26,18 +28,36 @@ const GLOBAL_CONDUCTOR_GUIDANCE_SLUG = "pi-conductor-guidance-default";
 
 export default function denExtension(pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
+    clearHeartbeat();
+    config = undefined;
+    bindingState = "unknown";
+    bindingMessage = undefined;
+    resolvedAgentGuidance = undefined;
+    ctx.ui.setStatus("den-guidance", undefined);
+
     try {
       config = await resolveConfig(ctx);
+      bindingState = "bound";
       await checkIn(config, ctx, "idle");
       resolvedAgentGuidance = await getAgentGuidanceQuietly(config, ctx);
       startHeartbeat(config, ctx);
       ctx.ui.setStatus("den", `Den ${config.projectId}/${config.role}`);
       ctx.ui.notify(`Den connected: ${config.projectId} (${config.instanceId})`, "info");
     } catch (error) {
+      config = undefined;
       resolvedAgentGuidance = undefined;
-      ctx.ui.setStatus("den", "Den offline");
       ctx.ui.setStatus("den-guidance", undefined);
-      ctx.ui.notify(`Den check-in failed: ${errorMessage(error)}`, "error");
+      if (error instanceof UnboundProjectError) {
+        bindingState = "unbound";
+        bindingMessage = error.message;
+        ctx.ui.setStatus("den", "Den: no project bound");
+        return;
+      }
+
+      bindingState = "offline";
+      bindingMessage = `Den check-in failed: ${errorMessage(error)}`;
+      ctx.ui.setStatus("den", "Den offline");
+      ctx.ui.notify(bindingMessage, "error");
     }
   });
 
@@ -72,8 +92,7 @@ export default function denExtension(pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
-    if (heartbeatTimer) clearInterval(heartbeatTimer);
-    heartbeatTimer = undefined;
+    clearHeartbeat();
     const cfg = await ensureConfig(ctx);
     if (!cfg) return;
     try {
@@ -94,7 +113,14 @@ export default function denExtension(pi: ExtensionAPI) {
   pi.registerCommand("den-status", {
     description: "Show the current Den Pi binding.",
     handler: async (_args, ctx) => {
-      const cfg = await requireConfig(ctx);
+      const cfg = await ensureConfig(ctx);
+      if (!cfg) {
+        const lines = formatUnboundStatus(ctx);
+        ctx.ui.setWidget("den-status", lines);
+        ctx.ui.notify(lines.join("\n"), bindingState === "offline" ? "error" : "info");
+        return;
+      }
+
       const bindings = await denFetch(cfg, `/api/agents/bindings?${query({
         projectId: cfg.projectId,
         agentIdentity: cfg.agent,
@@ -248,8 +274,10 @@ export default function denExtension(pi: ExtensionAPI) {
   pi.registerCommand("den-conductor-guidance", {
     description: "Load the Den-managed Pi conductor guidance.",
     handler: async (_args, ctx) => {
-      const cfg = await requireConfig(ctx);
-      const guidance = await getConductorGuidance(cfg);
+      const cfg = await ensureConfig(ctx);
+      const guidance = cfg
+        ? await getConductorGuidance(cfg)
+        : await getGlobalConductorGuidance(baseUrlFromEnv());
       ctx.ui.setWidget("den-conductor-guidance", guidance.content.split("\n").slice(0, 40));
       ctx.ui.notify(`Loaded conductor guidance from ${guidance.project_id}/${guidance.slug}.`, "info");
     },
@@ -260,8 +288,8 @@ export default function denExtension(pi: ExtensionAPI) {
 }
 
 async function resolveConfig(ctx: any): Promise<DenConfig> {
-  const baseUrl = normalizeBaseUrl(process.env.DEN_MCP_URL ?? process.env.DEN_MCP_BASE_URL ?? DEFAULT_BASE_URL);
-  const projectId = process.env.DEN_PI_PROJECT_ID ?? inferProjectIdFromCwd(ctx.cwd);
+  const baseUrl = baseUrlFromEnv();
+  const projectId = await resolveProjectId(baseUrl, ctx.cwd);
   const agent = process.env.DEN_PI_AGENT ?? "pi";
   const role = process.env.DEN_PI_ROLE ?? "conductor";
   const cwdHash = createHash("sha256").update(`${projectId}:${ctx.cwd}`).digest("hex").slice(0, 12);
@@ -273,28 +301,54 @@ async function resolveConfig(ctx: any): Promise<DenConfig> {
 
 async function ensureConfig(ctx: any): Promise<DenConfig | undefined> {
   if (config) return config;
+  if (bindingState === "unbound" || bindingState === "offline") return undefined;
   try {
     config = await resolveConfig(ctx);
+    bindingState = "bound";
+    bindingMessage = undefined;
     return config;
-  } catch {
+  } catch (error) {
+    config = undefined;
+    bindingState = error instanceof UnboundProjectError ? "unbound" : "offline";
+    bindingMessage = error instanceof UnboundProjectError
+      ? error.message
+      : `Den check-in failed: ${errorMessage(error)}`;
     return undefined;
   }
 }
 
 async function requireConfig(ctx: any): Promise<DenConfig> {
   const cfg = await ensureConfig(ctx);
-  if (!cfg) throw new Error("Den project could not be resolved. Set DEN_PI_PROJECT_ID or start Pi from a project directory.");
+  if (!cfg) {
+    throw new Error(bindingMessage ?? "Den is not bound to a project. Start Pi inside a registered Den project root or set DEN_PI_PROJECT_ID.");
+  }
   return cfg;
 }
 
-function inferProjectIdFromCwd(cwd: string): string {
-  const projectId = path.basename(path.resolve(cwd)).trim();
-  if (!projectId) throw new Error(`Could not infer Den project id from cwd: ${cwd}`);
-  return projectId;
+async function resolveProjectId(baseUrl: string, cwd: string): Promise<string> {
+  const explicitProjectId = normalizeOptionalString(process.env.DEN_PI_PROJECT_ID);
+  if (explicitProjectId) return explicitProjectId;
+
+  const projects = await denFetchBase(baseUrl, "/api/projects/");
+  const cwdPath = path.resolve(cwd);
+  const matches = take(projects, Number.MAX_SAFE_INTEGER)
+    .map((project) => ({ project, rootPath: normalizeOptionalString(project.root_path ?? project.rootPath) }))
+    .filter((entry) => entry.rootPath && isPathInside(cwdPath, entry.rootPath))
+    .sort((a, b) => b.rootPath!.length - a.rootPath!.length);
+
+  const projectId = normalizeOptionalString(matches[0]?.project?.id);
+  if (projectId) return projectId;
+
+  throw new UnboundProjectError(`Den is not bound to a project for cwd '${cwdPath}'. Start Pi inside a registered Den project root or set DEN_PI_PROJECT_ID explicitly.`);
+}
+
+function clearHeartbeat() {
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  heartbeatTimer = undefined;
 }
 
 function startHeartbeat(cfg: DenConfig, ctx: any) {
-  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  clearHeartbeat();
   heartbeatTimer = setInterval(() => {
     denFetch(cfg, "/api/agents/heartbeat", {
       method: "POST",
@@ -487,10 +541,14 @@ async function getAgentGuidance(cfg: DenConfig) {
 async function getConductorGuidance(cfg: DenConfig) {
   const projectDoc = await tryGetDocument(cfg, cfg.projectId, CONDUCTOR_GUIDANCE_SLUG);
   if (projectDoc) return projectDoc;
-  const globalDoc = await tryGetDocument(cfg, "_global", GLOBAL_CONDUCTOR_GUIDANCE_SLUG);
+  return getGlobalConductorGuidance(cfg.baseUrl, cfg.projectId);
+}
+
+async function getGlobalConductorGuidance(baseUrl: string, projectId = "unbound") {
+  const globalDoc = await tryGetDocumentBase(baseUrl, "_global", GLOBAL_CONDUCTOR_GUIDANCE_SLUG);
   if (globalDoc) return globalDoc;
   return {
-    project_id: cfg.projectId,
+    project_id: projectId,
     slug: CONDUCTOR_GUIDANCE_SLUG,
     title: "Built-in Pi Conductor Guidance",
     content: [
@@ -507,6 +565,15 @@ async function getConductorGuidance(cfg: DenConfig) {
 async function tryGetDocument(cfg: DenConfig, projectId: string, slug: string) {
   try {
     return await denFetch(cfg, `/api/projects/${esc(projectId)}/documents/${esc(slug)}`);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("failed with 404")) return undefined;
+    throw error;
+  }
+}
+
+async function tryGetDocumentBase(baseUrl: string, projectId: string, slug: string) {
+  try {
+    return await denFetchBase(baseUrl, `/api/projects/${esc(projectId)}/documents/${esc(slug)}`);
   } catch (error) {
     if (error instanceof Error && error.message.includes("failed with 404")) return undefined;
     throw error;
@@ -572,7 +639,11 @@ function parseOptionalTaskScopedText(args: string | undefined, fallbackTaskId: n
 }
 
 async function denFetch(cfg: DenConfig, pathAndQuery: string, options: { method?: string; body?: JsonObject } = {}) {
-  const response = await fetch(`${cfg.baseUrl}${pathAndQuery}`, {
+  return denFetchBase(cfg.baseUrl, pathAndQuery, options);
+}
+
+async function denFetchBase(baseUrl: string, pathAndQuery: string, options: { method?: string; body?: JsonObject } = {}) {
+  const response = await fetch(`${baseUrl}${pathAndQuery}`, {
     method: options.method ?? "GET",
     headers: options.body ? { "Content-Type": "application/json" } : undefined,
     body: options.body ? JSON.stringify(options.body) : undefined,
@@ -584,6 +655,19 @@ async function denFetch(cfg: DenConfig, pathAndQuery: string, options: { method?
     throw new Error(`${options.method ?? "GET"} ${pathAndQuery} failed with ${response.status}${detail}`);
   }
   return payload;
+}
+
+function formatUnboundStatus(ctx: any): string[] {
+  if (bindingState === "offline") {
+    return [bindingMessage ?? "Den offline", `Base URL: ${baseUrlFromEnv()}`];
+  }
+
+  return [
+    "Den: no project bound",
+    bindingMessage ?? `No registered Den project root matched ${path.resolve(ctx.cwd)}.`,
+    "Start Pi inside a registered project root or set DEN_PI_PROJECT_ID explicitly.",
+    `Base URL: ${baseUrlFromEnv()}`,
+  ];
 }
 
 function query(values: Record<string, string | number | undefined>): string {
@@ -604,6 +688,26 @@ function oneLine(value: string): string {
 
 function normalizeBaseUrl(value: string): string {
   return value.replace(/\/+$/, "");
+}
+
+function baseUrlFromEnv(): string {
+  return normalizeBaseUrl(process.env.DEN_MCP_URL ?? process.env.DEN_MCP_BASE_URL ?? DEFAULT_BASE_URL);
+}
+
+function normalizeOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function isPathInside(cwd: string, rootPath: string): boolean {
+  const normalizedRoot = path.resolve(rootPath);
+  return cwd === normalizedRoot || cwd.startsWith(`${normalizedRoot}${path.sep}`);
+}
+
+class UnboundProjectError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UnboundProjectError";
+  }
 }
 
 function esc(value: string): string {
