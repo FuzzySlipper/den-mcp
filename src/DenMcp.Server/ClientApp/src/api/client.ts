@@ -10,6 +10,7 @@ import type {
   DocumentSummary,
   Document,
   DocumentSearchResult,
+  DocType,
   AgentSession,
   AgentStreamEntry,
   DispatchEntry,
@@ -175,6 +176,18 @@ export function getDocument(projectId: string, slug: string): Promise<Document |
       if (!res.ok) throw new Error(`GET document: ${res.status}`);
       return res.json();
     });
+}
+
+export interface SaveDocumentRequest {
+  slug: string;
+  title: string;
+  content: string;
+  doc_type?: DocType;
+  tags?: string[] | null;
+}
+
+export function saveDocument(projectId: string, doc: SaveDocumentRequest): Promise<Document> {
+  return post(`/api/projects/${esc(projectId)}/documents`, doc);
 }
 
 export function searchDocuments(query: string, projectId?: string): Promise<DocumentSearchResult[]> {
