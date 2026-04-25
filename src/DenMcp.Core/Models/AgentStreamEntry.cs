@@ -35,5 +35,6 @@ public sealed class AgentStreamListOptions
     public string? RecipientAgent { get; set; }
     public string? RecipientRole { get; set; }
     public string? RecipientInstanceId { get; set; }
+    public string? MetadataRunId { get; set; }
     public int Limit { get; set; } = 50;
 }

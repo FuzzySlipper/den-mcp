@@ -13,6 +13,8 @@ import type {
   DocType,
   AgentSession,
   AgentStreamEntry,
+  SubagentRunSummary,
+  SubagentRunDetail,
   DispatchEntry,
   ReviewPacketResult,
 } from './types';
@@ -236,6 +238,29 @@ export function listAgentStream(opts: ListAgentStreamOpts = {}): Promise<AgentSt
     limit: opts.limit,
   });
   return get(`/api/agent-stream${q}`);
+}
+
+export interface ListSubagentRunsOpts {
+  projectId?: string;
+  taskId?: number;
+  limit?: number;
+}
+
+export function listSubagentRuns(opts: ListSubagentRunsOpts = {}): Promise<SubagentRunSummary[]> {
+  const q = buildQuery({
+    projectId: opts.projectId,
+    taskId: opts.taskId,
+    limit: opts.limit,
+  });
+  return get(`/api/subagent-runs${q}`);
+}
+
+export function getSubagentRun(runId: string, opts: Omit<ListSubagentRunsOpts, 'limit'> = {}): Promise<SubagentRunDetail> {
+  const q = buildQuery({
+    projectId: opts.projectId,
+    taskId: opts.taskId,
+  });
+  return get(`/api/subagent-runs/${esc(runId)}${q}`);
 }
 
 // Dispatches
