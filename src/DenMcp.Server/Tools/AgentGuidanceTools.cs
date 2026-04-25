@@ -36,7 +36,7 @@ public sealed class AgentGuidanceTools
         [Description("Document slug to include in resolved guidance.")] string document_slug,
         [Description("Project ID where the referenced document lives. Defaults to project_id.")] string? document_project_id = null,
         [Description("Importance: required or important. Default: important.")] string importance = "important",
-        [Description("Optional JSON array of audience labels, e.g. [\"pi\",\"conductor\"].")] string? audience = null,
+        [Description("Optional comma-separated audience labels, e.g. 'pi,conductor'.")] string? audience = null,
         [Description("Deterministic sort order within the scope. Lower comes first. Default: 0.")] int sort_order = 0,
         [Description("Optional notes for why this document is included.")] string? notes = null)
     {
@@ -45,7 +45,7 @@ public sealed class AgentGuidanceTools
         if (doc is null)
             return JsonSerializer.Serialize(new { error = $"Document '{docProjectId}/{document_slug}' not found." }, JsonOpts.Default);
 
-        var parsedAudience = audience is not null ? JsonSerializer.Deserialize<List<string>>(audience) : null;
+        var parsedAudience = SplitAudience(audience);
         var entry = await repo.UpsertAsync(new AgentGuidanceEntry
         {
             ProjectId = project_id,
@@ -59,14 +59,21 @@ public sealed class AgentGuidanceTools
         return JsonSerializer.Serialize(entry, JsonOpts.Default);
     }
 
-    [McpServerTool(Name = "delete_agent_guidance_entry"), Description("Delete a first-class agent guidance entry by ID.")]
+    [McpServerTool(Name = "delete_agent_guidance_entry"), Description("Delete a first-class agent guidance entry by project scope and ID.")]
     public static async Task<string> DeleteAgentGuidanceEntry(
         IAgentGuidanceRepository repo,
+        [Description("Guidance scope project ID that owns the entry. Use '_global' for global guidance entries.")] string project_id,
         [Description("Agent guidance entry ID.")] int entry_id)
     {
-        var deleted = await repo.DeleteAsync(entry_id);
+        var deleted = await repo.DeleteAsync(entry_id, project_id);
         return deleted
-            ? JsonSerializer.Serialize(new { message = $"Agent guidance entry {entry_id} deleted." }, JsonOpts.Default)
-            : JsonSerializer.Serialize(new { error = $"Agent guidance entry {entry_id} not found." }, JsonOpts.Default);
+            ? JsonSerializer.Serialize(new { message = $"Agent guidance entry {entry_id} deleted from project '{project_id}'." }, JsonOpts.Default)
+            : JsonSerializer.Serialize(new { error = $"Agent guidance entry {entry_id} not found in project '{project_id}'." }, JsonOpts.Default);
+    }
+
+    private static List<string>? SplitAudience(string? audience)
+    {
+        var values = audience?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return values is { Length: > 0 } ? values.ToList() : null;
     }
 }

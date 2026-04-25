@@ -114,6 +114,39 @@ public sealed class AgentGuidanceRepositoryTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task DeleteAsync_IsScopedAndKeepsReferencedDocument()
+    {
+        var global = await _guidance.UpsertAsync(new AgentGuidanceEntry
+        {
+            ProjectId = "_global",
+            DocumentProjectId = "_global",
+            DocumentSlug = "global-required",
+            Importance = AgentGuidanceImportance.Required,
+            SortOrder = 0
+        });
+        var local = await _guidance.UpsertAsync(new AgentGuidanceEntry
+        {
+            ProjectId = "proj",
+            DocumentProjectId = "proj",
+            DocumentSlug = "project-important",
+            SortOrder = 0
+        });
+
+        var wrongScopeDeleted = await _guidance.DeleteAsync(global.Id, "proj");
+        Assert.False(wrongScopeDeleted);
+
+        var localDeleted = await _guidance.DeleteAsync(local.Id, "proj");
+        Assert.True(localDeleted);
+
+        var withGlobal = await _guidance.ListAsync("proj", includeGlobal: true);
+        var remaining = Assert.Single(withGlobal);
+        Assert.Equal(global.Id, remaining.Id);
+
+        var referencedDocument = await _documents.GetAsync("proj", "project-important");
+        Assert.NotNull(referencedDocument);
+    }
+
+    [Fact]
     public async Task List_CanIncludeInheritedGlobalEntries()
     {
         await _guidance.UpsertAsync(new AgentGuidanceEntry

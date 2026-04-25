@@ -180,31 +180,6 @@ public sealed class DatabaseInitializer
         CREATE INDEX IF NOT EXISTS idx_documents_project_type ON documents(project_id, doc_type);
 
         ------------------------------------------------------------
-        -- AGENT GUIDANCE ENTRIES
-        ------------------------------------------------------------
-        CREATE TABLE IF NOT EXISTS agent_guidance_entries (
-            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id          TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-            document_project_id TEXT NOT NULL,
-            document_slug       TEXT NOT NULL,
-            importance          TEXT NOT NULL DEFAULT 'important'
-                                CHECK (importance IN ('required', 'important')),
-            audience            TEXT,
-            sort_order          INTEGER NOT NULL DEFAULT 0,
-            notes               TEXT,
-            created_at          TEXT NOT NULL DEFAULT (datetime('now')),
-            updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
-            UNIQUE(project_id, document_project_id, document_slug),
-            FOREIGN KEY (document_project_id, document_slug)
-                REFERENCES documents(project_id, slug) ON DELETE CASCADE
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_agent_guidance_scope_order
-            ON agent_guidance_entries(project_id, sort_order, importance, document_project_id, document_slug);
-        CREATE INDEX IF NOT EXISTS idx_agent_guidance_document
-            ON agent_guidance_entries(document_project_id, document_slug);
-
-        ------------------------------------------------------------
         -- FTS5 for full-text search across documents
         ------------------------------------------------------------
         CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(

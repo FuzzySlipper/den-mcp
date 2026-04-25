@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -102,6 +103,38 @@ public sealed class AgentGuidanceApiTests : IAsyncLifetime
         Assert.Equal("project-guidance", resolved.Sources[1].Slug);
         Assert.Contains("Global guidance content", resolved.Content);
         Assert.Contains("Project guidance content", resolved.Content);
+    }
+
+    [Fact]
+    public async Task AgentGuidance_DeleteIsScopedAndKeepsReferencedDocument()
+    {
+        var createResponse = await _client.PostAsJsonAsync($"/api/projects/{_projectId}/agent-guidance/entries", new
+        {
+            document_slug = "project-guidance",
+            sort_order = 10
+        });
+        createResponse.EnsureSuccessStatusCode();
+        var entry = await createResponse.Content.ReadFromJsonAsync<AgentGuidanceEntry>(JsonOpts);
+        Assert.NotNull(entry);
+
+        var wrongScopeResponse = await _client.DeleteAsync($"/api/projects/_global/agent-guidance/entries/{entry!.Id}");
+        Assert.Equal(HttpStatusCode.NotFound, wrongScopeResponse.StatusCode);
+
+        var stillListedResponse = await _client.GetAsync($"/api/projects/{_projectId}/agent-guidance/entries");
+        stillListedResponse.EnsureSuccessStatusCode();
+        var stillListed = await stillListedResponse.Content.ReadFromJsonAsync<List<AgentGuidanceEntry>>(JsonOpts);
+        Assert.Single(stillListed!);
+
+        var deleteResponse = await _client.DeleteAsync($"/api/projects/{_projectId}/agent-guidance/entries/{entry.Id}");
+        deleteResponse.EnsureSuccessStatusCode();
+
+        var listResponse = await _client.GetAsync($"/api/projects/{_projectId}/agent-guidance/entries");
+        listResponse.EnsureSuccessStatusCode();
+        var entries = await listResponse.Content.ReadFromJsonAsync<List<AgentGuidanceEntry>>(JsonOpts);
+        Assert.Empty(entries!);
+
+        var docResponse = await _client.GetAsync($"/api/projects/{_projectId}/documents/project-guidance");
+        docResponse.EnsureSuccessStatusCode();
     }
 
     private sealed class GuidanceAppFactory : WebApplicationFactory<Program>

@@ -70,8 +70,8 @@ DELETE /api/projects/{projectId}/agent-guidance/entries/{entryId}
 
 - `get_agent_guidance(project_id)` resolves the packet.
 - `list_agent_guidance_entries(project_id, include_global)` lists entries.
-- `add_agent_guidance_entry(...)` adds or updates an entry.
-- `delete_agent_guidance_entry(entry_id)` removes an entry.
+- `add_agent_guidance_entry(...)` adds or updates an entry; its `audience` argument is a comma-separated string such as `pi,conductor`.
+- `delete_agent_guidance_entry(project_id, entry_id)` removes an entry scoped to the owning project.
 
 ## CLI
 
