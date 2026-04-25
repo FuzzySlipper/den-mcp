@@ -7,6 +7,7 @@ using DenMcp.Core.Models;
 using DenMcp.Core.Services;
 using DenMcp.Server;
 using DenMcp.Server.Notifications;
+using DenMcp.Server.Realtime;
 using DenMcp.Server.Routes;
 using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol;
@@ -71,6 +72,7 @@ builder.Services.AddSingleton<IAgentSessionRepository, AgentSessionRepository>()
 builder.Services.AddSingleton<IAgentInstanceBindingRepository, AgentInstanceBindingRepository>();
 builder.Services.AddSingleton<DispatchRepository>();
 builder.Services.AddSingleton<IAgentStreamRepository, AgentStreamRepository>();
+builder.Services.AddSingleton<AgentStreamRealtimeHub>();
 builder.Services.AddSingleton<INotificationMessageRepository, NotificationMessageRepository>();
 builder.Services.AddSingleton<IAgentStreamOpsService, AgentStreamOpsService>();
 builder.Services.AddSingleton<IDispatchRepository>(services =>

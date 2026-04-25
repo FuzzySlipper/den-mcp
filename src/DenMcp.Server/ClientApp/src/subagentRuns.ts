@@ -1,4 +1,6 @@
-import type { AgentStreamEntry, SubagentRunState } from './api/types';
+import type { AgentStreamEntry, SubagentRunState, SubagentRunSummary } from './api/types';
+
+export type SubagentRunFilter = 'all' | 'active' | 'problem' | 'complete';
 
 export function stateFromSubagentEvent(eventType: string): SubagentRunState {
   switch (eventType) {
@@ -56,4 +58,18 @@ export function formatInfrastructureFailureReason(reason: string | null): string
 export function summarizeSubagentRunEntry(entry: AgentStreamEntry): string {
   const body = entry.body?.replace(/\s+/g, ' ').trim();
   return body || entry.event_type.replace(/_/g, ' ');
+}
+
+export function subagentRunMatchesFilter(run: SubagentRunSummary, filter: SubagentRunFilter): boolean {
+  switch (filter) {
+    case 'active':
+      return run.state === 'running' || run.state === 'retrying';
+    case 'problem':
+      return run.state === 'failed' || run.state === 'timeout' || run.state === 'aborted' || run.state === 'unknown';
+    case 'complete':
+      return run.state === 'complete';
+    case 'all':
+    default:
+      return true;
+  }
 }

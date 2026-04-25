@@ -290,6 +290,8 @@ export type SubagentRunState = 'running' | 'retrying' | 'complete' | 'failed' | 
 export interface SubagentRunSummary {
   run_id: string;
   state: SubagentRunState;
+  schema: string | null;
+  schema_version: number | null;
   latest: AgentStreamEntry;
   started: AgentStreamEntry | null;
   role: string | null;
@@ -320,6 +322,17 @@ export interface SubagentRunSummary {
 export interface SubagentRunDetail {
   summary: SubagentRunSummary;
   events: AgentStreamEntry[];
+  artifacts: SubagentRunArtifactSnapshot | null;
+}
+
+export interface SubagentRunArtifactSnapshot {
+  dir: string;
+  readable: boolean;
+  status_json: string | null;
+  events_tail: string | null;
+  stdout_tail: string | null;
+  stderr_tail: string | null;
+  read_error: string | null;
 }
 
 export interface DispatchEntry {

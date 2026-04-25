@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { getSubagentRun } from '../api/client';
 import type { AgentStreamEntry, SubagentRunSummary } from '../api/types';
 import { usePolling } from '../hooks/usePolling';
@@ -21,6 +21,7 @@ function formatDate(iso: string): string {
 }
 
 export function SubagentRunDetail({ run, onClose, onOpenTask, onOpenEntry }: Props) {
+  const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
   const fetchRun = useCallback(
     () => getSubagentRun(run.run_id, {
       projectId: run.project_id ?? undefined,
@@ -31,6 +32,12 @@ export function SubagentRunDetail({ run, onClose, onOpenTask, onOpenEntry }: Pro
   const { data: detail, error } = usePolling(fetchRun, run.state === 'running' || run.state === 'retrying' ? 2000 : 10_000);
   const summary = detail?.summary ?? run;
   const events = detail?.events ?? [run.latest];
+  const artifacts = detail?.artifacts ?? null;
+  const handleCopy = useCallback(async (label: string, value: string) => {
+    await navigator.clipboard.writeText(value);
+    setCopiedLabel(label);
+    window.setTimeout(() => setCopiedLabel(current => current === label ? null : current), 1400);
+  }, []);
 
   return (
     <div className="detail-overlay">
@@ -55,6 +62,12 @@ export function SubagentRunDetail({ run, onClose, onOpenTask, onOpenEntry }: Pro
               <>
                 <dt>Backend</dt>
                 <dd>{summary.backend}</dd>
+              </>
+            )}
+            {summary.schema && (
+              <>
+                <dt>Schema</dt>
+                <dd>{summary.schema}{summary.schema_version != null ? ` v${summary.schema_version}` : ''}</dd>
               </>
             )}
             {summary.model && (
@@ -128,19 +141,33 @@ export function SubagentRunDetail({ run, onClose, onOpenTask, onOpenEntry }: Pro
           </dl>
         </div>
 
-        {(summary.task_id != null || summary.artifact_dir) && (
-          <div className="detail-section">
-            <h3>Links</h3>
-            <div className="detail-action-row">
-              {summary.task_id != null && (
-                <button type="button" className="dispatch-action" onClick={() => onOpenTask(summary.task_id!)}>
-                  Open task #{summary.task_id}
-                </button>
-              )}
-              {summary.artifact_dir && <span className="subagent-detail-artifact">{summary.artifact_dir}</span>}
-            </div>
+        <div className="detail-section">
+          <h3>Links</h3>
+          <div className="detail-action-row">
+            <button type="button" className="dispatch-action" onClick={() => void handleCopy('run', summary.run_id)}>
+              {copiedLabel === 'run' ? 'Copied run' : 'Copy run'}
+            </button>
+            <button type="button" className="dispatch-action" onClick={() => onOpenEntry(summary.latest)}>
+              Open latest op
+            </button>
+            {summary.started && summary.started.id !== summary.latest.id && (
+              <button type="button" className="dispatch-action" onClick={() => onOpenEntry(summary.started!)}>
+                Open start op
+              </button>
+            )}
+            {summary.task_id != null && (
+              <button type="button" className="dispatch-action" onClick={() => onOpenTask(summary.task_id!)}>
+                Open task #{summary.task_id}
+              </button>
+            )}
+            {summary.artifact_dir && (
+              <button type="button" className="dispatch-action" onClick={() => void handleCopy('artifacts', summary.artifact_dir!)}>
+                {copiedLabel === 'artifacts' ? 'Copied artifacts' : 'Copy artifacts'}
+              </button>
+            )}
+            {summary.artifact_dir && <span className="subagent-detail-artifact">{summary.artifact_dir}</span>}
           </div>
-        )}
+        </div>
 
         {error && (
           <div className="detail-section">
@@ -153,6 +180,37 @@ export function SubagentRunDetail({ run, onClose, onOpenTask, onOpenEntry }: Pro
           <div className="detail-section">
             <h3>Stderr</h3>
             <pre className="detail-pre">{summary.stderr_preview}</pre>
+          </div>
+        )}
+
+        {artifacts && (
+          <div className="detail-section">
+            <h3>Artifacts</h3>
+            {artifacts.read_error && <div className="detail-description">{artifacts.read_error}</div>}
+            {artifacts.status_json != null && (
+              <details className="artifact-detail" open>
+                <summary>status.json</summary>
+                <pre className="detail-pre">{artifacts.status_json}</pre>
+              </details>
+            )}
+            {artifacts.events_tail != null && (
+              <details className="artifact-detail">
+                <summary>events.jsonl</summary>
+                <pre className="detail-pre">{artifacts.events_tail}</pre>
+              </details>
+            )}
+            {artifacts.stdout_tail != null && (
+              <details className="artifact-detail">
+                <summary>stdout.jsonl</summary>
+                <pre className="detail-pre">{artifacts.stdout_tail}</pre>
+              </details>
+            )}
+            {artifacts.stderr_tail != null && (
+              <details className="artifact-detail">
+                <summary>stderr.log</summary>
+                <pre className="detail-pre">{artifacts.stderr_tail}</pre>
+              </details>
+            )}
           </div>
         )}
 

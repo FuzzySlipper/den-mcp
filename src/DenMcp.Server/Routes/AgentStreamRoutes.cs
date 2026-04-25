@@ -2,6 +2,7 @@ using System.Text.Json;
 using DenMcp.Core.Data;
 using DenMcp.Core.Models;
 using DenMcp.Core.Services;
+using DenMcp.Server.Realtime;
 
 namespace DenMcp.Server.Routes;
 
@@ -45,11 +46,15 @@ public static class AgentStreamRoutes
             return Results.Ok(entries);
         });
 
-        app.MapPost("/api/agent-stream/messages", async (IAgentStreamMessageService service, SendAgentStreamEntryRequest req) =>
+        app.MapPost("/api/agent-stream/messages", async (
+            IAgentStreamMessageService service,
+            AgentStreamRealtimeHub realtime,
+            SendAgentStreamEntryRequest req) =>
         {
             try
             {
                 var result = await service.CreateAsync(ToCreateRequest(req, req.ProjectId));
+                realtime.Publish(result.Entry);
                 return Results.Created($"/api/agent-stream/{result.Entry.Id}", result);
             }
             catch (JsonException ex)
@@ -62,11 +67,15 @@ public static class AgentStreamRoutes
             }
         });
 
-        app.MapPost("/api/agent-stream/ops", async (IAgentStreamOpsService ops, SendAgentStreamEntryRequest req) =>
+        app.MapPost("/api/agent-stream/ops", async (
+            IAgentStreamOpsService ops,
+            AgentStreamRealtimeHub realtime,
+            SendAgentStreamEntryRequest req) =>
         {
             try
             {
                 var result = await ops.AppendOpsAsync(ToOpsEntry(req, req.ProjectId));
+                realtime.Publish(result);
                 return Results.Created($"/api/agent-stream/{result.Id}", result);
             }
             catch (JsonException ex)
@@ -125,7 +134,11 @@ public static class AgentStreamRoutes
             return Results.Ok(entries);
         });
 
-        group.MapPost("/messages", async (IAgentStreamMessageService service, string projectId, SendAgentStreamEntryRequest req) =>
+        group.MapPost("/messages", async (
+            IAgentStreamMessageService service,
+            AgentStreamRealtimeHub realtime,
+            string projectId,
+            SendAgentStreamEntryRequest req) =>
         {
             if (!string.IsNullOrWhiteSpace(req.ProjectId) &&
                 !string.Equals(req.ProjectId, projectId, StringComparison.Ordinal))
@@ -139,6 +152,7 @@ public static class AgentStreamRoutes
             try
             {
                 var result = await service.CreateAsync(ToCreateRequest(req, projectId));
+                realtime.Publish(result.Entry);
                 return Results.Created($"/api/projects/{projectId}/agent-stream/{result.Entry.Id}", result);
             }
             catch (JsonException ex)
@@ -151,7 +165,11 @@ public static class AgentStreamRoutes
             }
         });
 
-        group.MapPost("/ops", async (IAgentStreamOpsService ops, string projectId, SendAgentStreamEntryRequest req) =>
+        group.MapPost("/ops", async (
+            IAgentStreamOpsService ops,
+            AgentStreamRealtimeHub realtime,
+            string projectId,
+            SendAgentStreamEntryRequest req) =>
         {
             if (!string.IsNullOrWhiteSpace(req.ProjectId) &&
                 !string.Equals(req.ProjectId, projectId, StringComparison.Ordinal))
@@ -165,6 +183,7 @@ public static class AgentStreamRoutes
             try
             {
                 var result = await ops.AppendOpsAsync(ToOpsEntry(req, projectId));
+                realtime.Publish(result);
                 return Results.Created($"/api/projects/{projectId}/agent-stream/{result.Id}", result);
             }
             catch (JsonException ex)

@@ -1,5 +1,133 @@
 export type JsonObject = Record<string, unknown>;
 
+export const SUBAGENT_RUN_SCHEMA = "den_subagent_run";
+export const SUBAGENT_RUN_SCHEMA_VERSION = 1;
+
+export type SubagentArtifacts = {
+  dir: string;
+  stdout_jsonl_path: string;
+  stderr_log_path: string;
+  status_json_path: string;
+  events_jsonl_path: string;
+};
+
+export type SubagentRunIdentity = {
+  runId: string;
+  role: string;
+  taskId?: number;
+  cwd?: string;
+  backend: string;
+  model?: string;
+  tools?: string;
+  sessionMode?: string;
+  session?: string;
+  artifacts?: SubagentArtifacts;
+};
+
+export type SubagentRunState =
+  | "running"
+  | "retrying"
+  | "complete"
+  | "failed"
+  | "timeout"
+  | "aborted"
+  | "unknown";
+
+export type SubagentOpsEventType =
+  | "subagent_started"
+  | "subagent_process_started"
+  | "subagent_heartbeat"
+  | "subagent_assistant_output"
+  | "subagent_prompt_echo_detected"
+  | "subagent_fallback_started"
+  | "subagent_completed"
+  | "subagent_timeout"
+  | "subagent_startup_timeout"
+  | "subagent_terminal_drain_timeout"
+  | "subagent_aborted"
+  | "subagent_abort"
+  | "subagent_failed"
+  | "subagent_spawn_error";
+
+export function buildSubagentRunMetadata(
+  identity: SubagentRunIdentity,
+  extra: JsonObject = {},
+): JsonObject {
+  return omitUndefined({
+    schema: SUBAGENT_RUN_SCHEMA,
+    schema_version: SUBAGENT_RUN_SCHEMA_VERSION,
+    run_id: identity.runId,
+    role: identity.role,
+    task_id: identity.taskId ?? null,
+    cwd: identity.cwd ?? null,
+    backend: identity.backend,
+    model: identity.model ?? null,
+    tools: identity.tools ?? null,
+    session_mode: identity.sessionMode ?? "fresh",
+    session: identity.session ?? null,
+    artifacts: identity.artifacts ?? null,
+    ...extra,
+  });
+}
+
+export function normalizeSubagentRunEvent(event: JsonObject): JsonObject {
+  return omitUndefined({
+    schema: SUBAGENT_RUN_SCHEMA,
+    schema_version: SUBAGENT_RUN_SCHEMA_VERSION,
+    ...event,
+  });
+}
+
+export function subagentOpsEventTypeForEvent(eventType: string): SubagentOpsEventType | undefined {
+  switch (eventType) {
+    case "subagent.process_started":
+      return "subagent_process_started";
+    case "subagent.heartbeat":
+      return "subagent_heartbeat";
+    case "subagent.assistant_output":
+      return "subagent_assistant_output";
+    case "subagent.prompt_echo_detected":
+      return "subagent_prompt_echo_detected";
+    case "subagent.startup_timeout":
+      return "subagent_startup_timeout";
+    case "subagent.terminal_drain_timeout":
+      return "subagent_terminal_drain_timeout";
+    case "subagent.abort":
+      return "subagent_abort";
+    case "subagent.spawn_error":
+      return "subagent_spawn_error";
+    default:
+      return undefined;
+  }
+}
+
+export function subagentRunStateFromOpsEventType(eventType: string): SubagentRunState {
+  switch (eventType) {
+    case "subagent_started":
+    case "subagent_process_started":
+    case "subagent_heartbeat":
+    case "subagent_assistant_output":
+    case "subagent_prompt_echo_detected":
+      return "running";
+    case "subagent_fallback_started":
+      return "retrying";
+    case "subagent_completed":
+      return "complete";
+    case "subagent_timeout":
+    case "subagent_startup_timeout":
+    case "subagent_terminal_drain_timeout":
+      return "timeout";
+    case "subagent_aborted":
+    case "subagent_abort":
+      return "aborted";
+    case "subagent_failed":
+    case "subagent_spawn_error":
+      return "failed";
+    default:
+      return "unknown";
+  }
+}
+
 export type PiStdoutParseResult =
   | { kind: "json"; line: string; event: any }
   | { kind: "raw_stdout"; line: string };
@@ -170,6 +298,10 @@ export function isPromptEcho(text: string, prompt: string): boolean {
   if (normalizedText === normalizedPrompt) return true;
   const prefix = normalizedPrompt.slice(0, Math.min(normalizedPrompt.length, 500));
   return prefix.length > 80 && normalizedText.includes(prefix);
+}
+
+function omitUndefined(value: JsonObject): JsonObject {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
 }
 
 function normalizeForEchoDetection(value: string): string {

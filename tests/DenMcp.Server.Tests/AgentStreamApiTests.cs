@@ -6,6 +6,7 @@ using DenMcp.Core.Data;
 using DenMcp.Core.Llm;
 using DenMcp.Core.Models;
 using DenMcp.Core.Services;
+using DenMcp.Server.Realtime;
 using DenMcp.Server.Tools;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -46,6 +47,80 @@ public class AgentStreamApiTests : IAsyncLifetime
         _client.Dispose();
         _factory.Dispose();
         return Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task AgentStreamRealtimeHub_PublishesMatchingSubagentEvents()
+    {
+        var hub = new AgentStreamRealtimeHub();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var readTask = ReadFirstRealtimeEntryAsync(
+            hub.SubscribeAsync(new AgentStreamRealtimeFilter(ProjectId, TaskId: 775, EventTypePrefix: "subagent_"), cts.Token),
+            cts.Token);
+
+        hub.Publish(new AgentStreamEntry
+        {
+            Id = 1,
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "dispatch_created",
+            ProjectId = ProjectId,
+            TaskId = 775,
+            Sender = "den",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly
+        });
+
+        hub.Publish(new AgentStreamEntry
+        {
+            Id = 2,
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_heartbeat",
+            ProjectId = OtherProjectId,
+            TaskId = 775,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly
+        });
+
+        hub.Publish(new AgentStreamEntry
+        {
+            Id = 3,
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_heartbeat",
+            ProjectId = ProjectId,
+            TaskId = 775,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly
+        });
+
+        var received = await readTask;
+        Assert.Equal(3, received.Id);
+        Assert.Equal("subagent_heartbeat", received.EventType);
+    }
+
+    [Fact]
+    public async Task RestSubagentRunEvents_StreamsPostedSubagentOps()
+    {
+        using var response = await _client.GetAsync(
+            $"/api/subagent-runs/events?projectId={ProjectId}",
+            HttpCompletionOption.ResponseHeadersRead).WaitAsync(TimeSpan.FromSeconds(5));
+        response.EnsureSuccessStatusCode();
+        Assert.Equal("text/event-stream", response.Content.Headers.ContentType?.MediaType);
+
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        using var reader = new StreamReader(stream);
+
+        var post = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/agent-stream/ops", new
+        {
+            sender = "pi",
+            event_type = "subagent_heartbeat",
+            body = "planner sub-agent still running.",
+            metadata = """{"run_id":"sse-run","role":"planner"}"""
+        });
+        post.EnsureSuccessStatusCode();
+
+        var payload = await ReadUntilAsync(reader, "sse-run", TimeSpan.FromSeconds(5));
+        Assert.Contains("event: subagent_run_updated", payload);
+        Assert.Contains("subagent_heartbeat", payload);
+        Assert.Contains("sse-run", payload);
     }
 
     [Fact]
@@ -120,7 +195,7 @@ public class AgentStreamApiTests : IAsyncLifetime
             Sender = "pi",
             DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
             Body = "Started planner sub-agent.",
-            Metadata = Metadata("""{"run_id":"run-a","role":"planner","backend":"pi-cli","model":"gpt-5.5","artifacts":{"dir":"/tmp/run-a"}}""")
+            Metadata = Metadata("""{"schema":"den_subagent_run","schema_version":1,"run_id":"run-a","role":"planner","backend":"pi-cli","model":"gpt-5.5","artifacts":{"dir":"/tmp/run-a"}}""")
         });
 
         await repo.AppendAsync(new AgentStreamEntry
@@ -198,6 +273,8 @@ public class AgentStreamApiTests : IAsyncLifetime
         var run = Assert.Single(runs!);
         Assert.Equal("run-a", run.RunId);
         Assert.Equal("timeout", run.State);
+        Assert.Equal("den_subagent_run", run.Schema);
+        Assert.Equal(1, run.SchemaVersion);
         Assert.Equal(timeout.Id, run.Latest.Id);
         Assert.NotNull(run.Started);
         Assert.Equal("planner", run.Role);
@@ -219,6 +296,16 @@ public class AgentStreamApiTests : IAsyncLifetime
         Assert.Equal(1014, run.DurationMs);
         Assert.Equal("/tmp/run-a", run.ArtifactDir);
         Assert.Equal(5, run.EventCount);
+
+        var activeResponse = await _client.GetAsync($"/api/projects/{ProjectId}/subagent-runs?taskId={task.Id}&state=active");
+        activeResponse.EnsureSuccessStatusCode();
+        var activeRuns = await activeResponse.Content.ReadFromJsonAsync<List<SubagentRunSummary>>(JsonOpts);
+        Assert.Empty(activeRuns!);
+
+        var problemResponse = await _client.GetAsync($"/api/projects/{ProjectId}/subagent-runs?taskId={task.Id}&state=problem");
+        problemResponse.EnsureSuccessStatusCode();
+        var problemRuns = await problemResponse.Content.ReadFromJsonAsync<List<SubagentRunSummary>>(JsonOpts);
+        Assert.Single(problemRuns!);
 
         var detailResponse = await _client.GetAsync($"/api/projects/{ProjectId}/subagent-runs/run-a?taskId={task.Id}");
         detailResponse.EnsureSuccessStatusCode();
@@ -312,6 +399,81 @@ public class AgentStreamApiTests : IAsyncLifetime
         Assert.Equal("complete", detail!.Summary.State);
         Assert.Null(detail.Summary.InfrastructureFailureReason);
         Assert.Equal("extension_runtime", detail.Summary.InfrastructureWarningReason);
+    }
+
+    [Fact]
+    public async Task RestSubagentRuns_ReadsArtifactSnapshotForSafeRunDir()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IAgentStreamRepository>();
+        var runId = $"run-artifact-{Guid.NewGuid():N}";
+        var artifactDir = Path.Combine(Path.GetTempPath(), "den-subagent-runs", runId);
+        Directory.CreateDirectory(artifactDir);
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(artifactDir, "status.json"), """{"state":"complete"}""");
+            await File.WriteAllTextAsync(Path.Combine(artifactDir, "events.jsonl"), """{"type":"subagent.process_started"}""" + "\n");
+            await File.WriteAllTextAsync(Path.Combine(artifactDir, "stdout.jsonl"), """{"type":"message_end"}""" + "\n");
+            await File.WriteAllTextAsync(Path.Combine(artifactDir, "stderr.log"), "warning line\n");
+
+            await repo.AppendAsync(new AgentStreamEntry
+            {
+                StreamKind = AgentStreamKind.Ops,
+                EventType = "subagent_completed",
+                ProjectId = ProjectId,
+                Sender = "pi",
+                DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+                Metadata = Metadata(JsonSerializer.Serialize(new
+                {
+                    run_id = runId,
+                    role = "planner",
+                    artifacts = new { dir = artifactDir }
+                }, JsonOpts))
+            });
+
+            var detailResponse = await _client.GetAsync($"/api/projects/{ProjectId}/subagent-runs/{runId}");
+            detailResponse.EnsureSuccessStatusCode();
+
+            var detail = await detailResponse.Content.ReadFromJsonAsync<SubagentRunDetail>(JsonOpts);
+            Assert.NotNull(detail?.Artifacts);
+            Assert.True(detail!.Artifacts!.Readable);
+            Assert.Equal(artifactDir, detail.Artifacts.Dir);
+            Assert.Contains("\"state\":\"complete\"", detail.Artifacts.StatusJson);
+            Assert.Contains("subagent.process_started", detail.Artifacts.EventsTail);
+            Assert.Contains("message_end", detail.Artifacts.StdoutTail);
+            Assert.Contains("warning line", detail.Artifacts.StderrTail);
+        }
+        finally
+        {
+            if (Directory.Exists(artifactDir))
+                Directory.Delete(artifactDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RestSubagentRuns_RejectsUnexpectedArtifactDir()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IAgentStreamRepository>();
+
+        await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_failed",
+            ProjectId = ProjectId,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+            Metadata = Metadata("""{"run_id":"run-unsafe","role":"planner","artifacts":{"dir":"/tmp/not-a-subagent-run"}}""")
+        });
+
+        var detailResponse = await _client.GetAsync($"/api/projects/{ProjectId}/subagent-runs/run-unsafe");
+        detailResponse.EnsureSuccessStatusCode();
+
+        var detail = await detailResponse.Content.ReadFromJsonAsync<SubagentRunDetail>(JsonOpts);
+        Assert.NotNull(detail?.Artifacts);
+        Assert.False(detail!.Artifacts!.Readable);
+        Assert.Contains("expected den-subagent-runs", detail.Artifacts.ReadError);
     }
 
     [Fact]
@@ -579,5 +741,41 @@ public class AgentStreamApiTests : IAsyncLifetime
     {
         using var doc = JsonDocument.Parse(json);
         return doc.RootElement.Clone();
+    }
+
+    private static async Task<AgentStreamEntry> ReadFirstRealtimeEntryAsync(
+        IAsyncEnumerable<AgentStreamEntry> entries,
+        CancellationToken cancellationToken)
+    {
+        await foreach (var entry in entries.WithCancellation(cancellationToken))
+            return entry;
+
+        throw new InvalidOperationException("No realtime entry was published.");
+    }
+
+    private static async Task<string> ReadUntilAsync(StreamReader reader, string needle, TimeSpan timeout)
+    {
+        using var cts = new CancellationTokenSource(timeout);
+        var lines = new List<string>();
+        try
+        {
+            while (true)
+            {
+                var line = await reader.ReadLineAsync(cts.Token);
+                if (line is null)
+                    break;
+
+                lines.Add(line);
+                var text = string.Join("\n", lines);
+                if (text.Contains(needle, StringComparison.Ordinal))
+                    return text;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw new TimeoutException($"Timed out waiting for '{needle}' in SSE stream.");
+        }
+
+        throw new InvalidOperationException($"SSE stream ended before '{needle}' was observed.");
     }
 }

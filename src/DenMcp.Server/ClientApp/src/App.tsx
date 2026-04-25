@@ -8,6 +8,7 @@ import {
   getThread,
   listAgentStream,
   listSubagentRuns,
+  subagentRunEventsUrl,
   listDocuments,
   listActiveAgents,
   listDispatches,
@@ -15,6 +16,7 @@ import {
   rejectDispatch,
 } from './api/client';
 import { usePolling } from './hooks/usePolling';
+import { useEventSourceRefresh } from './hooks/useEventSourceRefresh';
 import { ProjectSidebar } from './components/ProjectSidebar';
 import { TaskTree } from './components/TaskTree';
 import { TaskDetail } from './components/TaskDetail';
@@ -31,6 +33,7 @@ import { AgentBar } from './components/AgentBar';
 import { DispatchPanel } from './components/DispatchPanel';
 import { DispatchDetail } from './components/DispatchDetail';
 import { MESSAGE_INTENT_OPTIONS, messageIntentLabel } from './messageIntents';
+import type { SubagentRunFilter } from './subagentRuns';
 
 export default function App() {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
@@ -50,6 +53,8 @@ export default function App() {
   const [streamSenderFilter, setStreamSenderFilter] = useState('');
   const [streamRecipientFilter, setStreamRecipientFilter] = useState('');
   const [streamTaskFilter, setStreamTaskFilter] = useState('');
+  const [subagentRunFilter, setSubagentRunFilter] = useState<SubagentRunFilter>('all');
+  const [subagentRunLimit, setSubagentRunLimit] = useState(8);
   const [sortMode, setSortMode] = useState('priority');
   const [pendingDispatchActionId, setPendingDispatchActionId] = useState<number | null>(null);
   const [dispatchActionError, setDispatchActionError] = useState<string | null>(null);
@@ -115,12 +120,28 @@ export default function App() {
       ? listSubagentRuns({
         projectId: isGlobal ? (streamProjectFilter.trim() || undefined) : effectiveProject,
         taskId: parsedStreamTaskId,
-        limit: 8,
+        state: subagentRunFilter === 'all' ? undefined : subagentRunFilter,
+        limit: subagentRunLimit,
       })
       : Promise.resolve([]),
+    [effectiveProject, isGlobal, parsedStreamTaskId, streamProjectFilter, subagentRunFilter, subagentRunLimit],
+  );
+  const {
+    data: subagentRuns,
+    loading: subagentRunsLoading,
+    error: subagentRunsError,
+    refresh: refreshSubagentRuns,
+  } = usePolling(fetchSubagentRuns, 2000);
+  const subagentRunEvents = useMemo(
+    () => effectiveProject
+      ? subagentRunEventsUrl({
+        projectId: isGlobal ? (streamProjectFilter.trim() || undefined) : effectiveProject,
+        taskId: parsedStreamTaskId,
+      })
+      : null,
     [effectiveProject, isGlobal, parsedStreamTaskId, streamProjectFilter],
   );
-  const { data: subagentRuns } = usePolling(fetchSubagentRuns, 2000);
+  useEventSourceRefresh(subagentRunEvents, 'subagent_run_updated', refreshSubagentRuns);
 
   const fetchDocs = useCallback(
     () => effectiveProject
@@ -453,12 +474,20 @@ export default function App() {
 
         <div className="panel panel-subagents">
           <div className="panel-header">
-            Sub-agent Runs
+            Sub-agent Runs <span className="count">({subagentRuns?.length ?? 0})</span>
           </div>
           <div className="panel-body">
             <SubagentRunPanel
               runs={subagentRuns ?? []}
+              totalCount={subagentRuns?.length ?? 0}
               isGlobal={isGlobal}
+              filter={subagentRunFilter}
+              limit={subagentRunLimit}
+              loading={subagentRunsLoading}
+              error={subagentRunsError}
+              onFilterChange={setSubagentRunFilter}
+              onLimitChange={setSubagentRunLimit}
+              onRefresh={refreshSubagentRuns}
               onSelectRun={handleSubagentRunSelect}
               onOpenTask={handleTaskSelect}
             />

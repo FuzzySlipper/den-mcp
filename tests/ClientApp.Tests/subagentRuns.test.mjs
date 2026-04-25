@@ -4,6 +4,7 @@ import {
   formatInfrastructureFailureReason,
   formatSubagentDuration,
   stateFromSubagentEvent,
+  subagentRunMatchesFilter,
   summarizeSubagentRunEntry,
 } from '../../src/DenMcp.Server/ClientApp/src/subagentRuns.ts';
 
@@ -55,4 +56,18 @@ test('subagent run helpers format labels and summaries', () => {
   assert.equal(summarizeSubagentRunEntry(entry({
     event_type: 'subagent_failed',
   })), 'subagent failed');
+});
+
+test('subagent run filters group operational states', () => {
+  const run = state => ({ state });
+
+  assert.equal(subagentRunMatchesFilter(run('running'), 'active'), true);
+  assert.equal(subagentRunMatchesFilter(run('retrying'), 'active'), true);
+  assert.equal(subagentRunMatchesFilter(run('complete'), 'active'), false);
+  assert.equal(subagentRunMatchesFilter(run('failed'), 'problem'), true);
+  assert.equal(subagentRunMatchesFilter(run('timeout'), 'problem'), true);
+  assert.equal(subagentRunMatchesFilter(run('aborted'), 'problem'), true);
+  assert.equal(subagentRunMatchesFilter(run('unknown'), 'problem'), true);
+  assert.equal(subagentRunMatchesFilter(run('complete'), 'complete'), true);
+  assert.equal(subagentRunMatchesFilter(run('running'), 'all'), true);
 });

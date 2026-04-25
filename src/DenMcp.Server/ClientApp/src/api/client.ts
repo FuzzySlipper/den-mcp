@@ -243,6 +243,7 @@ export function listAgentStream(opts: ListAgentStreamOpts = {}): Promise<AgentSt
 export interface ListSubagentRunsOpts {
   projectId?: string;
   taskId?: number;
+  state?: string;
   limit?: number;
 }
 
@@ -250,9 +251,18 @@ export function listSubagentRuns(opts: ListSubagentRunsOpts = {}): Promise<Subag
   const q = buildQuery({
     projectId: opts.projectId,
     taskId: opts.taskId,
+    state: opts.state,
     limit: opts.limit,
   });
   return get(`/api/subagent-runs${q}`);
+}
+
+export function subagentRunEventsUrl(opts: Omit<ListSubagentRunsOpts, 'state' | 'limit'> = {}): string {
+  const q = buildQuery({
+    projectId: opts.projectId,
+    taskId: opts.taskId,
+  });
+  return `/api/subagent-runs/events${q}`;
 }
 
 export function getSubagentRun(runId: string, opts: Omit<ListSubagentRunsOpts, 'limit'> = {}): Promise<SubagentRunDetail> {
