@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  classifySubagentInfrastructureFailure,
+  classifySubagentStderrIssue,
   createSubagentOutputExtractor,
   isSubagentInfrastructureFailure,
   isTerminalAssistantMessage,
   parsePiStdoutLine,
-} from '../../pi-dev/extensions/den-subagent-pipeline.ts';
+} from '../../pi-dev/lib/den-subagent-pipeline.ts';
 
 function assistantMessage(text, extra = {}) {
   return {
@@ -107,5 +109,14 @@ test('infrastructure failures are classified before fallback retry', () => {
   assert.equal(isSubagentInfrastructureFailure({ forced_kill: true }), true);
   assert.equal(isSubagentInfrastructureFailure({ signal: 'SIGTERM' }), true);
   assert.equal(isSubagentInfrastructureFailure({ child_error_message: 'spawn ENOENT' }), true);
+  assert.equal(classifySubagentInfrastructureFailure({
+    stderr_tail: 'Error: Failed to load extension "/tmp/bad.ts": Extension does not export a valid factory function',
+  }), 'extension_load');
+  assert.equal(classifySubagentInfrastructureFailure({
+    stderr: 'Extension error (/tmp/footer.ts): This extension ctx is stale after session replacement or reload.',
+  }), 'extension_runtime');
+  assert.equal(classifySubagentStderrIssue(
+    'Extension error (/tmp/footer.ts): This extension ctx is stale after session replacement or reload.',
+  ), 'extension_runtime');
   assert.equal(isSubagentInfrastructureFailure({}), false);
 });

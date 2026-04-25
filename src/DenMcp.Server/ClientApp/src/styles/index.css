@@ -531,6 +531,20 @@ html, body, #root {
   color: var(--text);
 }
 
+.detail-pre {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .review-card {
   border: 1px solid var(--border);
   border-radius: 6px;

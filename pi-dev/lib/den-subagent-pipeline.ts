@@ -29,7 +29,18 @@ export type InfrastructureFailureLike = {
   forced_kill?: boolean;
   signal?: string;
   child_error_message?: string;
+  stderr?: string;
+  stderr_tail?: string;
 };
+
+export type InfrastructureFailureReason =
+  | "aborted"
+  | "timeout"
+  | "forced_kill"
+  | "signal"
+  | "child_error"
+  | "extension_load"
+  | "extension_runtime";
 
 export function parsePiStdoutLine(line: string): PiStdoutParseResult | undefined {
   if (!line.trim()) return undefined;
@@ -102,13 +113,36 @@ export function createSubagentOutputExtractor(
 }
 
 export function isSubagentInfrastructureFailure(result: InfrastructureFailureLike): boolean {
-  return Boolean(
-    result.aborted
-      || result.timeout_kind
-      || result.forced_kill
-      || result.signal
-      || result.child_error_message,
-  );
+  return Boolean(classifySubagentInfrastructureFailure(result));
+}
+
+export function classifySubagentInfrastructureFailure(
+  result: InfrastructureFailureLike,
+): InfrastructureFailureReason | undefined {
+  if (result.aborted) return "aborted";
+  if (result.timeout_kind) return "timeout";
+  if (result.forced_kill) return "forced_kill";
+  if (result.signal) return "signal";
+  if (result.child_error_message) return "child_error";
+
+  const stderr = `${result.stderr_tail ?? ""}\n${result.stderr ?? ""}`;
+  return classifySubagentStderrIssue(stderr);
+}
+
+export function classifySubagentStderrIssue(stderr: string): InfrastructureFailureReason | undefined {
+  if (isExtensionLoadFailure(stderr)) return "extension_load";
+  if (isExtensionRuntimeFailure(stderr)) return "extension_runtime";
+  return undefined;
+}
+
+function isExtensionLoadFailure(stderr: string): boolean {
+  return /Failed to load extension/i.test(stderr)
+    || /Extension does not export a valid factory function/i.test(stderr);
+}
+
+function isExtensionRuntimeFailure(stderr: string): boolean {
+  return /Extension error \([^)]+\):/i.test(stderr)
+    || /This extension ctx is stale after session replacement or reload/i.test(stderr);
 }
 
 export function isTerminalAssistantMessage(message: any): boolean {

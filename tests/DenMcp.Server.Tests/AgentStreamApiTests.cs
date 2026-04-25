@@ -123,6 +123,42 @@ public class AgentStreamApiTests : IAsyncLifetime
             Metadata = Metadata("""{"run_id":"run-a","role":"planner","backend":"pi-cli","model":"gpt-5.5","artifacts":{"dir":"/tmp/run-a"}}""")
         });
 
+        await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_process_started",
+            ProjectId = ProjectId,
+            TaskId = task.Id,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+            Body = "planner sub-agent process started.",
+            Metadata = Metadata("""{"run_id":"run-a","role":"planner","backend":"pi-cli","model":"gpt-5.5","event":{"type":"subagent.process_started","pid":444}}""")
+        });
+
+        await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_heartbeat",
+            ProjectId = ProjectId,
+            TaskId = task.Id,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+            Body = "planner sub-agent still running.",
+            Metadata = Metadata("""{"run_id":"run-a","role":"planner","backend":"pi-cli","model":"gpt-5.5","event":{"type":"subagent.heartbeat","duration_ms":500}}""")
+        });
+
+        await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_startup_timeout",
+            ProjectId = ProjectId,
+            TaskId = task.Id,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+            Body = "planner sub-agent hit startup timeout.",
+            Metadata = Metadata("""{"run_id":"run-a","role":"planner","backend":"pi-cli","event":{"type":"subagent.startup_timeout"}}""")
+        });
+
         var timeout = await repo.AppendAsync(new AgentStreamEntry
         {
             StreamKind = AgentStreamKind.Ops,
@@ -132,7 +168,7 @@ public class AgentStreamApiTests : IAsyncLifetime
             Sender = "pi",
             DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
             Body = "planner sub-agent failed: startup timeout.",
-            Metadata = Metadata("""{"run_id":"run-a","role":"planner","backend":"pi-cli","duration_ms":1014,"timeout_kind":"startup","output_status":"no_assistant_final"}""")
+            Metadata = Metadata("""{"run_id":"run-a","role":"planner","backend":"pi-cli","duration_ms":1014,"exit_code":143,"signal":"SIGTERM","timeout_kind":"startup","output_status":"no_assistant_final","infrastructure_failure_reason":"timeout","stderr_preview":"startup timeout"}""")
         });
 
         await repo.AppendAsync(new AgentStreamEntry
@@ -171,9 +207,18 @@ public class AgentStreamApiTests : IAsyncLifetime
         Assert.Equal("gpt-5.5", run.Model);
         Assert.Equal("no_assistant_final", run.OutputStatus);
         Assert.Equal("startup", run.TimeoutKind);
+        Assert.Equal("timeout", run.InfrastructureFailureReason);
+        Assert.Equal(143, run.ExitCode);
+        Assert.Equal("SIGTERM", run.Signal);
+        Assert.Equal(444, run.Pid);
+        Assert.Equal("startup timeout", run.StderrPreview);
+        Assert.Equal(1, run.HeartbeatCount);
+        Assert.Equal(0, run.AssistantOutputCount);
+        Assert.NotNull(run.LastHeartbeatAt);
+        Assert.Null(run.LastAssistantOutputAt);
         Assert.Equal(1014, run.DurationMs);
         Assert.Equal("/tmp/run-a", run.ArtifactDir);
-        Assert.Equal(2, run.EventCount);
+        Assert.Equal(5, run.EventCount);
 
         var detailResponse = await _client.GetAsync($"/api/projects/{ProjectId}/subagent-runs/run-a?taskId={task.Id}");
         detailResponse.EnsureSuccessStatusCode();
@@ -182,12 +227,91 @@ public class AgentStreamApiTests : IAsyncLifetime
         Assert.NotNull(detail);
         Assert.Equal("run-a", detail!.Summary.RunId);
         Assert.Equal("timeout", detail.Summary.State);
-        Assert.Equal(2, detail.Events.Count);
+        Assert.Equal(5, detail.Events.Count);
         Assert.Equal("subagent_started", detail.Events[0].EventType);
-        Assert.Equal("subagent_timeout", detail.Events[1].EventType);
+        Assert.Equal("subagent_process_started", detail.Events[1].EventType);
+        Assert.Equal("subagent_heartbeat", detail.Events[2].EventType);
+        Assert.Equal("subagent_startup_timeout", detail.Events[3].EventType);
+        Assert.Equal("subagent_timeout", detail.Events[4].EventType);
 
         var scopedMiss = await _client.GetAsync($"/api/projects/{OtherProjectId}/subagent-runs/run-a");
         Assert.Equal(HttpStatusCode.NotFound, scopedMiss.StatusCode);
+    }
+
+    [Fact]
+    public async Task RestSubagentRuns_ProgressEventsKeepRunRunning()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IAgentStreamRepository>();
+
+        await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_started",
+            ProjectId = ProjectId,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+            Metadata = Metadata("""{"run_id":"run-progress","role":"coder","backend":"pi-cli"}""")
+        });
+
+        await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_assistant_output",
+            ProjectId = ProjectId,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+            Body = "coder sub-agent produced assistant output.",
+            Metadata = Metadata("""{"run_id":"run-progress","role":"coder","event":{"type":"subagent.assistant_output","chars":24}}""")
+        });
+
+        var detailResponse = await _client.GetAsync($"/api/projects/{ProjectId}/subagent-runs/run-progress");
+        detailResponse.EnsureSuccessStatusCode();
+
+        var detail = await detailResponse.Content.ReadFromJsonAsync<SubagentRunDetail>(JsonOpts);
+        Assert.NotNull(detail);
+        Assert.Equal("running", detail!.Summary.State);
+        Assert.Equal("subagent_assistant_output", detail.Summary.Latest.EventType);
+        Assert.Equal(0, detail.Summary.HeartbeatCount);
+        Assert.Equal(1, detail.Summary.AssistantOutputCount);
+        Assert.NotNull(detail.Summary.LastAssistantOutputAt);
+        Assert.Equal(2, detail.Summary.EventCount);
+    }
+
+    [Fact]
+    public async Task RestSubagentRuns_SurfacesInfrastructureWarningReason()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IAgentStreamRepository>();
+
+        await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_started",
+            ProjectId = ProjectId,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+            Metadata = Metadata("""{"run_id":"run-warning","role":"planner","backend":"pi-cli"}""")
+        });
+
+        await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_completed",
+            ProjectId = ProjectId,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+            Metadata = Metadata("""{"run_id":"run-warning","role":"planner","backend":"pi-cli","output_status":"assistant_final","infrastructure_warning_reason":"extension_runtime"}""")
+        });
+
+        var detailResponse = await _client.GetAsync($"/api/projects/{ProjectId}/subagent-runs/run-warning");
+        detailResponse.EnsureSuccessStatusCode();
+
+        var detail = await detailResponse.Content.ReadFromJsonAsync<SubagentRunDetail>(JsonOpts);
+        Assert.NotNull(detail);
+        Assert.Equal("complete", detail!.Summary.State);
+        Assert.Null(detail.Summary.InfrastructureFailureReason);
+        Assert.Equal("extension_runtime", detail.Summary.InfrastructureWarningReason);
     }
 
     [Fact]

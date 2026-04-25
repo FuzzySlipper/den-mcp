@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  formatInfrastructureFailureReason,
   formatSubagentDuration,
   stateFromSubagentEvent,
   summarizeSubagentRunEntry,
@@ -31,13 +32,23 @@ function entry(overrides) {
 
 test('subagent run helpers format labels and summaries', () => {
   assert.equal(stateFromSubagentEvent('subagent_started'), 'running');
+  assert.equal(stateFromSubagentEvent('subagent_process_started'), 'running');
+  assert.equal(stateFromSubagentEvent('subagent_heartbeat'), 'running');
+  assert.equal(stateFromSubagentEvent('subagent_assistant_output'), 'running');
   assert.equal(stateFromSubagentEvent('subagent_fallback_started'), 'retrying');
   assert.equal(stateFromSubagentEvent('subagent_completed'), 'complete');
   assert.equal(stateFromSubagentEvent('subagent_timeout'), 'timeout');
+  assert.equal(stateFromSubagentEvent('subagent_startup_timeout'), 'timeout');
+  assert.equal(stateFromSubagentEvent('subagent_abort'), 'aborted');
+  assert.equal(stateFromSubagentEvent('subagent_spawn_error'), 'failed');
   assert.equal(stateFromSubagentEvent('unknown_event'), 'unknown');
   assert.equal(formatSubagentDuration(999), '999ms');
   assert.equal(formatSubagentDuration(1014), '1.0s');
   assert.equal(formatSubagentDuration(61_000), '1m1s');
+  assert.equal(formatInfrastructureFailureReason('extension_load'), 'extension load');
+  assert.equal(formatInfrastructureFailureReason('child_error'), 'child process');
+  assert.equal(formatInfrastructureFailureReason('forced_kill'), 'forced kill');
+  assert.equal(formatInfrastructureFailureReason(null), '');
   assert.equal(summarizeSubagentRunEntry(entry({
     body: '  lots   of\nspace  ',
   })), 'lots of space');

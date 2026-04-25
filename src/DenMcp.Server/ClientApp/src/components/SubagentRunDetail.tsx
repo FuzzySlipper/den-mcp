@@ -2,7 +2,7 @@ import { useCallback } from 'react';
 import { getSubagentRun } from '../api/client';
 import type { AgentStreamEntry, SubagentRunSummary } from '../api/types';
 import { usePolling } from '../hooks/usePolling';
-import { formatSubagentDuration, summarizeSubagentRunEntry } from '../subagentRuns';
+import { formatInfrastructureFailureReason, formatSubagentDuration, summarizeSubagentRunEntry } from '../subagentRuns';
 import { truncate } from '../utils';
 
 interface Props {
@@ -63,6 +63,18 @@ export function SubagentRunDetail({ run, onClose, onOpenTask, onOpenEntry }: Pro
                 <dd>{summary.model}</dd>
               </>
             )}
+            {summary.pid != null && (
+              <>
+                <dt>PID</dt>
+                <dd>{summary.pid}</dd>
+              </>
+            )}
+            {summary.exit_code != null && (
+              <>
+                <dt>Exit</dt>
+                <dd>{summary.exit_code}{summary.signal ? ` (${summary.signal})` : ''}</dd>
+              </>
+            )}
             {summary.output_status && (
               <>
                 <dt>Output</dt>
@@ -73,6 +85,30 @@ export function SubagentRunDetail({ run, onClose, onOpenTask, onOpenEntry }: Pro
               <>
                 <dt>Timeout</dt>
                 <dd>{summary.timeout_kind}</dd>
+              </>
+            )}
+            {summary.infrastructure_failure_reason && (
+              <>
+                <dt>Infrastructure</dt>
+                <dd>{formatInfrastructureFailureReason(summary.infrastructure_failure_reason)}</dd>
+              </>
+            )}
+            {summary.infrastructure_warning_reason && (
+              <>
+                <dt>Warning</dt>
+                <dd>{formatInfrastructureFailureReason(summary.infrastructure_warning_reason)}</dd>
+              </>
+            )}
+            {summary.fallback_from_model && (
+              <>
+                <dt>Fallback</dt>
+                <dd>{summary.fallback_from_model} → {summary.fallback_model ?? 'configured fallback'}{summary.fallback_from_exit_code != null ? ` (exit ${summary.fallback_from_exit_code})` : ''}</dd>
+              </>
+            )}
+            {(summary.heartbeat_count > 0 || summary.assistant_output_count > 0) && (
+              <>
+                <dt>Progress</dt>
+                <dd>{summary.heartbeat_count} heartbeats, {summary.assistant_output_count} outputs</dd>
               </>
             )}
             {summary.duration_ms != null && (
@@ -110,6 +146,13 @@ export function SubagentRunDetail({ run, onClose, onOpenTask, onOpenEntry }: Pro
           <div className="detail-section">
             <h3>Run Detail</h3>
             <div className="detail-description">Could not refresh run detail: {error.message}</div>
+          </div>
+        )}
+
+        {summary.stderr_preview && (
+          <div className="detail-section">
+            <h3>Stderr</h3>
+            <pre className="detail-pre">{summary.stderr_preview}</pre>
           </div>
         )}
 

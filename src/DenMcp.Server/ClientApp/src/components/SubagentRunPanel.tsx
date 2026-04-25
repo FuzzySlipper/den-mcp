@@ -1,5 +1,6 @@
 import type { SubagentRunSummary } from '../api/types';
 import {
+  formatInfrastructureFailureReason,
   formatSubagentDuration,
   summarizeSubagentRunEntry,
 } from '../subagentRuns';
@@ -42,6 +43,12 @@ export function SubagentRunPanel({ runs, isGlobal, onSelectRun, onOpenTask }: Pr
             {run.model && <span>{truncate(run.model, 24)}</span>}
             {run.output_status && <span>{run.output_status}</span>}
             {run.timeout_kind && <span>{run.timeout_kind}</span>}
+            {run.infrastructure_failure_reason && <span>{formatInfrastructureFailureReason(run.infrastructure_failure_reason)}</span>}
+            {run.infrastructure_warning_reason && <span>warn: {formatInfrastructureFailureReason(run.infrastructure_warning_reason)}</span>}
+            {run.exit_code != null && <span>exit {run.exit_code}</span>}
+            {run.signal && <span>{run.signal}</span>}
+            {run.heartbeat_count > 0 && <span>{run.heartbeat_count} beats</span>}
+            {run.assistant_output_count > 0 && <span>{run.assistant_output_count} outputs</span>}
             {run.duration_ms != null && <span>{formatSubagentDuration(run.duration_ms)}</span>}
             <span>{run.event_count} events</span>
           </div>

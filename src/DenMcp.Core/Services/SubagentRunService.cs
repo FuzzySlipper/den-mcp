@@ -76,6 +76,12 @@ public sealed class SubagentRunService : ISubagentRunService
             .ToList();
         var latest = sorted[^1];
         var started = sorted.FirstOrDefault(entry => entry.EventType == "subagent_started");
+        var processStarted = sorted.LastOrDefault(entry => entry.EventType == "subagent_process_started");
+        var fallbackStarted = sorted.LastOrDefault(entry => entry.EventType == "subagent_fallback_started");
+        var heartbeats = sorted.Where(entry => entry.EventType == "subagent_heartbeat").ToList();
+        var assistantOutputs = sorted.Where(entry => entry.EventType == "subagent_assistant_output").ToList();
+        var lastHeartbeat = heartbeats.LastOrDefault();
+        var lastAssistantOutput = assistantOutputs.LastOrDefault();
 
         return new SubagentRunSummary
         {
@@ -90,6 +96,19 @@ public sealed class SubagentRunService : ISubagentRunService
             Model = TextMetadata(latest, "model") ?? TextMetadata(started, "model"),
             OutputStatus = TextMetadata(latest, "output_status"),
             TimeoutKind = TextMetadata(latest, "timeout_kind"),
+            InfrastructureFailureReason = TextMetadata(latest, "infrastructure_failure_reason"),
+            InfrastructureWarningReason = TextMetadata(latest, "infrastructure_warning_reason"),
+            ExitCode = IntMetadata(latest, "exit_code"),
+            Signal = TextMetadata(latest, "signal"),
+            Pid = IntMetadata(latest, "pid") ?? EventIntMetadata(processStarted, "pid"),
+            StderrPreview = TextMetadata(latest, "stderr_preview"),
+            FallbackModel = TextMetadata(latest, "fallback_model") ?? TextMetadata(fallbackStarted, "fallback_model"),
+            FallbackFromModel = TextMetadata(latest, "fallback_from_model") ?? TextMetadata(fallbackStarted, "failed_model"),
+            FallbackFromExitCode = IntMetadata(latest, "fallback_from_exit_code") ?? IntMetadata(fallbackStarted, "failed_exit_code"),
+            HeartbeatCount = heartbeats.Count,
+            AssistantOutputCount = assistantOutputs.Count,
+            LastHeartbeatAt = lastHeartbeat?.CreatedAt,
+            LastAssistantOutputAt = lastAssistantOutput?.CreatedAt,
             DurationMs = IntMetadata(latest, "duration_ms"),
             ArtifactDir = ArtifactDir(latest) ?? ArtifactDir(started),
             EventCount = sorted.Count
@@ -99,11 +118,19 @@ public sealed class SubagentRunService : ISubagentRunService
     private static string StateFromEvent(string eventType) => eventType switch
     {
         "subagent_started" => "running",
+        "subagent_process_started" => "running",
+        "subagent_heartbeat" => "running",
+        "subagent_assistant_output" => "running",
+        "subagent_prompt_echo_detected" => "running",
         "subagent_fallback_started" => "retrying",
         "subagent_completed" => "complete",
         "subagent_timeout" => "timeout",
+        "subagent_startup_timeout" => "timeout",
+        "subagent_terminal_drain_timeout" => "timeout",
         "subagent_aborted" => "aborted",
+        "subagent_abort" => "aborted",
         "subagent_failed" => "failed",
+        "subagent_spawn_error" => "failed",
         _ => "unknown"
     };
 
@@ -120,6 +147,16 @@ public sealed class SubagentRunService : ISubagentRunService
     private static int? IntMetadata(AgentStreamEntry? entry, string propertyName)
     {
         if (!TryGetMetadataProperty(entry, propertyName, out var property))
+            return null;
+
+        return property.ValueKind == JsonValueKind.Number && property.TryGetInt32(out var value)
+            ? value
+            : null;
+    }
+
+    private static int? EventIntMetadata(AgentStreamEntry? entry, string propertyName)
+    {
+        if (!TryGetEventMetadataProperty(entry, propertyName, out var property))
             return null;
 
         return property.ValueKind == JsonValueKind.Number && property.TryGetInt32(out var value)
@@ -149,5 +186,16 @@ public sealed class SubagentRunService : ISubagentRunService
         return entry?.Metadata is { } metadata &&
             metadata.ValueKind == JsonValueKind.Object &&
             metadata.TryGetProperty(propertyName, out property);
+    }
+
+    private static bool TryGetEventMetadataProperty(
+        AgentStreamEntry? entry,
+        string propertyName,
+        out JsonElement property)
+    {
+        property = default;
+        return TryGetMetadataProperty(entry, "event", out var eventMetadata) &&
+            eventMetadata.ValueKind == JsonValueKind.Object &&
+            eventMetadata.TryGetProperty(propertyName, out property);
     }
 }

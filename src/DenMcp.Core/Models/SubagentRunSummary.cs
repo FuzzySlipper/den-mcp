@@ -13,6 +13,19 @@ public sealed class SubagentRunSummary
     public string? Model { get; set; }
     public string? OutputStatus { get; set; }
     public string? TimeoutKind { get; set; }
+    public string? InfrastructureFailureReason { get; set; }
+    public string? InfrastructureWarningReason { get; set; }
+    public int? ExitCode { get; set; }
+    public string? Signal { get; set; }
+    public int? Pid { get; set; }
+    public string? StderrPreview { get; set; }
+    public string? FallbackModel { get; set; }
+    public string? FallbackFromModel { get; set; }
+    public int? FallbackFromExitCode { get; set; }
+    public int HeartbeatCount { get; set; }
+    public int AssistantOutputCount { get; set; }
+    public DateTime? LastHeartbeatAt { get; set; }
+    public DateTime? LastAssistantOutputAt { get; set; }
     public int? DurationMs { get; set; }
     public string? ArtifactDir { get; set; }
     public int EventCount { get; set; }
