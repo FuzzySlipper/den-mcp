@@ -6,6 +6,9 @@ Task: `#757`
 This spike starts the pivot from per-vendor live-session bridges toward one
 project-facing Pi conductor with Den-backed state.
 
+For the stabilized sub-agent runner, observability, control, and smoke-test
+contract after task `#785`, see `docs/pi-subagent-infrastructure.md`.
+
 The first git-tracked Pi resources live at:
 
 ```text
