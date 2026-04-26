@@ -2,6 +2,8 @@
 
 Date: 2026-04-25
 
+Status update, 2026-04-26: dispatches are retired from the canonical conductor path; see [ADR: Retire dispatches from the canonical conductor workflow](dispatch-retirement-adr.md). Treat older dispatch language in this note as historical bridge context unless it explicitly says legacy/debug.
+
 This note captures a research sanity check on turning Den from "MCP plus task
 storage" into a more explicit agent conductor and observation application.
 
@@ -132,7 +134,7 @@ Useful existing pieces:
 
 - `agent_stream_entries` as a thin operational audit stream
 - task-thread messages as durable summaries and review handoff records
-- dispatches as the wake/delivery queue
+- legacy dispatch rows as historical/debug bridge artifacts
 - Pi sub-agent run lifecycle events such as `subagent_started`, `subagent_timeout`, `subagent_failed`, and `subagent_completed`
 - local run artifacts such as `status.json`, `events.jsonl`, `stdout.jsonl`, and `stderr.log`
 - normalized sub-agent run summaries and detail routes
@@ -463,7 +465,7 @@ chat.
   telemetry.
 - `agent_stream_entries` are operational events and lightweight messages, not a
   global chat room.
-- Dispatches remain the durable wake/delivery queue.
+- Agent-stream/run state and future attention items are the normal wake/visibility path; dispatches are legacy/debug artifacts.
 - Terminal panes are attachable views, not the source of truth.
 - Den should still know what happened if a terminal window dies.
 - Failed or partial reviewer runs are not review verdicts.

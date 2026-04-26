@@ -9,6 +9,8 @@ project-facing Pi conductor with Den-backed state.
 For the stabilized sub-agent runner, observability, control, and smoke-test
 contract after task `#785`, see `docs/pi-subagent-infrastructure.md`.
 
+Status update, 2026-04-26: dispatches are retired from the normal Pi conductor path; see `docs/dispatch-retirement-adr.md`. Older dispatch command notes below are legacy/debug context.
+
 The first git-tracked Pi resources live at:
 
 ```text
@@ -24,7 +26,7 @@ Pi starts inside this repo.
 ## Goals for this slice
 
 - Bind a running Pi session to Den as one project-level conductor.
-- Keep Den as the durable source of tasks, messages, dispatches, stream entries,
+- Keep Den as the durable source of tasks, messages, stream entries, run records,
   and review records.
 - Expose a tiny Den command/tool surface inside Pi without replacing MCP or the
   existing server APIs.

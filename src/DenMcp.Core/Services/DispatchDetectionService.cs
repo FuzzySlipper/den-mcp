@@ -112,6 +112,15 @@ public sealed class DispatchDetectionService : IDispatchDetectionService
             return null;
         }
 
+        if (!configResult.Config.Defaults.LegacyDispatchEnabled)
+        {
+            _logger.LogDebug(
+                "Skipping automatic dispatch creation for {ProjectId} event {EventKind}; legacy dispatch routing is disabled.",
+                evt.ProjectId,
+                evt.EventKind);
+            return null;
+        }
+
         var trigger = _routing.MatchTrigger(configResult.Config, evt);
         if (trigger is null)
             return null; // No trigger matched — not a dispatchable event
@@ -158,7 +167,7 @@ public sealed class DispatchDetectionService : IDispatchDetectionService
         var (dispatch, created) = await _dispatches.CreateIfAbsentAsync(entry);
         if (evt.TaskId is int taskId)
         {
-            // Dispatches are a queue/cache over the task thread, so newer task-attached
+            // Legacy dispatches are a queue/cache over the task thread, so newer task-attached
             // work for the same target should retire older open entries.
             var expired = await _dispatches.ExpireSupersededForTaskTargetAsync(
                 evt.ProjectId,

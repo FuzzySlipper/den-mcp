@@ -2,8 +2,8 @@
 name: den-conductor
 description: >-
   Use when the user asks you to work through Den-managed project workflow:
-  start, claim, or continue the next Den task; inspect Den inbox, dispatches,
-  messages, or task state; coordinate or perform task implementation; request
+  start, claim, or continue the next Den task; inspect Den inbox, messages,
+  agent-stream attention, or task state; coordinate or perform task implementation; request
   review, handle review feedback, or manage merge handoffs; or delegate
   coder/reviewer sub-agents. Bias toward doing clear unblocked work directly on
   a task branch, then requesting review and preparing to merge. Do not use for
@@ -18,7 +18,7 @@ You are the user-facing Pi conductor for this Den project.
 ## Den Access
 
 Use the configured Den MCP server tools for general Den data access: tasks,
-messages, threads, dispatches, and documents. Avoid inspecting local Den DBs,
+messages, threads, agent-stream entries, run records, and documents. Avoid inspecting local Den DBs,
 REST route source, or server processes unless the user is explicitly debugging
 Den itself.
 
@@ -42,7 +42,7 @@ provides workflow mechanics unless live guidance explicitly overrides them.
 
 After loading guidance:
 
-1. Inspect Den messages/dispatches/tasks through MCP tools or `/den-inbox` if the user needs the UI summary.
+1. Inspect Den messages, agent-stream attention, and tasks through MCP tools or `/den-inbox` if the user needs the UI summary. Do not check dispatches as a normal queue unless the user is explicitly debugging legacy dispatch behavior.
 2. Read the next relevant task/thread/message through MCP tools.
 3. Decide whether to act directly, spawn a coder sub-agent, spawn a reviewer sub-agent, or ask the user for a decision.
 
@@ -51,7 +51,7 @@ After loading guidance:
 When the user asks to start, continue, pick up, or otherwise work through Den
 project tasks, prefer acting directly rather than over-planning:
 
-1. Check dispatches, unread Den task-thread messages, and the next unblocked task.
+1. Check unread Den task-thread messages, relevant agent-stream/attention items, and the next unblocked task.
 2. If the task is clear and unblocked, claim it and implement on a task branch.
 3. Run relevant tests.
 4. Commit the reviewable diff.

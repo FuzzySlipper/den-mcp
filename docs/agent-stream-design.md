@@ -2,6 +2,8 @@
 
 Date: 2026-04-23
 
+Status update, 2026-04-26: dispatches are no longer the canonical wake/work queue. See [ADR: Retire dispatches from the canonical conductor workflow](dispatch-retirement-adr.md). Historical dispatch references in this document describe the original bridge design; the current normal path is task/thread records plus agent-stream ops/run state.
+
 This note proposes a Den-native global agent stream for thin operational
 handoffs and targeted lightweight messages across all projects.
 
@@ -14,9 +16,9 @@ record of workflow state.
 Den already has two useful coordination primitives:
 
 - task-thread messages for rich context and durable discussion
-- dispatches for waking a specific agent when action is required
+- legacy dispatches for bridge compatibility when explicitly enabled
 
-Those are necessary, but they do not give us one obvious place to watch the
+Those primitives still do not give us one obvious place to watch the
 system-level workflow:
 
 - who handed work to whom
@@ -27,9 +29,7 @@ system-level workflow:
 
 The proposed agent stream fills that gap.
 
-It is not a replacement for task-thread messages, and it is not a second queue
-that competes with dispatches. It is the thin global event layer that lets us
-observe and route inter-agent activity across all projects from one place.
+It is not a replacement for task-thread messages, and it is not a second work queue. It is the thin global event layer that lets us observe and route inter-agent activity across all projects from one place.
 
 ## Goals
 
@@ -40,7 +40,7 @@ observe and route inter-agent activity across all projects from one place.
 - Support multiple live instances of the same agent family across different
   projects and roles.
 - Keep task-thread messages as the source of detailed work context.
-- Keep dispatches as the durable wake/delivery queue.
+- Keep legacy dispatch rows inspectable for compatibility/debugging without treating them as the default queue.
 - Leave the door open for future `@user` and `@agent` clarification flows.
 
 ## Non-goals
@@ -92,17 +92,11 @@ Examples:
 An agent stream entry may point at a task thread, but it should not duplicate
 the full content of that thread.
 
-### Dispatches
+### Legacy dispatches
 
-Dispatches remain the durable queue/cache for waking an agent.
+Dispatches are preserved as historical/legacy bridge rows, not the durable queue for normal agent work.
 
-The stream does not replace dispatch approval, completion, or dedup behavior.
-Instead:
-
-- the stream records that a handoff or wake-worthy event happened
-- dispatches remain the object that bridges consume when real work should start
-
-This keeps the global feed auditable without making it the sole delivery path.
+The stream records that a handoff or attention-worthy event happened. Bridges should consume agent-stream/attention state or explicit task/thread context by default; only legacy deployments that opt into `defaults.legacy_dispatch_enabled: true` should create or consume dispatch rows.
 
 ### Bridges and channels
 
@@ -348,19 +342,18 @@ The point is to stop asking the operator to say “okay” on every normal hando
 
 ## Normal workflow mapping
 
-The intended relationship between task messages, stream entries, and dispatches
-is:
+The intended relationship between task messages and stream entries is:
 
 1. Implementer posts a full review request on the task thread.
 2. Den emits a compact `review_requested` ops entry linked to the same
-   `task_id`, `thread_id`, and any created `dispatch_id`.
-3. Den creates or updates the reviewer dispatch.
-4. Reviewer bridge/channel receives the delivery and starts work.
-5. Den emits `review_started` when the reviewer instance acknowledges pickup.
-6. Reviewer posts detailed findings or approval on the task thread.
-7. Den emits `changes_requested` or `review_approved` plus the appropriate
+   `task_id` and `thread_id`.
+3. Reviewer/conductor attention is represented through agent-stream/run state,
+   role-aware targeted messages, or future first-class attention items.
+4. Reviewer posts detailed findings or approval on the task thread.
+5. Den emits `changes_requested` or `review_approved` plus the appropriate
    handoff event.
-8. Implementer instance is woken through the normal dispatch path.
+6. Implementer follows the task-thread handoff/attention item rather than a
+   pending dispatch queue.
 
 This keeps the stream thin while making the workflow globally visible.
 
@@ -493,8 +486,8 @@ chat-heavy workflow too early.
 
 ### Slice 6: bridge integration
 
-- Codex bridge consumes relevant wake-worthy stream entries or derived dispatch
-  events
+- Codex bridge consumes relevant wake-worthy stream entries or future attention
+  items; derived dispatch events are legacy-only
 - Claude Den channel consumes the same Den-native semantics
 - Telegram stays in the operator-notification lane
 
@@ -505,7 +498,8 @@ The best shape is:
 - one global Den-owned agent stream
 - two logical views: `ops` and `message`
 - task-thread messages remain the place for detailed context
-- dispatches remain the durable wake queue
+- agent-stream/run state and future attention items are the normal wake/visibility path
+- legacy dispatch rows remain inspectable for compatibility/debugging
 - bridges/channels stay adapter-specific
 - Telegram becomes notification and control, not the primary bus
 

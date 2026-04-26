@@ -2,6 +2,8 @@
 
 This is the operational reference for the live `den-mcp` + Signal integration on `den-srv`. It turns the one-off validation work into a repeatable smoke check and documents the ownership / path assumptions that matter when restarting, relinking, updating, or migrating the service.
 
+Status update, 2026-04-26: dispatch creation/approval is legacy bridge mode. The canonical conductor workflow no longer uses dispatches; only run this path when deliberately validating the Signal dispatch bridge with `defaults.legacy_dispatch_enabled: true` configured for the smoke project.
+
 ## Quick Smoke Check
 
 Run the full live smoke check as root:
@@ -18,7 +20,7 @@ What it validates:
 - `http://127.0.0.1:<den-port>/health` is healthy
 - the configured Signal account is visible to the actual Signal service user (`patch`)
 - direct JSON-RPC send through `signal-cli` succeeds to the configured recipient
-- a message with explicit recipient metadata creates a Den dispatch
+- in explicit legacy mode, a message with recipient metadata creates a Den dispatch
 - the resulting Signal notification can be approved/rejected by reaction
 
 The script defaults to:

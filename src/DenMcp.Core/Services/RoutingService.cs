@@ -292,7 +292,7 @@ public sealed class RoutingService : IRoutingService
         },
         Triggers =
         [
-            // Task moved to review → dispatch reviewer
+            // Legacy bridge mode: task moved to review → dispatch reviewer
             new RoutingTrigger
             {
                 Event = DispatchEvent.TaskStatusChanged,
@@ -300,7 +300,7 @@ public sealed class RoutingService : IRoutingService
                 DispatchTo = "reviewer",
                 PromptTemplate = "Review task #{task_id} ({task_title}) on branch {branch}. Run `git diff main...HEAD` to see changes."
             },
-            // Task moved from review back to planned → dispatch implementer for feedback
+            // Legacy bridge mode: task moved from review back to planned → dispatch implementer for feedback
             new RoutingTrigger
             {
                 Event = DispatchEvent.TaskStatusChanged,
@@ -309,7 +309,7 @@ public sealed class RoutingService : IRoutingService
                 DispatchTo = "implementer",
                 PromptTemplate = "Task #{task_id} ({task_title}) has review feedback. Check messages for details and address the findings on branch {branch}."
             },
-            // Message with explicit recipient → dispatch to that recipient
+            // Legacy bridge mode: message with explicit recipient → dispatch to that recipient
             new RoutingTrigger
             {
                 Event = DispatchEvent.MessageReceived,
@@ -317,7 +317,7 @@ public sealed class RoutingService : IRoutingService
                 DispatchTo = "{recipient}",
                 PromptTemplate = "You have a message on {project_id} from {sender}. Check your messages and respond."
             },
-            // Message with explicit target_role → resolve through configured role mapping
+            // Legacy bridge mode: message with explicit target_role → resolve through configured role mapping
             new RoutingTrigger
             {
                 Event = DispatchEvent.MessageReceived,
@@ -328,6 +328,7 @@ public sealed class RoutingService : IRoutingService
         ],
         Defaults = new RoutingDefaults
         {
+            LegacyDispatchEnabled = false,
             AutoApprove = false,
             ExpiryMinutes = 1440
         }

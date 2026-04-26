@@ -13,6 +13,7 @@ public class DispatchDetectionServiceTests : IAsyncLifetime
     private DispatchRepository _dispatches = null!;
     private TaskRepository _tasks = null!;
     private MessageRepository _messages = null!;
+    private DocumentRepository _docs = null!;
 
     public async Task InitializeAsync()
     {
@@ -20,8 +21,8 @@ public class DispatchDetectionServiceTests : IAsyncLifetime
         _tasks = new TaskRepository(_testDb.Db);
         _messages = new MessageRepository(_testDb.Db);
         _dispatches = new DispatchRepository(_testDb.Db);
-        var docs = new DocumentRepository(_testDb.Db);
-        var routing = new RoutingService(docs);
+        _docs = new DocumentRepository(_testDb.Db);
+        var routing = new RoutingService(_docs);
         var prompts = new PromptGenerationService(_tasks, _messages, routing);
         var contexts = new DispatchContextService(_dispatches, _messages, _tasks, routing,
             NullLogger<DispatchContextService>.Instance);
@@ -30,9 +31,29 @@ public class DispatchDetectionServiceTests : IAsyncLifetime
 
         var projRepo = new ProjectRepository(_testDb.Db);
         await projRepo.CreateAsync(new Project { Id = "proj", Name = "Test" });
+        await EnableLegacyDispatchRoutingAsync("proj");
     }
 
     public Task DisposeAsync() => _testDb.DisposeAsync();
+
+    private static readonly JsonSerializerOptions RoutingJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
+    };
+
+    private async Task EnableLegacyDispatchRoutingAsync(string projectId)
+    {
+        var config = RoutingService.CreateDefaultConfig();
+        config.Defaults.LegacyDispatchEnabled = true;
+        await _docs.UpsertAsync(new Document
+        {
+            ProjectId = projectId,
+            Slug = "dispatch-routing",
+            Title = "Legacy Dispatch Routing",
+            Content = JsonSerializer.Serialize(config, RoutingJsonOptions),
+            DocType = DocType.Convention
+        });
+    }
 
     private sealed class NoOpNotifications : INotificationChannel
     {
@@ -52,6 +73,45 @@ public class DispatchDetectionServiceTests : IAsyncLifetime
 
         public Task StartListeningAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
+
+    #region Legacy dispatch mode
+
+    [Fact]
+    public async Task LegacyDispatchDisabledByDefault_SuppressesAutomaticDispatchCreation()
+    {
+        var projects = new ProjectRepository(_testDb.Db);
+        await projects.CreateAsync(new Project { Id = "legacy-off", Name = "Legacy Off" });
+        var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "legacy-off", Title = "Review me" });
+
+        await _detection.OnTaskStatusChangedAsync(task, "in_progress", "review", "claude-code");
+
+        var pending = await _dispatches.ListAsync("legacy-off", statuses: [DispatchStatus.Pending]);
+        Assert.Empty(pending);
+    }
+
+    [Fact]
+    public async Task RoutingDocumentWithoutLegacyDispatchEnabled_SuppressesAutomaticDispatchCreation()
+    {
+        var projects = new ProjectRepository(_testDb.Db);
+        await projects.CreateAsync(new Project { Id = "legacy-doc-off", Name = "Legacy Doc Off" });
+        var config = RoutingService.CreateDefaultConfig();
+        await _docs.UpsertAsync(new Document
+        {
+            ProjectId = "legacy-doc-off",
+            Slug = "dispatch-routing",
+            Title = "Dispatch Routing",
+            Content = JsonSerializer.Serialize(config, RoutingJsonOptions),
+            DocType = DocType.Convention
+        });
+        var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "legacy-doc-off", Title = "Review me" });
+
+        await _detection.OnTaskStatusChangedAsync(task, "in_progress", "review", "claude-code");
+
+        var pending = await _dispatches.ListAsync("legacy-doc-off", statuses: [DispatchStatus.Pending]);
+        Assert.Empty(pending);
+    }
+
+    #endregion
 
     #region Task status change dispatch
 

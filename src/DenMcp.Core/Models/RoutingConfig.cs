@@ -5,8 +5,8 @@ namespace DenMcp.Core.Models;
 
 /// <summary>
 /// Per-project routing configuration. Stored as a den document
-/// (doc_type: convention, slug: dispatch-routing). Defines which agents
-/// fill which roles and which events trigger dispatches.
+/// (doc_type: convention, slug: dispatch-routing). Defines legacy dispatch
+/// bridge behavior for projects that still opt in to dispatch creation.
 /// </summary>
 public sealed class RoutingConfig
 {
@@ -99,6 +99,13 @@ public sealed class RoutingTrigger
 
 public sealed class RoutingDefaults
 {
+    /// <summary>
+    /// Dispatch creation is retired from the default conductor workflow.
+    /// Projects must explicitly enable this for legacy bridges that still consume dispatch rows.
+    /// </summary>
+    [JsonPropertyName("legacy_dispatch_enabled")]
+    public bool LegacyDispatchEnabled { get; set; } = false;
+
     [JsonPropertyName("auto_approve")]
     public bool AutoApprove { get; set; } = false;
 

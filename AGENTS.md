@@ -65,12 +65,12 @@ dotnet run --project src/DenMcp.Cli -- dashboard
 
 ## Task Management
 
-Use Den tasks and task-thread messages as the shared record. Dispatches are a wake-up and routing mechanism, not a second source of truth.
+Use Den tasks and task-thread messages as the shared record. Agent-stream ops and run records are the normal attention/observability layer. Dispatches are legacy bridge artifacts, not a normal work queue or second source of truth.
 
 Before substantial work:
-- Check pending dispatches for your own agent identity.
-- Check unread task-thread messages.
+- Check unread task-thread messages and relevant agent-stream/attention items.
 - Check the current task status if you are working from a task.
+- Ignore pending dispatches during normal startup/drain loops unless a user explicitly asks you to debug a legacy bridge or dispatch row.
 
 For Den state, prefer Den tools over shell. Shell, `curl`, database searches, and source-code inspection are fallback paths only after the relevant Den read tool is missing or fails.
 
@@ -78,7 +78,7 @@ When using Den task-thread handoffs:
 - Prefer task-thread messages over project-wide chat.
 - Use `metadata.type` for structured handoffs such as `planning_summary`, `review_request`, `review_feedback`, and `merge_request`.
 - Do not invent new `intent` values when an existing canonical family already fits; keep `intent` aligned with `handoff`, `review_request`, `review_feedback`, and similar built-in families.
-- When a message is intended to wake or redirect a specific agent, make the recipient explicit in metadata and keep the real context in the task/thread instead of relying only on generated prompt text.
+- When a message is intended to wake or redirect a specific agent, make the recipient explicit in metadata and keep the real context in the task/thread instead of relying on generated dispatch prompt text.
 
 Suggested targeted metadata examples:
 - `{"type":"review_request","recipient":"<agent>"}`
@@ -138,7 +138,7 @@ Preferred sequence:
 - If you are the intended recipient of `review_feedback`, `merge_request`, or `planning_summary`, read the full thread or structured context before acting.
 - If work is handed off between agents, keep the contract in Den tasks/messages rather than tool-specific side channels.
 - Helper scripts, notifications, Telegram relays, terminal wrappers, or local bridges may assist workflow, but they are not the primary record.
-- Before idling or declaring a slice complete, check Den again for queued dispatches, unread task-thread messages, and the next unblocked task so work drains promptly.
+- Before idling or declaring a slice complete, check Den again for unread task-thread messages, relevant agent-stream/attention items, and the next unblocked task so work drains promptly. Do not treat dispatches as a normal queue unless a legacy bridge/debug task explicitly says to.
 
 ## Git Workflow
 

@@ -11,9 +11,6 @@ import {
   subagentRunEventsUrl,
   listDocuments,
   listActiveAgents,
-  listDispatches,
-  approveDispatch,
-  rejectDispatch,
 } from './api/client';
 import { usePolling } from './hooks/usePolling';
 import { useEventSourceRefresh } from './hooks/useEventSourceRefresh';
@@ -30,7 +27,6 @@ import { SubagentRunDetail } from './components/SubagentRunDetail';
 import { DocumentList } from './components/DocumentList';
 import { DocumentDetail } from './components/DocumentDetail';
 import { AgentBar } from './components/AgentBar';
-import { DispatchPanel } from './components/DispatchPanel';
 import { DispatchDetail } from './components/DispatchDetail';
 import { MESSAGE_INTENT_OPTIONS, messageIntentLabel } from './messageIntents';
 import type { SubagentRunFilter } from './subagentRuns';
@@ -57,8 +53,6 @@ export default function App() {
   const [subagentRunFilter, setSubagentRunFilter] = useState<SubagentRunFilter>('all');
   const [subagentRunLimit, setSubagentRunLimit] = useState(8);
   const [sortMode, setSortMode] = useState('priority');
-  const [pendingDispatchActionId, setPendingDispatchActionId] = useState<number | null>(null);
-  const [dispatchActionError, setDispatchActionError] = useState<string | null>(null);
 
   const fetchProjects = useCallback(() => listProjects(), []);
   const { data: projects } = usePolling(fetchProjects, 5000);
@@ -157,21 +151,6 @@ export default function App() {
     [effectiveProject, isGlobal],
   );
   const { data: agents } = usePolling(fetchAgents, 5000);
-
-  const fetchDispatches = useCallback(
-    () => effectiveProject
-      ? listDispatches({
-        projectId: isGlobal ? undefined : effectiveProject,
-        status: 'pending',
-      })
-      : Promise.resolve([]),
-    [effectiveProject, isGlobal],
-  );
-  const {
-    data: dispatches,
-    error: dispatchError,
-    refresh: refreshDispatches,
-  } = usePolling(fetchDispatches, 5000);
 
   const sortedDocs = useMemo(
     () => documents ? [...documents].sort((a, b) => b.updated_at.localeCompare(a.updated_at)) : [],
@@ -297,36 +276,6 @@ export default function App() {
     }
   }, []);
 
-  const handleDispatchDecision = useCallback(async (
-    dispatch: DispatchEntry,
-    decision: 'approve' | 'reject',
-  ) => {
-    const verb = decision === 'approve' ? 'approve' : 'reject';
-    const confirmed = window.confirm(
-      `${verb[0].toUpperCase()}${verb.slice(1)} dispatch #${dispatch.id} for ${dispatch.target_agent} on ${dispatch.project_id}?`,
-    );
-    if (!confirmed) {
-      return;
-    }
-
-    setPendingDispatchActionId(dispatch.id);
-    setDispatchActionError(null);
-
-    try {
-      if (decision === 'approve') {
-        await approveDispatch(dispatch.id, 'web-ui');
-      } else {
-        await rejectDispatch(dispatch.id, 'web-ui');
-      }
-    } catch (error) {
-      setDispatchActionError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setPendingDispatchActionId(null);
-      refreshDispatches();
-    }
-  }, [refreshDispatches]);
-
-  const visibleDispatchError = dispatchActionError ?? (dispatchError ? dispatchError.message : null);
   const feedCount = feedMode === 'stream'
     ? filteredAgentStream.length
     : (messages?.length ?? 0);
@@ -453,7 +402,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* Middle row — agents plus dispatch fallback controls */}
+      {/* Middle row — agents plus active sub-agent work */}
       <div className="panel-middle-grid">
         <div className="panel panel-agents">
           <div className="panel-header">
@@ -461,22 +410,6 @@ export default function App() {
           </div>
           <div className="panel-body panel-body-agents">
             <AgentBar agents={agents ?? []} isGlobal={isGlobal} />
-          </div>
-        </div>
-
-        <div className="panel panel-dispatches">
-          <div className="panel-header">
-            Dispatches <span className="count">({dispatches?.length ?? 0})</span>
-          </div>
-          <div className="panel-body">
-            <DispatchPanel
-              dispatches={dispatches ?? []}
-              isGlobal={isGlobal}
-              pendingActionId={pendingDispatchActionId}
-              actionError={visibleDispatchError}
-              onApprove={dispatch => void handleDispatchDecision(dispatch, 'approve')}
-              onReject={dispatch => void handleDispatchDecision(dispatch, 'reject')}
-            />
           </div>
         </div>
 

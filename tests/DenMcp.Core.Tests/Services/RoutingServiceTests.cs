@@ -51,6 +51,7 @@ public class RoutingServiceTests : IAsyncLifetime
         Assert.Contains("implementer", result.Config.Roles.Keys);
         Assert.Contains("reviewer", result.Config.Roles.Keys);
         Assert.True(result.Config.Triggers.Count >= 3);
+        Assert.False(result.Config.Defaults.LegacyDispatchEnabled);
     }
 
     [Fact]
@@ -68,7 +69,7 @@ public class RoutingServiceTests : IAsyncLifetime
                     DispatchTo = "dev"
                 }
             ],
-            Defaults = new RoutingDefaults { ExpiryMinutes = 60 }
+            Defaults = new RoutingDefaults { LegacyDispatchEnabled = true, ExpiryMinutes = 60 }
         };
 
         await _docs.UpsertAsync(new Document
@@ -86,6 +87,7 @@ public class RoutingServiceTests : IAsyncLifetime
         Assert.Single(result.Config.Roles);
         Assert.Equal("my-agent", result.Config.Roles["dev"]);
         Assert.Single(result.Config.Triggers);
+        Assert.True(result.Config.Defaults.LegacyDispatchEnabled);
         Assert.Equal(60, result.Config.Defaults.ExpiryMinutes);
     }
 

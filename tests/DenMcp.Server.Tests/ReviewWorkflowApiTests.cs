@@ -120,12 +120,11 @@ public class ReviewWorkflowApiTests : IAsyncLifetime
         Assert.Equal("reviewer", result.Message.Metadata!.Value.GetProperty("target_role").GetString());
 
         var dispatches = await ListDispatchesAsync(targetAgent: "codex", statuses: [DispatchStatus.Pending]);
-        Assert.Single(dispatches);
-        Assert.Equal(task.Id, dispatches[0].TaskId);
+        Assert.Empty(dispatches);
 
         var streamEntries = await ListAgentStreamAsync(taskId: task.Id);
         Assert.Contains(streamEntries, entry => entry.EventType == "rereview_requested" && entry.RecipientRole == "reviewer");
-        Assert.Contains(streamEntries, entry => entry.EventType == "dispatch_created" && entry.DispatchId == dispatches[0].Id);
+        Assert.DoesNotContain(streamEntries, entry => entry.EventType == "dispatch_created");
     }
 
     [Fact]
@@ -181,7 +180,7 @@ public class ReviewWorkflowApiTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task RestSetVerdict_PostsFeedbackHandoffAndCompletesReviewerDispatch()
+    public async Task RestSetVerdict_PostsFeedbackHandoffAndResolvesReviewerDispatch()
     {
         var task = await CreateTaskAsync("REST verdict handoff", assignedTo: "claude-code");
         var reviewRequest = await CreateReviewRequestPacketAsync(task.Id, "claude-code");
@@ -213,14 +212,14 @@ public class ReviewWorkflowApiTests : IAsyncLifetime
         Assert.Equal("claude-code", handoff.Metadata!.Value.GetProperty("recipient").GetString());
 
         var implementerDispatches = await dispatches.ListAsync(ProjectId, "claude-code", [DispatchStatus.Pending]);
-        Assert.Single(implementerDispatches);
+        Assert.Empty(implementerDispatches);
 
         var completedReviewerDispatch = await dispatches.GetByIdAsync(reviewerDispatch.Id);
         Assert.Equal(DispatchStatus.Completed, completedReviewerDispatch!.Status);
 
         var streamEntries = await ListAgentStreamAsync(taskId: task.Id);
         Assert.Contains(streamEntries, entry => entry.EventType == "changes_requested" && entry.RecipientAgent == "claude-code");
-        Assert.Contains(streamEntries, entry => entry.EventType == "dispatch_created" && entry.DispatchId == implementerDispatches[0].Id);
+        Assert.DoesNotContain(streamEntries, entry => entry.EventType == "dispatch_created" && entry.RecipientAgent == "claude-code");
         Assert.DoesNotContain(streamEntries, entry => entry.EventType == "merge_handoff");
     }
 
@@ -258,8 +257,7 @@ public class ReviewWorkflowApiTests : IAsyncLifetime
             Assert.Contains("pick up your next task", handoff.Content, StringComparison.OrdinalIgnoreCase);
 
             var implementerDispatches = await dispatches.ListAsync(ProjectId, "claude-code", [DispatchStatus.Pending]);
-            Assert.Single(implementerDispatches);
-            Assert.Contains("mark the task done", implementerDispatches[0].ContextPrompt!, StringComparison.OrdinalIgnoreCase);
+            Assert.Empty(implementerDispatches);
 
             var stream = scope.ServiceProvider.GetRequiredService<IAgentStreamRepository>();
             var streamEntries = await stream.ListAsync(new AgentStreamListOptions
@@ -272,7 +270,7 @@ public class ReviewWorkflowApiTests : IAsyncLifetime
 
             Assert.Contains(streamEntries, entry => entry.EventType == "review_approved" && entry.RecipientAgent == "claude-code");
             Assert.Contains(streamEntries, entry => entry.EventType == "merge_handoff" && entry.RecipientAgent == "claude-code");
-            Assert.Contains(streamEntries, entry => entry.EventType == "dispatch_created" && entry.DispatchId == implementerDispatches[0].Id);
+            Assert.DoesNotContain(streamEntries, entry => entry.EventType == "dispatch_created");
         }
     }
 

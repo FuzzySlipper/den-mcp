@@ -148,12 +148,12 @@ html, body, #root {
 /* Messages panel — spans full width top */
 .panel-messages { grid-column: 1 / -1; grid-row: 1; }
 
-/* Middle row — split agents and dispatches */
+/* Middle row — agents and active sub-agent work */
 .panel-middle-grid {
   grid-column: 1 / -1;
   grid-row: 2;
   display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.25fr) minmax(0, 1.65fr);
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 2.9fr);
   gap: 1px;
   background: var(--border);
 }

@@ -15,8 +15,8 @@ using Microsoft.Extensions.Logging;
 namespace DenMcp.Server.Tests;
 
 /// <summary>
-/// Integration tests proving the four server wiring points invoke dispatch detection
-/// and that detection failures do not break the primary write path.
+/// Integration tests proving the server wiring points keep primary writes safe while
+/// automatic dispatch creation stays retired unless a legacy routing document opts in.
 /// </summary>
 public class DispatchDetectionWiringTests : IAsyncLifetime
 {
@@ -43,6 +43,54 @@ public class DispatchDetectionWiringTests : IAsyncLifetime
         using var scope = services.CreateScope();
         var projects = scope.ServiceProvider.GetRequiredService<IProjectRepository>();
         await projects.CreateAsync(new Project { Id = ProjectId, Name = "Wiring Test" });
+    }
+
+    private static async Task EnableLegacyDispatchRoutingAsync(IServiceProvider services)
+    {
+        using var scope = services.CreateScope();
+        var docs = scope.ServiceProvider.GetRequiredService<IDocumentRepository>();
+        await docs.UpsertAsync(new Document
+        {
+            ProjectId = ProjectId,
+            Slug = "dispatch-routing",
+            Title = "Legacy Dispatch Routing",
+            Content = """
+            {
+              "roles": {
+                "implementer": "claude-code",
+                "reviewer": "codex"
+              },
+              "triggers": [
+                {
+                  "event": "task_status_changed",
+                  "to_status": "review",
+                  "dispatch_to": "reviewer"
+                },
+                {
+                  "event": "task_status_changed",
+                  "from_status": "review",
+                  "to_status": "planned",
+                  "dispatch_to": "implementer"
+                },
+                {
+                  "event": "message_received",
+                  "has_recipient": true,
+                  "dispatch_to": "{recipient}"
+                },
+                {
+                  "event": "message_received",
+                  "has_target_role": true,
+                  "dispatch_to": "{target_role}"
+                }
+              ],
+              "defaults": {
+                "legacy_dispatch_enabled": true,
+                "expiry_minutes": 1440
+              }
+            }
+            """,
+            DocType = DocType.Convention
+        });
     }
 
     private async Task<int> SeedTaskAsync(IServiceProvider? services = null)
@@ -86,10 +134,10 @@ public class DispatchDetectionWiringTests : IAsyncLifetime
             : dispatch;
     }
 
-    #region REST wiring — dispatch is created
+    #region REST wiring — automatic dispatch creation is retired by default
 
     [Fact]
-    public async Task RestMessageCreate_TriggersDispatchDetection()
+    public async Task RestMessageCreate_DoesNotCreateDispatchByDefault()
     {
         var response = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/messages", new
         {
@@ -100,12 +148,11 @@ public class DispatchDetectionWiringTests : IAsyncLifetime
         response.EnsureSuccessStatusCode();
 
         var dispatches = await GetDispatchesAsync();
-        Assert.Single(dispatches);
-        Assert.Equal("claude-code", dispatches[0].TargetAgent);
+        Assert.Empty(dispatches);
     }
 
     [Fact]
-    public async Task RestMessageCreate_WithIntentOnly_TriggersDispatchDetection()
+    public async Task RestMessageCreate_WithIntentOnly_DoesNotCreateDispatchByDefault()
     {
         var response = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/messages", new
         {
@@ -117,12 +164,11 @@ public class DispatchDetectionWiringTests : IAsyncLifetime
         response.EnsureSuccessStatusCode();
 
         var dispatches = await GetDispatchesAsync();
-        Assert.Single(dispatches);
-        Assert.Equal("claude-code", dispatches[0].TargetAgent);
+        Assert.Empty(dispatches);
     }
 
     [Fact]
-    public async Task RestMessageCreate_WithTargetRole_TriggersDispatchDetection()
+    public async Task RestMessageCreate_WithTargetRole_DoesNotCreateDispatchByDefault()
     {
         var response = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/messages", new
         {
@@ -134,12 +180,11 @@ public class DispatchDetectionWiringTests : IAsyncLifetime
         response.EnsureSuccessStatusCode();
 
         var dispatches = await GetDispatchesAsync();
-        Assert.Single(dispatches);
-        Assert.Equal("codex", dispatches[0].TargetAgent);
+        Assert.Empty(dispatches);
     }
 
     [Fact]
-    public async Task RestTaskUpdate_TriggersDispatchDetection()
+    public async Task RestTaskUpdate_DoesNotCreateDispatchByDefault()
     {
         var taskId = await SeedTaskAsync();
 
@@ -151,8 +196,7 @@ public class DispatchDetectionWiringTests : IAsyncLifetime
         response.EnsureSuccessStatusCode();
 
         var dispatches = await GetDispatchesAsync();
-        Assert.Single(dispatches);
-        Assert.Equal("codex", dispatches[0].TargetAgent);
+        Assert.Empty(dispatches);
     }
 
     [Fact]
@@ -175,12 +219,30 @@ public class DispatchDetectionWiringTests : IAsyncLifetime
         Assert.Equal(DispatchStatus.Expired, (await dispatches.GetByIdAsync(approved.Id))!.Status);
     }
 
+    [Fact]
+    public async Task RestMessageCreate_WithLegacyDispatchRouting_CreatesDispatch()
+    {
+        await EnableLegacyDispatchRoutingAsync(_factory.Services);
+
+        var response = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/messages", new
+        {
+            sender = "codex",
+            content = "Review feedback via REST",
+            metadata = """{"type":"review_feedback","recipient":"claude-code"}"""
+        });
+        response.EnsureSuccessStatusCode();
+
+        var dispatches = await GetDispatchesAsync();
+        var dispatch = Assert.Single(dispatches);
+        Assert.Equal("claude-code", dispatch.TargetAgent);
+    }
+
     #endregion
 
-    #region MCP tool wiring — dispatch is created
+    #region MCP tool wiring — automatic dispatch creation is retired by default
 
     [Fact]
-    public async Task McpSendMessage_TriggersDispatchDetection()
+    public async Task McpSendMessage_DoesNotCreateDispatchByDefault()
     {
         using var scope = _factory.Services.CreateScope();
         var repo = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
@@ -192,12 +254,11 @@ public class DispatchDetectionWiringTests : IAsyncLifetime
             metadata: """{"type":"review_feedback","recipient":"claude-code"}""");
 
         var dispatches = await GetDispatchesAsync();
-        Assert.Single(dispatches);
-        Assert.Equal("claude-code", dispatches[0].TargetAgent);
+        Assert.Empty(dispatches);
     }
 
     [Fact]
-    public async Task McpSendMessage_WithIntentOnly_TriggersDispatchDetection()
+    public async Task McpSendMessage_WithIntentOnly_DoesNotCreateDispatchByDefault()
     {
         using var scope = _factory.Services.CreateScope();
         var repo = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
@@ -210,12 +271,11 @@ public class DispatchDetectionWiringTests : IAsyncLifetime
             intent: "review_feedback");
 
         var dispatches = await GetDispatchesAsync();
-        Assert.Single(dispatches);
-        Assert.Equal("claude-code", dispatches[0].TargetAgent);
+        Assert.Empty(dispatches);
     }
 
     [Fact]
-    public async Task McpSendMessage_WithTargetRole_TriggersDispatchDetection()
+    public async Task McpSendMessage_WithTargetRole_DoesNotCreateDispatchByDefault()
     {
         using var scope = _factory.Services.CreateScope();
         var repo = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
@@ -228,12 +288,11 @@ public class DispatchDetectionWiringTests : IAsyncLifetime
             intent: "review_request");
 
         var dispatches = await GetDispatchesAsync();
-        Assert.Single(dispatches);
-        Assert.Equal("codex", dispatches[0].TargetAgent);
+        Assert.Empty(dispatches);
     }
 
     [Fact]
-    public async Task McpUpdateTask_TriggersDispatchDetection()
+    public async Task McpUpdateTask_DoesNotCreateDispatchByDefault()
     {
         var taskId = await SeedTaskAsync();
 
@@ -246,8 +305,7 @@ public class DispatchDetectionWiringTests : IAsyncLifetime
             taskId, "claude-code", status: "review");
 
         var dispatches = await GetDispatchesAsync();
-        Assert.Single(dispatches);
-        Assert.Equal("codex", dispatches[0].TargetAgent);
+        Assert.Empty(dispatches);
     }
 
     #endregion

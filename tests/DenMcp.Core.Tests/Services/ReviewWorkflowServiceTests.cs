@@ -188,7 +188,7 @@ public class ReviewWorkflowServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SetReviewVerdictAsync_ChangesRequested_PostsFeedbackHandoffAndCompletesReviewerDispatch()
+    public async Task SetReviewVerdictAsync_ChangesRequested_PostsFeedbackHandoffAndResolvesReviewerDispatch()
     {
         var task = await _tasks.CreateAsync(new ProjectTask
         {
@@ -269,8 +269,7 @@ public class ReviewWorkflowServiceTests : IAsyncLifetime
         Assert.Equal(reviewDispatch.Id, result.CompletedDispatches[0].Id);
 
         var implementerDispatches = await _dispatches.ListAsync("proj", "claude-code", [DispatchStatus.Pending]);
-        Assert.Single(implementerDispatches);
-        Assert.Contains("review feedback", implementerDispatches[0].Summary!, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(implementerDispatches);
 
         var completedReviewerDispatch = await _dispatches.GetByIdAsync(reviewDispatch.Id);
         Assert.Equal(DispatchStatus.Completed, completedReviewerDispatch!.Status);
@@ -315,10 +314,7 @@ public class ReviewWorkflowServiceTests : IAsyncLifetime
         Assert.Equal("claude-code", result.HandoffMessage.Metadata!.Value.GetProperty("recipient").GetString());
 
         var implementerDispatches = await _dispatches.ListAsync("proj", "claude-code", [DispatchStatus.Pending]);
-        Assert.Single(implementerDispatches);
-        Assert.Contains("Merge handoff", implementerDispatches[0].Summary!, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("mark the task done", implementerDispatches[0].ContextPrompt!, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("request review again with the new head SHA and tests run", implementerDispatches[0].ContextPrompt!, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(implementerDispatches);
     }
 
     [Fact]
@@ -420,6 +416,6 @@ public class ReviewWorkflowServiceTests : IAsyncLifetime
             message.Metadata.Value.GetProperty("handoff_kind").GetString() == "merge_request");
 
         var implementerDispatches = await _dispatches.ListAsync("proj", "claude-code", [DispatchStatus.Pending]);
-        Assert.Single(implementerDispatches);
+        Assert.Empty(implementerDispatches);
     }
 }

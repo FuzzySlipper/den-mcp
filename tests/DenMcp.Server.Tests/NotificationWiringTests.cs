@@ -36,6 +36,35 @@ public class NotificationWiringTests : IAsyncLifetime
         return Task.CompletedTask;
     }
 
+    private static async Task EnableLegacyDispatchRoutingAsync(IServiceProvider services)
+    {
+        using var scope = services.CreateScope();
+        var docs = scope.ServiceProvider.GetRequiredService<IDocumentRepository>();
+        await docs.UpsertAsync(new Document
+        {
+            ProjectId = ProjectId,
+            Slug = "dispatch-routing",
+            Title = "Legacy Dispatch Routing",
+            Content = """
+            {
+              "roles": {},
+              "triggers": [
+                {
+                  "event": "message_received",
+                  "has_recipient": true,
+                  "dispatch_to": "{recipient}"
+                }
+              ],
+              "defaults": {
+                "legacy_dispatch_enabled": true,
+                "expiry_minutes": 1440
+              }
+            }
+            """,
+            DocType = DocType.Convention
+        });
+    }
+
     private async Task<int> SeedTaskAsync(IServiceProvider? services = null)
     {
         using var scope = (services ?? _factory.Services).CreateScope();
@@ -45,8 +74,25 @@ public class NotificationWiringTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task RestMessageCreate_SendsDispatchNotification()
+    public async Task RestMessageCreate_DoesNotSendDispatchNotificationByDefault()
     {
+        var response = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/messages", new
+        {
+            sender = "codex",
+            content = "Review feedback via Signal",
+            metadata = """{"type":"review_feedback","recipient":"claude-code"}"""
+        });
+
+        response.EnsureSuccessStatusCode();
+
+        Assert.Empty(_factory.RecordingChannel.DispatchNotifications);
+    }
+
+    [Fact]
+    public async Task RestMessageCreate_WithLegacyDispatchRouting_SendsDispatchNotification()
+    {
+        await EnableLegacyDispatchRoutingAsync(_factory.Services);
+
         var response = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/messages", new
         {
             sender = "codex",
