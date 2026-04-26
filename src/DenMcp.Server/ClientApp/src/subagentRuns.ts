@@ -2,6 +2,41 @@ import type { AgentStreamEntry, SubagentRunState, SubagentRunSummary, SubagentRu
 
 export type SubagentRunFilter = 'all' | 'active' | 'problem' | 'complete';
 
+export type SubagentWorkCardKind = 'assistant' | 'tool' | 'lifecycle';
+export type SubagentWorkCardStatus = 'requested' | 'running' | 'complete' | 'error' | 'info';
+
+export interface SubagentWorkCard {
+  id: string;
+  kind: SubagentWorkCardKind;
+  status: SubagentWorkCardStatus;
+  title: string;
+  subtitle: string | null;
+  timestamp: number | null;
+  startedAt: number | null;
+  endedAt: number | null;
+  toolCallId: string | null;
+  toolName: string | null;
+  argsPreview: string | null;
+  resultPreview: string | null;
+  textPreview: string | null;
+  warning: string | null;
+  eventCount: number;
+  events: SubagentRunWorkEvent[];
+}
+
+export interface SubagentWorkActivitySummary {
+  cardCount: number;
+  toolCallCount: number;
+  errorCount: number;
+  assistantMessageCount: number;
+  lifecycleCount: number;
+  latestAt: number | null;
+  currentToolName: string | null;
+  lastToolName: string | null;
+  lastAssistantPreview: string | null;
+  statusText: string;
+}
+
 export function stateFromSubagentEvent(eventType: string): SubagentRunState {
   switch (eventType) {
     case 'subagent_started':
@@ -108,6 +143,240 @@ export function formatSubagentWorkEventType(type: string): string {
 export function formatSubagentWorkTimestamp(ts: number | null | undefined): string {
   if (typeof ts !== 'number' || !Number.isFinite(ts)) return '';
   return new Date(ts).toLocaleString();
+}
+
+function asFiniteTimestamp(ts: number | null | undefined): number | null {
+  return typeof ts === 'number' && Number.isFinite(ts) ? ts : null;
+}
+
+function preview(value: string | null | undefined): string | null {
+  const trimmed = value?.replace(/\s+/g, ' ').trim();
+  return trimmed || null;
+}
+
+function toolCardKey(event: SubagentRunWorkEvent, index: number): string {
+  if (event.tool_call_id) return `tool:${event.tool_call_id}`;
+  return `tool:${event.tool_name ?? 'unknown'}:${event.ts ?? 'no-ts'}:${index}`;
+}
+
+function detectToolWarning(toolName: string | null | undefined, argsPreview: string | null | undefined): string | null {
+  const args = argsPreview?.toLowerCase() ?? '';
+  if (!args) return null;
+  const shellLike = !toolName || ['bash', 'shell', 'terminal'].includes(toolName.toLowerCase());
+  if (shellLike && /find\s+\//.test(args)) return 'broad filesystem search';
+  if (shellLike && /grep\s+(-[^\s]*r[^\s]*|--recursive)\s+\//.test(args)) return 'broad recursive search';
+  if (shellLike && /rm\s+(-[^\s]*r[^\s]*f|-[^\s]*f[^\s]*r)\s+\//.test(args)) return 'dangerous root delete command';
+  if (shellLike && /sudo\s+/.test(args)) return 'privileged shell command';
+  return null;
+}
+
+function createToolCard(event: SubagentRunWorkEvent, index: number): SubagentWorkCard {
+  const ts = asFiniteTimestamp(event.ts);
+  const toolName = event.tool_name ?? null;
+  const args = preview(event.args_preview);
+  return {
+    id: toolCardKey(event, index),
+    kind: 'tool',
+    status: 'requested',
+    title: toolName ?? 'tool',
+    subtitle: null,
+    timestamp: ts,
+    startedAt: null,
+    endedAt: null,
+    toolCallId: event.tool_call_id ?? null,
+    toolName,
+    argsPreview: args,
+    resultPreview: preview(event.result_preview),
+    textPreview: null,
+    warning: detectToolWarning(toolName, args),
+    eventCount: 0,
+    events: [],
+  };
+}
+
+function touchToolCard(card: SubagentWorkCard, event: SubagentRunWorkEvent): void {
+  const ts = asFiniteTimestamp(event.ts);
+  const args = preview(event.args_preview);
+  const result = preview(event.result_preview);
+  card.events.push(event);
+  card.eventCount = card.events.length;
+  card.timestamp = ts ?? card.timestamp;
+  card.toolName = event.tool_name ?? card.toolName;
+  card.toolCallId = event.tool_call_id ?? card.toolCallId;
+  card.title = card.toolName ?? card.title;
+  card.argsPreview = args ?? card.argsPreview;
+  card.resultPreview = result ?? card.resultPreview;
+  card.warning = card.warning ?? detectToolWarning(card.toolName, card.argsPreview);
+
+  if (event.type === 'subagent.work_tool_start') {
+    card.status = 'running';
+    card.startedAt = ts ?? card.startedAt;
+  } else if (event.type === 'subagent.work_tool_update') {
+    if (card.status === 'requested') card.status = 'running';
+  } else if (event.type === 'subagent.work_tool_end') {
+    card.status = event.is_error ? 'error' : 'complete';
+    card.endedAt = ts ?? card.endedAt;
+    if (card.startedAt == null) card.startedAt = card.timestamp;
+  }
+}
+
+function createCardFromEvent(event: SubagentRunWorkEvent, index: number, kind: SubagentWorkCardKind, title: string): SubagentWorkCard {
+  const ts = asFiniteTimestamp(event.ts);
+  const text = preview(event.text_preview);
+  return {
+    id: `${kind}:${event.type}:${ts ?? 'no-ts'}:${index}`,
+    kind,
+    status: event.is_error ? 'error' : kind === 'assistant' ? 'complete' : 'info',
+    title,
+    subtitle: null,
+    timestamp: ts,
+    startedAt: ts,
+    endedAt: ts,
+    toolCallId: null,
+    toolName: event.tool_name ?? null,
+    argsPreview: preview(event.args_preview),
+    resultPreview: preview(event.result_preview),
+    textPreview: text,
+    warning: null,
+    eventCount: 1,
+    events: [event],
+  };
+}
+
+function isToolEvent(event: SubagentRunWorkEvent): boolean {
+  return event.type === 'subagent.work_tool_start'
+    || event.type === 'subagent.work_tool_update'
+    || event.type === 'subagent.work_tool_end';
+}
+
+function hasToolCalls(event: SubagentRunWorkEvent): boolean {
+  return Array.isArray(event.tool_calls) && event.tool_calls.length > 0;
+}
+
+function isAssistantTextEvent(event: SubagentRunWorkEvent): boolean {
+  if (event.role && event.role !== 'assistant') return false;
+  if (!preview(event.text_preview)) return false;
+  if (hasToolCalls(event)) return false;
+  return event.type === 'subagent.work_message_update'
+    || event.type === 'subagent.work_message_end'
+    || event.type === 'subagent.work_turn_end';
+}
+
+function lifecycleTitle(type: string): string {
+  switch (type) {
+    case 'subagent.work_session':
+      return 'Session created';
+    case 'subagent.work_agent_start':
+      return 'Agent initialized';
+    case 'subagent.work_turn_start':
+      return 'Turn started';
+    case 'subagent.work_turn_end':
+      return 'Turn finished';
+    case 'subagent.work_message_start':
+      return 'Assistant message started';
+    default:
+      return formatSubagentWorkEventType(type);
+  }
+}
+
+export function groupSubagentWorkEvents(events: SubagentRunWorkEvent[]): SubagentWorkCard[] {
+  const cards: SubagentWorkCard[] = [];
+  const toolCards = new Map<string, SubagentWorkCard>();
+
+  events.forEach((event, index) => {
+    if (event.type === 'subagent.work_message_end' && hasToolCalls(event)) {
+      event.tool_calls?.forEach((toolCall, toolIndex) => {
+        const synthetic: SubagentRunWorkEvent = {
+          ...event,
+          type: 'subagent.work_tool_start',
+          tool_call_id: toolCall.id ?? null,
+          tool_name: toolCall.name ?? null,
+          args_preview: toolCall.args_preview ?? null,
+          result_preview: null,
+          is_error: false,
+        };
+        const key = toolCardKey(synthetic, index + toolIndex / 1000);
+        let card = toolCards.get(key);
+        if (!card) {
+          card = createToolCard(synthetic, index);
+          toolCards.set(key, card);
+          cards.push(card);
+        }
+        card.events.push(event);
+        card.eventCount = card.events.length;
+        card.status = card.status === 'requested' ? 'requested' : card.status;
+        card.argsPreview = preview(toolCall.args_preview) ?? card.argsPreview;
+        card.warning = card.warning ?? detectToolWarning(card.toolName, card.argsPreview);
+      });
+      return;
+    }
+
+    if (isToolEvent(event)) {
+      const key = toolCardKey(event, index);
+      let card = toolCards.get(key);
+      if (!card) {
+        card = createToolCard(event, index);
+        toolCards.set(key, card);
+        cards.push(card);
+      }
+      touchToolCard(card, event);
+      return;
+    }
+
+    if (isAssistantTextEvent(event)) {
+      cards.push(createCardFromEvent(event, index, 'assistant', event.type === 'subagent.work_message_update' ? 'Assistant update' : 'Assistant message'));
+      return;
+    }
+
+    if (event.type.startsWith('subagent.work_')) {
+      cards.push(createCardFromEvent(event, index, 'lifecycle', lifecycleTitle(event.type)));
+    }
+  });
+
+  return cards;
+}
+
+export function summarizeSubagentWorkActivity(events: SubagentRunWorkEvent[]): SubagentWorkActivitySummary {
+  const cards = groupSubagentWorkEvents(events);
+  const toolCards = cards.filter(card => card.kind === 'tool');
+  const assistantCards = cards.filter(card => card.kind === 'assistant');
+  const lifecycleCards = cards.filter(card => card.kind === 'lifecycle');
+  const currentTool = [...toolCards].reverse().find(card => card.status === 'running' || card.status === 'requested') ?? null;
+  const lastTool = [...toolCards].reverse().find(card => card.status === 'complete' || card.status === 'error') ?? currentTool;
+  const lastAssistant = [...assistantCards].reverse().find(card => card.textPreview) ?? null;
+  const latestAt = cards.reduce<number | null>((latest, card) => {
+    const ts = card.endedAt ?? card.timestamp ?? card.startedAt;
+    return ts != null && (latest == null || ts > latest) ? ts : latest;
+  }, null);
+  const errorCount = cards.filter(card => card.status === 'error').length;
+  let statusText = 'no structured work events';
+  if (currentTool) statusText = `${currentTool.status === 'requested' ? 'requested' : 'running'} ${currentTool.toolName ?? 'tool'}`;
+  else if (lastTool) statusText = `last tool: ${lastTool.toolName ?? 'tool'}`;
+  else if (lastAssistant) statusText = 'last assistant message';
+  else if (cards.length > 0) statusText = `${cards.length} lifecycle events`;
+
+  return {
+    cardCount: cards.length,
+    toolCallCount: toolCards.length,
+    errorCount,
+    assistantMessageCount: assistantCards.length,
+    lifecycleCount: lifecycleCards.length,
+    latestAt,
+    currentToolName: currentTool?.toolName ?? null,
+    lastToolName: lastTool?.toolName ?? null,
+    lastAssistantPreview: lastAssistant?.textPreview ?? null,
+    statusText,
+  };
+}
+
+export function summarizeSubagentWorkCard(card: SubagentWorkCard): string {
+  if (card.kind === 'tool') {
+    const result = card.resultPreview ? ` → ${card.resultPreview}` : '';
+    const args = card.argsPreview ? ` ${card.argsPreview}` : '';
+    return `${card.toolName ?? 'tool'} ${card.status}${args}${result}`.trim();
+  }
+  if (card.textPreview) return card.textPreview;
+  return card.title;
 }
 
 export function subagentRunMatchesFilter(run: SubagentRunSummary, filter: SubagentRunFilter): boolean {

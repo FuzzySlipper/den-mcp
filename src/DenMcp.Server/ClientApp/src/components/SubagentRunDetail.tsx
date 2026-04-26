@@ -1,14 +1,15 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { controlSubagentRun, getSubagentRun, type SubagentRunControlAction } from '../api/client';
 import type { AgentStreamEntry, SubagentRunSummary } from '../api/types';
 import { usePolling } from '../hooks/usePolling';
 import {
   formatInfrastructureFailureReason,
   formatSubagentDuration,
-  formatSubagentWorkEventType,
   formatSubagentWorkTimestamp,
+  groupSubagentWorkEvents,
   summarizeSubagentRunEntry,
-  summarizeSubagentWorkEvent,
+  summarizeSubagentWorkActivity,
+  summarizeSubagentWorkCard,
 } from '../subagentRuns';
 import { truncate } from '../utils';
 
@@ -27,6 +28,14 @@ function formatDate(iso: string): string {
   return new Date(`${iso}Z`).toLocaleString();
 }
 
+function formatCardStatus(status: string): string {
+  return status.replace(/_/g, ' ');
+}
+
+function cardTimestamp(card: { endedAt: number | null; timestamp: number | null; startedAt: number | null }): number | null {
+  return card.endedAt ?? card.timestamp ?? card.startedAt;
+}
+
 export function SubagentRunDetail({ run, onClose, onOpenTask, onOpenEntry }: Props) {
   const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
   const [controlPending, setControlPending] = useState<SubagentRunControlAction | null>(null);
@@ -41,7 +50,9 @@ export function SubagentRunDetail({ run, onClose, onOpenTask, onOpenEntry }: Pro
   const { data: detail, error, refresh } = usePolling(fetchRun, run.state === 'running' || run.state === 'retrying' || run.state === 'aborting' ? 2000 : 10_000);
   const summary = detail?.summary ?? run;
   const events = detail?.events ?? [run.latest];
-  const workEvents = detail?.work_events ?? [];
+  const workEvents = detail?.work_events;
+  const workCards = useMemo(() => groupSubagentWorkEvents(workEvents ?? []), [workEvents]);
+  const workActivity = useMemo(() => summarizeSubagentWorkActivity(workEvents ?? []), [workEvents]);
   const artifacts = detail?.artifacts ?? null;
   const canAbort = summary.state === 'running' || summary.state === 'retrying' || summary.state === 'aborting';
   const canRequestRerun = !canAbort && summary.state !== 'rerun_requested';
@@ -72,7 +83,7 @@ export function SubagentRunDetail({ run, onClose, onOpenTask, onOpenEntry }: Pro
   }, [refresh, summary.project_id, summary.run_id, summary.task_id]);
 
   return (
-    <div className="detail-overlay">
+    <div className="detail-overlay detail-overlay-wide">
       <div className="detail-header">
         <h2>Sub-agent run</h2>
         <button className="detail-close" onClick={onClose}>✕</button>
@@ -242,17 +253,61 @@ export function SubagentRunDetail({ run, onClose, onOpenTask, onOpenEntry }: Pro
           </div>
         )}
 
-        {workEvents.length > 0 && (
+        {workEvents && workEvents.length > 0 && (
           <div className="detail-section">
             <h3>Work</h3>
-            <div className="subagent-work-list">
-              {workEvents.map((event, index) => (
-                <div key={`${event.type}:${event.ts ?? index}:${index}`} className={`subagent-work-item ${event.is_error ? 'subagent-work-item-error' : ''}`}>
-                  <span className="subagent-event-time">{formatSubagentWorkTimestamp(event.ts)}</span>
-                  <span className="stream-chip stream-chip-event">{formatSubagentWorkEventType(event.type)}</span>
-                  <span className="subagent-work-body">{truncate(summarizeSubagentWorkEvent(event), 180)}</span>
-                  {event.tool_name && <span className="subagent-work-tool">{event.tool_name}</span>}
-                </div>
+            <div className="subagent-work-summary-grid">
+              <div className="subagent-work-summary-card">
+                <span>Activity</span>
+                <strong>{workActivity.statusText}</strong>
+              </div>
+              <div className="subagent-work-summary-card">
+                <span>Tools</span>
+                <strong>{workActivity.toolCallCount}</strong>
+              </div>
+              <div className="subagent-work-summary-card">
+                <span>Assistant</span>
+                <strong>{workActivity.assistantMessageCount}</strong>
+              </div>
+              <div className={`subagent-work-summary-card ${workActivity.errorCount > 0 ? 'subagent-work-summary-card-error' : ''}`}>
+                <span>Errors</span>
+                <strong>{workActivity.errorCount}</strong>
+              </div>
+            </div>
+            {workActivity.lastAssistantPreview && (
+              <div className="subagent-work-last-assistant">
+                <span>Last assistant</span>
+                <p>{truncate(workActivity.lastAssistantPreview, 240)}</p>
+              </div>
+            )}
+            <div className="subagent-work-card-list">
+              {workCards.map(card => (
+                <article key={card.id} className={`subagent-work-card subagent-work-card-${card.kind} subagent-work-card-${card.status}`}>
+                  <div className="subagent-work-card-head">
+                    <span className="stream-chip stream-chip-event">{card.kind}</span>
+                    <strong>{card.title}</strong>
+                    <span className={`subagent-work-status subagent-work-status-${card.status}`}>{formatCardStatus(card.status)}</span>
+                    <span className="subagent-event-time">{formatSubagentWorkTimestamp(cardTimestamp(card))}</span>
+                  </div>
+                  {card.warning && <div className="subagent-work-warning">⚠ {card.warning}</div>}
+                  {card.textPreview && <p className="subagent-work-text">{truncate(card.textPreview, 420)}</p>}
+                  {card.argsPreview && (
+                    <div className="subagent-work-preview">
+                      <span>Args</span>
+                      <pre>{truncate(card.argsPreview, 520)}</pre>
+                    </div>
+                  )}
+                  {card.resultPreview && (
+                    <div className="subagent-work-preview">
+                      <span>{card.status === 'error' ? 'Error/result' : 'Result'}</span>
+                      <pre>{truncate(card.resultPreview, 520)}</pre>
+                    </div>
+                  )}
+                  <details className="subagent-work-raw">
+                    <summary>{card.eventCount} raw event{card.eventCount === 1 ? '' : 's'} · {truncate(summarizeSubagentWorkCard(card), 96)}</summary>
+                    <pre>{JSON.stringify(card.events, null, 2)}</pre>
+                  </details>
+                </article>
               ))}
             </div>
           </div>

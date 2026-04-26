@@ -487,6 +487,7 @@ export default function App() {
           taskId={selectedTaskId}
           onSelectTask={handleTaskSelect}
           onSelectMessage={handleMessageSelect}
+          onSelectRun={handleSubagentRunSelect}
           onClose={() => {
             setSelectedTaskId(null);
             setSelectedTaskProjectId(null);

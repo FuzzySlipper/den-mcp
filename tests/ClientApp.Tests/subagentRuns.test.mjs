@@ -5,9 +5,12 @@ import {
   formatSubagentDuration,
   formatSubagentWorkEventType,
   formatSubagentWorkTimestamp,
+  groupSubagentWorkEvents,
   stateFromSubagentEvent,
   subagentRunMatchesFilter,
   summarizeSubagentRunEntry,
+  summarizeSubagentWorkActivity,
+  summarizeSubagentWorkCard,
   summarizeSubagentWorkEvent,
 } from '../../src/DenMcp.Server/ClientApp/src/subagentRuns.ts';
 
@@ -89,6 +92,63 @@ test('subagent work event helpers render bounded live-feed summaries', () => {
   assert.equal(formatSubagentWorkEventType('subagent.work_tool_start'), 'tool start');
   assert.equal(formatSubagentWorkTimestamp(1234), new Date(1234).toLocaleString());
   assert.equal(formatSubagentWorkTimestamp(null), '');
+});
+
+test('subagent work event grouping creates operator cards and activity summary', () => {
+  const events = [
+    {
+      type: 'subagent.work_message_end',
+      ts: 1000,
+      role: 'assistant',
+      text_preview: 'I will inspect the project.',
+    },
+    {
+      type: 'subagent.work_message_end',
+      ts: 2000,
+      role: 'assistant',
+      tool_calls: [{ id: 'call-1', name: 'bash', args_preview: '{"command":"find / -name secrets"}' }],
+    },
+    {
+      type: 'subagent.work_tool_start',
+      ts: 2100,
+      tool_call_id: 'call-1',
+      tool_name: 'bash',
+      args_preview: '{"command":"find / -name secrets"}',
+    },
+    {
+      type: 'subagent.work_tool_end',
+      ts: 2400,
+      tool_call_id: 'call-1',
+      tool_name: 'bash',
+      result_preview: 'permission denied',
+      is_error: true,
+    },
+    {
+      type: 'subagent.work_turn_start',
+      ts: 2500,
+    },
+  ];
+
+  const cards = groupSubagentWorkEvents(events);
+  assert.equal(cards.length, 3);
+  assert.equal(cards[0].kind, 'assistant');
+  assert.equal(cards[0].textPreview, 'I will inspect the project.');
+  assert.equal(cards[1].kind, 'tool');
+  assert.equal(cards[1].toolName, 'bash');
+  assert.equal(cards[1].status, 'error');
+  assert.equal(cards[1].eventCount, 3);
+  assert.equal(cards[1].warning, 'broad filesystem search');
+  assert.match(summarizeSubagentWorkCard(cards[1]), /permission denied/);
+  assert.equal(cards[2].kind, 'lifecycle');
+
+  const activity = summarizeSubagentWorkActivity(events);
+  assert.equal(activity.toolCallCount, 1);
+  assert.equal(activity.errorCount, 1);
+  assert.equal(activity.assistantMessageCount, 1);
+  assert.equal(activity.lifecycleCount, 1);
+  assert.equal(activity.lastToolName, 'bash');
+  assert.equal(activity.lastAssistantPreview, 'I will inspect the project.');
+  assert.equal(activity.latestAt, 2500);
 });
 
 test('subagent run filters group operational states', () => {

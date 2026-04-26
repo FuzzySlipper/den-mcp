@@ -4,11 +4,14 @@ import type {
   ReviewFinding,
   ReviewTimelineEntry,
   ReviewVerdict,
+  SubagentRunState,
+  SubagentRunSummary,
   TaskDetail as TaskDetailType,
   TaskStatus,
 } from '../api/types';
-import { getTask, updateTask } from '../api/client';
-import { formatTimeAgo } from '../utils';
+import { getTask, listSubagentRuns, updateTask } from '../api/client';
+import { formatSubagentDuration } from '../subagentRuns';
+import { formatTimeAgo, truncate } from '../utils';
 import { messageIntentLabel } from '../messageIntents';
 
 interface Props {
@@ -16,6 +19,7 @@ interface Props {
   taskId: number;
   onSelectTask: (taskId: number) => void;
   onSelectMessage: (message: Message) => void;
+  onSelectRun: (run: SubagentRunSummary) => void;
   onClose: () => void;
 }
 
@@ -51,9 +55,45 @@ function renderFindingMeta(finding: ReviewFinding): string[] {
   return parts;
 }
 
-export function TaskDetail({ projectId, taskId, onSelectTask, onSelectMessage, onClose }: Props) {
+function isActiveRunState(state: SubagentRunState): boolean {
+  return state === 'running' || state === 'retrying' || state === 'aborting' || state === 'rerun_requested';
+}
+
+function isProblemRunState(state: SubagentRunState): boolean {
+  return state === 'failed' || state === 'timeout' || state === 'aborted' || state === 'unknown';
+}
+
+function shortSha(value: string | null | undefined): string {
+  return value ? value.slice(0, 8) : 'unknown';
+}
+
+function summarizeRun(run: SubagentRunSummary): string {
+  const bits = [run.role, run.model, run.duration_ms != null ? formatSubagentDuration(run.duration_ms) : null]
+    .filter(Boolean);
+  return bits.length > 0 ? bits.join(' · ') : run.run_id;
+}
+
+function nextAction(detail: TaskDetailType, runs: SubagentRunSummary[]): string {
+  const activeRun = runs.find(run => isActiveRunState(run.state));
+  const problemRun = runs.find(run => isProblemRunState(run.state));
+  const currentRound = detail.review_workflow.current_round;
+  if (activeRun) return `Monitor ${activeRun.role ?? 'agent'} run ${activeRun.run_id.slice(0, 8)} or abort if it drifts.`;
+  if (problemRun) return `Inspect ${problemRun.state} run ${problemRun.run_id.slice(0, 8)} and rerun or fix the task.`;
+  if (detail.task.status === 'blocked') return 'Resolve dependencies or unblock the task before assigning more work.';
+  if (detail.open_review_findings.length > 0) return 'Address open review findings, then request rereview.';
+  if (detail.task.status === 'review' && currentRound?.verdict === 'looks_good') return 'Confirm the reviewed head still matches, then merge.';
+  if (detail.task.status === 'review') return 'Wait for review or launch a reviewer run if none is active.';
+  if (detail.task.status === 'planned') return 'Claim/start implementation on a task branch.';
+  if (detail.task.status === 'in_progress') return 'Continue implementation, then request review with a stable diff.';
+  if (detail.task.status === 'done') return 'No action needed; task is complete.';
+  return 'Triage task state and decide the next operator action.';
+}
+
+export function TaskDetail({ projectId, taskId, onSelectTask, onSelectMessage, onSelectRun, onClose }: Props) {
   const [detail, setDetail] = useState<TaskDetailType | null>(null);
+  const [runs, setRuns] = useState<SubagentRunSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [runsError, setRunsError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -61,6 +101,29 @@ export function TaskDetail({ projectId, taskId, onSelectTask, onSelectMessage, o
       .then(d => { if (!cancelled) setDetail(d); })
       .catch(e => { if (!cancelled) setError(e.message); });
     return () => { cancelled = true; };
+  }, [projectId, taskId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | null = null;
+    const loadRuns = () => {
+      listSubagentRuns({ projectId, taskId, limit: 8 })
+        .then(result => {
+          if (!cancelled) {
+            setRuns(result);
+            setRunsError(null);
+          }
+        })
+        .catch(e => {
+          if (!cancelled) setRunsError(e instanceof Error ? e.message : String(e));
+        });
+    };
+    loadRuns();
+    timer = window.setInterval(loadRuns, 2000);
+    return () => {
+      cancelled = true;
+      if (timer != null) window.clearInterval(timer);
+    };
   }, [projectId, taskId]);
 
   const handleStatusChange = async (newStatus: string) => {
@@ -98,6 +161,10 @@ export function TaskDetail({ projectId, taskId, onSelectTask, onSelectMessage, o
 
   const { task } = detail;
   const currentRound = detail.review_workflow.current_round;
+  const activeRuns = runs.filter(run => isActiveRunState(run.state));
+  const problemRuns = runs.filter(run => isProblemRunState(run.state));
+  const latestRun = runs[0] ?? null;
+  const operatorNextAction = nextAction(detail, runs);
 
   const handleTaskNavigation = (nextTaskId: number) => {
     if (nextTaskId !== task.id) {
@@ -106,7 +173,7 @@ export function TaskDetail({ projectId, taskId, onSelectTask, onSelectMessage, o
   };
 
   return (
-    <div className="detail-overlay">
+    <div className="detail-overlay detail-overlay-wide">
       <div className="detail-header">
         <h2>#{task.id} {task.title}</h2>
         <button className="detail-close" onClick={onClose}>✕</button>
@@ -135,6 +202,50 @@ export function TaskDetail({ projectId, taskId, onSelectTask, onSelectMessage, o
               </>
             )}
           </dl>
+        </div>
+
+        <div className="detail-section workspace-section">
+          <h3>Workspace</h3>
+          <div className="workspace-grid">
+            <div className={`workspace-card ${activeRuns.length > 0 ? 'workspace-card-active' : problemRuns.length > 0 ? 'workspace-card-problem' : ''}`}>
+              <span>Running</span>
+              <strong>{activeRuns.length > 0 ? `${activeRuns.length} active run${activeRuns.length === 1 ? '' : 's'}` : latestRun ? `last ${latestRun.state}` : 'no runs yet'}</strong>
+              <p>{activeRuns[0] ? summarizeRun(activeRuns[0]) : latestRun ? summarizeRun(latestRun) : 'No sub-agent activity is linked to this task yet.'}</p>
+            </div>
+            <div className="workspace-card">
+              <span>Changed</span>
+              <strong>{currentRound ? `${currentRound.preferred_diff.base_ref}...${currentRound.preferred_diff.head_ref}` : 'no review diff yet'}</strong>
+              <p>{currentRound ? `head ${shortSha(currentRound.head_commit)} on ${currentRound.branch}` : 'Changed-file projection is not available yet; review metadata will appear here once a review is requested.'}</p>
+            </div>
+            <div className={`workspace-card ${detail.open_review_findings.length > 0 ? 'workspace-card-problem' : detail.review_workflow.current_verdict === 'looks_good' ? 'workspace-card-ready' : ''}`}>
+              <span>Review</span>
+              <strong>{currentRound ? formatVerdict(detail.review_workflow.current_verdict) : 'not requested'}</strong>
+              <p>{currentRound ? `${detail.open_review_findings.length} open findings · R${currentRound.round_number}` : 'No review round is linked to this task.'}</p>
+            </div>
+            <div className="workspace-card workspace-card-next">
+              <span>Next</span>
+              <strong>{task.status.replace(/_/g, ' ')}</strong>
+              <p>{operatorNextAction}</p>
+            </div>
+          </div>
+          {runsError && <div className="detail-description">Could not load agent runs: {runsError}</div>}
+          {runs.length > 0 && (
+            <div className="workspace-run-list">
+              {runs.slice(0, 4).map(run => (
+                <button
+                  key={run.run_id}
+                  type="button"
+                  className={`workspace-run-card workspace-run-card-${run.state}`}
+                  onClick={() => onSelectRun(run)}
+                  title={`Open run ${run.run_id}`}
+                >
+                  <span className={`subagent-state subagent-state-${run.state}`}>{run.state}</span>
+                  <span className="workspace-run-title">{run.role ?? 'agent'} · {run.run_id.slice(0, 8)}</span>
+                  <span className="workspace-run-meta">{truncate(summarizeRun(run), 90)}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {detail.review_workflow.review_round_count > 0 && currentRound && (
