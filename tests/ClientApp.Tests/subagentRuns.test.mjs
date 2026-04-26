@@ -86,9 +86,11 @@ test('subagent work event helpers render bounded live-feed summaries', () => {
     tool_calls: [{ name: 'den_get_task' }, { name: 'bash' }],
   }), 'assistant requested tools: den_get_task, bash');
   assert.equal(summarizeSubagentWorkEvent({
-    type: 'subagent.work_message_update',
+    type: 'subagent.work_reasoning_update',
     update_kind: 'thinking_delta',
-  }), 'assistant update (thinking_delta)');
+    reasoning_chars: 12,
+    reasoning_redacted: true,
+  }), 'reasoning thinking_delta (12 chars, redacted)');
   assert.equal(formatSubagentWorkEventType('subagent.work_tool_start'), 'tool start');
   assert.equal(formatSubagentWorkTimestamp(1234), new Date(1234).toLocaleString());
   assert.equal(formatSubagentWorkTimestamp(null), '');
@@ -125,13 +127,20 @@ test('subagent work event grouping creates operator cards and activity summary',
       is_error: true,
     },
     {
+      type: 'subagent.work_reasoning_update',
+      ts: 2450,
+      reasoning_kind: 'thinking_delta',
+      reasoning_chars: 42,
+      reasoning_redacted: true,
+    },
+    {
       type: 'subagent.work_turn_start',
       ts: 2500,
     },
   ];
 
   const cards = groupSubagentWorkEvents(events);
-  assert.equal(cards.length, 4);
+  assert.equal(cards.length, 5);
   assert.equal(cards[0].kind, 'assistant');
   assert.equal(cards[0].textPreview, 'I will inspect the project.');
   assert.equal(cards[1].kind, 'assistant');
@@ -143,12 +152,16 @@ test('subagent work event grouping creates operator cards and activity summary',
   assert.equal(cards[2].eventCount, 3);
   assert.equal(cards[2].warning, 'broad filesystem search');
   assert.match(summarizeSubagentWorkCard(cards[2]), /permission denied/);
-  assert.equal(cards[3].kind, 'lifecycle');
+  assert.equal(cards[3].kind, 'reasoning');
+  assert.equal(cards[3].title, 'Reasoning update');
+  assert.equal(cards[3].textPreview, 'reasoning thinking_delta (42 chars, redacted)');
+  assert.equal(cards[4].kind, 'lifecycle');
 
   const activity = summarizeSubagentWorkActivity(events);
   assert.equal(activity.toolCallCount, 1);
   assert.equal(activity.errorCount, 1);
   assert.equal(activity.assistantMessageCount, 2);
+  assert.equal(activity.reasoningCount, 1);
   assert.equal(activity.lifecycleCount, 1);
   assert.equal(activity.lastToolName, 'bash');
   assert.equal(activity.lastAssistantPreview, 'I found the likely area and will search broadly.');

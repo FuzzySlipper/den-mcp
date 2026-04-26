@@ -225,6 +225,8 @@ prompt/user messages intentionally skipped. The normalized records include:
 
 - turn start/end timestamps
 - assistant message start/update/end summaries without raw prompts
+- reasoning/thinking activity as dedicated work items with event kind, provider,
+  model, run/task context, char counts, and redaction state
 - tool call id/name, bounded args previews, bounded result previews, and error
   status
 - content type and tool-call summaries when an assistant message requests tools
@@ -232,10 +234,10 @@ prompt/user messages intentionally skipped. The normalized records include:
 Only selected low-volume work events are mirrored into Den agent-stream ops
 (`subagent_work_turn_start`, `subagent_work_turn_end`, `subagent_work_tool_start`,
 `subagent_work_tool_end`, and `subagent_work_message_end`). High-frequency
-message/tool update deltas stay in `events.jsonl`; Den web reads and parses the
-artifact tail for the run detail "Work" timeline. This keeps the top-level stream
-human-scale while still making runaway searches, repeated tools, and off-scope
-commands visible while the run is active.
+message/tool/reasoning update deltas stay in `events.jsonl`; Den web reads and
+parses the artifact tail for the run detail "Work" timeline. This keeps the
+top-level stream human-scale while still making runaway searches, repeated tools,
+off-scope commands, and reasoning activity visible while the run is active.
 
 Task `#815` adds session-tree enrichment for historical run detail views. Fresh
 sub-agent runs now keep a child Pi session file in `{artifact_dir}/sessions` by
@@ -257,9 +259,12 @@ records:
 - `custom` and `custom_message` -> extension context cards
 
 User-role session messages are intentionally skipped so generated prompts do not
-become Den API/work-feed content. Thinking blocks are represented by counts and
-content type flags rather than raw full reasoning text. The session JSONL remains
-a local artifact for forensic inspection.
+become Den API/work-feed content. Thinking blocks are represented by dedicated
+reasoning cards, counts, redaction flags, and content type flags rather than raw
+full reasoning text. Set `DEN_PI_SUBAGENT_RAW_REASONING=1` only in trusted local
+debugging contexts if Den web/API should include bounded reasoning previews from
+local artifacts; task-thread result messages never include raw reasoning. The
+session JSONL remains a local artifact for forensic inspection.
 
 ## Pi Session Manager / psm-bridge Reference
 

@@ -168,16 +168,74 @@ test('subagent work event normalizer summarizes child Pi events without prompts'
     stop_reason: 'stop',
   });
 
-  assert.equal(normalizePiWorkEvent({
+  assert.deepEqual(normalizePiWorkEvent({
     type: 'message_update',
     assistantMessageEvent: { type: 'thinking_delta' },
-    message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'private scratchpad' }] },
-  }, 1236), undefined);
+    message: { role: 'assistant', provider: 'openai', model: 'gpt-test', content: [{ type: 'thinking', thinking: 'private scratchpad' }] },
+  }, 1236), {
+    type: 'subagent.work_reasoning_update',
+    ts: 1236,
+    source_type: 'message_update',
+    role: 'assistant',
+    provider: 'openai',
+    model: 'gpt-test',
+    update_kind: 'thinking_delta',
+    reasoning_kind: 'thinking_delta',
+    reasoning_chars: 18,
+    reasoning_redacted: true,
+    content_types: ['thinking'],
+  });
 
   assert.equal(normalizePiWorkEvent({
     type: 'message_end',
     message: { role: 'user', content: [{ type: 'text', text: 'full generated prompt' }] },
   }, 1237), undefined);
+
+  assert.deepEqual(normalizePiWorkEvent({
+    type: 'turn_start',
+  }, 1239, {
+    runId: 'run-1',
+    taskId: 824,
+    subagentRole: 'coder',
+    backend: 'pi-cli',
+    requestedModel: 'gpt-test',
+  }), {
+    type: 'subagent.work_turn_start',
+    ts: 1239,
+    source_type: 'turn_start',
+    run_id: 'run-1',
+    task_id: 824,
+    subagent_role: 'coder',
+    backend: 'pi-cli',
+    requested_model: 'gpt-test',
+  });
+});
+
+test('subagent reasoning normalization can include raw local preview when enabled', () => {
+  const previous = process.env.DEN_PI_SUBAGENT_RAW_REASONING;
+  process.env.DEN_PI_SUBAGENT_RAW_REASONING = '1';
+  try {
+    assert.deepEqual(normalizePiWorkEvent({
+      type: 'message_update',
+      assistantMessageEvent: { type: 'reasoning_delta', delta: 'checking Den access' },
+      message: { role: 'assistant', provider: 'openai', model: 'gpt-test', content: [{ type: 'reasoning', reasoning: 'checking Den access' }] },
+    }, 1238), {
+      type: 'subagent.work_reasoning_update',
+      ts: 1238,
+      source_type: 'message_update',
+      role: 'assistant',
+      provider: 'openai',
+      model: 'gpt-test',
+      update_kind: 'reasoning_delta',
+      reasoning_kind: 'reasoning_delta',
+      reasoning_chars: 19,
+      reasoning_redacted: false,
+      text_preview: 'checking Den access',
+      content_types: ['reasoning'],
+    });
+  } finally {
+    restoreEnv('DEN_PI_SUBAGENT_RAW_REASONING', previous);
+  }
 });
 
 test('subagent run schema helpers emit canonical metadata and event mapping', () => {
@@ -272,6 +330,7 @@ test('subagent run schema helpers emit canonical metadata and event mapping', ()
   assert.equal(subagentOpsEventTypeForEvent('subagent.spawn_error'), 'subagent_spawn_error');
   assert.equal(subagentOpsEventTypeForEvent('subagent.work_tool_start'), 'subagent_work_tool_start');
   assert.equal(subagentOpsEventTypeForEvent('subagent.work_message_update'), undefined);
+  assert.equal(subagentOpsEventTypeForEvent('subagent.work_reasoning_update'), undefined);
   assert.equal(subagentOpsEventTypeForEvent('message_end'), undefined);
   assert.equal(subagentRunStateFromOpsEventType('subagent_assistant_output'), 'running');
   assert.equal(subagentRunStateFromOpsEventType('subagent_work_tool_start'), 'running');

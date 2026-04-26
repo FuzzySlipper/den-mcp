@@ -2,7 +2,7 @@ import type { AgentStreamEntry, SubagentRunState, SubagentRunSummary, SubagentRu
 
 export type SubagentRunFilter = 'all' | 'active' | 'problem' | 'complete';
 
-export type SubagentWorkCardKind = 'assistant' | 'tool' | 'lifecycle';
+export type SubagentWorkCardKind = 'assistant' | 'reasoning' | 'tool' | 'lifecycle';
 export type SubagentWorkCardStatus = 'requested' | 'running' | 'complete' | 'error' | 'info';
 
 export interface SubagentWorkCard {
@@ -29,6 +29,7 @@ export interface SubagentWorkActivitySummary {
   toolCallCount: number;
   errorCount: number;
   assistantMessageCount: number;
+  reasoningCount: number;
   lifecycleCount: number;
   latestAt: number | null;
   currentToolName: string | null;
@@ -125,6 +126,13 @@ export function summarizeSubagentWorkEvent(event: SubagentRunWorkEvent): string 
         return `assistant requested tool${event.tool_calls.length > 1 ? 's' : ''}${names ? `: ${names}` : ''}`;
       }
       return event.text_preview ? `assistant message: ${event.text_preview}` : 'assistant message ended';
+    case 'subagent.work_reasoning_start':
+    case 'subagent.work_reasoning_update':
+    case 'subagent.work_reasoning_end':
+      if (event.reasoning_redacted) {
+        return `reasoning ${event.update_kind ?? event.reasoning_kind ?? 'activity'} (${event.reasoning_chars ?? 0} chars, redacted)`;
+      }
+      return event.text_preview ? `reasoning: ${event.text_preview}` : `reasoning ${event.update_kind ?? event.reasoning_kind ?? 'activity'}`;
     case 'subagent.work_tool_start':
       return `tool started: ${event.tool_name ?? 'unknown'}${event.args_preview ? ` ${event.args_preview}` : ''}`;
     case 'subagent.work_tool_update':
@@ -232,7 +240,7 @@ function touchToolCard(card: SubagentWorkCard, event: SubagentRunWorkEvent): voi
 
 function createCardFromEvent(event: SubagentRunWorkEvent, index: number, kind: SubagentWorkCardKind, title: string): SubagentWorkCard {
   const ts = asFiniteTimestamp(event.ts);
-  const text = preview(event.text_preview);
+  const text = preview(event.text_preview) ?? (kind === 'reasoning' ? summarizeSubagentWorkEvent(event) : null);
   return {
     id: `${kind}:${event.type}:${ts ?? 'no-ts'}:${index}`,
     kind,
@@ -264,6 +272,12 @@ function hasToolCalls(event: SubagentRunWorkEvent): boolean {
   return Array.isArray(event.tool_calls) && event.tool_calls.length > 0;
 }
 
+function isReasoningEvent(event: SubagentRunWorkEvent): boolean {
+  return event.type === 'subagent.work_reasoning_start'
+    || event.type === 'subagent.work_reasoning_update'
+    || event.type === 'subagent.work_reasoning_end';
+}
+
 function isAssistantTextEvent(event: SubagentRunWorkEvent): boolean {
   if (event.role && event.role !== 'assistant') return false;
   if (!preview(event.text_preview)) return false;
@@ -285,6 +299,12 @@ function lifecycleTitle(type: string): string {
       return 'Turn finished';
     case 'subagent.work_message_start':
       return 'Assistant message started';
+    case 'subagent.work_reasoning_start':
+      return 'Reasoning started';
+    case 'subagent.work_reasoning_update':
+      return 'Reasoning update';
+    case 'subagent.work_reasoning_end':
+      return 'Reasoning ended';
     case 'subagent.work_compaction':
       return 'Session compacted';
     case 'subagent.work_branch_summary':
@@ -345,6 +365,11 @@ export function groupSubagentWorkEvents(events: SubagentRunWorkEvent[]): Subagen
       return;
     }
 
+    if (isReasoningEvent(event)) {
+      cards.push(createCardFromEvent(event, index, 'reasoning', lifecycleTitle(event.type)));
+      return;
+    }
+
     if (isAssistantTextEvent(event)) {
       cards.push(createCardFromEvent(event, index, 'assistant', event.type === 'subagent.work_message_update' ? 'Assistant update' : 'Assistant message'));
       return;
@@ -362,10 +387,12 @@ export function summarizeSubagentWorkActivity(events: SubagentRunWorkEvent[]): S
   const cards = groupSubagentWorkEvents(events);
   const toolCards = cards.filter(card => card.kind === 'tool');
   const assistantCards = cards.filter(card => card.kind === 'assistant');
+  const reasoningCards = cards.filter(card => card.kind === 'reasoning');
   const lifecycleCards = cards.filter(card => card.kind === 'lifecycle');
   const currentTool = [...toolCards].reverse().find(card => card.status === 'running' || card.status === 'requested') ?? null;
   const lastTool = [...toolCards].reverse().find(card => card.status === 'complete' || card.status === 'error') ?? currentTool;
   const lastAssistant = [...assistantCards].reverse().find(card => card.textPreview) ?? null;
+  const lastReasoning = [...reasoningCards].reverse().find(card => card.textPreview) ?? reasoningCards.at(-1) ?? null;
   const latestAt = cards.reduce<number | null>((latest, card) => {
     const ts = card.endedAt ?? card.timestamp ?? card.startedAt;
     return ts != null && (latest == null || ts > latest) ? ts : latest;
@@ -375,6 +402,7 @@ export function summarizeSubagentWorkActivity(events: SubagentRunWorkEvent[]): S
   if (currentTool) statusText = `${currentTool.status === 'requested' ? 'requested' : 'running'} ${currentTool.toolName ?? 'tool'}`;
   else if (lastTool) statusText = `last tool: ${lastTool.toolName ?? 'tool'}`;
   else if (lastAssistant) statusText = 'last assistant message';
+  else if (lastReasoning) statusText = 'reasoning activity';
   else if (cards.length > 0) statusText = `${cards.length} lifecycle events`;
 
   return {
@@ -382,6 +410,7 @@ export function summarizeSubagentWorkActivity(events: SubagentRunWorkEvent[]): S
     toolCallCount: toolCards.length,
     errorCount,
     assistantMessageCount: assistantCards.length,
+    reasoningCount: reasoningCards.length,
     lifecycleCount: lifecycleCards.length,
     latestAt,
     currentToolName: currentTool?.toolName ?? null,

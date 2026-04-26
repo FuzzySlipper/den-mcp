@@ -619,6 +619,8 @@ public class AgentStreamApiTests : IAsyncLifetime
         var artifactDir = Path.Combine(Path.GetTempPath(), "den-subagent-runs", runId);
         var sessionDir = Path.Combine(artifactDir, "sessions");
         Directory.CreateDirectory(sessionDir);
+        var previousRawReasoning = Environment.GetEnvironmentVariable("DEN_PI_SUBAGENT_RAW_REASONING");
+        Environment.SetEnvironmentVariable("DEN_PI_SUBAGENT_RAW_REASONING", null);
 
         try
         {
@@ -667,9 +669,17 @@ public class AgentStreamApiTests : IAsyncLifetime
             Assert.Contains("session-815", detail.Artifacts.SessionTail);
             Assert.Equal("subagent.work_session", detail.WorkEvents[0].GetProperty("type").GetString());
             Assert.DoesNotContain(detail.WorkEvents, evt => evt.TryGetProperty("role", out var role) && role.GetString() == "user");
+            var reasoning = detail.WorkEvents.Single(evt => evt.GetProperty("type").GetString() == "subagent.work_reasoning_end");
+            Assert.Equal(runId, reasoning.GetProperty("run_id").GetString());
+            Assert.Equal("planner", reasoning.GetProperty("subagent_role").GetString());
+            Assert.Equal(13, reasoning.GetProperty("reasoning_chars").GetInt32());
+            Assert.True(reasoning.GetProperty("reasoning_redacted").GetBoolean());
+            Assert.False(reasoning.TryGetProperty("text_preview", out _));
             var assistant = detail.WorkEvents.Single(evt => evt.GetProperty("type").GetString() == "subagent.work_message_end");
             Assert.Equal("I will inspect files.", assistant.GetProperty("text_preview").GetString());
             Assert.Equal(13, assistant.GetProperty("thinking_chars").GetInt32());
+            Assert.Equal(13, assistant.GetProperty("reasoning_chars").GetInt32());
+            Assert.True(assistant.GetProperty("reasoning_redacted").GetBoolean());
             Assert.Equal("read", assistant.GetProperty("tool_calls")[0].GetProperty("name").GetString());
             Assert.Contains(detail.WorkEvents, evt => evt.GetProperty("type").GetString() == "subagent.work_tool_end" && evt.GetProperty("result_preview").GetString() == "file text");
             Assert.Contains(detail.WorkEvents, evt => evt.GetProperty("type").GetString() == "subagent.work_bash_execution" && evt.GetProperty("args_preview").GetString() == "dotnet test");
@@ -681,6 +691,7 @@ public class AgentStreamApiTests : IAsyncLifetime
         }
         finally
         {
+            Environment.SetEnvironmentVariable("DEN_PI_SUBAGENT_RAW_REASONING", previousRawReasoning);
             if (Directory.Exists(artifactDir))
                 Directory.Delete(artifactDir, recursive: true);
         }

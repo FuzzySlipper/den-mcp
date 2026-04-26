@@ -525,7 +525,13 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
       if (parsed.event?.type === "session") {
         piSessionId = normalizeString(parsed.event.id) ?? piSessionId;
       }
-      const workEvent = normalizePiWorkEvent(parsed.event);
+      const workEvent = normalizePiWorkEvent(parsed.event, Date.now(), {
+        runId,
+        taskId: options.taskId,
+        subagentRole: options.role,
+        backend: piCliSubagentBackend.name,
+        requestedModel: options.model,
+      });
       if (workEvent) void recorder.appendEvent(workEvent);
       return parsed.event;
     }

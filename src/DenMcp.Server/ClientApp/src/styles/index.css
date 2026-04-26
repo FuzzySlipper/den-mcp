@@ -1328,7 +1328,7 @@ html, body, #root {
 
 .subagent-work-summary-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 8px;
 }
@@ -1401,6 +1401,10 @@ html, body, #root {
 
 .subagent-work-card-assistant {
   border-left: 3px solid var(--purple);
+}
+
+.subagent-work-card-reasoning {
+  border-left: 3px solid var(--yellow);
 }
 
 .subagent-work-card-lifecycle {

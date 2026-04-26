@@ -340,6 +340,11 @@ export interface SubagentRunWorkEvent {
   type: string;
   ts?: number | null;
   source_type?: string | null;
+  run_id?: string | null;
+  task_id?: number | null;
+  subagent_role?: string | null;
+  backend?: string | null;
+  requested_model?: string | null;
   role?: string | null;
   provider?: string | null;
   model?: string | null;
@@ -347,6 +352,10 @@ export interface SubagentRunWorkEvent {
   content_types?: string[] | null;
   text_preview?: string | null;
   text_chars?: number | null;
+  reasoning_kind?: string | null;
+  reasoning_chars?: number | null;
+  reasoning_redacted?: boolean | null;
+  thinking_chars?: number | null;
   stop_reason?: string | null;
   tool_call_id?: string | null;
   tool_name?: string | null;

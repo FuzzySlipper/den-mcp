@@ -269,6 +269,10 @@ export function SubagentRunDetail({ run, onClose, onOpenTask, onOpenEntry }: Pro
                 <span>Assistant</span>
                 <strong>{workActivity.assistantMessageCount}</strong>
               </div>
+              <div className="subagent-work-summary-card">
+                <span>Reasoning</span>
+                <strong>{workActivity.reasoningCount}</strong>
+              </div>
               <div className={`subagent-work-summary-card ${workActivity.errorCount > 0 ? 'subagent-work-summary-card-error' : ''}`}>
                 <span>Errors</span>
                 <strong>{workActivity.errorCount}</strong>

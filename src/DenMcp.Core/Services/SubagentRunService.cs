@@ -74,7 +74,7 @@ public sealed class SubagentRunService : ISubagentRunService
         {
             Summary = summary,
             Events = events,
-            WorkEvents = BuildWorkEvents(events, artifacts),
+            WorkEvents = BuildWorkEvents(events, artifacts, summary),
             Artifacts = artifacts
         };
     }
@@ -295,22 +295,50 @@ public sealed class SubagentRunService : ISubagentRunService
 
     private static List<JsonElement> BuildWorkEvents(
         IReadOnlyList<AgentStreamEntry> streamEvents,
-        SubagentRunArtifactSnapshot? artifacts)
+        SubagentRunArtifactSnapshot? artifacts,
+        SubagentRunSummary summary)
     {
         var sessionEvents = ParseSessionWorkEvents(artifacts?.SessionTail);
         if (sessionEvents.Count > 0)
-            return sessionEvents;
+            return EnrichWorkEvents(sessionEvents, summary);
 
         var artifactEvents = ParseWorkEvents(artifacts?.EventsTail);
         if (artifactEvents.Count > 0)
-            return artifactEvents;
+            return EnrichWorkEvents(artifactEvents, summary);
 
-        return streamEvents
+        var streamWorkEvents = streamEvents
             .Select(StreamWorkEvent)
             .Where(workEvent => workEvent.HasValue)
             .Select(workEvent => workEvent!.Value)
             .TakeLast(80)
             .ToList();
+        return EnrichWorkEvents(streamWorkEvents, summary);
+    }
+
+    private static List<JsonElement> EnrichWorkEvents(IEnumerable<JsonElement> events, SubagentRunSummary summary)
+    {
+        return events.Select(workEvent => EnrichWorkEvent(workEvent, summary)).ToList();
+    }
+
+    private static JsonElement EnrichWorkEvent(JsonElement workEvent, SubagentRunSummary summary)
+    {
+        if (workEvent.ValueKind != JsonValueKind.Object)
+            return workEvent.Clone();
+
+        var payload = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(workEvent.GetRawText()) ?? [];
+        AddMissing(payload, "run_id", summary.RunId);
+        AddMissing(payload, "task_id", summary.TaskId);
+        AddMissing(payload, "subagent_role", summary.Role);
+        AddMissing(payload, "backend", summary.Backend);
+        AddMissing(payload, "requested_model", summary.Model);
+        return JsonSerializer.SerializeToElement(payload);
+    }
+
+    private static void AddMissing(Dictionary<string, JsonElement> payload, string key, object? value)
+    {
+        if (payload.ContainsKey(key) || value is null)
+            return;
+        payload[key] = JsonSerializer.SerializeToElement(value);
     }
 
     private static List<JsonElement> ParseSessionWorkEvents(string? sessionJsonl)
@@ -328,9 +356,7 @@ public sealed class SubagentRunService : ISubagentRunService
             try
             {
                 using var doc = JsonDocument.Parse(trimmed);
-                var workEvent = NormalizeSessionEntry(doc.RootElement);
-                if (workEvent.HasValue)
-                    events.Add(workEvent.Value);
+                events.AddRange(NormalizeSessionEntry(doc.RootElement));
             }
             catch (JsonException)
             {
@@ -341,14 +367,14 @@ public sealed class SubagentRunService : ISubagentRunService
         return events.TakeLast(80).ToList();
     }
 
-    private static JsonElement? NormalizeSessionEntry(JsonElement entry)
+    private static IReadOnlyList<JsonElement> NormalizeSessionEntry(JsonElement entry)
     {
         if (entry.ValueKind != JsonValueKind.Object || !TryGetString(entry, "type", out var type))
-            return null;
+            return [];
 
         return type switch
         {
-            "session" => WorkEvent(new Dictionary<string, object?>
+            "session" => [WorkEvent(new Dictionary<string, object?>
             {
                 ["type"] = "subagent.work_session",
                 ["ts"] = TimestampMs(entry),
@@ -356,9 +382,9 @@ public sealed class SubagentRunService : ISubagentRunService
                 ["session_id"] = StringOrNull(entry, "id"),
                 ["cwd"] = StringOrNull(entry, "cwd"),
                 ["version"] = NumberOrNull(entry, "version")
-            }),
+            })],
             "message" => NormalizeSessionMessageEntry(entry),
-            "compaction" => WorkEvent(new Dictionary<string, object?>
+            "compaction" => [WorkEvent(new Dictionary<string, object?>
             {
                 ["type"] = "subagent.work_compaction",
                 ["ts"] = TimestampMs(entry),
@@ -368,8 +394,8 @@ public sealed class SubagentRunService : ISubagentRunService
                 ["text_preview"] = Preview(StringOrNull(entry, "summary")),
                 ["tokens_before"] = NumberOrNull(entry, "tokensBefore"),
                 ["first_kept_entry_id"] = StringOrNull(entry, "firstKeptEntryId")
-            }),
-            "branch_summary" => WorkEvent(new Dictionary<string, object?>
+            })],
+            "branch_summary" => [WorkEvent(new Dictionary<string, object?>
             {
                 ["type"] = "subagent.work_branch_summary",
                 ["ts"] = TimestampMs(entry),
@@ -378,8 +404,8 @@ public sealed class SubagentRunService : ISubagentRunService
                 ["parent_id"] = StringOrNull(entry, "parentId"),
                 ["from_id"] = StringOrNull(entry, "fromId"),
                 ["text_preview"] = Preview(StringOrNull(entry, "summary"))
-            }),
-            "custom" => WorkEvent(new Dictionary<string, object?>
+            })],
+            "custom" => [WorkEvent(new Dictionary<string, object?>
             {
                 ["type"] = "subagent.work_custom",
                 ["ts"] = TimestampMs(entry),
@@ -388,8 +414,8 @@ public sealed class SubagentRunService : ISubagentRunService
                 ["parent_id"] = StringOrNull(entry, "parentId"),
                 ["custom_type"] = StringOrNull(entry, "customType"),
                 ["result_preview"] = Preview(JsonPreview(entry, "data"))
-            }),
-            "custom_message" => WorkEvent(new Dictionary<string, object?>
+            })],
+            "custom_message" => [WorkEvent(new Dictionary<string, object?>
             {
                 ["type"] = "subagent.work_custom_message",
                 ["ts"] = TimestampMs(entry),
@@ -399,19 +425,19 @@ public sealed class SubagentRunService : ISubagentRunService
                 ["custom_type"] = StringOrNull(entry, "customType"),
                 ["text_preview"] = Preview(ContentText(entry.TryGetProperty("content", out var content) ? content : default)),
                 ["display"] = BoolOrNull(entry, "display")
-            }),
-            _ => null
+            })],
+            _ => []
         };
     }
 
-    private static JsonElement? NormalizeSessionMessageEntry(JsonElement entry)
+    private static IReadOnlyList<JsonElement> NormalizeSessionMessageEntry(JsonElement entry)
     {
         if (!entry.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object)
-            return null;
+            return [];
         if (!TryGetString(message, "role", out var role))
-            return null;
+            return [];
         if (role == "user")
-            return null; // Avoid surfacing raw prompts in the Den work feed.
+            return []; // Avoid surfacing raw prompts in the Den work feed.
 
         var common = new Dictionary<string, object?>
         {
@@ -424,17 +450,7 @@ public sealed class SubagentRunService : ISubagentRunService
         switch (role)
         {
             case "assistant":
-                common["type"] = "subagent.work_message_end";
-                common["source_type"] = "session_tree_message";
-                common["provider"] = StringOrNull(message, "provider");
-                common["model"] = StringOrNull(message, "model");
-                common["text_preview"] = Preview(ContentText(message.TryGetProperty("content", out var content) ? content : default, includeThinking: false));
-                common["text_chars"] = ContentTextLength(message.TryGetProperty("content", out content) ? content : default, includeThinking: false);
-                common["thinking_chars"] = ContentTextLength(message.TryGetProperty("content", out content) ? content : default, includeThinking: true, thinkingOnly: true);
-                common["content_types"] = ContentTypes(message.TryGetProperty("content", out content) ? content : default);
-                common["tool_calls"] = ToolCalls(message.TryGetProperty("content", out content) ? content : default);
-                common["stop_reason"] = StringOrNull(message, "stopReason");
-                return WorkEvent(common);
+                return NormalizeSessionAssistantMessage(common, message);
             case "toolResult":
                 common["type"] = "subagent.work_tool_end";
                 common["source_type"] = "session_tree_tool_result";
@@ -442,7 +458,7 @@ public sealed class SubagentRunService : ISubagentRunService
                 common["tool_name"] = StringOrNull(message, "toolName");
                 common["result_preview"] = Preview(ContentText(message.TryGetProperty("content", out var toolContent) ? toolContent : default) ?? JsonPreview(message, "content"));
                 common["is_error"] = BoolOrNull(message, "isError") ?? false;
-                return WorkEvent(common);
+                return [WorkEvent(common)];
             case "bashExecution":
                 common["type"] = "subagent.work_bash_execution";
                 common["source_type"] = "session_tree_bash_execution";
@@ -453,29 +469,84 @@ public sealed class SubagentRunService : ISubagentRunService
                 common["cancelled"] = BoolOrNull(message, "cancelled");
                 common["truncated"] = BoolOrNull(message, "truncated");
                 common["is_error"] = NumberOrNull(message, "exitCode") is not null and not 0;
-                return WorkEvent(common);
+                return [WorkEvent(common)];
             case "custom":
                 common["type"] = "subagent.work_custom_message";
                 common["source_type"] = "session_tree_custom_message";
                 common["custom_type"] = StringOrNull(message, "customType");
                 common["text_preview"] = Preview(ContentText(message.TryGetProperty("content", out var customContent) ? customContent : default));
                 common["display"] = BoolOrNull(message, "display");
-                return WorkEvent(common);
+                return [WorkEvent(common)];
             case "branchSummary":
                 common["type"] = "subagent.work_branch_summary";
                 common["source_type"] = "session_tree_branch_summary_message";
                 common["from_id"] = StringOrNull(message, "fromId");
                 common["text_preview"] = Preview(StringOrNull(message, "summary"));
-                return WorkEvent(common);
+                return [WorkEvent(common)];
             case "compactionSummary":
                 common["type"] = "subagent.work_compaction";
                 common["source_type"] = "session_tree_compaction_message";
                 common["text_preview"] = Preview(StringOrNull(message, "summary"));
                 common["tokens_before"] = NumberOrNull(message, "tokensBefore");
-                return WorkEvent(common);
+                return [WorkEvent(common)];
             default:
-                return null;
+                return [];
         }
+    }
+
+    private static IReadOnlyList<JsonElement> NormalizeSessionAssistantMessage(Dictionary<string, object?> common, JsonElement message)
+    {
+        var content = message.TryGetProperty("content", out var value) ? value : default;
+        var text = ContentText(content, includeThinking: false);
+        var thinkingText = ContentText(content, includeThinking: true, thinkingOnly: true);
+        var thinkingChars = thinkingText?.Length;
+        var contentTypes = ContentTypes(content);
+        var toolCalls = ToolCalls(content);
+        var provider = StringOrNull(message, "provider");
+        var model = StringOrNull(message, "model");
+        var stopReason = StringOrNull(message, "stopReason");
+        var events = new List<JsonElement>();
+
+        if (thinkingChars is > 0 || ContentTypesIncludeThinking(contentTypes))
+        {
+            var exposeRaw = RawReasoningCaptureEnabled() && !ContentHasRedactedThinking(content);
+            var reasoning = new Dictionary<string, object?>(common)
+            {
+                ["type"] = "subagent.work_reasoning_end",
+                ["source_type"] = "session_tree_message",
+                ["provider"] = provider,
+                ["model"] = model,
+                ["reasoning_kind"] = "thinking",
+                ["reasoning_chars"] = thinkingChars,
+                ["reasoning_redacted"] = !exposeRaw,
+                ["text_preview"] = exposeRaw ? Preview(thinkingText) : null,
+                ["content_types"] = contentTypes,
+                ["stop_reason"] = stopReason
+            };
+            events.Add(WorkEvent(reasoning));
+        }
+
+        if (!string.IsNullOrWhiteSpace(text) || toolCalls is { Count: > 0 })
+        {
+            var messageEvent = new Dictionary<string, object?>(common)
+            {
+                ["type"] = "subagent.work_message_end",
+                ["source_type"] = "session_tree_message",
+                ["provider"] = provider,
+                ["model"] = model,
+                ["text_preview"] = Preview(text),
+                ["text_chars"] = text?.Length,
+                ["thinking_chars"] = thinkingChars,
+                ["reasoning_chars"] = thinkingChars,
+                ["reasoning_redacted"] = thinkingChars is > 0,
+                ["content_types"] = contentTypes,
+                ["tool_calls"] = toolCalls,
+                ["stop_reason"] = stopReason
+            };
+            events.Add(WorkEvent(messageEvent));
+        }
+
+        return events;
     }
 
     private static JsonElement WorkEvent(Dictionary<string, object?> payload)
@@ -521,6 +592,28 @@ public sealed class SubagentRunService : ISubagentRunService
         return types.Count == 0 ? null : types;
     }
 
+    private static bool ContentTypesIncludeThinking(List<string>? contentTypes) =>
+        contentTypes?.Any(type => type.Contains("thinking", StringComparison.OrdinalIgnoreCase) || type.Contains("reasoning", StringComparison.OrdinalIgnoreCase)) == true;
+
+    private static bool ContentHasRedactedThinking(JsonElement content)
+    {
+        if (content.ValueKind != JsonValueKind.Array)
+            return false;
+
+        return content.EnumerateArray().Any(part =>
+            (StringOrNull(part, "type") is "thinking" or "reasoning") &&
+            BoolOrNull(part, "redacted") == true);
+    }
+
+    private static bool RawReasoningCaptureEnabled()
+    {
+        var value = Environment.GetEnvironmentVariable("DEN_PI_SUBAGENT_RAW_REASONING");
+        return value is not null && (value.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("yes", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("on", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static string? ContentText(JsonElement content, bool includeThinking = true, bool thinkingOnly = false)
     {
         if (content.ValueKind == JsonValueKind.String)
@@ -536,8 +629,13 @@ public sealed class SubagentRunService : ISubagentRunService
             var typeName = type.GetString();
             if (typeName == "text" && !thinkingOnly && part.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String)
                 parts.Add(text.GetString()!);
-            if (typeName == "thinking" && includeThinking && part.TryGetProperty("thinking", out var thinking) && thinking.ValueKind == JsonValueKind.String)
-                parts.Add(thinking.GetString()!);
+            if ((typeName == "thinking" || typeName == "reasoning") && includeThinking)
+            {
+                if (part.TryGetProperty("thinking", out var thinking) && thinking.ValueKind == JsonValueKind.String)
+                    parts.Add(thinking.GetString()!);
+                else if (part.TryGetProperty("reasoning", out var reasoning) && reasoning.ValueKind == JsonValueKind.String)
+                    parts.Add(reasoning.GetString()!);
+            }
         }
 
         return parts.Count == 0 ? null : string.Join("", parts);

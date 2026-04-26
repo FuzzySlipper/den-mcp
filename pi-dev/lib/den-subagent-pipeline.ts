@@ -209,6 +209,14 @@ export type PiStdoutParseResult =
   | { kind: "json"; line: string; event: any }
   | { kind: "raw_stdout"; line: string };
 
+export type PiWorkEventContext = {
+  runId?: string;
+  taskId?: number;
+  subagentRole?: string;
+  backend?: string;
+  requestedModel?: string;
+};
+
 export type SubagentOutputSnapshot = {
   finalOutput: string;
   model?: string;
@@ -256,7 +264,7 @@ export function parsePiStdoutLine(line: string): PiStdoutParseResult | undefined
   }
 }
 
-export function normalizePiWorkEvent(event: any, now = Date.now()): JsonObject | undefined {
+export function normalizePiWorkEvent(event: any, now = Date.now(), context: PiWorkEventContext = {}): JsonObject | undefined {
   if (!event || typeof event.type !== "string") return undefined;
 
   switch (event.type) {
@@ -265,68 +273,90 @@ export function normalizePiWorkEvent(event: any, now = Date.now()): JsonObject |
         type: "subagent.work_session",
         ts: eventTimestamp(event, now),
         source_type: event.type,
+        ...workContextMetadata(context),
         session_id: normalizeString(event.id),
         cwd: normalizeString(event.cwd),
         version: finiteNumber(event.version),
       });
     case "agent_start":
-      return {
+      return omitUndefined({
         type: "subagent.work_agent_start",
         ts: eventTimestamp(event, now),
         source_type: event.type,
-      };
+        ...workContextMetadata(context),
+      });
     case "turn_start":
-      return {
+      return omitUndefined({
         type: "subagent.work_turn_start",
         ts: eventTimestamp(event, now),
         source_type: event.type,
-      };
+        ...workContextMetadata(context),
+      });
     case "turn_end":
       return omitUndefined({
         type: "subagent.work_turn_end",
         ts: eventTimestamp(event, now),
         source_type: event.type,
+        ...workContextMetadata(context),
         ...summarizeAssistantMessage(event.message),
       });
     case "message_start":
-      return normalizePiMessageWorkEvent(event, "start", now);
+      return normalizePiMessageWorkEvent(event, "start", now, context);
     case "message_update":
-      return normalizePiMessageWorkEvent(event, "update", now);
+      return normalizePiMessageWorkEvent(event, "update", now, context);
     case "message_end":
-      return normalizePiMessageWorkEvent(event, "end", now);
+      return normalizePiMessageWorkEvent(event, "end", now, context);
     case "tool_execution_start":
-      return normalizePiToolWorkEvent(event, "start", now);
+      return normalizePiToolWorkEvent(event, "start", now, context);
     case "tool_execution_update":
-      return normalizePiToolWorkEvent(event, "update", now);
+      return normalizePiToolWorkEvent(event, "update", now, context);
     case "tool_execution_end":
-      return normalizePiToolWorkEvent(event, "end", now);
+      return normalizePiToolWorkEvent(event, "end", now, context);
     default:
       return undefined;
   }
 }
 
-function normalizePiMessageWorkEvent(event: any, phase: "start" | "update" | "end", now: number): JsonObject | undefined {
+function normalizePiMessageWorkEvent(event: any, phase: "start" | "update" | "end", now: number, context: PiWorkEventContext): JsonObject | undefined {
   const message = event.message;
   const role = normalizeString(message?.role);
   if (role !== "assistant") return undefined;
 
   const messageSummary = summarizeAssistantMessage(message);
   const updateKind = normalizeString(event.assistantMessageEvent?.type);
-  if (phase === "update" && !messageSummary.text_preview && !messageSummary.tool_calls) return undefined;
+  const reasoningSummary = summarizeReasoningActivity(event, message);
+  const hasAssistantNarrative = Boolean(messageSummary.text_preview || messageSummary.tool_calls);
+  if (reasoningSummary && (isReasoningUpdateKind(updateKind) || !hasAssistantNarrative)) {
+    return omitUndefined({
+      type: `subagent.work_reasoning_${phase}`,
+      ts: eventTimestamp(event, now),
+      source_type: event.type,
+      ...workContextMetadata(context),
+      role,
+      provider: normalizeString(message?.provider),
+      model: normalizeString(message?.model),
+      update_kind: updateKind,
+      ...reasoningSummary,
+    });
+  }
+  if (phase === "update" && !hasAssistantNarrative) return undefined;
 
   return omitUndefined({
     type: `subagent.work_message_${phase}`,
     ts: eventTimestamp(event, now),
     source_type: event.type,
+    ...workContextMetadata(context),
     role,
     provider: normalizeString(message?.provider),
     model: normalizeString(message?.model),
     update_kind: updateKind,
     ...messageSummary,
+    reasoning_chars: reasoningSummary?.reasoning_chars,
+    reasoning_redacted: reasoningSummary?.reasoning_redacted,
   });
 }
 
-function normalizePiToolWorkEvent(event: any, phase: "start" | "update" | "end", now: number): JsonObject | undefined {
+function normalizePiToolWorkEvent(event: any, phase: "start" | "update" | "end", now: number, context: PiWorkEventContext): JsonObject | undefined {
   const toolName = normalizeString(event.toolName ?? event.tool_name);
   if (!toolName) return undefined;
   const result = event.result ?? event.partialResult ?? event.partial_result;
@@ -338,6 +368,7 @@ function normalizePiToolWorkEvent(event: any, phase: "start" | "update" | "end",
     type: `subagent.work_tool_${phase}`,
     ts: eventTimestamp(event, now),
     source_type: event.type,
+    ...workContextMetadata(context),
     tool_call_id: normalizeString(event.toolCallId ?? event.tool_call_id),
     tool_name: toolName,
     args_preview: boundedPreview(event.args, 500),
@@ -473,6 +504,67 @@ function summarizeAssistantMessage(message: any): JsonObject {
   });
 }
 
+function summarizeReasoningActivity(event: any, message: any): JsonObject | undefined {
+  const eventKind = normalizeString(event?.assistantMessageEvent?.type);
+  const reasoningText = extractReasoningText(event, message);
+  const contentTypes = extractContentTypes(message) ?? [];
+  const looksLikeReasoning = Boolean(reasoningText)
+    || isReasoningUpdateKind(eventKind)
+    || contentTypes.some((type) => /thinking|reasoning/i.test(type));
+  if (!looksLikeReasoning) return undefined;
+
+  const chars = typeof reasoningText === "string" ? reasoningText.length : finiteNumber(event?.assistantMessageEvent?.chars ?? event?.assistantMessageEvent?.length);
+  const sourceRedacted = hasRedactedReasoning(message);
+  const exposeRaw = rawReasoningCaptureEnabled() && !sourceRedacted;
+  return omitUndefined({
+    reasoning_kind: eventKind ?? "thinking",
+    reasoning_chars: chars,
+    reasoning_redacted: !exposeRaw,
+    text_preview: exposeRaw ? boundedPreview(reasoningText, 240) : undefined,
+    content_types: contentTypes.length > 0 ? contentTypes : undefined,
+    stop_reason: normalizeString(message?.stopReason ?? message?.stop_reason),
+  });
+}
+
+function isReasoningUpdateKind(value: string | undefined): boolean {
+  return Boolean(value && /thinking|reasoning/i.test(value));
+}
+
+function extractReasoningText(event: any, message: any): string | undefined {
+  const assistantEvent = event?.assistantMessageEvent;
+  const eventCandidates = [
+    assistantEvent?.delta,
+    assistantEvent?.content,
+    assistantEvent?.thinking,
+    assistantEvent?.reasoning,
+    assistantEvent?.text,
+    assistantEvent?.partial?.thinking,
+    assistantEvent?.partial?.reasoning,
+  ];
+  for (const candidate of eventCandidates) {
+    if (typeof candidate === "string" && candidate.length > 0) return candidate;
+  }
+
+  if (!Array.isArray(message?.content)) return undefined;
+  const parts = message.content
+    .filter((part: any) => part?.type === "thinking" || part?.type === "reasoning")
+    .map((part: any) => typeof part.thinking === "string" ? part.thinking : typeof part.reasoning === "string" ? part.reasoning : "")
+    .filter((text: string) => text.length > 0);
+  return parts.length > 0 ? parts.join("") : undefined;
+}
+
+function hasRedactedReasoning(message: any): boolean {
+  if (!Array.isArray(message?.content)) return false;
+  return message.content.some((part: any) =>
+    (part?.type === "thinking" || part?.type === "reasoning") && part?.redacted === true,
+  );
+}
+
+function rawReasoningCaptureEnabled(): boolean {
+  const value = process.env.DEN_PI_SUBAGENT_RAW_REASONING;
+  return typeof value === "string" && ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+}
+
 function extractContentTypes(message: any): string[] | undefined {
   if (!Array.isArray(message?.content)) return undefined;
   const types = Array.from(new Set(message.content
@@ -499,6 +591,16 @@ function hasMeaningfulToolResult(value: unknown): boolean {
   const content = (value as { content?: unknown }).content;
   if (Array.isArray(content)) return content.length > 0;
   return true;
+}
+
+function workContextMetadata(context: PiWorkEventContext): JsonObject {
+  return omitUndefined({
+    run_id: normalizeString(context.runId),
+    task_id: optionalPositiveInteger(context.taskId),
+    subagent_role: normalizeString(context.subagentRole),
+    backend: normalizeString(context.backend),
+    requested_model: normalizeString(context.requestedModel),
+  });
 }
 
 function eventTimestamp(event: any, fallback: number): number {
