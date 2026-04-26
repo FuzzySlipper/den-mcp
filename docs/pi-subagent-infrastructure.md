@@ -1,7 +1,7 @@
 # Pi Sub-Agent Infrastructure
 
 Date: 2026-04-26
-Status: current stable shape after tasks `#785`, `#806`, `#813`, `#808`, `#815`, `#824`, and `#825`
+Status: current stable shape after tasks `#785`, `#806`, `#813`, `#808`, `#815`, `#824`, `#825`, and `#826`
 
 This note captures the intended shape for Pi-launched Den sub-agents after the
 observability and control hardening work. The goal is not to make Pi the whole
@@ -314,6 +314,22 @@ and reasoning update deltas before posting to Den, and depends on what the live
 Pi extension API emits during the interactive session. Detailed forensic replay
 still belongs to sub-agent run artifacts and task-thread/review records; parent
 operator entries are for situational awareness while the conductor is active.
+
+## Den Web Thoughts Lane
+
+Task `#826` adds a Den web `Thoughts` feed beside the existing `Stream` and
+`Messages` feed modes. The lane is intentionally narrower than the raw stream:
+it classifies `agent.work_reasoning_*`, `agent.work_message_*`,
+`subagent.work_reasoning_*`, and `subagent.work_message_*` entries while leaving
+tool, bash, and file-edit effects in the run detail/stream surfaces.
+
+The lane combines parent-agent stream ops with recent sub-agent run-detail work
+events. It supports selected-project and `_global` views, plus project, task,
+agent, and role filters. Items deep-link to the stream entry for parent/stream
+ops or to the sub-agent run detail for artifact-backed child work events.
+Reasoning items render as redacted markers by default; when a trusted local run
+captured bounded raw reasoning previews, the `Raw local` toggle can reveal those
+previews in the lane without changing task-thread messages.
 
 ## Pi Session Manager / psm-bridge Reference
 

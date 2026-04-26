@@ -9,6 +9,7 @@ import {
   listAgentStream,
   listSubagentRuns,
   subagentRunEventsUrl,
+  getSubagentRun,
   listDocuments,
   listActiveAgents,
 } from './api/client';
@@ -22,6 +23,7 @@ import { MessageFeed } from './components/MessageFeed';
 import { MessageDetail } from './components/MessageDetail';
 import { AgentStreamFeed } from './components/AgentStreamFeed';
 import { AgentStreamDetail } from './components/AgentStreamDetail';
+import { ThoughtFeed } from './components/ThoughtFeed';
 import { SubagentRunPanel } from './components/SubagentRunPanel';
 import { SubagentRunDetail } from './components/SubagentRunDetail';
 import { DocumentList } from './components/DocumentList';
@@ -30,6 +32,13 @@ import { AgentBar } from './components/AgentBar';
 import { DispatchDetail } from './components/DispatchDetail';
 import { MESSAGE_INTENT_OPTIONS, messageIntentLabel } from './messageIntents';
 import type { SubagentRunFilter } from './subagentRuns';
+import {
+  filterThoughtItems,
+  hasRawReasoningPreview,
+  sortThoughtItems,
+  thoughtItemFromStreamEntry,
+  thoughtItemsFromSubagentRunDetail,
+} from './thoughts';
 
 export default function App() {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
@@ -41,7 +50,7 @@ export default function App() {
   const [selectedDispatch, setSelectedDispatch] = useState<DispatchEntry | null>(null);
   const [selectedDoc, setSelectedDoc] = useState<DocumentSummary | null>(null);
   const [viewMode, setViewMode] = useState<'tasks' | 'documents'>('tasks');
-  const [feedMode, setFeedMode] = useState<'stream' | 'messages'>('stream');
+  const [feedMode, setFeedMode] = useState<'stream' | 'messages' | 'thoughts'>('stream');
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [messageIntentFilter, setMessageIntentFilter] = useState<MessageIntent | ''>('');
   const [streamKindFilter, setStreamKindFilter] = useState<'ops' | 'message'>('ops');
@@ -50,6 +59,11 @@ export default function App() {
   const [streamSenderFilter, setStreamSenderFilter] = useState('');
   const [streamRecipientFilter, setStreamRecipientFilter] = useState('');
   const [streamTaskFilter, setStreamTaskFilter] = useState('');
+  const [thoughtProjectFilter, setThoughtProjectFilter] = useState('');
+  const [thoughtTaskFilter, setThoughtTaskFilter] = useState('');
+  const [thoughtAgentFilter, setThoughtAgentFilter] = useState('');
+  const [thoughtRoleFilter, setThoughtRoleFilter] = useState('');
+  const [thoughtRawMode, setThoughtRawMode] = useState(false);
   const [subagentRunFilter, setSubagentRunFilter] = useState<SubagentRunFilter>('all');
   const [subagentRunLimit, setSubagentRunLimit] = useState(8);
   const [sortMode, setSortMode] = useState('priority');
@@ -86,6 +100,11 @@ export default function App() {
     const trimmed = streamTaskFilter.trim();
     return /^\d+$/.test(trimmed) ? Number(trimmed) : undefined;
   }, [streamTaskFilter]);
+
+  const parsedThoughtTaskId = useMemo(() => {
+    const trimmed = thoughtTaskFilter.trim();
+    return /^\d+$/.test(trimmed) ? Number(trimmed) : undefined;
+  }, [thoughtTaskFilter]);
 
   const fetchAgentStream = useCallback(
     () => effectiveProject
@@ -138,6 +157,69 @@ export default function App() {
   );
   useEventSourceRefresh(subagentRunEvents, 'subagent_run_updated', refreshSubagentRuns);
 
+  const fetchThoughts = useCallback(async () => {
+    if (!effectiveProject || feedMode !== 'thoughts') return [];
+
+    const projectFilter = isGlobal ? (thoughtProjectFilter.trim() || undefined) : effectiveProject;
+    const [streamEntries, runs] = await Promise.all([
+      listAgentStream({
+        projectId: projectFilter,
+        taskId: parsedThoughtTaskId,
+        streamKind: 'ops',
+        sender: thoughtAgentFilter.trim() || undefined,
+        limit: 100,
+      }),
+      listSubagentRuns({
+        projectId: projectFilter,
+        taskId: parsedThoughtTaskId,
+        limit: 10,
+      }),
+    ]);
+
+    const runDetails = await Promise.allSettled(runs.slice(0, 8).map(run => getSubagentRun(run.run_id, {
+      projectId: run.project_id ?? projectFilter,
+      taskId: run.task_id ?? undefined,
+    })));
+
+    const streamThoughts = streamEntries
+      .map(thoughtItemFromStreamEntry)
+      .filter(item => item !== null);
+    const runThoughts = runDetails.flatMap(result => result.status === 'fulfilled'
+      ? thoughtItemsFromSubagentRunDetail(result.value)
+      : []);
+
+    return filterThoughtItems(sortThoughtItems([...streamThoughts, ...runThoughts]), {
+      project: isGlobal ? thoughtProjectFilter : undefined,
+      taskId: parsedThoughtTaskId,
+      agent: thoughtAgentFilter,
+      role: thoughtRoleFilter,
+    });
+  }, [
+    effectiveProject,
+    feedMode,
+    isGlobal,
+    parsedThoughtTaskId,
+    thoughtAgentFilter,
+    thoughtProjectFilter,
+    thoughtRoleFilter,
+  ]);
+  const {
+    data: thoughts,
+    loading: thoughtsLoading,
+    error: thoughtsError,
+    refresh: refreshThoughts,
+  } = usePolling(fetchThoughts, 4000);
+  const thoughtSubagentRunEvents = useMemo(
+    () => effectiveProject
+      ? subagentRunEventsUrl({
+        projectId: isGlobal ? (thoughtProjectFilter.trim() || undefined) : effectiveProject,
+        taskId: parsedThoughtTaskId,
+      })
+      : null,
+    [effectiveProject, isGlobal, parsedThoughtTaskId, thoughtProjectFilter],
+  );
+  useEventSourceRefresh(thoughtSubagentRunEvents, 'subagent_run_updated', refreshThoughts);
+
   const fetchDocs = useCallback(
     () => effectiveProject
       ? listDocuments(isGlobal ? undefined : effectiveProject)
@@ -180,6 +262,7 @@ export default function App() {
     }
     return Array.from(options).sort((left, right) => left.localeCompare(right));
   }, [agentStream, streamEventFilter]);
+  const rawReasoningAvailable = useMemo(() => hasRawReasoningPreview(thoughts ?? []), [thoughts]);
 
   const taskCount = tasks?.length ?? 0;
   const filterLabel = statusFilter ? ` [${statusFilter}]` : '';
@@ -278,14 +361,21 @@ export default function App() {
 
   const feedCount = feedMode === 'stream'
     ? filteredAgentStream.length
-    : (messages?.length ?? 0);
+    : feedMode === 'thoughts'
+      ? (thoughts?.length ?? 0)
+      : (messages?.length ?? 0);
+  const feedTitle = feedMode === 'stream'
+    ? 'Agent Stream'
+    : feedMode === 'thoughts'
+      ? 'Thoughts'
+      : 'Messages';
 
   return (
     <div className="dashboard">
       {/* Feed — top, full width */}
       <div className="panel panel-messages">
         <div className="panel-header">
-          {feedMode === 'stream' ? 'Agent Stream' : 'Messages'}
+          {feedTitle}
           {effectiveProject && (
             <span className="count">
               ({feedCount}{feedMode === 'messages' ? messageFilterLabel : ''})
@@ -305,6 +395,12 @@ export default function App() {
               onClick={() => setFeedMode('messages')}
             >
               Messages
+            </button>
+            <button
+              className={feedMode === 'thoughts' ? 'active' : ''}
+              onClick={() => setFeedMode('thoughts')}
+            >
+              Thoughts
             </button>
           </div>
 
@@ -364,7 +460,7 @@ export default function App() {
                 placeholder="Task #"
               />
             </>
-          ) : (
+          ) : feedMode === 'messages' ? (
             <>
               <label className="panel-filter-label" htmlFor="message-intent-filter">Intent</label>
               <select
@@ -380,6 +476,51 @@ export default function App() {
                 ))}
               </select>
             </>
+          ) : (
+            <>
+              {isGlobal && (
+                <input
+                  className="feed-text-filter"
+                  value={thoughtProjectFilter}
+                  onChange={e => setThoughtProjectFilter(e.target.value)}
+                  placeholder="Project"
+                />
+              )}
+
+              <input
+                className="feed-text-filter"
+                value={thoughtAgentFilter}
+                onChange={e => setThoughtAgentFilter(e.target.value)}
+                placeholder="Agent"
+              />
+
+              <input
+                className="feed-text-filter"
+                value={thoughtRoleFilter}
+                onChange={e => setThoughtRoleFilter(e.target.value)}
+                placeholder="Role"
+              />
+
+              <input
+                className="feed-text-filter feed-text-filter-short"
+                value={thoughtTaskFilter}
+                onChange={e => setThoughtTaskFilter(e.target.value)}
+                placeholder="Task #"
+              />
+
+              <label
+                className={`thought-raw-toggle${rawReasoningAvailable ? '' : ' thought-raw-toggle-disabled'}`}
+                title={rawReasoningAvailable ? 'Show bounded local raw reasoning previews' : 'No local raw reasoning previews in this feed'}
+              >
+                <input
+                  type="checkbox"
+                  checked={thoughtRawMode && rawReasoningAvailable}
+                  disabled={!rawReasoningAvailable}
+                  onChange={e => setThoughtRawMode(e.target.checked)}
+                />
+                Raw local
+              </label>
+            </>
           )}
         </div>
         <div className="panel-body">
@@ -392,11 +533,23 @@ export default function App() {
               onOpenThread={entry => void handleStreamThreadOpen(entry)}
               onOpenDispatch={dispatchId => void handleDispatchSelect(dispatchId)}
             />
-          ) : (
+          ) : feedMode === 'messages' ? (
             <MessageFeed
               messages={messages ?? []}
               isGlobal={isGlobal}
               onSelect={handleMessageSelect}
+            />
+          ) : (
+            <ThoughtFeed
+              items={thoughts ?? []}
+              isGlobal={isGlobal}
+              loading={thoughtsLoading}
+              error={thoughtsError}
+              showRawReasoning={thoughtRawMode && rawReasoningAvailable}
+              rawReasoningAvailable={rawReasoningAvailable}
+              onOpenTask={handleTaskSelect}
+              onOpenRun={handleSubagentRunSelect}
+              onOpenStream={handleStreamSelect}
             />
           )}
         </div>

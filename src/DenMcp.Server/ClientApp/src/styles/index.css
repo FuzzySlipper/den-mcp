@@ -145,6 +145,23 @@ html, body, #root {
   width: 72px;
 }
 
+.thought-raw-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  user-select: none;
+}
+
+.thought-raw-toggle input {
+  margin: 0;
+}
+
+.thought-raw-toggle-disabled {
+  opacity: 0.55;
+}
+
 /* Messages panel — spans full width top */
 .panel-messages { grid-column: 1 / -1; grid-row: 1; }
 
@@ -1153,6 +1170,55 @@ html, body, #root {
   padding: 2px 8px;
   font-size: 11px;
   cursor: pointer;
+}
+
+.thought-list {
+  background: linear-gradient(180deg, rgba(106, 139, 255, 0.04), transparent 180px);
+}
+
+.thought-item-reasoning {
+  border-left: 2px solid var(--purple);
+}
+
+.thought-item-assistant_message {
+  border-left: 2px solid var(--cyan);
+}
+
+.thought-role,
+.thought-model {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.thought-chip-reasoning {
+  background: #2a1f44;
+  color: var(--purple);
+}
+
+.thought-chip-assistant_message {
+  background: #233029;
+  color: var(--cyan);
+}
+
+.thought-chip-raw {
+  background: #3c2b14;
+  color: var(--yellow);
+}
+
+.thought-chip-redacted {
+  background: #2b2b35;
+  color: var(--text-muted);
+}
+
+.thought-summary {
+  white-space: normal;
+}
+
+.thought-mode-note {
+  padding: 6px 10px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
 }
 
 .stream-link:hover {
