@@ -315,7 +315,7 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
         }
         const output = outputExtractor.updateFromEvent(parsed);
         if (output) onUpdate?.(output);
-        if (isTerminalAssistantMessage(parsed.message)) {
+        if (parsed.type === "message_end" && isTerminalAssistantMessage(parsed.message)) {
           clearTimer(finalDrainTimer);
           finalDrainTimer = setTimeout(() => terminate("terminal_drain"), finalDrainMs);
           finalDrainTimer.unref?.();

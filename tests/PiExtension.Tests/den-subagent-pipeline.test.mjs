@@ -352,7 +352,7 @@ test('pi cli runner times out children that never emit JSON', async (t) => {
       'setInterval(() => {}, 1000);',
     ],
     env: {
-      DEN_PI_SUBAGENT_STARTUP_TIMEOUT_MS: '25',
+      DEN_PI_SUBAGENT_STARTUP_TIMEOUT_MS: '100',
       DEN_PI_SUBAGENT_FORCE_KILL_MS: '500',
     },
     options: { role: 'planner', prompt: 'Wait for JSON that will never arrive.' },
@@ -423,6 +423,47 @@ test('pi cli runner preserves assistant final output when terminal drain guard k
   assert.ok(events.some((event) => event.type === 'subagent.process_finished'));
 });
 
+test('pi cli runner does not terminal-drain partial assistant tool-use turns', async (t) => {
+  const updates = [];
+  const { result, recorder } = await runFakePiSubagent(t, {
+    prefix: 'den-subagent-tool-use-preface-',
+    runId: 'run-tool-use-preface-not-final',
+    scriptLines: [
+      '#!/usr/bin/env node',
+      'process.on("SIGTERM", () => process.exit(143));',
+      'console.log(JSON.stringify({ type: "message_update", message: { role: "assistant", model: "gpt-test", stopReason: "stop", content: [{ type: "text", text: "Now let me run the tests." }] } }));',
+      'setTimeout(() => console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", model: "gpt-test", stopReason: "toolUse", content: [{ type: "text", text: "Now let me run the tests." }, { type: "toolCall", id: "tool-1", name: "bash", arguments: { command: "node --test" } }] } })), 50);',
+      'setTimeout(() => console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", model: "gpt-test", stopReason: "stop", content: [{ type: "text", text: "actual final verdict" }] } })), 90);',
+      'setTimeout(() => process.exit(0), 100);',
+    ],
+    env: {
+      DEN_PI_SUBAGENT_STARTUP_TIMEOUT_MS: '1000',
+      DEN_PI_SUBAGENT_FINAL_DRAIN_MS: '25',
+      DEN_PI_SUBAGENT_FORCE_KILL_MS: '500',
+    },
+    options: { role: 'reviewer', prompt: 'Review the tests, then produce a final verdict.' },
+    onUpdate(partial) {
+      updates.push(partial);
+    },
+  });
+
+  assert.equal(result.exit_code, 0);
+  assert.equal(result.timeout_kind, undefined);
+  assert.equal(result.final_output, 'actual final verdict');
+  assert.equal(result.assistant_final_found, true);
+  assert.equal(result.output_status, 'assistant_final');
+  assert.equal(subagentSucceeded(result), true);
+  assert.deepEqual(updates, ['actual final verdict']);
+
+  const status = await readJson(recorder.artifacts.status_json_path);
+  const events = await readJsonLines(recorder.artifacts.events_jsonl_path);
+  assert.equal(status.state, 'complete');
+  assert.equal(status.timeout_kind, null);
+  assert.equal(status.output_status, 'assistant_final');
+  assert.ok(events.some((event) => event.type === 'subagent.assistant_output'));
+  assert.equal(events.some((event) => event.type === 'subagent.terminal_drain_timeout'), false);
+});
+
 test('output extractor accepts assistant final output and records model', () => {
   const events = [];
   const extractor = createSubagentOutputExtractor('Say hi', {
@@ -446,6 +487,37 @@ test('output extractor accepts assistant final output and records model', () => 
     childErrorMessage: undefined,
   });
   assert.equal(events[0].type, 'subagent.assistant_output');
+});
+
+test('output extractor ignores assistant tool-use prefaces as final output', () => {
+  const events = [];
+  const extractor = createSubagentOutputExtractor('Run tests', {
+    appendEvent(event) {
+      events.push(event);
+    },
+  });
+
+  const output = extractor.updateFromEvent({
+    type: 'message_end',
+    message: assistantMessage('Now let me run the tests.', {
+      stopReason: 'toolUse',
+      content: [
+        { type: 'text', text: 'Now let me run the tests.' },
+        { type: 'toolCall', id: 'tool-1', name: 'bash', arguments: { command: 'node --test' } },
+      ],
+    }),
+  });
+
+  assert.equal(output, undefined);
+  assert.deepEqual(extractor.snapshot(), {
+    finalOutput: '',
+    model: 'gpt-test',
+    messageCount: 1,
+    assistantMessageCount: 1,
+    promptEchoDetected: false,
+    childErrorMessage: undefined,
+  });
+  assert.deepEqual(events, []);
 });
 
 test('output extractor ignores user prompt echoes', () => {

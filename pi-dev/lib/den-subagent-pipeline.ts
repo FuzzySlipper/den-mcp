@@ -220,6 +220,8 @@ export function createSubagentOutputExtractor(
       assistantMessageCount++;
       if (message.model && typeof message.model === "string") model = message.model;
       if (!text) return undefined;
+      const terminalAssistantMessage = event.type === "message_end" && isTerminalAssistantMessage(message);
+      if (!terminalAssistantMessage) return undefined;
 
       if (isPromptEcho(text, prompt)) {
         promptEchoDetected = true;
@@ -227,7 +229,7 @@ export function createSubagentOutputExtractor(
           type: "subagent.prompt_echo_detected",
           ts: Date.now(),
           chars: text.length,
-          terminal: isTerminalAssistantMessage(message),
+          terminal: true,
         });
         return undefined;
       }
@@ -237,7 +239,7 @@ export function createSubagentOutputExtractor(
         type: "subagent.assistant_output",
         ts: Date.now(),
         chars: text.length,
-        terminal: isTerminalAssistantMessage(message),
+        terminal: true,
       });
       return text;
     },
