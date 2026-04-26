@@ -1015,9 +1015,23 @@ function formatProgressOpsBody(role: string, event: JsonObject): string {
       return `${role} sub-agent abort requested.`;
     case "subagent.spawn_error":
       return `${role} sub-agent spawn failed${typeof event.error === "string" ? `: ${oneLine(event.error)}` : ""}.`;
+    case "subagent.work_turn_start":
+      return `${role} sub-agent started a Pi turn.`;
+    case "subagent.work_turn_end":
+      return `${role} sub-agent finished a Pi turn${typeof event.text_preview === "string" ? `: ${oneLine(event.text_preview)}` : ""}.`;
+    case "subagent.work_tool_start":
+      return `${role} sub-agent started tool ${formatWorkToolName(event)}${typeof event.args_preview === "string" ? `: ${oneLine(event.args_preview)}` : ""}.`;
+    case "subagent.work_tool_end":
+      return `${role} sub-agent finished tool ${formatWorkToolName(event)}${event.is_error === true ? " with error" : ""}${typeof event.result_preview === "string" ? `: ${oneLine(event.result_preview)}` : ""}.`;
+    case "subagent.work_message_end":
+      return `${role} sub-agent produced an assistant message${typeof event.text_preview === "string" ? `: ${oneLine(event.text_preview)}` : ""}.`;
     default:
       return `${role} sub-agent progress update.`;
   }
+}
+
+function formatWorkToolName(event: JsonObject): string {
+  return typeof event.tool_name === "string" && event.tool_name.trim() ? event.tool_name : "(unknown)";
 }
 
 function rememberRerunSnapshot(

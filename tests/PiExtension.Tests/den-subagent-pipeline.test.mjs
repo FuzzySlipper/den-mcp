@@ -19,6 +19,7 @@ import {
   createSubagentOutputExtractor,
   isSubagentInfrastructureFailure,
   isTerminalAssistantMessage,
+  normalizePiWorkEvent,
   normalizeSubagentRunEvent,
   parsePiStdoutLine,
   subagentOpsEventTypeForEvent,
@@ -119,6 +120,66 @@ test('parsePiStdoutLine preserves json and raw stdout separately', () => {
   assert.equal(parsePiStdoutLine('   '), undefined);
 });
 
+test('subagent work event normalizer summarizes child Pi events without prompts', () => {
+  assert.deepEqual(normalizePiWorkEvent({
+    type: 'tool_execution_start',
+    toolCallId: 'tool-1',
+    toolName: 'bash',
+    args: { command: 'node --test tests/PiExtension.Tests/*.mjs' },
+  }, 1234), {
+    type: 'subagent.work_tool_start',
+    ts: 1234,
+    source_type: 'tool_execution_start',
+    tool_call_id: 'tool-1',
+    tool_name: 'bash',
+    args_preview: '{"command":"node --test tests/PiExtension.Tests/*.mjs"}',
+  });
+
+  assert.deepEqual(normalizePiWorkEvent({
+    type: 'tool_execution_end',
+    toolCallId: 'tool-1',
+    toolName: 'bash',
+    result: { content: [{ type: 'text', text: 'ok\n' }] },
+    isError: false,
+  }, 1235), {
+    type: 'subagent.work_tool_end',
+    ts: 1235,
+    source_type: 'tool_execution_end',
+    tool_call_id: 'tool-1',
+    tool_name: 'bash',
+    result_preview: '{"content":[{"type":"text","text":"ok\\n"}]}',
+    is_error: false,
+  });
+
+  assert.deepEqual(normalizePiWorkEvent({
+    type: 'message_update',
+    assistantMessageEvent: { type: 'text_delta' },
+    message: assistantMessage('Running tests now'),
+  }, 1236), {
+    type: 'subagent.work_message_update',
+    ts: 1236,
+    source_type: 'message_update',
+    role: 'assistant',
+    model: 'gpt-test',
+    update_kind: 'text_delta',
+    text_preview: 'Running tests now',
+    text_chars: 17,
+    content_types: ['text'],
+    stop_reason: 'stop',
+  });
+
+  assert.equal(normalizePiWorkEvent({
+    type: 'message_update',
+    assistantMessageEvent: { type: 'thinking_delta' },
+    message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'private scratchpad' }] },
+  }, 1236), undefined);
+
+  assert.equal(normalizePiWorkEvent({
+    type: 'message_end',
+    message: { role: 'user', content: [{ type: 'text', text: 'full generated prompt' }] },
+  }, 1237), undefined);
+});
+
 test('subagent run schema helpers emit canonical metadata and event mapping', () => {
   const artifacts = {
     dir: '/tmp/den-subagent-runs/run-1',
@@ -163,8 +224,11 @@ test('subagent run schema helpers emit canonical metadata and event mapping', ()
   });
   assert.equal(subagentOpsEventTypeForEvent('subagent.heartbeat'), 'subagent_heartbeat');
   assert.equal(subagentOpsEventTypeForEvent('subagent.spawn_error'), 'subagent_spawn_error');
+  assert.equal(subagentOpsEventTypeForEvent('subagent.work_tool_start'), 'subagent_work_tool_start');
+  assert.equal(subagentOpsEventTypeForEvent('subagent.work_message_update'), undefined);
   assert.equal(subagentOpsEventTypeForEvent('message_end'), undefined);
   assert.equal(subagentRunStateFromOpsEventType('subagent_assistant_output'), 'running');
+  assert.equal(subagentRunStateFromOpsEventType('subagent_work_tool_start'), 'running');
   assert.equal(subagentRunStateFromOpsEventType('subagent_abort_requested'), 'aborting');
   assert.equal(subagentRunStateFromOpsEventType('subagent_rerun_requested'), 'rerun_requested');
   assert.equal(subagentRunStateFromOpsEventType('subagent_rerun_accepted'), 'rerun_accepted');
@@ -421,6 +485,33 @@ test('pi cli runner preserves assistant final output when terminal drain guard k
   assert.ok(events.some((event) => event.type === 'subagent.assistant_output'));
   assert.ok(events.some((event) => event.type === 'subagent.terminal_drain_timeout'));
   assert.ok(events.some((event) => event.type === 'subagent.process_finished'));
+});
+
+test('pi cli runner records normalized work events from child Pi stream', async (t) => {
+  const { result, recorder } = await runFakePiSubagent(t, {
+    prefix: 'den-subagent-work-events-',
+    runId: 'run-normalized-work-events',
+    scriptLines: [
+      '#!/usr/bin/env node',
+      'console.log(JSON.stringify({ type: "turn_start" }));',
+      'console.log(JSON.stringify({ type: "tool_execution_start", toolCallId: "tool-1", toolName: "bash", args: { command: "echo ok" } }));',
+      'console.log(JSON.stringify({ type: "tool_execution_end", toolCallId: "tool-1", toolName: "bash", result: { content: [{ type: "text", text: "ok\\n" }] }, isError: false }));',
+      'console.log(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta" }, message: { role: "assistant", model: "gpt-test", stopReason: "stop", content: [{ type: "text", text: "Tests passed." }] } }));',
+      'console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", model: "gpt-test", stopReason: "stop", content: [{ type: "text", text: "final answer" }] } }));',
+      'process.exit(0);',
+    ],
+    options: { role: 'coder', prompt: 'Run a tool and summarize it.' },
+  });
+
+  assert.equal(result.exit_code, 0);
+  assert.equal(result.final_output, 'final answer');
+  const events = await readJsonLines(recorder.artifacts.events_jsonl_path);
+  assert.ok(events.some((event) => event.type === 'subagent.work_turn_start'));
+  assert.ok(events.some((event) => event.type === 'subagent.work_tool_start' && event.tool_name === 'bash' && event.args_preview.includes('echo ok')));
+  assert.ok(events.some((event) => event.type === 'subagent.work_tool_end' && event.result_preview.includes('ok') && event.is_error === false));
+  assert.ok(events.some((event) => event.type === 'subagent.work_message_update' && event.text_preview === 'Tests passed.'));
+  assert.ok(events.some((event) => event.type === 'subagent.work_message_end' && event.text_preview === 'final answer'));
+  assert.ok(events.some((event) => event.type === 'subagent.assistant_output'));
 });
 
 test('pi cli runner does not terminal-drain partial assistant tool-use turns', async (t) => {

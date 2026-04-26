@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace DenMcp.Core.Models;
 
 public sealed class SubagentRunSummary
@@ -37,6 +39,7 @@ public sealed class SubagentRunDetail
 {
     public required SubagentRunSummary Summary { get; set; }
     public required List<AgentStreamEntry> Events { get; set; }
+    public List<JsonElement> WorkEvents { get; set; } = [];
     public SubagentRunArtifactSnapshot? Artifacts { get; set; }
 }
 

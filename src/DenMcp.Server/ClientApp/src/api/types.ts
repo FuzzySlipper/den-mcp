@@ -332,7 +332,33 @@ export interface SubagentRunSummary {
 export interface SubagentRunDetail {
   summary: SubagentRunSummary;
   events: AgentStreamEntry[];
+  work_events: SubagentRunWorkEvent[];
   artifacts: SubagentRunArtifactSnapshot | null;
+}
+
+export interface SubagentRunWorkEvent {
+  type: string;
+  ts?: number | null;
+  source_type?: string | null;
+  role?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  update_kind?: string | null;
+  content_types?: string[] | null;
+  text_preview?: string | null;
+  text_chars?: number | null;
+  stop_reason?: string | null;
+  tool_call_id?: string | null;
+  tool_name?: string | null;
+  args_preview?: string | null;
+  result_preview?: string | null;
+  is_error?: boolean | null;
+  tool_calls?: Array<{
+    id?: string | null;
+    name?: string | null;
+    args_preview?: string | null;
+  }> | null;
+  [key: string]: unknown;
 }
 
 export interface SubagentRunArtifactSnapshot {

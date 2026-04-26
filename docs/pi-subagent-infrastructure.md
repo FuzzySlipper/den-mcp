@@ -1,7 +1,7 @@
 # Pi Sub-Agent Infrastructure
 
 Date: 2026-04-26
-Status: current stable shape after task `#785`
+Status: current stable shape after tasks `#785` and `#813`
 
 This note captures the intended shape for Pi-launched Den sub-agents after the
 observability and control hardening work. The goal is not to make Pi the whole
@@ -138,11 +138,65 @@ subagent_startup_timeout
 subagent_terminal_drain_timeout
 subagent_failed
 subagent_spawn_error
+subagent_work_turn_start
+subagent_work_turn_end
+subagent_work_tool_start
+subagent_work_tool_end
+subagent_work_message_end
 ```
 
 Den web derives run state from this stream. That keeps the current design
 compatible with alternate future runners, because a runner only has to emit the
 same lifecycle schema and task result/failure metadata.
+
+## Child Pi Work Feed
+
+Task `#813` audited live child `pi --mode json` output from recent sub-agent
+runs. The child JSON stream includes these Pi event families before they are
+condensed into Den-visible run state:
+
+```text
+session
+agent_start
+turn_start
+turn_end
+message_start
+message_update
+message_end
+tool_execution_start
+tool_execution_update
+tool_execution_end
+```
+
+`stdout.jsonl` remains the raw forensic transcript. The runner also normalizes
+these events into bounded `subagent.work_*` records in `events.jsonl`, with
+prompt/user messages intentionally skipped. The normalized records include:
+
+- turn start/end timestamps
+- assistant message start/update/end summaries without raw prompts
+- tool call id/name, bounded args previews, bounded result previews, and error
+  status
+- content type and tool-call summaries when an assistant message requests tools
+
+Only selected low-volume work events are mirrored into Den agent-stream ops
+(`subagent_work_turn_start`, `subagent_work_turn_end`, `subagent_work_tool_start`,
+`subagent_work_tool_end`, and `subagent_work_message_end`). High-frequency
+message/tool update deltas stay in `events.jsonl`; Den web reads and parses the
+artifact tail for the run detail "Work" timeline. This keeps the top-level stream
+human-scale while still making runaway searches, repeated tools, and off-scope
+commands visible while the run is active.
+
+## Tau Reference
+
+Tau is useful as a design reference for interactive parent Pi sessions: it
+subscribes to Pi events, mirrors session/message/tool state over WebSocket, and
+renders compact tool cards in a browser. Den sub-agents should not depend on Tau
+for visibility in this slice. They are headless child `pi --mode json` processes
+whose stdout is already captured by the Den runner. Loading Tau into every child
+would require per-run ports, auth, cleanup, and a registry of child servers, while
+Den already has run ids, artifacts, and a web surface. The supported sub-agent
+path is therefore the normalized Den work feed above; Tau can still be evaluated
+separately for interactive parent-session mirroring.
 
 ## Controls
 

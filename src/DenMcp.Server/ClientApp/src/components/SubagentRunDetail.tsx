@@ -2,7 +2,14 @@ import { useCallback, useState } from 'react';
 import { controlSubagentRun, getSubagentRun, type SubagentRunControlAction } from '../api/client';
 import type { AgentStreamEntry, SubagentRunSummary } from '../api/types';
 import { usePolling } from '../hooks/usePolling';
-import { formatInfrastructureFailureReason, formatSubagentDuration, summarizeSubagentRunEntry } from '../subagentRuns';
+import {
+  formatInfrastructureFailureReason,
+  formatSubagentDuration,
+  formatSubagentWorkEventType,
+  formatSubagentWorkTimestamp,
+  summarizeSubagentRunEntry,
+  summarizeSubagentWorkEvent,
+} from '../subagentRuns';
 import { truncate } from '../utils';
 
 interface Props {
@@ -34,6 +41,7 @@ export function SubagentRunDetail({ run, onClose, onOpenTask, onOpenEntry }: Pro
   const { data: detail, error, refresh } = usePolling(fetchRun, run.state === 'running' || run.state === 'retrying' || run.state === 'aborting' ? 2000 : 10_000);
   const summary = detail?.summary ?? run;
   const events = detail?.events ?? [run.latest];
+  const workEvents = detail?.work_events ?? [];
   const artifacts = detail?.artifacts ?? null;
   const canAbort = summary.state === 'running' || summary.state === 'retrying' || summary.state === 'aborting';
   const canRequestRerun = !canAbort && summary.state !== 'rerun_requested';
@@ -231,6 +239,22 @@ export function SubagentRunDetail({ run, onClose, onOpenTask, onOpenEntry }: Pro
           <div className="detail-section">
             <h3>Stderr</h3>
             <pre className="detail-pre">{summary.stderr_preview}</pre>
+          </div>
+        )}
+
+        {workEvents.length > 0 && (
+          <div className="detail-section">
+            <h3>Work</h3>
+            <div className="subagent-work-list">
+              {workEvents.map((event, index) => (
+                <div key={`${event.type}:${event.ts ?? index}:${index}`} className={`subagent-work-item ${event.is_error ? 'subagent-work-item-error' : ''}`}>
+                  <span className="subagent-event-time">{formatSubagentWorkTimestamp(event.ts)}</span>
+                  <span className="stream-chip stream-chip-event">{formatSubagentWorkEventType(event.type)}</span>
+                  <span className="subagent-work-body">{truncate(summarizeSubagentWorkEvent(event), 180)}</span>
+                  {event.tool_name && <span className="subagent-work-tool">{event.tool_name}</span>}
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

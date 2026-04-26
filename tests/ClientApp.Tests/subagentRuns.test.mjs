@@ -3,9 +3,12 @@ import test from 'node:test';
 import {
   formatInfrastructureFailureReason,
   formatSubagentDuration,
+  formatSubagentWorkEventType,
+  formatSubagentWorkTimestamp,
   stateFromSubagentEvent,
   subagentRunMatchesFilter,
   summarizeSubagentRunEntry,
+  summarizeSubagentWorkEvent,
 } from '../../src/DenMcp.Server/ClientApp/src/subagentRuns.ts';
 
 function entry(overrides) {
@@ -36,6 +39,7 @@ test('subagent run helpers format labels and summaries', () => {
   assert.equal(stateFromSubagentEvent('subagent_process_started'), 'running');
   assert.equal(stateFromSubagentEvent('subagent_heartbeat'), 'running');
   assert.equal(stateFromSubagentEvent('subagent_assistant_output'), 'running');
+  assert.equal(stateFromSubagentEvent('subagent_work_tool_start'), 'running');
   assert.equal(stateFromSubagentEvent('subagent_fallback_started'), 'retrying');
   assert.equal(stateFromSubagentEvent('subagent_abort_requested'), 'aborting');
   assert.equal(stateFromSubagentEvent('subagent_rerun_requested'), 'rerun_requested');
@@ -60,6 +64,31 @@ test('subagent run helpers format labels and summaries', () => {
   assert.equal(summarizeSubagentRunEntry(entry({
     event_type: 'subagent_failed',
   })), 'subagent failed');
+});
+
+test('subagent work event helpers render bounded live-feed summaries', () => {
+  assert.equal(summarizeSubagentWorkEvent({
+    type: 'subagent.work_tool_start',
+    tool_name: 'bash',
+    args_preview: '{"command":"dotnet test"}',
+  }), 'tool started: bash {"command":"dotnet test"}');
+  assert.equal(summarizeSubagentWorkEvent({
+    type: 'subagent.work_tool_end',
+    tool_name: 'bash',
+    result_preview: 'Build failed',
+    is_error: true,
+  }), 'tool errored: bash Build failed');
+  assert.equal(summarizeSubagentWorkEvent({
+    type: 'subagent.work_message_end',
+    tool_calls: [{ name: 'den_get_task' }, { name: 'bash' }],
+  }), 'assistant requested tools: den_get_task, bash');
+  assert.equal(summarizeSubagentWorkEvent({
+    type: 'subagent.work_message_update',
+    update_kind: 'thinking_delta',
+  }), 'assistant update (thinking_delta)');
+  assert.equal(formatSubagentWorkEventType('subagent.work_tool_start'), 'tool start');
+  assert.equal(formatSubagentWorkTimestamp(1234), new Date(1234).toLocaleString());
+  assert.equal(formatSubagentWorkTimestamp(null), '');
 });
 
 test('subagent run filters group operational states', () => {

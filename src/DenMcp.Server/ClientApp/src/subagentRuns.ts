@@ -1,4 +1,4 @@
-import type { AgentStreamEntry, SubagentRunState, SubagentRunSummary } from './api/types';
+import type { AgentStreamEntry, SubagentRunState, SubagentRunSummary, SubagentRunWorkEvent } from './api/types';
 
 export type SubagentRunFilter = 'all' | 'active' | 'problem' | 'complete';
 
@@ -33,7 +33,7 @@ export function stateFromSubagentEvent(eventType: string): SubagentRunState {
     case 'subagent_spawn_error':
       return 'failed';
     default:
-      return 'unknown';
+      return eventType.startsWith('subagent_work_') ? 'running' : 'unknown';
   }
 }
 
@@ -66,6 +66,48 @@ export function formatInfrastructureFailureReason(reason: string | null): string
 export function summarizeSubagentRunEntry(entry: AgentStreamEntry): string {
   const body = entry.body?.replace(/\s+/g, ' ').trim();
   return body || entry.event_type.replace(/_/g, ' ');
+}
+
+export function summarizeSubagentWorkEvent(event: SubagentRunWorkEvent): string {
+  switch (event.type) {
+    case 'subagent.work_session':
+      return `session${event.cwd ? ` in ${event.cwd}` : ''}`;
+    case 'subagent.work_agent_start':
+      return 'agent process initialized';
+    case 'subagent.work_turn_start':
+      return 'turn started';
+    case 'subagent.work_turn_end':
+      return event.text_preview ? `turn finished: ${event.text_preview}` : 'turn finished';
+    case 'subagent.work_message_start':
+      return 'assistant message started';
+    case 'subagent.work_message_update':
+      return event.text_preview
+        ? `assistant update: ${event.text_preview}`
+        : `assistant update${event.update_kind ? ` (${event.update_kind})` : ''}`;
+    case 'subagent.work_message_end':
+      if (event.tool_calls?.length) {
+        const names = event.tool_calls.map(tool => tool.name).filter(Boolean).join(', ');
+        return `assistant requested tool${event.tool_calls.length > 1 ? 's' : ''}${names ? `: ${names}` : ''}`;
+      }
+      return event.text_preview ? `assistant message: ${event.text_preview}` : 'assistant message ended';
+    case 'subagent.work_tool_start':
+      return `tool started: ${event.tool_name ?? 'unknown'}${event.args_preview ? ` ${event.args_preview}` : ''}`;
+    case 'subagent.work_tool_update':
+      return `tool update: ${event.tool_name ?? 'unknown'}${event.result_preview ? ` ${event.result_preview}` : ''}`;
+    case 'subagent.work_tool_end':
+      return `tool ${event.is_error ? 'errored' : 'finished'}: ${event.tool_name ?? 'unknown'}${event.result_preview ? ` ${event.result_preview}` : ''}`;
+    default:
+      return event.type.replace(/[_.]/g, ' ');
+  }
+}
+
+export function formatSubagentWorkEventType(type: string): string {
+  return type.replace(/^subagent\.work_/, '').replace(/_/g, ' ');
+}
+
+export function formatSubagentWorkTimestamp(ts: number | null | undefined): string {
+  if (typeof ts !== 'number' || !Number.isFinite(ts)) return '';
+  return new Date(ts).toLocaleString();
 }
 
 export function subagentRunMatchesFilter(run: SubagentRunSummary, filter: SubagentRunFilter): boolean {

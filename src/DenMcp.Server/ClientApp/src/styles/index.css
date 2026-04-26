@@ -1210,10 +1210,43 @@ html, body, #root {
   overflow-wrap: anywhere;
 }
 
-.subagent-event-list {
+.subagent-event-list,
+.subagent-work-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.subagent-work-item {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 7px 8px;
+  display: grid;
+  grid-template-columns: minmax(112px, auto) auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.subagent-work-item-error {
+  border-color: #6a2a3c;
+  background: #2a151d;
+}
+
+.subagent-work-body {
+  color: var(--text);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-work-tool {
+  color: var(--cyan);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  white-space: nowrap;
 }
 
 .subagent-event-item {

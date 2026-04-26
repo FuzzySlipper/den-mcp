@@ -379,17 +379,31 @@ public class AgentStreamApiTests : IAsyncLifetime
             Metadata = Metadata("""{"run_id":"run-progress","role":"coder","event":{"type":"subagent.assistant_output","chars":24}}""")
         });
 
+        await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_work_tool_start",
+            ProjectId = ProjectId,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+            Body = "coder sub-agent started tool bash.",
+            Metadata = Metadata("""{"run_id":"run-progress","role":"coder","event":{"type":"subagent.work_tool_start","tool_name":"bash","args_preview":"{\"command\":\"dotnet test\"}"}}""")
+        });
+
         var detailResponse = await _client.GetAsync($"/api/projects/{ProjectId}/subagent-runs/run-progress");
         detailResponse.EnsureSuccessStatusCode();
 
         var detail = await detailResponse.Content.ReadFromJsonAsync<SubagentRunDetail>(JsonOpts);
         Assert.NotNull(detail);
         Assert.Equal("running", detail!.Summary.State);
-        Assert.Equal("subagent_assistant_output", detail.Summary.Latest.EventType);
+        Assert.Equal("subagent_work_tool_start", detail.Summary.Latest.EventType);
         Assert.Equal(0, detail.Summary.HeartbeatCount);
         Assert.Equal(1, detail.Summary.AssistantOutputCount);
         Assert.NotNull(detail.Summary.LastAssistantOutputAt);
-        Assert.Equal(2, detail.Summary.EventCount);
+        Assert.Equal(3, detail.Summary.EventCount);
+        var workEvent = Assert.Single(detail.WorkEvents);
+        Assert.Equal("subagent.work_tool_start", workEvent.GetProperty("type").GetString());
+        Assert.Equal("bash", workEvent.GetProperty("tool_name").GetString());
     }
 
     [Fact]
@@ -538,7 +552,12 @@ public class AgentStreamApiTests : IAsyncLifetime
         try
         {
             await File.WriteAllTextAsync(Path.Combine(artifactDir, "status.json"), """{"state":"complete"}""");
-            await File.WriteAllTextAsync(Path.Combine(artifactDir, "events.jsonl"), """{"type":"subagent.process_started"}""" + "\n");
+            await File.WriteAllTextAsync(Path.Combine(artifactDir, "events.jsonl"), string.Join("\n", [
+                """{"type":"subagent.process_started"}""",
+                """{"type":"subagent.work_tool_start","ts":1234,"tool_name":"bash","args_preview":"{\"command\":\"git status\"}"}""",
+                """{"type":"subagent.work_message_end","ts":1235,"text_preview":"done"}""",
+                ""
+            ]));
             await File.WriteAllTextAsync(Path.Combine(artifactDir, "stdout.jsonl"), """{"type":"message_end"}""" + "\n");
             await File.WriteAllTextAsync(Path.Combine(artifactDir, "stderr.log"), "warning line\n");
 
@@ -568,6 +587,10 @@ public class AgentStreamApiTests : IAsyncLifetime
             Assert.Contains("subagent.process_started", detail.Artifacts.EventsTail);
             Assert.Contains("message_end", detail.Artifacts.StdoutTail);
             Assert.Contains("warning line", detail.Artifacts.StderrTail);
+            Assert.Equal(2, detail.WorkEvents.Count);
+            Assert.Equal("subagent.work_tool_start", detail.WorkEvents[0].GetProperty("type").GetString());
+            Assert.Equal("bash", detail.WorkEvents[0].GetProperty("tool_name").GetString());
+            Assert.Equal("done", detail.WorkEvents[1].GetProperty("text_preview").GetString());
         }
         finally
         {

@@ -55,7 +55,12 @@ export type SubagentOpsEventType =
   | "subagent_aborted"
   | "subagent_abort"
   | "subagent_failed"
-  | "subagent_spawn_error";
+  | "subagent_spawn_error"
+  | "subagent_work_turn_start"
+  | "subagent_work_turn_end"
+  | "subagent_work_tool_start"
+  | "subagent_work_tool_end"
+  | "subagent_work_message_end";
 
 export function buildSubagentRunMetadata(
   identity: SubagentRunIdentity,
@@ -105,6 +110,16 @@ export function subagentOpsEventTypeForEvent(eventType: string): SubagentOpsEven
       return "subagent_abort";
     case "subagent.spawn_error":
       return "subagent_spawn_error";
+    case "subagent.work_turn_start":
+      return "subagent_work_turn_start";
+    case "subagent.work_turn_end":
+      return "subagent_work_turn_end";
+    case "subagent.work_tool_start":
+      return "subagent_work_tool_start";
+    case "subagent.work_tool_end":
+      return "subagent_work_tool_end";
+    case "subagent.work_message_end":
+      return "subagent_work_message_end";
     default:
       return undefined;
   }
@@ -117,6 +132,11 @@ export function subagentRunStateFromOpsEventType(eventType: string): SubagentRun
     case "subagent_heartbeat":
     case "subagent_assistant_output":
     case "subagent_prompt_echo_detected":
+    case "subagent_work_turn_start":
+    case "subagent_work_turn_end":
+    case "subagent_work_tool_start":
+    case "subagent_work_tool_end":
+    case "subagent_work_message_end":
       return "running";
     case "subagent_fallback_started":
       return "retrying";
@@ -194,6 +214,96 @@ export function parsePiStdoutLine(line: string): PiStdoutParseResult | undefined
   } catch {
     return { kind: "raw_stdout", line };
   }
+}
+
+export function normalizePiWorkEvent(event: any, now = Date.now()): JsonObject | undefined {
+  if (!event || typeof event.type !== "string") return undefined;
+
+  switch (event.type) {
+    case "session":
+      return omitUndefined({
+        type: "subagent.work_session",
+        ts: eventTimestamp(event, now),
+        source_type: event.type,
+        session_id: normalizeString(event.id),
+        cwd: normalizeString(event.cwd),
+        version: finiteNumber(event.version),
+      });
+    case "agent_start":
+      return {
+        type: "subagent.work_agent_start",
+        ts: eventTimestamp(event, now),
+        source_type: event.type,
+      };
+    case "turn_start":
+      return {
+        type: "subagent.work_turn_start",
+        ts: eventTimestamp(event, now),
+        source_type: event.type,
+      };
+    case "turn_end":
+      return omitUndefined({
+        type: "subagent.work_turn_end",
+        ts: eventTimestamp(event, now),
+        source_type: event.type,
+        ...summarizeAssistantMessage(event.message),
+      });
+    case "message_start":
+      return normalizePiMessageWorkEvent(event, "start", now);
+    case "message_update":
+      return normalizePiMessageWorkEvent(event, "update", now);
+    case "message_end":
+      return normalizePiMessageWorkEvent(event, "end", now);
+    case "tool_execution_start":
+      return normalizePiToolWorkEvent(event, "start", now);
+    case "tool_execution_update":
+      return normalizePiToolWorkEvent(event, "update", now);
+    case "tool_execution_end":
+      return normalizePiToolWorkEvent(event, "end", now);
+    default:
+      return undefined;
+  }
+}
+
+function normalizePiMessageWorkEvent(event: any, phase: "start" | "update" | "end", now: number): JsonObject | undefined {
+  const message = event.message;
+  const role = normalizeString(message?.role);
+  if (role !== "assistant") return undefined;
+
+  const messageSummary = summarizeAssistantMessage(message);
+  const updateKind = normalizeString(event.assistantMessageEvent?.type);
+  if (phase === "update" && !messageSummary.text_preview && !messageSummary.tool_calls) return undefined;
+
+  return omitUndefined({
+    type: `subagent.work_message_${phase}`,
+    ts: eventTimestamp(event, now),
+    source_type: event.type,
+    role,
+    provider: normalizeString(message?.provider),
+    model: normalizeString(message?.model),
+    update_kind: updateKind,
+    ...messageSummary,
+  });
+}
+
+function normalizePiToolWorkEvent(event: any, phase: "start" | "update" | "end", now: number): JsonObject | undefined {
+  const toolName = normalizeString(event.toolName ?? event.tool_name);
+  if (!toolName) return undefined;
+  const result = event.result ?? event.partialResult ?? event.partial_result;
+  if (phase === "update" && !hasMeaningfulToolResult(result)) return undefined;
+  const resultPreview = boundedPreview(result, 500);
+  const isError = typeof event.isError === "boolean" ? event.isError : typeof event.is_error === "boolean" ? event.is_error : undefined;
+
+  return omitUndefined({
+    type: `subagent.work_tool_${phase}`,
+    ts: eventTimestamp(event, now),
+    source_type: event.type,
+    tool_call_id: normalizeString(event.toolCallId ?? event.tool_call_id),
+    tool_name: toolName,
+    args_preview: boundedPreview(event.args, 500),
+    result_preview: resultPreview,
+    is_error: isError,
+  });
 }
 
 export function createSubagentOutputExtractor(
@@ -308,6 +418,91 @@ export function extractText(message: any): string | undefined {
     if (part?.type === "text" && typeof part.text === "string") return part.text;
   }
   return undefined;
+}
+
+function summarizeAssistantMessage(message: any): JsonObject {
+  if (!message || message.role !== "assistant") return {};
+  const text = extractText(message);
+  const toolCalls = extractToolCallSummaries(message);
+  return omitUndefined({
+    text_preview: boundedPreview(text, 240),
+    text_chars: typeof text === "string" ? text.length : undefined,
+    content_types: extractContentTypes(message),
+    tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+    stop_reason: normalizeString(message.stopReason ?? message.stop_reason),
+  });
+}
+
+function extractContentTypes(message: any): string[] | undefined {
+  if (!Array.isArray(message?.content)) return undefined;
+  const types = Array.from(new Set(message.content
+    .map((part: any) => normalizeString(part?.type))
+    .filter((type: string | undefined): type is string => Boolean(type))));
+  return types.length > 0 ? types : undefined;
+}
+
+function extractToolCallSummaries(message: any): JsonObject[] {
+  if (!Array.isArray(message?.content)) return [];
+  return message.content
+    .filter((part: any) => part?.type === "toolCall" || part?.type === "tool_call")
+    .slice(0, 8)
+    .map((part: any) => omitUndefined({
+      id: normalizeString(part.id ?? part.toolCallId ?? part.tool_call_id),
+      name: normalizeString(part.name ?? part.toolName ?? part.tool_name),
+      args_preview: boundedPreview(part.arguments ?? part.args, 300),
+    }));
+}
+
+function hasMeaningfulToolResult(value: unknown): boolean {
+  if (value === undefined || value === null) return false;
+  if (typeof value !== "object") return true;
+  const content = (value as { content?: unknown }).content;
+  if (Array.isArray(content)) return content.length > 0;
+  return true;
+}
+
+function eventTimestamp(event: any, fallback: number): number {
+  const candidates = [
+    event?.ts,
+    event?.timestamp,
+    event?.message?.timestamp,
+    event?.assistantMessageEvent?.timestamp,
+    event?.assistantMessageEvent?.partial?.timestamp,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "number" && Number.isFinite(candidate)) return candidate;
+    if (typeof candidate === "string") {
+      const parsed = Date.parse(candidate);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return fallback;
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function normalizeString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function boundedPreview(value: unknown, maxChars: number): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  const raw = typeof value === "string" ? value : safeJson(value);
+  const oneLineValue = raw.replace(/\s+/g, " ").trim();
+  if (!oneLineValue) return undefined;
+  return oneLineValue.length <= maxChars ? oneLineValue : `${oneLineValue.slice(0, Math.max(0, maxChars - 1))}…`;
+}
+
+function safeJson(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 export function isPromptEcho(text: string, prompt: string): boolean {

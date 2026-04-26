@@ -6,6 +6,7 @@ import {
   classifySubagentStderrIssue,
   createSubagentOutputExtractor,
   isTerminalAssistantMessage,
+  normalizePiWorkEvent,
   parsePiStdoutLine,
   type JsonObject,
   type SubagentArtifacts,
@@ -447,6 +448,8 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
     if (!parsed) return undefined;
     if (parsed.kind === "json") {
       void recorder.appendStdoutLine(parsed.line);
+      const workEvent = normalizePiWorkEvent(parsed.event);
+      if (workEvent) void recorder.appendEvent(workEvent);
       return parsed.event;
     }
 

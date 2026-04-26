@@ -67,11 +67,13 @@ public sealed class SubagentRunService : ISubagentRunService
             return null;
 
         var summary = BuildSummary(runId, events);
+        var artifacts = await ReadArtifactsAsync(runId, summary);
         return new SubagentRunDetail
         {
             Summary = summary,
             Events = events,
-            Artifacts = await ReadArtifactsAsync(runId, summary)
+            WorkEvents = BuildWorkEvents(events, artifacts),
+            Artifacts = artifacts
         };
     }
 
@@ -131,6 +133,7 @@ public sealed class SubagentRunService : ISubagentRunService
         "subagent_heartbeat" => "running",
         "subagent_assistant_output" => "running",
         "subagent_prompt_echo_detected" => "running",
+        _ when eventType.StartsWith("subagent_work_", StringComparison.Ordinal) => "running",
         "subagent_fallback_started" => "retrying",
         "subagent_abort_requested" => "aborting",
         "subagent_rerun_requested" => "rerun_requested",
@@ -202,6 +205,69 @@ public sealed class SubagentRunService : ISubagentRunService
         }
 
         return string.IsNullOrWhiteSpace(dir.GetString()) ? null : dir.GetString();
+    }
+
+    private static List<JsonElement> BuildWorkEvents(
+        IReadOnlyList<AgentStreamEntry> streamEvents,
+        SubagentRunArtifactSnapshot? artifacts)
+    {
+        var artifactEvents = ParseWorkEvents(artifacts?.EventsTail);
+        if (artifactEvents.Count > 0)
+            return artifactEvents;
+
+        return streamEvents
+            .Select(StreamWorkEvent)
+            .Where(workEvent => workEvent.HasValue)
+            .Select(workEvent => workEvent!.Value)
+            .TakeLast(80)
+            .ToList();
+    }
+
+    private static List<JsonElement> ParseWorkEvents(string? eventsJsonl)
+    {
+        if (string.IsNullOrWhiteSpace(eventsJsonl))
+            return [];
+
+        var events = new List<JsonElement>();
+        foreach (var line in eventsJsonl.Split('\n'))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.Length == 0 || trimmed == "...")
+                continue;
+
+            try
+            {
+                using var doc = JsonDocument.Parse(trimmed);
+                if (IsSubagentWorkEvent(doc.RootElement))
+                    events.Add(doc.RootElement.Clone());
+            }
+            catch (JsonException)
+            {
+                // The artifact snapshot may begin mid-line when tailing a large file.
+            }
+        }
+
+        return events.TakeLast(80).ToList();
+    }
+
+    private static JsonElement? StreamWorkEvent(AgentStreamEntry entry)
+    {
+        if (!entry.EventType.StartsWith("subagent_work_", StringComparison.Ordinal) ||
+            !TryGetMetadataProperty(entry, "event", out var eventMetadata) ||
+            !IsSubagentWorkEvent(eventMetadata))
+        {
+            return null;
+        }
+
+        return eventMetadata.Clone();
+    }
+
+    private static bool IsSubagentWorkEvent(JsonElement element)
+    {
+        return element.ValueKind == JsonValueKind.Object &&
+            element.TryGetProperty("type", out var type) &&
+            type.ValueKind == JsonValueKind.String &&
+            type.GetString()?.StartsWith("subagent.work_", StringComparison.Ordinal) == true;
     }
 
     private static bool TryGetMetadataProperty(
