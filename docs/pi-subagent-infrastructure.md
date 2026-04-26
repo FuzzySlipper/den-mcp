@@ -1,7 +1,7 @@
 # Pi Sub-Agent Infrastructure
 
 Date: 2026-04-26
-Status: current stable shape after tasks `#785`, `#806`, `#813`, `#808`, `#815`, `#824`, `#825`, and `#826`
+Status: current stable shape after tasks `#785`, `#806`, `#813`, `#808`, `#815`, `#824`, `#825`, `#826`, and `#851`
 
 This note captures the intended shape for Pi-launched Den sub-agents after the
 observability and control hardening work. The goal is not to make Pi the whole
@@ -92,6 +92,33 @@ sessions/*.jsonl
 Task-thread messages should stay compact. They include final output for success
 or a concise failure explanation plus structured `den_subagent_run` metadata.
 Large transcripts and raw event details belong in the artifact files. Fresh child Pi sessions are persisted under each run's local artifact directory so Den can reconstruct historical work structure without copying raw prompts into Den database rows or task-thread messages.
+
+## Parent Tool Return Boundary
+
+Task `#851` separates child-run forensics from the parent conductor's tool-result
+context. Pi persists model-callable tool results as parent session
+`toolResult` messages, and those messages include a `details` field in the
+session/context object. Pi's current first-party provider adapters and
+compaction serializer use the tool-result `content` text rather than serializing
+`details` into provider payloads, but `details` is still stored in the parent Pi
+session and is visible to hooks/adapters. Treat it as parent-context-adjacent
+metadata, not as an unlimited UI-only side channel.
+
+`den_run_subagent`, `den_run_coder`, and `den_run_reviewer` therefore return a
+bounded parent-facing payload with schema `den_subagent_parent_tool_result`:
+
+- content text: run id, task/review ids when present, role, state, exit/duration,
+  model, output status, artifact paths, and a bounded final or failure summary
+- details: the same compact identifiers/status fields plus bounded previews and
+  artifact paths
+- never: full child stdout, stderr/stderr tail, work-event arrays, raw session
+  transcript content, or unbounded result metadata
+
+Full forensic data remains in `stdout.jsonl`, `stderr.log`, `events.jsonl`,
+`sessions/*.jsonl`, `status.json`, Den AgentRun/run detail, and task-thread
+result/failure messages where appropriate. The parent tool return may point at
+those artifacts, but it must not copy their raw contents into the conductor
+conversation.
 
 The canonical metadata schema is:
 

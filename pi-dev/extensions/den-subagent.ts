@@ -7,6 +7,7 @@ import { Type } from "typebox";
 import {
   createSubagentRunRecorder,
 } from "../lib/den-subagent-recorder.ts";
+import { buildSubagentParentToolResult } from "../lib/den-subagent-parent-tool-result.ts";
 import {
   createSubagentBackend,
   defaultToolsForRole,
@@ -1020,12 +1021,7 @@ function formatReviewContextTarget(context: { reviewRoundId?: number; branch?: s
 }
 
 function resultTool(result: SubagentResult) {
-  const ok = subagentSucceeded(result);
-  return {
-    content: [{ type: "text", text: ok ? result.final_output : formatFailureSummary(result) }],
-    details: result,
-    isError: !ok,
-  };
+  return buildSubagentParentToolResult(result);
 }
 
 function formatResultLines(result: SubagentResult): string[] {
