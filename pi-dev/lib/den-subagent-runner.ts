@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import {
   SUBAGENT_RUN_SCHEMA,
   SUBAGENT_RUN_SCHEMA_VERSION,
+  buildSubagentRunContextMetadata,
   classifySubagentInfrastructureFailure,
   classifySubagentStderrIssue,
   createSubagentOutputExtractor,
@@ -33,12 +34,28 @@ export type RunOptions = {
   cwd?: string;
   postResult?: boolean;
   rerunOfRunId?: string;
+  reviewRoundId?: number;
+  workspaceId?: string;
+  worktreePath?: string;
+  branch?: string;
+  baseBranch?: string;
+  baseCommit?: string;
+  headCommit?: string;
+  purpose?: string;
 };
 
 export type SubagentResult = {
   run_id: string;
   role: string;
   task_id?: number;
+  review_round_id?: number;
+  workspace_id?: string;
+  worktree_path?: string;
+  branch?: string;
+  base_branch?: string;
+  base_commit?: string;
+  head_commit?: string;
+  purpose?: string;
   session_mode: string;
   session?: string;
   exit_code: number;
@@ -124,6 +141,7 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
   if (tools) args.push("--tools", tools);
   const prompt = buildSubagentPrompt(cfg, options);
   args.push(prompt);
+  const contextMetadata = buildSubagentRunContextMetadata(options);
 
   const env = {
     ...process.env,
@@ -215,6 +233,7 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
         type: kind ? `subagent.${kind}_timeout` : "subagent.abort",
         ts: Date.now(),
         pid: proc.pid ?? null,
+        ...contextMetadata,
         ...eventExtra,
       });
       killProcessTree(proc, "SIGTERM");
@@ -265,6 +284,7 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
       tools: tools ?? null,
       session_mode: sessionMode,
       session: options.session ?? null,
+      ...contextMetadata,
       process_group: process.platform !== "win32" && proc.pid ? -proc.pid : null,
     });
     void recorder.appendEvent({
@@ -272,6 +292,7 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
       ts: Date.now(),
       pid: proc.pid ?? null,
       command,
+      ...contextMetadata,
       process_group: process.platform !== "win32" && proc.pid ? -proc.pid : null,
     });
     if (heartbeatMs > 0) {
@@ -283,6 +304,7 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
           duration_ms: Math.max(0, Date.now() - Date.parse(startedAt)),
           saw_json_event: sawJsonEvent,
           stderr_bytes: Buffer.byteLength(stderr),
+          ...contextMetadata,
         });
       }, heartbeatMs);
       heartbeatTimer.unref?.();
@@ -337,6 +359,7 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
         type: "subagent.spawn_error",
         ts: Date.now(),
         error: error.message,
+        ...contextMetadata,
       });
       resolveOnce(1);
     });
@@ -367,6 +390,14 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
     run_id: runId,
     role: options.role,
     task_id: options.taskId,
+    review_round_id: metadataNumber(contextMetadata.review_round_id),
+    workspace_id: metadataString(contextMetadata.workspace_id),
+    worktree_path: metadataString(contextMetadata.worktree_path),
+    branch: metadataString(contextMetadata.branch),
+    base_branch: metadataString(contextMetadata.base_branch),
+    base_commit: metadataString(contextMetadata.base_commit),
+    head_commit: metadataString(contextMetadata.head_commit),
+    purpose: metadataString(contextMetadata.purpose),
     session_mode: sessionMode,
     session: options.session,
     exit_code: termination.exitCode,
@@ -430,6 +461,7 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
     child_error_message: result.child_error_message ?? null,
     infrastructure_failure_reason: result.infrastructure_failure_reason ?? null,
     infrastructure_warning_reason: result.infrastructure_warning_reason ?? null,
+    ...contextMetadata,
   });
   await recorder.appendEvent({
     type: "subagent.process_finished",
@@ -439,6 +471,7 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
     timeout_kind: result.timeout_kind ?? null,
     forced_kill: result.forced_kill,
     output_status: result.output_status,
+    ...contextMetadata,
   });
 
   return result;
@@ -577,4 +610,12 @@ function normalizeString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function metadataString(value: unknown): string | undefined {
+  return typeof value === "string" && value ? value : undefined;
+}
+
+function metadataNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }

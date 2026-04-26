@@ -11,6 +11,17 @@ export type SubagentArtifacts = {
   events_jsonl_path: string;
 };
 
+export type SubagentRunContext = {
+  reviewRoundId?: number;
+  workspaceId?: string;
+  worktreePath?: string;
+  branch?: string;
+  baseBranch?: string;
+  baseCommit?: string;
+  headCommit?: string;
+  purpose?: string;
+};
+
 export type SubagentRunIdentity = {
   runId: string;
   role: string;
@@ -23,7 +34,7 @@ export type SubagentRunIdentity = {
   session?: string;
   rerunOfRunId?: string;
   artifacts?: SubagentArtifacts;
-};
+} & SubagentRunContext;
 
 export type SubagentRunState =
   | "running"
@@ -79,6 +90,7 @@ export function buildSubagentRunMetadata(
     session_mode: identity.sessionMode ?? "fresh",
     session: identity.session ?? null,
     rerun_of_run_id: identity.rerunOfRunId ?? null,
+    ...buildSubagentRunContextMetadata(identity),
     artifacts: identity.artifacts ?? null,
     ...extra,
   });
@@ -90,6 +102,31 @@ export function normalizeSubagentRunEvent(event: JsonObject): JsonObject {
     schema_version: SUBAGENT_RUN_SCHEMA_VERSION,
     ...event,
   });
+}
+
+export function buildSubagentRunContextMetadata(context: SubagentRunContext = {}): JsonObject {
+  return {
+    review_round_id: optionalPositiveInteger(context.reviewRoundId) ?? null,
+    workspace_id: normalizeContextString(context.workspaceId) ?? null,
+    worktree_path: normalizeContextString(context.worktreePath) ?? null,
+    branch: normalizeContextString(context.branch) ?? null,
+    base_branch: normalizeContextString(context.baseBranch) ?? null,
+    base_commit: normalizeContextString(context.baseCommit) ?? null,
+    head_commit: normalizeContextString(context.headCommit) ?? null,
+    purpose: normalizeSubagentRunPurpose(context.purpose) ?? null,
+  };
+}
+
+export function normalizeSubagentRunPurpose(value: unknown): string | undefined {
+  const normalized = normalizeContextString(value);
+  if (!normalized) return undefined;
+  const purpose = normalized
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^a-z0-9_.:]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return purpose ? purpose.slice(0, 80) : undefined;
 }
 
 export function subagentOpsEventTypeForEvent(eventType: string): SubagentOpsEventType | undefined {
@@ -487,6 +524,17 @@ function normalizeString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function optionalPositiveInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
+function normalizeContextString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const oneLineValue = value.replace(/\s+/g, " ").trim();
+  if (!oneLineValue) return undefined;
+  return oneLineValue.length <= 500 ? oneLineValue : oneLineValue.slice(0, 500);
 }
 
 function boundedPreview(value: unknown, maxChars: number): string | undefined {

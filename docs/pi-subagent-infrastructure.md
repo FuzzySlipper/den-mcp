@@ -1,7 +1,7 @@
 # Pi Sub-Agent Infrastructure
 
 Date: 2026-04-26
-Status: current stable shape after tasks `#785` and `#813`
+Status: current stable shape after tasks `#785`, `#806`, `#813`, and `#808`
 
 This note captures the intended shape for Pi-launched Den sub-agents after the
 observability and control hardening work. The goal is not to make Pi the whole
@@ -107,6 +107,14 @@ tools
 session_mode
 session
 rerun_of_run_id
+review_round_id
+workspace_id
+worktree_path
+branch
+base_branch
+base_commit
+head_commit
+purpose
 artifacts
 ```
 
@@ -114,6 +122,22 @@ Completion metadata also includes execution status such as `exit_code`,
 `duration_ms`, `aborted`, `timeout_kind`, `assistant_final_found`,
 `prompt_echo_detected`, `output_status`, and infrastructure failure/warning
 classification.
+
+## Conductor Context Metadata
+
+Task `#808` carries optional conductor context through Pi launch options and the
+run metadata layer. `den_run_subagent`, `den_run_coder`, and `den_run_reviewer`
+accept review/workspace/git context fields (`review_round_id`, `workspace_id`,
+`worktree_path`, `branch`, `base_branch`, `base_commit`, `head_commit`) plus a
+normalized `purpose`. The same context is present on `subagent_started`, terminal
+lifecycle ops, task-thread result/failure metadata, `status.json`, and artifact
+lifecycle events such as `subagent.process_started` / `subagent.process_finished`.
+
+Reviewer runs launched through `den_run_reviewer` can resolve the latest pending
+review round from the task detail when a caller does not provide an explicit
+`review_round_id`, and will use that round's branch/base/head metadata when the
+caller has not overridden it. This keeps run records linked to review workflow
+without storing raw prompts durably.
 
 ## AgentRun Durable Projection
 

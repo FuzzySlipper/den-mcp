@@ -210,8 +210,53 @@ test('subagent run schema helpers emit canonical metadata and event mapping', ()
     session_mode: 'fresh',
     session: null,
     rerun_of_run_id: null,
+    review_round_id: null,
+    workspace_id: null,
+    worktree_path: null,
+    branch: null,
+    base_branch: null,
+    base_commit: null,
+    head_commit: null,
+    purpose: null,
     artifacts,
     output_status: 'assistant_final',
+  });
+  assert.deepEqual(buildSubagentRunMetadata({
+    runId: 'run-review',
+    role: 'reviewer',
+    taskId: 808,
+    cwd: '/repo/worktree',
+    backend: 'pi-cli',
+    reviewRoundId: 135,
+    workspaceId: 'workspace-1',
+    worktreePath: '/repo/worktree',
+    branch: 'task/808-subagent-context-metadata',
+    baseBranch: 'main',
+    baseCommit: 'base-sha',
+    headCommit: 'head-sha',
+    purpose: 'Review Follow-Up',
+  }), {
+    schema: SUBAGENT_RUN_SCHEMA,
+    schema_version: SUBAGENT_RUN_SCHEMA_VERSION,
+    run_id: 'run-review',
+    role: 'reviewer',
+    task_id: 808,
+    cwd: '/repo/worktree',
+    backend: 'pi-cli',
+    model: null,
+    tools: null,
+    session_mode: 'fresh',
+    session: null,
+    rerun_of_run_id: null,
+    review_round_id: 135,
+    workspace_id: 'workspace-1',
+    worktree_path: '/repo/worktree',
+    branch: 'task/808-subagent-context-metadata',
+    base_branch: 'main',
+    base_commit: 'base-sha',
+    head_commit: 'head-sha',
+    purpose: 'review_follow_up',
+    artifacts: null,
   });
   assert.deepEqual(normalizeSubagentRunEvent({
     type: 'subagent.heartbeat',
@@ -485,6 +530,54 @@ test('pi cli runner preserves assistant final output when terminal drain guard k
   assert.ok(events.some((event) => event.type === 'subagent.assistant_output'));
   assert.ok(events.some((event) => event.type === 'subagent.terminal_drain_timeout'));
   assert.ok(events.some((event) => event.type === 'subagent.process_finished'));
+});
+
+test('pi cli runner carries conductor context into status, result, and lifecycle events', async (t) => {
+  const { result, recorder } = await runFakePiSubagent(t, {
+    prefix: 'den-subagent-context-metadata-',
+    runId: 'run-context-metadata',
+    scriptLines: [
+      '#!/usr/bin/env node',
+      'console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", model: "gpt-test", stopReason: "stop", content: [{ type: "text", text: "context preserved" }] } }));',
+      'process.exit(0);',
+    ],
+    options: {
+      role: 'reviewer',
+      taskId: 808,
+      prompt: 'Review the current branch.',
+      reviewRoundId: 135,
+      workspaceId: 'workspace-1',
+      worktreePath: '/tmp/worktrees/den-808',
+      branch: 'task/808-subagent-context-metadata',
+      baseBranch: 'main',
+      baseCommit: 'base-sha',
+      headCommit: 'head-sha',
+      purpose: 'Review Follow-Up',
+    },
+  });
+
+  assert.equal(result.exit_code, 0);
+  assert.equal(result.review_round_id, 135);
+  assert.equal(result.workspace_id, 'workspace-1');
+  assert.equal(result.worktree_path, '/tmp/worktrees/den-808');
+  assert.equal(result.branch, 'task/808-subagent-context-metadata');
+  assert.equal(result.base_branch, 'main');
+  assert.equal(result.base_commit, 'base-sha');
+  assert.equal(result.head_commit, 'head-sha');
+  assert.equal(result.purpose, 'review_follow_up');
+
+  const status = await readJson(recorder.artifacts.status_json_path);
+  const events = await readJsonLines(recorder.artifacts.events_jsonl_path);
+  assert.equal(status.review_round_id, 135);
+  assert.equal(status.workspace_id, 'workspace-1');
+  assert.equal(status.worktree_path, '/tmp/worktrees/den-808');
+  assert.equal(status.branch, 'task/808-subagent-context-metadata');
+  assert.equal(status.base_branch, 'main');
+  assert.equal(status.base_commit, 'base-sha');
+  assert.equal(status.head_commit, 'head-sha');
+  assert.equal(status.purpose, 'review_follow_up');
+  assert.ok(events.some((event) => event.type === 'subagent.process_started' && event.review_round_id === 135 && event.purpose === 'review_follow_up'));
+  assert.ok(events.some((event) => event.type === 'subagent.process_finished' && event.review_round_id === 135 && event.branch === 'task/808-subagent-context-metadata'));
 });
 
 test('pi cli runner records normalized work events from child Pi stream', async (t) => {

@@ -23,6 +23,7 @@ import {
   SUBAGENT_RUN_SCHEMA_VERSION,
   buildSubagentRunMetadata,
   isSubagentInfrastructureFailure,
+  normalizeSubagentRunPurpose,
   subagentOpsEventTypeForEvent,
   type SubagentArtifacts,
   type JsonObject,
@@ -46,6 +47,10 @@ const GLOBAL_SUFFIX = "-default";
 const DEN_CONFIG_FILENAME = "den-config.json";
 const RERUN_POLL_MS = 3_000;
 const MAX_RERUN_SNAPSHOTS = 50;
+
+type RunContextOptions = Pick<RunOptions,
+  "reviewRoundId" | "workspaceId" | "worktreePath" | "branch" | "baseBranch" | "baseCommit" | "headCommit" | "purpose"
+>;
 
 type RerunSnapshot = {
   cfg: DenConfig;
@@ -126,6 +131,14 @@ export default function denSubagent(pi: ExtensionAPI) {
       role: Type.String({ description: "Sub-agent role, e.g. coder, reviewer, planner." }),
       prompt: Type.String({ description: "Bounded task prompt for the fresh Pi run." }),
       task_id: Type.Optional(Type.Number({ description: "Optional Den task ID to link ops and result messages." })),
+      review_round_id: Type.Optional(Type.Number({ description: "Optional Den review round ID to link this run to review workflow context." })),
+      workspace_id: Type.Optional(Type.String({ description: "Optional future Den workspace ID." })),
+      worktree_path: Type.Optional(Type.String({ description: "Optional local worktree path associated with this run." })),
+      branch: Type.Optional(Type.String({ description: "Optional branch under work/review." })),
+      base_branch: Type.Optional(Type.String({ description: "Optional base branch for the run context." })),
+      base_commit: Type.Optional(Type.String({ description: "Optional base commit for the run context." })),
+      head_commit: Type.Optional(Type.String({ description: "Optional head commit for the run context." })),
+      purpose: Type.Optional(Type.String({ description: "Optional normalized run purpose, e.g. implementation, review, planning." })),
       model: Type.Optional(Type.String({ description: "Optional Pi model pattern/provider id for the sub-agent." })),
       tools: Type.Optional(Type.String({ description: "Optional comma-separated Pi tool allowlist. Defaults by role." })),
       cwd: Type.Optional(Type.String({ description: "Optional working directory. Defaults to current Pi cwd." })),
@@ -141,6 +154,7 @@ export default function denSubagent(pi: ExtensionAPI) {
           role: params.role,
           prompt: params.prompt,
           taskId: optionalNumber(params.task_id),
+          ...contextFromParams(params, params.role),
           sessionMode: parseSessionMode(normalizeString(params.session_mode)),
           session: normalizeString(params.session),
           model: normalizeString(params.model),
@@ -168,6 +182,14 @@ export default function denSubagent(pi: ExtensionAPI) {
     parameters: Type.Object({
       task_id: Type.Number({ description: "Den task ID." }),
       extra_notes: Type.Optional(Type.String({ description: "Optional extra conductor notes." })),
+      review_round_id: Type.Optional(Type.Number({ description: "Optional Den review round ID this coder run is addressing." })),
+      workspace_id: Type.Optional(Type.String({ description: "Optional future Den workspace ID." })),
+      worktree_path: Type.Optional(Type.String({ description: "Optional local worktree path associated with this run." })),
+      branch: Type.Optional(Type.String({ description: "Optional branch under work." })),
+      base_branch: Type.Optional(Type.String({ description: "Optional base branch for the run context." })),
+      base_commit: Type.Optional(Type.String({ description: "Optional base commit for the run context." })),
+      head_commit: Type.Optional(Type.String({ description: "Optional head commit for the run context." })),
+      purpose: Type.Optional(Type.String({ description: "Optional normalized run purpose. Defaults to implementation for coder runs." })),
       model: Type.Optional(Type.String({ description: "Optional Pi model pattern/provider id." })),
       tools: Type.Optional(Type.String({ description: "Optional comma-separated Pi tool allowlist." })),
       cwd: Type.Optional(Type.String({ description: "Optional working directory." })),
@@ -183,6 +205,7 @@ export default function denSubagent(pi: ExtensionAPI) {
         {
           taskId: params.task_id,
           extraNotes: normalizeString(params.extra_notes),
+          ...contextFromParams(params, "coder"),
           model: normalizeString(params.model),
           tools: normalizeString(params.tools),
           cwd: normalizeString(params.cwd),
@@ -205,6 +228,14 @@ export default function denSubagent(pi: ExtensionAPI) {
     parameters: Type.Object({
       task_id: Type.Number({ description: "Den task ID." }),
       review_target: Type.Optional(Type.String({ description: "Branch, diff range, commit, or review target notes." })),
+      review_round_id: Type.Optional(Type.Number({ description: "Optional Den review round ID. Defaults to the latest pending review round when resolvable." })),
+      workspace_id: Type.Optional(Type.String({ description: "Optional future Den workspace ID." })),
+      worktree_path: Type.Optional(Type.String({ description: "Optional local worktree path associated with this run." })),
+      branch: Type.Optional(Type.String({ description: "Optional branch under review." })),
+      base_branch: Type.Optional(Type.String({ description: "Optional base branch for the review context." })),
+      base_commit: Type.Optional(Type.String({ description: "Optional base commit for the review context." })),
+      head_commit: Type.Optional(Type.String({ description: "Optional head commit for the review context." })),
+      purpose: Type.Optional(Type.String({ description: "Optional normalized run purpose. Defaults to review for reviewer runs." })),
       model: Type.Optional(Type.String({ description: "Optional Pi model pattern/provider id." })),
       tools: Type.Optional(Type.String({ description: "Optional comma-separated Pi tool allowlist." })),
       cwd: Type.Optional(Type.String({ description: "Optional working directory." })),
@@ -220,6 +251,7 @@ export default function denSubagent(pi: ExtensionAPI) {
         {
           taskId: params.task_id,
           reviewTarget: normalizeString(params.review_target),
+          ...contextFromParams(params, "reviewer"),
           model: normalizeString(params.model),
           tools: normalizeString(params.tools),
           cwd: normalizeString(params.cwd),
@@ -383,6 +415,14 @@ async function runPromptedSubagent(
     taskId: number;
     extraNotes?: string;
     reviewTarget?: string;
+    reviewRoundId?: number;
+    workspaceId?: string;
+    worktreePath?: string;
+    branch?: string;
+    baseBranch?: string;
+    baseCommit?: string;
+    headCommit?: string;
+    purpose?: string;
     model?: string;
     tools?: string;
     cwd?: string;
@@ -395,6 +435,7 @@ async function runPromptedSubagent(
   onUpdate: ((partial: string) => void) | undefined,
 ) {
   const task = await getTask(cfg, options.taskId);
+  const reviewContext: Partial<RunContextOptions> = role === "reviewer" ? resolveReviewerRunContext(task, options) : {};
   const promptDoc = await resolvePromptDoc(cfg, role === "coder" ? CODER_PROMPT_SLUG : REVIEWER_PROMPT_SLUG);
   const prompt = renderTemplate(promptDoc.content, {
     project_id: cfg.projectId,
@@ -402,7 +443,7 @@ async function runPromptedSubagent(
     task_title: String(task.task?.title ?? task.title ?? ""),
     task_description: String(task.task?.description ?? task.description ?? "(no task description)"),
     task_context: summarizeTaskContext(task),
-    review_target: options.reviewTarget ?? options.extraNotes ?? "(no review target provided)",
+    review_target: options.reviewTarget ?? formatReviewContextTarget(reviewContext) ?? options.extraNotes ?? "(no review target provided)",
     extra_notes: options.extraNotes ?? "",
     role,
   });
@@ -413,6 +454,14 @@ async function runPromptedSubagent(
       role,
       prompt,
       taskId: options.taskId,
+      reviewRoundId: options.reviewRoundId ?? reviewContext.reviewRoundId,
+      workspaceId: options.workspaceId,
+      worktreePath: options.worktreePath,
+      branch: options.branch ?? reviewContext.branch,
+      baseBranch: options.baseBranch ?? reviewContext.baseBranch,
+      baseCommit: options.baseCommit ?? reviewContext.baseCommit,
+      headCommit: options.headCommit ?? reviewContext.headCommit,
+      purpose: options.purpose ?? defaultPurposeForRole(role),
       model: options.model,
       tools: options.tools,
       cwd: options.cwd,
@@ -453,6 +502,7 @@ async function runDenSubagent(
   });
   const artifacts = recorder.artifacts;
   const startedAt = new Date().toISOString();
+  const contextIdentity = subagentContextIdentity(effectiveOptions);
   await recorder.writeStatus({
     schema: SUBAGENT_RUN_SCHEMA,
     schema_version: SUBAGENT_RUN_SCHEMA_VERSION,
@@ -463,6 +513,14 @@ async function runDenSubagent(
     backend: backend.name,
     cwd,
     started_at: startedAt,
+    review_round_id: contextIdentity.reviewRoundId ?? null,
+    workspace_id: contextIdentity.workspaceId ?? null,
+    worktree_path: contextIdentity.worktreePath ?? null,
+    branch: contextIdentity.branch ?? null,
+    base_branch: contextIdentity.baseBranch ?? null,
+    base_commit: contextIdentity.baseCommit ?? null,
+    head_commit: contextIdentity.headCommit ?? null,
+    purpose: contextIdentity.purpose ?? null,
   });
   await appendOps(cfg, "subagent_started", {
     taskId: effectiveOptions.taskId,
@@ -478,6 +536,7 @@ async function runDenSubagent(
       sessionMode: effectiveOptions.sessionMode ?? "fresh",
       session: effectiveOptions.session,
       rerunOfRunId: effectiveOptions.rerunOfRunId,
+      ...contextIdentity,
       artifacts,
     }, { started_at: startedAt }),
   });
@@ -513,6 +572,7 @@ async function runDenSubagent(
         sessionMode: effectiveOptions.sessionMode ?? "fresh",
         session: effectiveOptions.session,
         rerunOfRunId: effectiveOptions.rerunOfRunId,
+        ...contextIdentity,
         artifacts: result.artifacts,
       }, {
         failed_model: result.model ?? effectiveOptions.model ?? null,
@@ -527,6 +587,14 @@ async function runDenSubagent(
       ts: Date.now(),
       failed_exit_code: result.exit_code,
       fallback_model: fallbackModel,
+      review_round_id: contextIdentity.reviewRoundId ?? null,
+      workspace_id: contextIdentity.workspaceId ?? null,
+      worktree_path: contextIdentity.worktreePath ?? null,
+      branch: contextIdentity.branch ?? null,
+      base_branch: contextIdentity.baseBranch ?? null,
+      base_commit: contextIdentity.baseCommit ?? null,
+      head_commit: contextIdentity.headCommit ?? null,
+      purpose: contextIdentity.purpose ?? null,
     });
     const failed = result;
     result = await backend.run({
@@ -567,6 +635,7 @@ async function runDenSubagent(
       sessionMode: result.session_mode,
       session: result.session,
       rerunOfRunId: effectiveOptions.rerunOfRunId,
+      ...contextIdentity,
       artifacts: result.artifacts,
     }, {
       fallback_model: effectiveOptions.fallbackModel ?? null,
@@ -609,6 +678,7 @@ async function runDenSubagent(
         sessionMode: result.session_mode,
         session: result.session,
         rerunOfRunId: effectiveOptions.rerunOfRunId,
+        ...contextIdentity,
         artifacts: result.artifacts,
       }),
       exit_code: result.exit_code,
@@ -746,6 +816,7 @@ async function applyConfiguredDefaults(options: RunOptions, cwd: string): Promis
     model: options.model ?? normalizeString(roleConfig?.model),
     fallbackModel: options.fallbackModel ?? normalizeString(config.fallback_model),
     tools: options.tools ?? normalizeString(roleConfig?.tools),
+    purpose: normalizeSubagentRunPurpose(options.purpose) ?? defaultPurposeForRole(options.role),
   };
 }
 
@@ -860,6 +931,89 @@ function onUpdateText(onUpdate: any, role: string, taskId: number) {
       details: { role, task_id: taskId },
     });
   };
+}
+
+function contextFromParams(params: any, role: string): RunContextOptions {
+  return {
+    reviewRoundId: optionalNumber(params.review_round_id),
+    workspaceId: normalizeString(params.workspace_id),
+    worktreePath: normalizeString(params.worktree_path),
+    branch: normalizeString(params.branch),
+    baseBranch: normalizeString(params.base_branch),
+    baseCommit: normalizeString(params.base_commit),
+    headCommit: normalizeString(params.head_commit),
+    purpose: normalizeSubagentRunPurpose(params.purpose) ?? defaultPurposeForRole(role),
+  };
+}
+
+function subagentContextIdentity(options: RunOptions): RunContextOptions {
+  return {
+    reviewRoundId: options.reviewRoundId,
+    workspaceId: options.workspaceId,
+    worktreePath: options.worktreePath,
+    branch: options.branch,
+    baseBranch: options.baseBranch,
+    baseCommit: options.baseCommit,
+    headCommit: options.headCommit,
+    purpose: options.purpose,
+  };
+}
+
+function defaultPurposeForRole(role: string): string {
+  const normalizedRole = normalizeString(role) ?? "subagent";
+  switch (normalizedRole.toLowerCase()) {
+    case "coder":
+      return "implementation";
+    case "reviewer":
+      return "review";
+    case "planner":
+      return "planning";
+    default:
+      return normalizeSubagentRunPurpose(normalizedRole) ?? "subagent";
+  }
+}
+
+function resolveReviewerRunContext(detail: any, options: { reviewRoundId?: number }): Partial<RunContextOptions> {
+  const rounds = normalizeReviewRounds(detail);
+  const selected = selectReviewRound(rounds, options.reviewRoundId);
+  if (!selected) return options.reviewRoundId ? { reviewRoundId: options.reviewRoundId } : {};
+  return {
+    reviewRoundId: optionalNumber(selected.id),
+    branch: normalizeString(selected.branch),
+    baseBranch: normalizeString(selected.base_branch ?? selected.baseBranch),
+    baseCommit: normalizeString(selected.base_commit ?? selected.baseCommit),
+    headCommit: normalizeString(selected.head_commit ?? selected.headCommit),
+  };
+}
+
+function normalizeReviewRounds(detail: any): any[] {
+  const candidates = detail?.review_rounds ?? detail?.reviewRounds ?? detail?.task?.review_rounds ?? detail?.task?.reviewRounds;
+  return Array.isArray(candidates) ? candidates : [];
+}
+
+function selectReviewRound(rounds: any[], explicitReviewRoundId: number | undefined): any | undefined {
+  if (explicitReviewRoundId !== undefined) {
+    return rounds.find((round) => optionalNumber(round?.id) === explicitReviewRoundId);
+  }
+
+  const sorted = [...rounds].sort((a, b) => reviewRoundSortValue(b) - reviewRoundSortValue(a));
+  return sorted.find((round) => round?.verdict === null || round?.verdict === undefined) ?? sorted[0];
+}
+
+function reviewRoundSortValue(round: any): number {
+  return optionalNumber(round?.round_number ?? round?.roundNumber) ?? optionalNumber(round?.id) ?? 0;
+}
+
+function formatReviewContextTarget(context: { reviewRoundId?: number; branch?: string; baseBranch?: string; baseCommit?: string; headCommit?: string }): string | undefined {
+  if (!context.reviewRoundId && !context.branch && !context.headCommit) return undefined;
+  const parts: string[] = [];
+  if (context.reviewRoundId) parts.push(`review round #${context.reviewRoundId}`);
+  if (context.branch) parts.push(`branch ${context.branch}`);
+  if (context.baseBranch || context.baseCommit) {
+    parts.push(`base ${[context.baseBranch, context.baseCommit].filter(Boolean).join(" @ ")}`);
+  }
+  if (context.headCommit) parts.push(`head ${context.headCommit}`);
+  return parts.join("; ");
 }
 
 function resultTool(result: SubagentResult) {
@@ -988,6 +1142,7 @@ function createSubagentProgressPublisher(
           sessionMode: context.options.sessionMode ?? "fresh",
           session: context.options.session,
           rerunOfRunId: context.options.rerunOfRunId,
+          ...subagentContextIdentity(context.options),
           artifacts: context.artifacts,
         }, { event }),
       });
@@ -1143,6 +1298,7 @@ async function executeRerunRequest(entry: any, sourceRunId: string, snapshot: Re
       tools: snapshot.options.tools ?? defaultToolsForRole(snapshot.options.role),
       sessionMode: snapshot.options.sessionMode ?? "fresh",
       session: snapshot.options.session,
+      ...subagentContextIdentity(snapshot.options),
     }, {
       action: "rerun",
       request_entry_id: entry.id,
