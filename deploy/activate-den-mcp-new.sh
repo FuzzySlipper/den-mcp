@@ -42,6 +42,21 @@ install_units() {
   install -m 0644 "$FINAL_ROOT/repo/deploy/den-mcp.service" /etc/systemd/system/den-mcp.service
 }
 
+cleanup_legacy_signal_units() {
+  local units=(
+    signal-cli-den.service
+    signal-cli-update.service
+    signal-cli-update.timer
+  )
+
+  echo "Retiring legacy Signal systemd units if present..."
+  systemctl disable --now "${units[@]}" >/dev/null 2>&1 || true
+  for unit in "${units[@]}"; do
+    rm -f "/etc/systemd/system/$unit"
+  done
+  systemctl reset-failed "${units[@]}" >/dev/null 2>&1 || true
+}
+
 fix_permissions() {
   chown -R patch:patch "$FINAL_ROOT/repo"
   chown -R "$SERVER_USER:$SERVER_GROUP" "$FINAL_ROOT/server"
@@ -77,6 +92,7 @@ main() {
 
   echo "Stopping existing service..."
   systemctl stop den-mcp.service 2>/dev/null || true
+  cleanup_legacy_signal_units
 
   copy_live_database
 
