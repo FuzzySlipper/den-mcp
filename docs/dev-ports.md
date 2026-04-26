@@ -8,4 +8,7 @@ Guidelines:
 - Treat framework-default ports as exceptions only when a tool truly requires them.
 
 Current assignments:
-- `12081` — `signal-cli-den` JSON-RPC and SSE endpoint on `127.0.0.1`
+- none currently reserved for supported Den runtime services in this range.
+
+Retired assignments:
+- `12081` — legacy `signal-cli-den` JSON-RPC/SSE endpoint, removed from the supported runtime in task `#811`.

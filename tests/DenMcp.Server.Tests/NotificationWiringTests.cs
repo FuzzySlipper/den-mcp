@@ -79,7 +79,7 @@ public class NotificationWiringTests : IAsyncLifetime
         var response = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/messages", new
         {
             sender = "codex",
-            content = "Review feedback via Signal",
+            content = "Review feedback for notification routing",
             metadata = """{"type":"review_feedback","recipient":"claude-code"}"""
         });
 
@@ -96,7 +96,7 @@ public class NotificationWiringTests : IAsyncLifetime
         var response = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/messages", new
         {
             sender = "codex",
-            content = "Review feedback via Signal",
+            content = "Review feedback for notification routing",
             metadata = """{"type":"review_feedback","recipient":"claude-code"}"""
         });
 

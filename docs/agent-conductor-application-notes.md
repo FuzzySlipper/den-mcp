@@ -41,7 +41,7 @@ In short:
 ```text
 Den Core:       durable truth, invariants, task/review/run/workspace models
 Den Runtime:    spawn/stop/observe agents, worktrees, artifacts, policy decisions
-Adapters:       MCP, Pi, Codex, Claude, Telegram, terminal muxers, local shell
+Adapters:       MCP, Pi, Codex, Claude, terminal muxers, local shell
 Web Console:    operator cockpit over the above
 ```
 
@@ -277,7 +277,7 @@ Helpful patterns:
 - Task -> agent -> review workflow as the central loop.
 - Epic Swarm for spawning parallel agents on subtasks.
 - Auto-proceed rules based on task type/priority.
-- External triggers from Telegram, Slack, RSS, Gmail, custom plugins, and a scheduler.
+- External triggers from maintained adapters such as Slack, RSS, Gmail, custom plugins, and a scheduler.
 - One-agent-one-task command model with `/jat:start`, `/jat:complete`,
   `/jat:pause`, `/jat:verify`, and `/jat:status`.
 - File reservations and conflict checks before starting work.

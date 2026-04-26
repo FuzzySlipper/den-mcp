@@ -350,21 +350,6 @@ public sealed class DatabaseInitializer
             ON review_findings(review_round_id, finding_number);
 
         ------------------------------------------------------------
-        -- NOTIFICATION MESSAGE LINKS
-        ------------------------------------------------------------
-        CREATE TABLE IF NOT EXISTS notification_message_links (
-            channel             TEXT NOT NULL,
-            external_message_id TEXT NOT NULL,
-            dispatch_id         INTEGER NOT NULL REFERENCES dispatch_entries(id) ON DELETE CASCADE,
-            recipient           TEXT,
-            created_at          TEXT NOT NULL DEFAULT (datetime('now')),
-            PRIMARY KEY (channel, external_message_id)
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_notification_links_dispatch
-            ON notification_message_links(dispatch_id);
-
-        ------------------------------------------------------------
         -- DISPATCH ENTRIES
         ------------------------------------------------------------
         CREATE TABLE IF NOT EXISTS dispatch_entries (

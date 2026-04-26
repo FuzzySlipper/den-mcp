@@ -18,3 +18,20 @@ public interface INotificationChannel
 
     Task StartListeningAsync(CancellationToken cancellationToken);
 }
+
+public sealed class NoOpNotificationChannel : INotificationChannel
+{
+    public Task SendDispatchNotificationAsync(
+        DispatchEntry dispatch,
+        string summary,
+        CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    public Task SendAgentStatusAsync(
+        string projectId,
+        string agent,
+        string status,
+        int? taskId = null,
+        CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    public Task StartListeningAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}

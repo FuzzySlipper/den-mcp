@@ -226,7 +226,7 @@ public class ReviewWorkflowServiceTests : IAsyncLifetime
             DedupKey = DispatchEntry.BuildDedupKey(DispatchTriggerType.Message, reviewRequest.Message.Id, "codex"),
             ExpiresAt = DateTime.UtcNow.AddHours(1)
         });
-        await _dispatches.ApproveAsync(reviewDispatch.Id, "signal-user");
+        await _dispatches.ApproveAsync(reviewDispatch.Id, "legacy-bridge-user");
         var (stalePendingDispatch, _) = await _dispatches.CreateIfAbsentAsync(new DispatchEntry
         {
             ProjectId = "proj",

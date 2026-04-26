@@ -1,7 +1,6 @@
 [Unit]
 Description=den-mcp server
-Wants=signal-cli-den.service
-After=network.target signal-cli-den.service
+After=network.target
 
 [Service]
 Type=exec

@@ -6,7 +6,6 @@ using DenMcp.Core.Llm;
 using DenMcp.Core.Models;
 using DenMcp.Core.Services;
 using DenMcp.Server;
-using DenMcp.Server.Notifications;
 using DenMcp.Server.Realtime;
 using DenMcp.Server.Routes;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -74,7 +73,7 @@ builder.Services.AddSingleton<DispatchRepository>();
 builder.Services.AddSingleton<IAgentStreamRepository, AgentStreamRepository>();
 builder.Services.AddSingleton<IAgentRunRepository, AgentRunRepository>();
 builder.Services.AddSingleton<AgentStreamRealtimeHub>();
-builder.Services.AddSingleton<INotificationMessageRepository, NotificationMessageRepository>();
+builder.Services.AddSingleton<INotificationChannel, NoOpNotificationChannel>();
 builder.Services.AddSingleton<IAgentStreamOpsService, AgentStreamOpsService>();
 builder.Services.AddSingleton<IDispatchRepository>(services =>
     new AgentStreamDispatchRepository(
@@ -91,21 +90,6 @@ builder.Services.AddSingleton<IRoutingService, RoutingService>();
 builder.Services.AddSingleton<IPromptGenerationService, PromptGenerationService>();
 builder.Services.AddSingleton<IDispatchContextService, DispatchContextService>();
 builder.Services.AddSingleton<IDispatchDetectionService, DispatchDetectionService>();
-builder.Services.AddHttpClient("signal-daemon", (services, client) =>
-{
-    var denOptions = services.GetRequiredService<DenMcpOptions>();
-    client.BaseAddress = new Uri(denOptions.Signal.GetBaseUrl());
-    client.Timeout = TimeSpan.FromSeconds(10);
-});
-builder.Services.AddHttpClient("signal-events", (services, client) =>
-{
-    var denOptions = services.GetRequiredService<DenMcpOptions>();
-    client.BaseAddress = new Uri(denOptions.Signal.GetBaseUrl());
-    client.Timeout = Timeout.InfiniteTimeSpan;
-});
-builder.Services.AddSingleton<SignalNotificationChannel>();
-builder.Services.AddSingleton<INotificationChannel>(services => services.GetRequiredService<SignalNotificationChannel>());
-builder.Services.AddHostedService<NotificationListenerHostedService>();
 
 // Librarian
 builder.Services.AddSingleton<LibrarianGatherer>();

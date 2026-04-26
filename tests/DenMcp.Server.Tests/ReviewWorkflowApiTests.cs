@@ -374,7 +374,7 @@ public class ReviewWorkflowApiTests : IAsyncLifetime
             DedupKey = DispatchEntry.BuildDedupKey(DispatchTriggerType.Message, triggerId, reviewer),
             ExpiresAt = DateTime.UtcNow.AddHours(1)
         });
-        return await dispatches.ApproveAsync(entry.Id, "signal-user");
+        return await dispatches.ApproveAsync(entry.Id, "legacy-bridge-user");
     }
 
     private sealed class ReviewWorkflowAppFactory : WebApplicationFactory<Program>

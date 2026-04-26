@@ -939,7 +939,7 @@ class BridgeDaemon:
             f"{pretty_context}\n\n"
             "Instructions:\n"
             "- Treat Den as the source of truth for this handoff.\n"
-            "- If you need more detail, read the referenced task, thread, and messages in Den instead of relying on Telegram payload text.\n"
+            "- If you need more detail, read the referenced task, thread, and messages in Den instead of relying on bridge payload text.\n"
             "- Finish the current slice before checking Den for more queued work.\n"
         )
 

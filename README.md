@@ -180,7 +180,7 @@ sudo cp deploy/den-mcp.service /etc/systemd/system/
 sudo systemctl enable --now den-mcp
 ```
 
-For the live Signal integration smoke check, restart flow, relink flow, updater, and ownership/path expectations, see [docs/live-signal-ops-runbook.md](docs/live-signal-ops-runbook.md).
+Signal/Telegram mobile bridge integrations are retired from the supported runtime. Current operator workflows use Den web, Pi/conductor runs, task-thread messages, review records, agent-stream ops, and AgentRun state.
 
 ## License
 

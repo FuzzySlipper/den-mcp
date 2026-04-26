@@ -2,7 +2,7 @@
 
 Date: 2026-04-20
 
-Status update, 2026-04-26: this dispatch-centered bridge plan is historical/legacy context. The canonical conductor workflow now uses task/thread messages plus agent-stream/run state; see [ADR: Retire dispatches from the canonical conductor workflow](dispatch-retirement-adr.md).
+Status update, 2026-04-26: this dispatch-centered bridge plan is historical/legacy context. The canonical conductor workflow now uses task/thread messages plus agent-stream/run state; Signal/Telegram mobile bridges are retired from the supported runtime. See [ADR: Retire dispatches from the canonical conductor workflow](dispatch-retirement-adr.md) and [Legacy Mobile Bridge Integrations](legacy-mobile-bridges.md).
 
 This note replaces the earlier tmux-conductor direction for the current
 experimentation path. The new goal is to validate a per-project Codex

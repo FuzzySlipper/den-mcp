@@ -7,7 +7,6 @@ SSH_TARGET="${SSH_TARGET:-patch@192.168.1.10}"
 SERVICE_NAME="${SERVICE_NAME:-den-mcp.service}"
 REMOTE_SERVER_ROOT="${REMOTE_SERVER_ROOT:-/data/dev/den-mcp/server}"
 REMOTE_STAGE_DIR="${REMOTE_STAGE_DIR:-/tmp/den-mcp-live-publish}"
-RESTART_SIGNAL=0
 SKIP_RESTART=0
 TEMP_PUBLISH_DIR_CREATED=0
 
@@ -22,7 +21,6 @@ Run this as your normal user, not with local sudo. The script uses your SSH
 config/keys locally and remote sudo on the server.
 
 Options:
-  --restart-signal   Also restart signal-cli-den.service after deploy
   --skip-restart     Publish and sync only; do not restart services
   -h, --help         Show this help
 
@@ -34,9 +32,6 @@ EOF
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --restart-signal)
-        RESTART_SIGNAL=1
-        ;;
       --skip-restart)
         SKIP_RESTART=1
         ;;
@@ -144,11 +139,7 @@ restart_remote() {
   fi
 
   echo "Restarting live service on $SSH_TARGET ..."
-  if [[ "$RESTART_SIGNAL" -eq 1 ]]; then
-    ssh -t "$SSH_TARGET" "sudo systemctl restart signal-cli-den.service $SERVICE_NAME && sudo systemctl --no-pager --full status signal-cli-den.service $SERVICE_NAME --lines=20"
-  else
-    ssh -t "$SSH_TARGET" "sudo systemctl restart $SERVICE_NAME && sudo systemctl --no-pager --full status $SERVICE_NAME --lines=20"
-  fi
+  ssh -t "$SSH_TARGET" "sudo systemctl restart $SERVICE_NAME && sudo systemctl --no-pager --full status $SERVICE_NAME --lines=20"
 }
 
 main() {
