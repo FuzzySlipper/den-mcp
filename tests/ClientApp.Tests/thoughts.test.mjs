@@ -99,8 +99,21 @@ test('thought stream classification keeps reasoning/message entries and excludes
     event_type: 'agent_work_message_end',
     body: 'Assistant finished the plan.',
   }));
+  const toolOnlyAssistantMessage = thoughtItemFromStreamEntry(streamEntry({
+    id: 4,
+    event_type: 'subagent_work_message_end',
+    body: 'coder sub-agent produced an assistant message.',
+    metadata: {
+      role: 'coder',
+      event: {
+        type: 'subagent.work_message_end',
+        tool_calls: [{ name: 'bash', args_preview: 'ls' }],
+      },
+    },
+  }));
 
   assert.equal(parentTool, null);
+  assert.equal(toolOnlyAssistantMessage, null);
   assert.equal(parentReasoning?.kind, 'reasoning');
   assert.equal(parentReasoning?.role, 'conductor');
   assert.equal(parentReasoning?.rawPreviewAvailable, true);
@@ -147,6 +160,14 @@ test('subagent run thoughts include reasoning and assistant messages without too
     {
       type: 'subagent.work_message_end',
       ts: 6_000,
+      run_id: 'run-1234567890',
+      task_id: 826,
+      subagent_role: 'coder',
+      tool_calls: [{ name: 'bash', args_preview: 'rg thoughts' }],
+    },
+    {
+      type: 'subagent.work_message_end',
+      ts: 7_000,
       run_id: 'run-1234567890',
       task_id: 826,
       subagent_role: 'coder',

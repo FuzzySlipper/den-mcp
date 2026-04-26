@@ -57,7 +57,8 @@ export function thoughtItemFromStreamEntry(entry: AgentStreamEntry): ThoughtFeed
     type: eventType,
   } as SubagentRunWorkEvent;
 
-  if (!event.text_preview && entry.body && isThoughtWorkEventType(eventType)) {
+  const hasMetadataToolCalls = Array.isArray(metadataEvent?.tool_calls) && metadataEvent.tool_calls.length > 0;
+  if (!event.text_preview && entry.body && isThoughtWorkEventType(eventType) && !hasMetadataToolCalls) {
     event.text_preview = entry.body;
   }
 
@@ -159,8 +160,7 @@ function thoughtItemFromWorkEvent(workEvent: SubagentRunWorkEvent, context: Thou
   if (!kind) return null;
 
   const textPreview = stringValue(workEvent.text_preview);
-  const hasToolCalls = Array.isArray(workEvent.tool_calls) && workEvent.tool_calls.length > 0;
-  if (kind === 'assistant_message' && !textPreview && !hasToolCalls && type.endsWith('_start')) return null;
+  if (kind === 'assistant_message' && !textPreview) return null;
 
   const timestampMs = numberValue(workEvent.ts) ?? parseCreatedAt(context.fallbackCreatedAt);
   const createdAt = numberValue(workEvent.ts) != null ? formatServerIso(timestampMs) : context.fallbackCreatedAt;
@@ -189,7 +189,7 @@ function thoughtItemFromWorkEvent(workEvent: SubagentRunWorkEvent, context: Thou
     role,
     runId,
     model,
-    textPreview: textPreview ?? assistantToolCallSummary(workEvent) ?? null,
+    textPreview: textPreview ?? null,
     reasoningChars: numberValue(workEvent.reasoning_chars) ?? numberValue(workEvent.thinking_chars) ?? null,
     reasoningRedacted: reasoningRedacted ?? null,
     rawPreviewAvailable,
@@ -213,15 +213,6 @@ function streamEventTypeToWorkEventType(eventType: string): string | null {
   if (eventType.startsWith('agent_work_')) return eventType.replace(/^agent_work_/, 'agent.work_');
   if (eventType.startsWith('subagent_work_')) return eventType.replace(/^subagent_work_/, 'subagent.work_');
   return null;
-}
-
-function assistantToolCallSummary(workEvent: SubagentRunWorkEvent): string | undefined {
-  if (!Array.isArray(workEvent.tool_calls) || workEvent.tool_calls.length === 0) return undefined;
-  const names = workEvent.tool_calls
-    .map(toolCall => toolCall?.name)
-    .filter((name): name is string => typeof name === 'string' && name.trim().length > 0);
-  if (names.length === 0) return `${workEvent.tool_calls.length} tool call${workEvent.tool_calls.length === 1 ? '' : 's'} requested.`;
-  return `Assistant requested ${names.join(', ')}.`;
 }
 
 function recordValue(value: unknown): Record<string, unknown> | null {
