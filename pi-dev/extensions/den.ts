@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { normalizePiWorkEvent } from "../lib/den-subagent-pipeline.ts";
 
 type JsonObject = Record<string, unknown>;
 
@@ -13,6 +14,19 @@ type DenConfig = {
   sessionId: string;
 };
 
+export type ParentAgentWorkIdentity = {
+  projectId: string;
+  agent: string;
+  role: string;
+  instanceId: string;
+  sessionId: string;
+  taskId?: number;
+  cwd?: string;
+  sessionFile?: string;
+  piSessionId?: string;
+  model?: string;
+};
+
 let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
 let config: DenConfig | undefined;
 let bindingState: "unknown" | "bound" | "unbound" | "offline" = "unknown";
@@ -20,6 +34,7 @@ let bindingMessage: string | undefined;
 let lastInboxLines: string[] = [];
 let currentTaskId: number | undefined;
 let resolvedAgentGuidance: any | undefined;
+const parentWorkMirrorLastAt = new Map<string, number>();
 
 const DEFAULT_BASE_URL = "http://192.168.1.10:5199";
 const HEARTBEAT_SECONDS = 60;
@@ -75,7 +90,32 @@ export default function denExtension(pi: ExtensionAPI) {
     const cfg = await ensureConfig(ctx);
     if (!cfg) return;
     ctx.ui.setStatus("den", `Den ${cfg.projectId}/${cfg.role}: busy`);
+    scheduleParentAgentWorkMirror({ type: "agent_start" }, ctx);
     await checkInQuietly(cfg, ctx, "busy");
+  });
+
+  pi.on("turn_start", (event, ctx) => {
+    scheduleParentAgentWorkMirror(event, ctx);
+  });
+
+  pi.on("turn_end", (event, ctx) => {
+    scheduleParentAgentWorkMirror(event, ctx);
+  });
+
+  pi.on("message_update", (event, ctx) => {
+    scheduleParentAgentWorkMirror(event, ctx);
+  });
+
+  pi.on("message_end", (event, ctx) => {
+    scheduleParentAgentWorkMirror(event, ctx);
+  });
+
+  pi.on("tool_execution_start", (event, ctx) => {
+    scheduleParentAgentWorkMirror(event, ctx);
+  });
+
+  pi.on("tool_execution_end", (event, ctx) => {
+    scheduleParentAgentWorkMirror(event, ctx);
   });
 
   pi.on("agent_end", async (_event, ctx) => {
@@ -386,11 +426,144 @@ async function checkIn(cfg: DenConfig, ctx: any, state: string) {
       metadata: JSON.stringify({
         cwd: ctx.cwd,
         state,
+        current_task_id: currentTaskId ?? null,
         session_file: ctx.sessionManager?.getSessionFile?.() ?? null,
         model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : null,
       }),
     },
   });
+}
+
+function scheduleParentAgentWorkMirror(sourceEvent: any, ctx: any) {
+  const cfg = config;
+  if (!cfg) return;
+
+  const workEvent = normalizeParentAgentWorkEvent(sourceEvent, buildParentWorkIdentity(cfg, ctx));
+  if (!workEvent || !shouldMirrorParentAgentWorkEvent(workEvent)) return;
+
+  void appendParentAgentWorkOps(cfg, workEvent).catch(() => {
+    // Parent-agent observability should never interrupt the active Pi turn.
+  });
+}
+
+function buildParentWorkIdentity(cfg: DenConfig, ctx: any): ParentAgentWorkIdentity {
+  return {
+    projectId: cfg.projectId,
+    agent: cfg.agent,
+    role: cfg.role,
+    instanceId: cfg.instanceId,
+    sessionId: cfg.sessionId,
+    taskId: currentTaskId,
+    cwd: ctx.cwd,
+    sessionFile: ctx.sessionManager?.getSessionFile?.() ?? undefined,
+    piSessionId: ctx.sessionManager?.getSessionId?.() ?? undefined,
+    model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined,
+  };
+}
+
+export function normalizeParentAgentWorkEvent(sourceEvent: any, identity: ParentAgentWorkIdentity, now = Date.now()): JsonObject | undefined {
+  if (normalizeOptionalString(sourceEvent?.message?.role) === "user") return undefined;
+
+  const normalized = normalizePiWorkEvent(sourceEvent, now, {
+    taskId: identity.taskId,
+    subagentRole: identity.role,
+    backend: "pi-extension",
+    requestedModel: identity.model,
+  });
+  if (!normalized || typeof normalized.type !== "string") return undefined;
+
+  const piSessionId = normalizeOptionalString(normalized.session_id) ?? identity.piSessionId;
+  const payload: JsonObject = {
+    ...normalized,
+    type: normalized.type.replace(/^subagent\.work_/, "agent.work_"),
+    project_id: identity.projectId,
+    agent: identity.agent,
+    agent_role: identity.role,
+    instance_id: identity.instanceId,
+    session_id: identity.sessionId,
+    pi_session_id: piSessionId ?? null,
+    session_file: identity.sessionFile ?? null,
+    cwd: identity.cwd ?? null,
+  };
+  delete payload.subagent_role;
+  delete payload.run_id;
+  return omitUndefined(payload);
+}
+
+function shouldMirrorParentAgentWorkEvent(workEvent: JsonObject, now = Date.now()): boolean {
+  const type = typeof workEvent.type === "string" ? workEvent.type : "";
+  if (!type.startsWith("agent.work_")) return false;
+  if (type === "agent.work_tool_update") return false;
+  if (type === "agent.work_message_update" || type === "agent.work_reasoning_update") {
+    const key = `${type}:${workEvent.instance_id ?? "unknown"}:${workEvent.update_kind ?? workEvent.reasoning_kind ?? "update"}`;
+    const intervalMs = type === "agent.work_reasoning_update" ? 5_000 : 10_000;
+    const previous = parentWorkMirrorLastAt.get(key) ?? 0;
+    if (previous > 0 && now - previous < intervalMs) return false;
+    parentWorkMirrorLastAt.set(key, now);
+  }
+  return true;
+}
+
+export function parentAgentOpsEventTypeForWorkEvent(workEvent: JsonObject): string | undefined {
+  const type = typeof workEvent.type === "string" ? workEvent.type : undefined;
+  return type?.startsWith("agent.work_") ? type.replace(/[.]/g, "_") : undefined;
+}
+
+async function appendParentAgentWorkOps(cfg: DenConfig, workEvent: JsonObject) {
+  const eventType = parentAgentOpsEventTypeForWorkEvent(workEvent);
+  if (!eventType) return;
+  const taskId = typeof workEvent.task_id === "number" ? workEvent.task_id : currentTaskId;
+
+  await denFetch(cfg, `/api/projects/${esc(cfg.projectId)}/agent-stream/ops`, {
+    method: "POST",
+    body: {
+      sender: cfg.agent,
+      sender_instance_id: cfg.instanceId,
+      event_type: eventType,
+      task_id: taskId,
+      delivery_mode: "record_only",
+      body: formatParentAgentWorkBody(cfg.role, workEvent),
+      metadata: JSON.stringify({
+        schema: "den_parent_agent_work",
+        schema_version: 1,
+        agent: cfg.agent,
+        role: cfg.role,
+        instance_id: cfg.instanceId,
+        session_id: cfg.sessionId,
+        task_id: taskId ?? null,
+        event: workEvent,
+      }),
+    },
+  });
+}
+
+function formatParentAgentWorkBody(role: string, workEvent: JsonObject): string {
+  switch (workEvent.type) {
+    case "agent.work_agent_start":
+      return `${role} agent started responding.`;
+    case "agent.work_turn_start":
+      return `${role} agent started a turn.`;
+    case "agent.work_turn_end":
+      return `${role} agent finished a turn${typeof workEvent.text_preview === "string" ? `: ${oneLine(workEvent.text_preview)}` : ""}.`;
+    case "agent.work_message_update":
+      return `${role} agent assistant update${typeof workEvent.text_preview === "string" ? `: ${oneLine(workEvent.text_preview)}` : ""}.`;
+    case "agent.work_message_end":
+      return `${role} agent assistant message${typeof workEvent.text_preview === "string" ? `: ${oneLine(workEvent.text_preview)}` : ""}.`;
+    case "agent.work_reasoning_start":
+    case "agent.work_reasoning_update":
+    case "agent.work_reasoning_end":
+      return `${role} agent reasoning activity${typeof workEvent.reasoning_chars === "number" ? ` (${workEvent.reasoning_chars} chars${workEvent.reasoning_redacted === false ? " visible" : ", redacted"})` : ""}.`;
+    case "agent.work_tool_start":
+      return `${role} agent started tool ${formatWorkToolName(workEvent)}${typeof workEvent.args_preview === "string" ? `: ${oneLine(workEvent.args_preview)}` : ""}.`;
+    case "agent.work_tool_end":
+      return `${role} agent finished tool ${formatWorkToolName(workEvent)}${workEvent.is_error === true ? " with error" : ""}${typeof workEvent.result_preview === "string" ? `: ${oneLine(workEvent.result_preview)}` : ""}.`;
+    default:
+      return `${role} agent activity.`;
+  }
+}
+
+function formatWorkToolName(workEvent: JsonObject): string {
+  return typeof workEvent.tool_name === "string" && workEvent.tool_name.trim() ? workEvent.tool_name : "(unknown)";
 }
 
 async function buildInboxLines(cfg: DenConfig): Promise<string[]> {
@@ -684,6 +857,10 @@ function take(value: unknown, count: number): any[] {
 
 function oneLine(value: string): string {
   return value.replace(/\s+/g, " ").trim().slice(0, 140);
+}
+
+function omitUndefined(value: JsonObject): JsonObject {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
 }
 
 function normalizeBaseUrl(value: string): string {

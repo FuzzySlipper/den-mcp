@@ -1,7 +1,7 @@
 # Pi Sub-Agent Infrastructure
 
 Date: 2026-04-26
-Status: current stable shape after tasks `#785`, `#806`, `#813`, `#808`, and `#815`
+Status: current stable shape after tasks `#785`, `#806`, `#813`, `#808`, `#815`, `#824`, and `#825`
 
 This note captures the intended shape for Pi-launched Den sub-agents after the
 observability and control hardening work. The goal is not to make Pi the whole
@@ -194,7 +194,16 @@ subagent_work_turn_end
 subagent_work_tool_start
 subagent_work_tool_end
 subagent_work_message_end
+agent_work_reasoning_update
+agent_work_message_update
+agent_work_message_end
+agent_work_tool_start
+agent_work_tool_end
 ```
+
+`agent_work_*` entries are emitted by the parent interactive Pi extension for the
+operator stream. `subagent_work_*` entries are emitted by Den-launched child runs
+and also feed the AgentRun/run-detail projection.
 
 Den web derives run state from this stream. That keeps the current design
 compatible with alternate future runners, because a runner only has to emit the
@@ -265,6 +274,46 @@ full reasoning text. Set `DEN_PI_SUBAGENT_RAW_REASONING=1` only in trusted local
 debugging contexts if Den web/API should include bounded reasoning previews from
 local artifacts; task-thread result messages never include raw reasoning. The
 session JSONL remains a local artifact for forensic inspection.
+
+## Parent Pi Agent Work Mirror
+
+Task `#825` extends the same low-noise operator-signal policy to parent
+interactive Pi sessions. Parent sessions are not child `AgentRun` records and do
+not have a per-run artifact directory, but the Den Pi extension can observe Pi's
+live extension events and append bounded Den agent-stream `ops` entries for the
+operator view.
+
+Observed parent Pi event families include:
+
+- `agent_start`, `turn_start`, and `turn_end` for lifecycle activity.
+- `message_update` and `message_end` for assistant narrative updates/final
+  assistant messages. User-role messages are skipped so prompts do not become Den
+  stream content.
+- `message_update.assistantMessageEvent` updates such as `text_delta`,
+  `thinking_start`, `thinking_delta`, and `thinking_end` for the reasoning lane.
+- `tool_execution_start` and `tool_execution_end` for bounded tool-effect cards;
+  high-frequency tool updates are intentionally not mirrored.
+
+The parent mirror normalizes these to `agent.work_*` payloads and stores them as
+agent-stream event types such as `agent_work_reasoning_update`,
+`agent_work_message_end`, `agent_work_tool_start`, and `agent_work_tool_end`.
+Each metadata payload includes project id, agent identity, role, instance id,
+Den session id, Pi session id/file when Pi exposes it, current task id when the
+extension knows one, cwd, model, timestamp, and the bounded normalized event.
+
+Reasoning/thinking content follows the same local policy as sub-agent reasoning:
+raw previews are redacted by default and represented by event kind, provider,
+model, char counts, and `reasoning_redacted`. Set
+`DEN_PI_SUBAGENT_RAW_REASONING=1` only in trusted local debugging contexts to
+allow bounded raw reasoning previews in Den stream metadata. Task-thread messages
+still never include raw reasoning.
+
+This parent mirror is best-effort observability, not a durable run transcript.
+It avoids raw terminal streaming as a signal, throttles high-frequency assistant
+and reasoning update deltas before posting to Den, and depends on what the live
+Pi extension API emits during the interactive session. Detailed forensic replay
+still belongs to sub-agent run artifacts and task-thread/review records; parent
+operator entries are for situational awareness while the conductor is active.
 
 ## Pi Session Manager / psm-bridge Reference
 
