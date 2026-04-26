@@ -40,6 +40,73 @@ function restoreEnv(name, value) {
   else process.env[name] = value;
 }
 
+const FAKE_RUNNER_ENV = [
+  'PI_CODING_AGENT_DIR',
+  'DEN_PI_SUBAGENT_PI_BIN',
+  'DEN_PI_SUBAGENT_STARTUP_TIMEOUT_MS',
+  'DEN_PI_SUBAGENT_FINAL_DRAIN_MS',
+  'DEN_PI_SUBAGENT_FORCE_KILL_MS',
+  'DEN_PI_SUBAGENT_HEARTBEAT_MS',
+  'DEN_PI_SUBAGENT_CONTROL_POLL_MS',
+];
+
+async function runFakePiSubagent(t, {
+  prefix,
+  scriptLines,
+  runId,
+  options,
+  env = {},
+  onUpdate,
+}) {
+  const tmp = await mkdtemp(path.join(os.tmpdir(), prefix));
+  const fakePi = path.join(tmp, 'fake-pi');
+  await writeFile(fakePi, `${scriptLines.join('\n')}\n`, 'utf8');
+  await chmod(fakePi, 0o755);
+
+  const envValues = {
+    DEN_PI_SUBAGENT_HEARTBEAT_MS: '0',
+    DEN_PI_SUBAGENT_CONTROL_POLL_MS: '0',
+    ...env,
+  };
+  const envNames = new Set([...FAKE_RUNNER_ENV, ...Object.keys(envValues)]);
+  const previousEnv = new Map([...envNames].map((name) => [name, process.env[name]]));
+  process.env.PI_CODING_AGENT_DIR = path.join(tmp, 'agent');
+  process.env.DEN_PI_SUBAGENT_PI_BIN = fakePi;
+  for (const [name, value] of Object.entries(envValues)) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = String(value);
+  }
+
+  t.after(async () => {
+    for (const [name, value] of previousEnv) restoreEnv(name, value);
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  const recorder = await createSubagentRunRecorder(runId);
+  const result = await runPiCliSubagent({
+    cfg: { projectId: 'den-mcp', agent: 'pi', role: 'conductor', instanceId: 'pi-main', baseUrl: 'http://den' },
+    options,
+    cwd: tmp,
+    runId,
+    recorder,
+    startedAt: new Date().toISOString(),
+    signal: undefined,
+    controlSource: undefined,
+    onUpdate,
+  });
+
+  return { tmp, fakePi, recorder, result };
+}
+
+async function readJson(filePath) {
+  return JSON.parse(await readFile(filePath, 'utf8'));
+}
+
+async function readJsonLines(filePath) {
+  const text = await readFile(filePath, 'utf8');
+  return text.trim() ? text.trim().split('\n').map((line) => JSON.parse(line)) : [];
+}
+
 test('parsePiStdoutLine preserves json and raw stdout separately', () => {
   const json = parsePiStdoutLine('{"type":"message_end","message":{"role":"assistant"}}');
   assert.equal(json?.kind, 'json');
@@ -239,6 +306,121 @@ test('pi cli runner observes Den abort control request and terminates child', as
   assert.match(eventText, /"request_entry_id":42/);
   assert.match(eventText, /"requested_by":"web-ui"/);
   assert.match(statusText, /"state": "aborted"/);
+});
+
+test('pi cli runner suppresses prompt-echo-only output when child exits 143', async (t) => {
+  const { result, recorder } = await runFakePiSubagent(t, {
+    prefix: 'den-subagent-echo-143-',
+    runId: 'run-prompt-echo-143',
+    scriptLines: [
+      '#!/usr/bin/env node',
+      'const prompt = process.argv[process.argv.length - 1];',
+      'console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", model: "gpt-test", stopReason: "stop", content: [{ type: "text", text: prompt }] } }));',
+      'process.exit(143);',
+    ],
+    options: { role: 'reviewer', taskId: 772, prompt: 'Review the current branch and finish with a verdict.' },
+  });
+
+  assert.equal(result.exit_code, 143);
+  assert.equal(result.signal, undefined);
+  assert.equal(result.final_output, '');
+  assert.equal(result.assistant_final_found, false);
+  assert.equal(result.prompt_echo_detected, true);
+  assert.equal(result.output_status, 'prompt_echo_only');
+  assert.equal(result.message_count, 1);
+  assert.equal(result.assistant_message_count, 1);
+  assert.equal(subagentSucceeded(result), false);
+
+  const status = await readJson(recorder.artifacts.status_json_path);
+  const events = await readJsonLines(recorder.artifacts.events_jsonl_path);
+  const stdout = await readJsonLines(recorder.artifacts.stdout_jsonl_path);
+  assert.equal(status.state, 'failed');
+  assert.equal(status.output_status, 'prompt_echo_only');
+  assert.equal(status.exit_code, 143);
+  assert.ok(events.some((event) => event.type === 'subagent.prompt_echo_detected'));
+  assert.ok(stdout.some((event) => event.type === 'message_end'));
+});
+
+test('pi cli runner times out children that never emit JSON', async (t) => {
+  const { result, recorder } = await runFakePiSubagent(t, {
+    prefix: 'den-subagent-startup-timeout-',
+    runId: 'run-no-json-startup-timeout',
+    scriptLines: [
+      '#!/usr/bin/env node',
+      'process.stderr.write("fake child started without json\\n");',
+      'process.on("SIGTERM", () => process.exit(143));',
+      'setInterval(() => {}, 1000);',
+    ],
+    env: {
+      DEN_PI_SUBAGENT_STARTUP_TIMEOUT_MS: '25',
+      DEN_PI_SUBAGENT_FORCE_KILL_MS: '500',
+    },
+    options: { role: 'planner', prompt: 'Wait for JSON that will never arrive.' },
+  });
+
+  assert.equal(result.timeout_kind, 'startup');
+  assert.equal(result.aborted, false);
+  assert.equal(result.forced_kill, false);
+  assert.equal(result.assistant_final_found, false);
+  assert.equal(result.output_status, 'no_assistant_final');
+  assert.equal(result.infrastructure_failure_reason, 'timeout');
+  assert.equal(subagentSucceeded(result), false);
+  assert.ok(result.pid > 0);
+  assert.ok(Date.parse(result.started_at) <= Date.parse(result.ended_at));
+  assert.ok(result.duration_ms >= 0);
+  assert.match(result.stderr_tail, /fake child started without json/);
+
+  const status = await readJson(recorder.artifacts.status_json_path);
+  const events = await readJsonLines(recorder.artifacts.events_jsonl_path);
+  const stderr = await readFile(recorder.artifacts.stderr_log_path, 'utf8');
+  assert.equal(status.state, 'timeout');
+  assert.equal(status.timeout_kind, 'startup');
+  assert.equal(status.pid, result.pid);
+  assert.ok(events.some((event) => event.type === 'subagent.process_started'));
+  assert.ok(events.some((event) => event.type === 'subagent.startup_timeout'));
+  assert.ok(events.some((event) => event.type === 'subagent.process_finished'));
+  assert.match(stderr, /fake child started without json/);
+});
+
+test('pi cli runner preserves assistant final output when terminal drain guard kills stuck child', async (t) => {
+  const updates = [];
+  const { result, recorder } = await runFakePiSubagent(t, {
+    prefix: 'den-subagent-terminal-drain-',
+    runId: 'run-terminal-drain-final-output',
+    scriptLines: [
+      '#!/usr/bin/env node',
+      'process.on("SIGTERM", () => process.exit(143));',
+      'console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", model: "gpt-test", stopReason: "stop", content: [{ type: "text", text: "final answer before stuck handles" }] } }));',
+      'setInterval(() => {}, 1000);',
+    ],
+    env: {
+      DEN_PI_SUBAGENT_STARTUP_TIMEOUT_MS: '1000',
+      DEN_PI_SUBAGENT_FINAL_DRAIN_MS: '25',
+      DEN_PI_SUBAGENT_FORCE_KILL_MS: '500',
+    },
+    options: { role: 'coder', prompt: 'Produce a final answer and then keep handles open.' },
+    onUpdate(partial) {
+      updates.push(partial);
+    },
+  });
+
+  assert.equal(result.final_output, 'final answer before stuck handles');
+  assert.equal(result.assistant_final_found, true);
+  assert.equal(result.prompt_echo_detected, false);
+  assert.equal(result.output_status, 'assistant_final');
+  assert.equal(result.timeout_kind, 'terminal_drain');
+  assert.equal(result.forced_kill, false);
+  assert.equal(subagentSucceeded(result), true);
+  assert.deepEqual(updates, ['final answer before stuck handles']);
+
+  const status = await readJson(recorder.artifacts.status_json_path);
+  const events = await readJsonLines(recorder.artifacts.events_jsonl_path);
+  assert.equal(status.state, 'complete');
+  assert.equal(status.timeout_kind, 'terminal_drain');
+  assert.equal(status.output_status, 'assistant_final');
+  assert.ok(events.some((event) => event.type === 'subagent.assistant_output'));
+  assert.ok(events.some((event) => event.type === 'subagent.terminal_drain_timeout'));
+  assert.ok(events.some((event) => event.type === 'subagent.process_finished'));
 });
 
 test('output extractor accepts assistant final output and records model', () => {
