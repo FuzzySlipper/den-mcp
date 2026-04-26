@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { readdir, readFile, stat } from "node:fs/promises";
+import path from "node:path";
 import {
   SUBAGENT_RUN_SCHEMA,
   SUBAGENT_RUN_SCHEMA_VERSION,
@@ -58,6 +60,10 @@ export type SubagentResult = {
   purpose?: string;
   session_mode: string;
   session?: string;
+  pi_session_id?: string;
+  pi_session_dir?: string;
+  pi_session_file_path?: string;
+  pi_session_persisted?: boolean;
   exit_code: number;
   signal?: string;
   pid?: number;
@@ -134,14 +140,23 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
   const { cfg, options, cwd, runId, recorder, startedAt, signal, controlSource, onUpdate } = input;
   const artifacts = recorder.artifacts;
   const sessionMode = options.sessionMode ?? "fresh";
+  const freshSessionDir = sessionMode === "fresh" && shouldPersistFreshSession() ? artifacts.session_dir : undefined;
   const args = ["--mode", "json", "-p"];
-  addSessionArgs(args, sessionMode, options.session);
+  addSessionArgs(args, sessionMode, options.session, freshSessionDir);
   if (options.model) args.push("--model", options.model);
   const tools = options.tools ?? defaultToolsForRole(options.role);
   if (tools) args.push("--tools", tools);
   const prompt = buildSubagentPrompt(cfg, options);
   args.push(prompt);
   const contextMetadata = buildSubagentRunContextMetadata(options);
+  let piSessionId: string | undefined;
+  let piSessionFilePath: string | undefined;
+  const sessionMetadata = () => ({
+    pi_session_id: piSessionId ?? null,
+    pi_session_dir: freshSessionDir ?? null,
+    pi_session_file_path: piSessionFilePath ?? null,
+    pi_session_persisted: Boolean(freshSessionDir),
+  });
 
   const env = {
     ...process.env,
@@ -234,6 +249,7 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
         ts: Date.now(),
         pid: proc.pid ?? null,
         ...contextMetadata,
+        ...sessionMetadata(),
         ...eventExtra,
       });
       killProcessTree(proc, "SIGTERM");
@@ -285,6 +301,8 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
       session_mode: sessionMode,
       session: options.session ?? null,
       ...contextMetadata,
+      ...sessionMetadata(),
+      artifacts,
       process_group: process.platform !== "win32" && proc.pid ? -proc.pid : null,
     });
     void recorder.appendEvent({
@@ -293,6 +311,7 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
       pid: proc.pid ?? null,
       command,
       ...contextMetadata,
+      ...sessionMetadata(),
       process_group: process.platform !== "win32" && proc.pid ? -proc.pid : null,
     });
     if (heartbeatMs > 0) {
@@ -305,6 +324,7 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
           saw_json_event: sawJsonEvent,
           stderr_bytes: Buffer.byteLength(stderr),
           ...contextMetadata,
+          ...sessionMetadata(),
         });
       }, heartbeatMs);
       heartbeatTimer.unref?.();
@@ -360,6 +380,7 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
         ts: Date.now(),
         error: error.message,
         ...contextMetadata,
+        ...sessionMetadata(),
       });
       resolveOnce(1);
     });
@@ -386,6 +407,19 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
       ? "prompt_echo_only"
       : "no_assistant_final";
   const stderrTail = tail(stderr.trim(), 2000);
+  const discoveredSession = await discoverPiSessionFile(freshSessionDir, piSessionId);
+  piSessionId = piSessionId ?? discoveredSession?.sessionId;
+  piSessionFilePath = discoveredSession?.filePath;
+  if (piSessionId) artifacts.session_id = piSessionId;
+  if (piSessionFilePath) artifacts.session_file_path = piSessionFilePath;
+  if (piSessionFilePath) {
+    await recorder.appendEvent({
+      type: "subagent.session_file_detected",
+      ts: Date.now(),
+      ...contextMetadata,
+      ...sessionMetadata(),
+    });
+  }
   const result: SubagentResult = {
     run_id: runId,
     role: options.role,
@@ -400,6 +434,10 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
     purpose: metadataString(contextMetadata.purpose),
     session_mode: sessionMode,
     session: options.session,
+    pi_session_id: piSessionId,
+    pi_session_dir: freshSessionDir,
+    pi_session_file_path: piSessionFilePath,
+    pi_session_persisted: Boolean(freshSessionDir),
     exit_code: termination.exitCode,
     signal: termination.signal,
     pid,
@@ -462,6 +500,8 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
     infrastructure_failure_reason: result.infrastructure_failure_reason ?? null,
     infrastructure_warning_reason: result.infrastructure_warning_reason ?? null,
     ...contextMetadata,
+    ...sessionMetadata(),
+    artifacts,
   });
   await recorder.appendEvent({
     type: "subagent.process_finished",
@@ -472,6 +512,7 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
     forced_kill: result.forced_kill,
     output_status: result.output_status,
     ...contextMetadata,
+    ...sessionMetadata(),
   });
 
   return result;
@@ -481,6 +522,9 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
     if (!parsed) return undefined;
     if (parsed.kind === "json") {
       void recorder.appendStdoutLine(parsed.line);
+      if (parsed.event?.type === "session") {
+        piSessionId = normalizeString(parsed.event.id) ?? piSessionId;
+      }
       const workEvent = normalizePiWorkEvent(parsed.event);
       if (workEvent) void recorder.appendEvent(workEvent);
       return parsed.event;
@@ -507,10 +551,11 @@ export function buildSubagentPrompt(cfg: DenConfig, options: RunOptions): string
   ].filter((line) => line !== "").join("\n");
 }
 
-export function addSessionArgs(args: string[], sessionMode: string, session: string | undefined) {
+export function addSessionArgs(args: string[], sessionMode: string, session: string | undefined, sessionDir?: string) {
   switch (sessionMode) {
     case "fresh":
-      args.push("--no-session");
+      if (sessionDir) args.push("--session-dir", sessionDir);
+      else args.push("--no-session");
       return;
     case "continue":
       args.push("--continue");
@@ -618,4 +663,50 @@ function metadataString(value: unknown): string | undefined {
 
 function metadataNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function shouldPersistFreshSession(): boolean {
+  const value = process.env.DEN_PI_SUBAGENT_NO_SESSION;
+  if (!value) return true;
+  return !["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+}
+
+type DiscoveredSessionFile = {
+  filePath: string;
+  sessionId?: string;
+};
+
+async function discoverPiSessionFile(sessionDir: string | undefined, preferredSessionId: string | undefined): Promise<DiscoveredSessionFile | undefined> {
+  if (!sessionDir) return undefined;
+  try {
+    const entries = await readdir(sessionDir, { withFileTypes: true });
+    const candidates = await Promise.all(entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
+      .map(async (entry) => {
+        const filePath = path.join(sessionDir, entry.name);
+        const info = await stat(filePath);
+        const sessionId = await readSessionHeaderId(filePath);
+        return { filePath, sessionId, mtimeMs: info.mtimeMs };
+      }));
+    if (candidates.length === 0) return undefined;
+    if (preferredSessionId) {
+      const matching = candidates.find((candidate) => candidate.sessionId === preferredSessionId || candidate.filePath.includes(preferredSessionId));
+      if (matching) return matching;
+    }
+    return candidates.sort((a, b) => b.mtimeMs - a.mtimeMs)[0];
+  } catch {
+    return undefined;
+  }
+}
+
+async function readSessionHeaderId(filePath: string): Promise<string | undefined> {
+  try {
+    const text = await readFile(filePath, "utf8");
+    const firstLine = text.split("\n", 1)[0]?.trim();
+    if (!firstLine) return undefined;
+    const header = JSON.parse(firstLine);
+    return normalizeString(header?.id);
+  } catch {
+    return undefined;
+  }
 }

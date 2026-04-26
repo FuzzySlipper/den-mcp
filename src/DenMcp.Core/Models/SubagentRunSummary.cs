@@ -51,6 +51,8 @@ public sealed class SubagentRunArtifactSnapshot
     public string? EventsTail { get; set; }
     public string? StdoutTail { get; set; }
     public string? StderrTail { get; set; }
+    public string? SessionFilePath { get; set; }
+    public string? SessionTail { get; set; }
     public string? ReadError { get; set; }
 }
 

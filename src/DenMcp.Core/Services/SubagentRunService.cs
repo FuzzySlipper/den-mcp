@@ -297,6 +297,10 @@ public sealed class SubagentRunService : ISubagentRunService
         IReadOnlyList<AgentStreamEntry> streamEvents,
         SubagentRunArtifactSnapshot? artifacts)
     {
+        var sessionEvents = ParseSessionWorkEvents(artifacts?.SessionTail);
+        if (sessionEvents.Count > 0)
+            return sessionEvents;
+
         var artifactEvents = ParseWorkEvents(artifacts?.EventsTail);
         if (artifactEvents.Count > 0)
             return artifactEvents;
@@ -307,6 +311,297 @@ public sealed class SubagentRunService : ISubagentRunService
             .Select(workEvent => workEvent!.Value)
             .TakeLast(80)
             .ToList();
+    }
+
+    private static List<JsonElement> ParseSessionWorkEvents(string? sessionJsonl)
+    {
+        if (string.IsNullOrWhiteSpace(sessionJsonl))
+            return [];
+
+        var events = new List<JsonElement>();
+        foreach (var line in sessionJsonl.Split('\n'))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.Length == 0 || trimmed == "...")
+                continue;
+
+            try
+            {
+                using var doc = JsonDocument.Parse(trimmed);
+                var workEvent = NormalizeSessionEntry(doc.RootElement);
+                if (workEvent.HasValue)
+                    events.Add(workEvent.Value);
+            }
+            catch (JsonException)
+            {
+                // The artifact snapshot may begin mid-line when tailing a large file.
+            }
+        }
+
+        return events.TakeLast(80).ToList();
+    }
+
+    private static JsonElement? NormalizeSessionEntry(JsonElement entry)
+    {
+        if (entry.ValueKind != JsonValueKind.Object || !TryGetString(entry, "type", out var type))
+            return null;
+
+        return type switch
+        {
+            "session" => WorkEvent(new Dictionary<string, object?>
+            {
+                ["type"] = "subagent.work_session",
+                ["ts"] = TimestampMs(entry),
+                ["source_type"] = "session_tree_session",
+                ["session_id"] = StringOrNull(entry, "id"),
+                ["cwd"] = StringOrNull(entry, "cwd"),
+                ["version"] = NumberOrNull(entry, "version")
+            }),
+            "message" => NormalizeSessionMessageEntry(entry),
+            "compaction" => WorkEvent(new Dictionary<string, object?>
+            {
+                ["type"] = "subagent.work_compaction",
+                ["ts"] = TimestampMs(entry),
+                ["source_type"] = "session_tree_compaction",
+                ["entry_id"] = StringOrNull(entry, "id"),
+                ["parent_id"] = StringOrNull(entry, "parentId"),
+                ["text_preview"] = Preview(StringOrNull(entry, "summary")),
+                ["tokens_before"] = NumberOrNull(entry, "tokensBefore"),
+                ["first_kept_entry_id"] = StringOrNull(entry, "firstKeptEntryId")
+            }),
+            "branch_summary" => WorkEvent(new Dictionary<string, object?>
+            {
+                ["type"] = "subagent.work_branch_summary",
+                ["ts"] = TimestampMs(entry),
+                ["source_type"] = "session_tree_branch_summary",
+                ["entry_id"] = StringOrNull(entry, "id"),
+                ["parent_id"] = StringOrNull(entry, "parentId"),
+                ["from_id"] = StringOrNull(entry, "fromId"),
+                ["text_preview"] = Preview(StringOrNull(entry, "summary"))
+            }),
+            "custom" => WorkEvent(new Dictionary<string, object?>
+            {
+                ["type"] = "subagent.work_custom",
+                ["ts"] = TimestampMs(entry),
+                ["source_type"] = "session_tree_custom",
+                ["entry_id"] = StringOrNull(entry, "id"),
+                ["parent_id"] = StringOrNull(entry, "parentId"),
+                ["custom_type"] = StringOrNull(entry, "customType"),
+                ["result_preview"] = Preview(JsonPreview(entry, "data"))
+            }),
+            "custom_message" => WorkEvent(new Dictionary<string, object?>
+            {
+                ["type"] = "subagent.work_custom_message",
+                ["ts"] = TimestampMs(entry),
+                ["source_type"] = "session_tree_custom_message",
+                ["entry_id"] = StringOrNull(entry, "id"),
+                ["parent_id"] = StringOrNull(entry, "parentId"),
+                ["custom_type"] = StringOrNull(entry, "customType"),
+                ["text_preview"] = Preview(ContentText(entry.TryGetProperty("content", out var content) ? content : default)),
+                ["display"] = BoolOrNull(entry, "display")
+            }),
+            _ => null
+        };
+    }
+
+    private static JsonElement? NormalizeSessionMessageEntry(JsonElement entry)
+    {
+        if (!entry.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object)
+            return null;
+        if (!TryGetString(message, "role", out var role))
+            return null;
+        if (role == "user")
+            return null; // Avoid surfacing raw prompts in the Den work feed.
+
+        var common = new Dictionary<string, object?>
+        {
+            ["ts"] = TimestampMs(entry),
+            ["entry_id"] = StringOrNull(entry, "id"),
+            ["parent_id"] = StringOrNull(entry, "parentId"),
+            ["role"] = role
+        };
+
+        switch (role)
+        {
+            case "assistant":
+                common["type"] = "subagent.work_message_end";
+                common["source_type"] = "session_tree_message";
+                common["provider"] = StringOrNull(message, "provider");
+                common["model"] = StringOrNull(message, "model");
+                common["text_preview"] = Preview(ContentText(message.TryGetProperty("content", out var content) ? content : default, includeThinking: false));
+                common["text_chars"] = ContentTextLength(message.TryGetProperty("content", out content) ? content : default, includeThinking: false);
+                common["thinking_chars"] = ContentTextLength(message.TryGetProperty("content", out content) ? content : default, includeThinking: true, thinkingOnly: true);
+                common["content_types"] = ContentTypes(message.TryGetProperty("content", out content) ? content : default);
+                common["tool_calls"] = ToolCalls(message.TryGetProperty("content", out content) ? content : default);
+                common["stop_reason"] = StringOrNull(message, "stopReason");
+                return WorkEvent(common);
+            case "toolResult":
+                common["type"] = "subagent.work_tool_end";
+                common["source_type"] = "session_tree_tool_result";
+                common["tool_call_id"] = StringOrNull(message, "toolCallId");
+                common["tool_name"] = StringOrNull(message, "toolName");
+                common["result_preview"] = Preview(ContentText(message.TryGetProperty("content", out var toolContent) ? toolContent : default) ?? JsonPreview(message, "content"));
+                common["is_error"] = BoolOrNull(message, "isError") ?? false;
+                return WorkEvent(common);
+            case "bashExecution":
+                common["type"] = "subagent.work_bash_execution";
+                common["source_type"] = "session_tree_bash_execution";
+                common["tool_name"] = "bash";
+                common["args_preview"] = Preview(StringOrNull(message, "command"));
+                common["result_preview"] = Preview(StringOrNull(message, "output"));
+                common["exit_code"] = NumberOrNull(message, "exitCode");
+                common["cancelled"] = BoolOrNull(message, "cancelled");
+                common["truncated"] = BoolOrNull(message, "truncated");
+                common["is_error"] = NumberOrNull(message, "exitCode") is not null and not 0;
+                return WorkEvent(common);
+            case "custom":
+                common["type"] = "subagent.work_custom_message";
+                common["source_type"] = "session_tree_custom_message";
+                common["custom_type"] = StringOrNull(message, "customType");
+                common["text_preview"] = Preview(ContentText(message.TryGetProperty("content", out var customContent) ? customContent : default));
+                common["display"] = BoolOrNull(message, "display");
+                return WorkEvent(common);
+            case "branchSummary":
+                common["type"] = "subagent.work_branch_summary";
+                common["source_type"] = "session_tree_branch_summary_message";
+                common["from_id"] = StringOrNull(message, "fromId");
+                common["text_preview"] = Preview(StringOrNull(message, "summary"));
+                return WorkEvent(common);
+            case "compactionSummary":
+                common["type"] = "subagent.work_compaction";
+                common["source_type"] = "session_tree_compaction_message";
+                common["text_preview"] = Preview(StringOrNull(message, "summary"));
+                common["tokens_before"] = NumberOrNull(message, "tokensBefore");
+                return WorkEvent(common);
+            default:
+                return null;
+        }
+    }
+
+    private static JsonElement WorkEvent(Dictionary<string, object?> payload)
+    {
+        var compact = payload
+            .Where(pair => pair.Value is not null)
+            .ToDictionary(pair => pair.Key, pair => pair.Value);
+        return JsonSerializer.SerializeToElement(compact);
+    }
+
+    private static List<Dictionary<string, object?>>? ToolCalls(JsonElement content)
+    {
+        if (content.ValueKind != JsonValueKind.Array)
+            return null;
+
+        var calls = new List<Dictionary<string, object?>>();
+        foreach (var part in content.EnumerateArray())
+        {
+            if (!part.TryGetProperty("type", out var type) || type.GetString() != "toolCall")
+                continue;
+            calls.Add(new Dictionary<string, object?>
+            {
+                ["id"] = StringOrNull(part, "id"),
+                ["name"] = StringOrNull(part, "name"),
+                ["args_preview"] = Preview(JsonPreview(part, "arguments"))
+            });
+        }
+
+        return calls.Count == 0 ? null : calls;
+    }
+
+    private static List<string>? ContentTypes(JsonElement content)
+    {
+        if (content.ValueKind != JsonValueKind.Array)
+            return null;
+
+        var types = content.EnumerateArray()
+            .Select(part => StringOrNull(part, "type"))
+            .Where(type => !string.IsNullOrWhiteSpace(type))
+            .Distinct(StringComparer.Ordinal)
+            .Cast<string>()
+            .ToList();
+        return types.Count == 0 ? null : types;
+    }
+
+    private static string? ContentText(JsonElement content, bool includeThinking = true, bool thinkingOnly = false)
+    {
+        if (content.ValueKind == JsonValueKind.String)
+            return thinkingOnly ? null : content.GetString();
+        if (content.ValueKind != JsonValueKind.Array)
+            return null;
+
+        var parts = new List<string>();
+        foreach (var part in content.EnumerateArray())
+        {
+            if (!part.TryGetProperty("type", out var type))
+                continue;
+            var typeName = type.GetString();
+            if (typeName == "text" && !thinkingOnly && part.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String)
+                parts.Add(text.GetString()!);
+            if (typeName == "thinking" && includeThinking && part.TryGetProperty("thinking", out var thinking) && thinking.ValueKind == JsonValueKind.String)
+                parts.Add(thinking.GetString()!);
+        }
+
+        return parts.Count == 0 ? null : string.Join("", parts);
+    }
+
+    private static int? ContentTextLength(JsonElement content, bool includeThinking = true, bool thinkingOnly = false)
+    {
+        var text = ContentText(content, includeThinking, thinkingOnly);
+        return text is null ? null : text.Length;
+    }
+
+    private static long? TimestampMs(JsonElement entry)
+    {
+        if (!TryGetString(entry, "timestamp", out var value) || !DateTimeOffset.TryParse(value, out var timestamp))
+            return null;
+        return timestamp.ToUnixTimeMilliseconds();
+    }
+
+    private static string? Preview(string? value, int maxChars = 500)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+        var normalized = string.Join(" ", value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return normalized.Length <= maxChars ? normalized : string.Concat(normalized.AsSpan(0, maxChars), "…");
+    }
+
+    private static string? JsonPreview(JsonElement element, string propertyName)
+    {
+        return element.TryGetProperty(propertyName, out var property) && property.ValueKind is not JsonValueKind.Undefined and not JsonValueKind.Null
+            ? property.GetRawText()
+            : null;
+    }
+
+    private static string? StringOrNull(JsonElement element, string propertyName)
+    {
+        return TryGetString(element, propertyName, out var value) ? value : null;
+    }
+
+    private static bool TryGetString(JsonElement element, string propertyName, out string value)
+    {
+        value = string.Empty;
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.String)
+            return false;
+        value = property.GetString() ?? string.Empty;
+        return !string.IsNullOrWhiteSpace(value);
+    }
+
+    private static long? NumberOrNull(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.Number)
+            return null;
+        return property.TryGetInt64(out var value) ? value : null;
+    }
+
+    private static bool? BoolOrNull(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(propertyName, out var property))
+            return null;
+        return property.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            _ => null
+        };
     }
 
     private static List<JsonElement> ParseWorkEvents(string? eventsJsonl)
@@ -396,6 +691,7 @@ public sealed class SubagentRunService : ISubagentRunService
 
         try
         {
+            var sessionFilePath = FindSessionFile(artifactDir);
             return new SubagentRunArtifactSnapshot
             {
                 Dir = artifactDir,
@@ -403,7 +699,9 @@ public sealed class SubagentRunService : ISubagentRunService
                 StatusJson = await ReadArtifactTailAsync(artifactDir, "status.json"),
                 EventsTail = await ReadArtifactTailAsync(artifactDir, "events.jsonl"),
                 StdoutTail = await ReadArtifactTailAsync(artifactDir, "stdout.jsonl"),
-                StderrTail = await ReadArtifactTailAsync(artifactDir, "stderr.log")
+                StderrTail = await ReadArtifactTailAsync(artifactDir, "stderr.log"),
+                SessionFilePath = sessionFilePath,
+                SessionTail = sessionFilePath is null ? null : await ReadArtifactPathTailAsync(artifactDir, sessionFilePath)
             };
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
@@ -432,15 +730,39 @@ public sealed class SubagentRunService : ISubagentRunService
         }
     }
 
-    private static async Task<string?> ReadArtifactTailAsync(string artifactDir, string fileName)
+    private static string? FindSessionFile(string artifactDir)
     {
-        var fullDir = Path.TrimEndingDirectorySeparator(Path.GetFullPath(artifactDir));
-        var filePath = Path.GetFullPath(Path.Combine(fullDir, fileName));
-        var dirWithSeparator = $"{fullDir}{Path.DirectorySeparatorChar}";
-        if (!filePath.StartsWith(dirWithSeparator, StringComparison.Ordinal) || !File.Exists(filePath))
+        var sessionDir = Path.Combine(artifactDir, "sessions");
+        if (!Directory.Exists(sessionDir))
             return null;
 
-        await using var stream = File.OpenRead(filePath);
+        var fullArtifactDir = Path.TrimEndingDirectorySeparator(Path.GetFullPath(artifactDir));
+        var dirWithSeparator = $"{fullArtifactDir}{Path.DirectorySeparatorChar}";
+        return Directory.EnumerateFiles(sessionDir, "*.jsonl", SearchOption.TopDirectoryOnly)
+            .Select(Path.GetFullPath)
+            .Where(path => path.StartsWith(dirWithSeparator, StringComparison.Ordinal))
+            .Select(path => new FileInfo(path))
+            .Where(info => info.Exists)
+            .OrderByDescending(info => info.LastWriteTimeUtc)
+            .Select(info => info.FullName)
+            .FirstOrDefault();
+    }
+
+    private static Task<string?> ReadArtifactTailAsync(string artifactDir, string fileName)
+    {
+        var fullDir = Path.TrimEndingDirectorySeparator(Path.GetFullPath(artifactDir));
+        return ReadArtifactPathTailAsync(fullDir, Path.Combine(fullDir, fileName));
+    }
+
+    private static async Task<string?> ReadArtifactPathTailAsync(string artifactDir, string filePath)
+    {
+        var fullDir = Path.TrimEndingDirectorySeparator(Path.GetFullPath(artifactDir));
+        var fullPath = Path.GetFullPath(filePath);
+        var dirWithSeparator = $"{fullDir}{Path.DirectorySeparatorChar}";
+        if (!fullPath.StartsWith(dirWithSeparator, StringComparison.Ordinal) || !File.Exists(fullPath))
+            return null;
+
+        await using var stream = File.OpenRead(fullPath);
         var bytesToRead = (int)Math.Min(stream.Length, MaxArtifactTailBytes);
         if (bytesToRead == 0)
             return string.Empty;

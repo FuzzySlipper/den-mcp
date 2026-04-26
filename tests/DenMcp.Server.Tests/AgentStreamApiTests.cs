@@ -611,6 +611,82 @@ public class AgentStreamApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RestSubagentRuns_PrefersSessionTreeWorkEventsWhenSessionArtifactExists()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IAgentStreamRepository>();
+        var runId = $"run-session-{Guid.NewGuid():N}";
+        var artifactDir = Path.Combine(Path.GetTempPath(), "den-subagent-runs", runId);
+        var sessionDir = Path.Combine(artifactDir, "sessions");
+        Directory.CreateDirectory(sessionDir);
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(artifactDir, "status.json"), """{"state":"complete"}""");
+            await File.WriteAllTextAsync(Path.Combine(artifactDir, "events.jsonl"), string.Join("\n", [
+                """{"type":"subagent.work_message_end","text_preview":"live fallback"}""",
+                ""
+            ]));
+            await File.WriteAllTextAsync(Path.Combine(artifactDir, "stdout.jsonl"), """{"type":"message_end"}""" + "\n");
+            await File.WriteAllTextAsync(Path.Combine(artifactDir, "stderr.log"), "");
+            var sessionFile = Path.Combine(sessionDir, "2026-04-26T00-00-00-000Z_session-815.jsonl");
+            await File.WriteAllTextAsync(sessionFile, string.Join("\n", [
+                """{"type":"session","version":3,"id":"session-815","timestamp":"2026-04-26T00:00:00.000Z","cwd":"/repo"}""",
+                """{"type":"message","id":"u1","parentId":null,"timestamp":"2026-04-26T00:00:01.000Z","message":{"role":"user","content":"raw prompt must not surface"}}""",
+                """{"type":"message","id":"a1","parentId":"u1","timestamp":"2026-04-26T00:00:02.000Z","message":{"role":"assistant","provider":"openai","model":"gpt-test","stopReason":"toolUse","content":[{"type":"text","text":"I will inspect files."},{"type":"thinking","thinking":"private chain"},{"type":"toolCall","id":"tool-1","name":"read","arguments":{"path":"README.md"}}]}}""",
+                """{"type":"message","id":"t1","parentId":"a1","timestamp":"2026-04-26T00:00:03.000Z","message":{"role":"toolResult","toolCallId":"tool-1","toolName":"read","isError":false,"content":[{"type":"text","text":"file text"}]}}""",
+                """{"type":"message","id":"b1","parentId":"t1","timestamp":"2026-04-26T00:00:04.000Z","message":{"role":"bashExecution","command":"dotnet test","output":"passed","exitCode":0,"cancelled":false,"truncated":false}}""",
+                """{"type":"compaction","id":"c1","parentId":"b1","timestamp":"2026-04-26T00:00:05.000Z","summary":"Earlier work summarized","firstKeptEntryId":"a1","tokensBefore":5000}""",
+                """{"type":"branch_summary","id":"s1","parentId":"c1","timestamp":"2026-04-26T00:00:06.000Z","fromId":"old1","summary":"Abandoned approach"}""",
+                """{"type":"custom","id":"x1","parentId":"s1","timestamp":"2026-04-26T00:00:07.000Z","customType":"den-test","data":{"count":1}}""",
+                """{"type":"custom_message","id":"m1","parentId":"x1","timestamp":"2026-04-26T00:00:08.000Z","customType":"den-test","content":"Injected context","display":true}""",
+                ""
+            ]));
+
+            await repo.AppendAsync(new AgentStreamEntry
+            {
+                StreamKind = AgentStreamKind.Ops,
+                EventType = "subagent_completed",
+                ProjectId = ProjectId,
+                Sender = "pi",
+                DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+                Metadata = Metadata(JsonSerializer.Serialize(new
+                {
+                    run_id = runId,
+                    role = "planner",
+                    artifacts = new { dir = artifactDir }
+                }, JsonOpts))
+            });
+
+            var detailResponse = await _client.GetAsync($"/api/projects/{ProjectId}/subagent-runs/{runId}");
+            detailResponse.EnsureSuccessStatusCode();
+
+            var detail = await detailResponse.Content.ReadFromJsonAsync<SubagentRunDetail>(JsonOpts);
+            Assert.NotNull(detail?.Artifacts);
+            Assert.Equal(sessionFile, detail!.Artifacts!.SessionFilePath);
+            Assert.Contains("session-815", detail.Artifacts.SessionTail);
+            Assert.Equal("subagent.work_session", detail.WorkEvents[0].GetProperty("type").GetString());
+            Assert.DoesNotContain(detail.WorkEvents, evt => evt.TryGetProperty("role", out var role) && role.GetString() == "user");
+            var assistant = detail.WorkEvents.Single(evt => evt.GetProperty("type").GetString() == "subagent.work_message_end");
+            Assert.Equal("I will inspect files.", assistant.GetProperty("text_preview").GetString());
+            Assert.Equal(13, assistant.GetProperty("thinking_chars").GetInt32());
+            Assert.Equal("read", assistant.GetProperty("tool_calls")[0].GetProperty("name").GetString());
+            Assert.Contains(detail.WorkEvents, evt => evt.GetProperty("type").GetString() == "subagent.work_tool_end" && evt.GetProperty("result_preview").GetString() == "file text");
+            Assert.Contains(detail.WorkEvents, evt => evt.GetProperty("type").GetString() == "subagent.work_bash_execution" && evt.GetProperty("args_preview").GetString() == "dotnet test");
+            Assert.Contains(detail.WorkEvents, evt => evt.GetProperty("type").GetString() == "subagent.work_compaction");
+            Assert.Contains(detail.WorkEvents, evt => evt.GetProperty("type").GetString() == "subagent.work_branch_summary");
+            Assert.Contains(detail.WorkEvents, evt => evt.GetProperty("type").GetString() == "subagent.work_custom");
+            Assert.Contains(detail.WorkEvents, evt => evt.GetProperty("type").GetString() == "subagent.work_custom_message");
+            Assert.DoesNotContain(detail.WorkEvents, evt => evt.TryGetProperty("text_preview", out var preview) && preview.GetString() == "live fallback");
+        }
+        finally
+        {
+            if (Directory.Exists(artifactDir))
+                Directory.Delete(artifactDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task RestSubagentRuns_RejectsUnexpectedArtifactDir()
     {
         using var scope = _factory.Services.CreateScope();

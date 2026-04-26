@@ -155,6 +155,50 @@ test('subagent work event grouping creates operator cards and activity summary',
   assert.equal(activity.latestAt, 2500);
 });
 
+test('subagent work event grouping handles session-tree bash and context events', () => {
+  const events = [
+    {
+      type: 'subagent.work_bash_execution',
+      ts: 3000,
+      tool_name: 'bash',
+      args_preview: 'dotnet test',
+      result_preview: 'passed',
+      is_error: false,
+    },
+    {
+      type: 'subagent.work_compaction',
+      ts: 3100,
+      text_preview: 'Earlier work summarized',
+    },
+    {
+      type: 'subagent.work_branch_summary',
+      ts: 3200,
+      text_preview: 'Abandoned approach',
+    },
+    {
+      type: 'subagent.work_custom_message',
+      ts: 3300,
+      custom_type: 'den-test',
+      text_preview: 'Injected context',
+    },
+  ];
+
+  const cards = groupSubagentWorkEvents(events);
+  assert.equal(cards.length, 4);
+  assert.equal(cards[0].kind, 'tool');
+  assert.equal(cards[0].status, 'complete');
+  assert.equal(cards[0].toolName, 'bash');
+  assert.match(summarizeSubagentWorkEvent(events[0]), /bash finished: dotnet test/);
+  assert.equal(cards[1].title, 'Session compacted');
+  assert.equal(cards[2].title, 'Branch summary');
+  assert.equal(cards[3].title, 'Custom message');
+
+  const activity = summarizeSubagentWorkActivity(events);
+  assert.equal(activity.toolCallCount, 1);
+  assert.equal(activity.lifecycleCount, 3);
+  assert.equal(activity.lastToolName, 'bash');
+});
+
 test('subagent run filters group operational states', () => {
   const run = state => ({ state });
 

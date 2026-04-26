@@ -341,6 +341,12 @@ export function SubagentRunDetail({ run, onClose, onOpenTask, onOpenEntry }: Pro
                 <pre className="detail-pre">{artifacts.stderr_tail}</pre>
               </details>
             )}
+            {artifacts.session_tail != null && (
+              <details className="artifact-detail">
+                <summary>{artifacts.session_file_path ? `session ${artifacts.session_file_path}` : 'session.jsonl'}</summary>
+                <pre className="detail-pre">{artifacts.session_tail}</pre>
+              </details>
+            )}
           </div>
         )}
 

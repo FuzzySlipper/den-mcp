@@ -131,6 +131,16 @@ export function summarizeSubagentWorkEvent(event: SubagentRunWorkEvent): string 
       return `tool update: ${event.tool_name ?? 'unknown'}${event.result_preview ? ` ${event.result_preview}` : ''}`;
     case 'subagent.work_tool_end':
       return `tool ${event.is_error ? 'errored' : 'finished'}: ${event.tool_name ?? 'unknown'}${event.result_preview ? ` ${event.result_preview}` : ''}`;
+    case 'subagent.work_bash_execution':
+      return `bash ${event.is_error ? 'failed' : 'finished'}${event.args_preview ? `: ${event.args_preview}` : ''}`;
+    case 'subagent.work_compaction':
+      return event.text_preview ? `compaction: ${event.text_preview}` : 'session compacted';
+    case 'subagent.work_branch_summary':
+      return event.text_preview ? `branch summary: ${event.text_preview}` : 'branch summary';
+    case 'subagent.work_custom':
+      return `custom event${event.custom_type ? `: ${event.custom_type}` : ''}`;
+    case 'subagent.work_custom_message':
+      return event.text_preview ? `custom message: ${event.text_preview}` : 'custom message';
     default:
       return event.type.replace(/[_.]/g, ' ');
   }
@@ -213,7 +223,7 @@ function touchToolCard(card: SubagentWorkCard, event: SubagentRunWorkEvent): voi
     card.startedAt = ts ?? card.startedAt;
   } else if (event.type === 'subagent.work_tool_update') {
     if (card.status === 'requested') card.status = 'running';
-  } else if (event.type === 'subagent.work_tool_end') {
+  } else if (event.type === 'subagent.work_tool_end' || event.type === 'subagent.work_bash_execution') {
     card.status = event.is_error ? 'error' : 'complete';
     card.endedAt = ts ?? card.endedAt;
     if (card.startedAt == null) card.startedAt = card.timestamp;
@@ -246,7 +256,8 @@ function createCardFromEvent(event: SubagentRunWorkEvent, index: number, kind: S
 function isToolEvent(event: SubagentRunWorkEvent): boolean {
   return event.type === 'subagent.work_tool_start'
     || event.type === 'subagent.work_tool_update'
-    || event.type === 'subagent.work_tool_end';
+    || event.type === 'subagent.work_tool_end'
+    || event.type === 'subagent.work_bash_execution';
 }
 
 function hasToolCalls(event: SubagentRunWorkEvent): boolean {
@@ -274,6 +285,14 @@ function lifecycleTitle(type: string): string {
       return 'Turn finished';
     case 'subagent.work_message_start':
       return 'Assistant message started';
+    case 'subagent.work_compaction':
+      return 'Session compacted';
+    case 'subagent.work_branch_summary':
+      return 'Branch summary';
+    case 'subagent.work_custom':
+      return 'Custom event';
+    case 'subagent.work_custom_message':
+      return 'Custom message';
     default:
       return formatSubagentWorkEventType(type);
   }

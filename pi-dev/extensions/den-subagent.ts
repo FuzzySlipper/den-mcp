@@ -521,6 +521,9 @@ async function runDenSubagent(
     base_commit: contextIdentity.baseCommit ?? null,
     head_commit: contextIdentity.headCommit ?? null,
     purpose: contextIdentity.purpose ?? null,
+    pi_session_dir: artifacts.session_dir ?? null,
+    pi_session_persisted: true,
+    artifacts,
   });
   await appendOps(cfg, "subagent_started", {
     taskId: effectiveOptions.taskId,

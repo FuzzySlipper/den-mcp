@@ -9,6 +9,9 @@ export type SubagentArtifacts = {
   stderr_log_path: string;
   status_json_path: string;
   events_jsonl_path: string;
+  session_dir?: string;
+  session_file_path?: string;
+  session_id?: string;
 };
 
 export type SubagentRunContext = {

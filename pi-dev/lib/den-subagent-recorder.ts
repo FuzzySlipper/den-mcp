@@ -77,8 +77,10 @@ async function createRunArtifacts(runId: string): Promise<SubagentArtifacts> {
     stderr_log_path: path.join(dir, "stderr.log"),
     status_json_path: path.join(dir, "status.json"),
     events_jsonl_path: path.join(dir, "events.jsonl"),
+    session_dir: path.join(dir, "sessions"),
   };
   await Promise.all([
+    mkdir(artifacts.session_dir, { recursive: true }),
     writeFile(artifacts.stdout_jsonl_path, "", "utf8"),
     writeFile(artifacts.stderr_log_path, "", "utf8"),
     writeFile(artifacts.events_jsonl_path, "", "utf8"),

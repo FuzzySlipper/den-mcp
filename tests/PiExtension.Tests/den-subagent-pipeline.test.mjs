@@ -187,6 +187,7 @@ test('subagent run schema helpers emit canonical metadata and event mapping', ()
     stderr_log_path: '/tmp/den-subagent-runs/run-1/stderr.log',
     status_json_path: '/tmp/den-subagent-runs/run-1/status.json',
     events_jsonl_path: '/tmp/den-subagent-runs/run-1/events.jsonl',
+    session_dir: '/tmp/den-subagent-runs/run-1/sessions',
   };
   assert.deepEqual(buildSubagentRunMetadata({
     runId: 'run-1',
@@ -313,6 +314,7 @@ test('subagent run recorder writes normalized artifacts and ordered progress eve
   const stderrText = await readFile(recorder.artifacts.stderr_log_path, 'utf8');
 
   assert.equal(recorder.artifacts.dir, path.join(agentDir, 'den-subagent-runs', 'run-recorder'));
+  assert.equal(recorder.artifacts.session_dir, path.join(agentDir, 'den-subagent-runs', 'run-recorder', 'sessions'));
   assert.match(statusText, /"state": "starting"/);
   assert.match(eventText, /"schema":"den_subagent_run"/);
   assert.match(eventText, /"type":"subagent.heartbeat"/);
@@ -337,6 +339,10 @@ test('pi cli runner helpers keep prompt, session, and success semantics stable',
   const freshArgs = [];
   addSessionArgs(freshArgs, 'fresh');
   assert.deepEqual(freshArgs, ['--no-session']);
+
+  const persistedFreshArgs = [];
+  addSessionArgs(persistedFreshArgs, 'fresh', undefined, '/tmp/run/sessions');
+  assert.deepEqual(persistedFreshArgs, ['--session-dir', '/tmp/run/sessions']);
 
   const forkArgs = [];
   addSessionArgs(forkArgs, 'fork', 'session-1');
@@ -578,6 +584,44 @@ test('pi cli runner carries conductor context into status, result, and lifecycle
   assert.equal(status.purpose, 'review_follow_up');
   assert.ok(events.some((event) => event.type === 'subagent.process_started' && event.review_round_id === 135 && event.purpose === 'review_follow_up'));
   assert.ok(events.some((event) => event.type === 'subagent.process_finished' && event.review_round_id === 135 && event.branch === 'task/808-subagent-context-metadata'));
+});
+
+test('pi cli runner records child session file metadata when fresh runs persist sessions', async (t) => {
+  const { result, recorder } = await runFakePiSubagent(t, {
+    prefix: 'den-subagent-session-file-',
+    runId: 'run-session-file',
+    scriptLines: [
+      '#!/usr/bin/env node',
+      'const fs = require("node:fs");',
+      'const path = require("node:path");',
+      'const sessionDir = process.argv[process.argv.indexOf("--session-dir") + 1];',
+      'const sessionId = "session-test-123";',
+      'fs.mkdirSync(sessionDir, { recursive: true });',
+      'const sessionFile = path.join(sessionDir, `2026-04-26T00-00-00-000Z_${sessionId}.jsonl`);',
+      'fs.writeFileSync(sessionFile, JSON.stringify({ type: "session", version: 3, id: sessionId, timestamp: "2026-04-26T00:00:00.000Z", cwd: process.cwd() }) + "\\n");',
+      'fs.appendFileSync(sessionFile, JSON.stringify({ type: "message", id: "a1", parentId: null, timestamp: "2026-04-26T00:00:01.000Z", message: { role: "assistant", provider: "fake", model: "gpt-test", stopReason: "stop", content: [{ type: "text", text: "session-backed final" }] } }) + "\\n");',
+      'console.log(JSON.stringify({ type: "session", version: 3, id: sessionId, cwd: process.cwd() }));',
+      'console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", model: "gpt-test", stopReason: "stop", content: [{ type: "text", text: "session-backed final" }] } }));',
+      'process.exit(0);',
+    ],
+    options: { role: 'coder', prompt: 'Create a persisted child session.' },
+  });
+
+  assert.equal(result.exit_code, 0);
+  assert.equal(result.pi_session_persisted, true);
+  assert.equal(result.pi_session_id, 'session-test-123');
+  assert.equal(result.pi_session_dir, recorder.artifacts.session_dir);
+  assert.equal(result.pi_session_file_path, path.join(recorder.artifacts.session_dir, '2026-04-26T00-00-00-000Z_session-test-123.jsonl'));
+  assert.equal(result.artifacts.session_id, 'session-test-123');
+  assert.equal(result.artifacts.session_file_path, result.pi_session_file_path);
+
+  const status = await readJson(recorder.artifacts.status_json_path);
+  const events = await readJsonLines(recorder.artifacts.events_jsonl_path);
+  assert.equal(status.pi_session_id, 'session-test-123');
+  assert.equal(status.pi_session_file_path, result.pi_session_file_path);
+  assert.equal(status.artifacts.session_file_path, result.pi_session_file_path);
+  assert.ok(events.some((event) => event.type === 'subagent.work_session' && event.session_id === 'session-test-123'));
+  assert.ok(events.some((event) => event.type === 'subagent.session_file_detected' && event.pi_session_file_path === result.pi_session_file_path));
 });
 
 test('pi cli runner records normalized work events from child Pi stream', async (t) => {

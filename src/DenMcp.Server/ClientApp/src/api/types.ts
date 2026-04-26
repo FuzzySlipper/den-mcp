@@ -385,6 +385,8 @@ export interface SubagentRunArtifactSnapshot {
   events_tail: string | null;
   stdout_tail: string | null;
   stderr_tail: string | null;
+  session_file_path: string | null;
+  session_tail: string | null;
   read_error: string | null;
 }
 

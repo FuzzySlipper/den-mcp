@@ -1,7 +1,7 @@
 # Pi Sub-Agent Infrastructure
 
 Date: 2026-04-26
-Status: current stable shape after tasks `#785`, `#806`, `#813`, and `#808`
+Status: current stable shape after tasks `#785`, `#806`, `#813`, `#808`, and `#815`
 
 This note captures the intended shape for Pi-launched Den sub-agents after the
 observability and control hardening work. The goal is not to make Pi the whole
@@ -13,7 +13,7 @@ workflow state and the primary observation surface.
 - Pi extension: thin runner/tool adapter.
 - Den task messages: concise final success or failure records.
 - Den agent stream: live lifecycle/control bus.
-- Artifact files: detailed forensic logs for stdout, stderr, status, and events.
+- Artifact files: detailed forensic logs for stdout, stderr, status, live events, and child Pi session JSONL.
 - Den web: primary place to watch and manage sub-agent runs.
 
 The conductor chat can mention important outcomes, but it should not be the only
@@ -60,7 +60,7 @@ By default a sub-agent launch:
 1. Creates a run id and artifact directory under
    `~/.pi/agent/den-subagent-runs/{run_id}`.
 2. Appends `subagent_started` to Den agent-stream.
-3. Spawns `pi --mode json -p ...` in a fresh child process.
+3. Spawns `pi --mode json --session-dir {artifact_dir}/sessions -p ...` in a fresh child process by default.
 4. Mirrors lifecycle events from artifacts into Den agent-stream.
 5. Posts one task-thread result or failure message when `task_id` and
    `post_result` allow it.
@@ -86,11 +86,12 @@ stdout.jsonl
 stderr.log
 status.json
 events.jsonl
+sessions/*.jsonl
 ```
 
 Task-thread messages should stay compact. They include final output for success
 or a concise failure explanation plus structured `den_subagent_run` metadata.
-Large transcripts and raw event details belong in the artifact files.
+Large transcripts and raw event details belong in the artifact files. Fresh child Pi sessions are persisted under each run's local artifact directory so Den can reconstruct historical work structure without copying raw prompts into Den database rows or task-thread messages.
 
 The canonical metadata schema is:
 
@@ -107,6 +108,10 @@ tools
 session_mode
 session
 rerun_of_run_id
+pi_session_id
+pi_session_dir
+pi_session_file_path
+pi_session_persisted
 review_round_id
 workspace_id
 worktree_path
@@ -231,6 +236,43 @@ message/tool update deltas stay in `events.jsonl`; Den web reads and parses the
 artifact tail for the run detail "Work" timeline. This keeps the top-level stream
 human-scale while still making runaway searches, repeated tools, and off-scope
 commands visible while the run is active.
+
+Task `#815` adds session-tree enrichment for historical run detail views. Fresh
+sub-agent runs now keep a child Pi session file in `{artifact_dir}/sessions` by
+default, and the runner records `pi_session_id`, `pi_session_dir`,
+`pi_session_file_path`, and `pi_session_persisted` in `status.json`, artifact
+metadata, terminal lifecycle events, and task-thread/run metadata where
+available. Set `DEN_PI_SUBAGENT_NO_SESSION=1` to force the older ephemeral
+`--no-session` mode for local debugging.
+
+`SubagentRunService` prefers the child session tree when building run-detail work
+events, then falls back to `events.jsonl`, then to mirrored agent-stream work ops.
+The session normalizer maps Pi session entries to bounded `subagent.work_*`
+records:
+
+- `message` assistant entries -> assistant commentary/tool-call summaries
+- `message` tool-result entries -> tool result cards
+- `message` bash-execution entries -> bash/tool-effect cards
+- `compaction` and `branch_summary` -> lifecycle/context cards
+- `custom` and `custom_message` -> extension context cards
+
+User-role session messages are intentionally skipped so generated prompts do not
+become Den API/work-feed content. Thinking blocks are represented by counts and
+content type flags rather than raw full reasoning text. The session JSONL remains
+a local artifact for forensic inspection.
+
+## Pi Session Manager / psm-bridge Reference
+
+Pi Session Manager and psm-bridge are useful references for how to interpret Pi's
+JSONL session tree, especially the `id`/`parentId` topology and typed entries for
+messages, tool results, bash executions, compaction, branch summaries, and custom
+extension data. Den borrows that data model directly from Pi's documented session
+format instead of depending on either runtime: child sub-agents are already
+headless Pi processes, and Den already owns run ids, artifacts, task/review links,
+and the web operator surface.
+
+The integration boundary is therefore the local session file under the run
+artifact directory, not a second frontend service or bridge process.
 
 ## Tau Reference
 
