@@ -72,6 +72,7 @@ builder.Services.AddSingleton<IAgentSessionRepository, AgentSessionRepository>()
 builder.Services.AddSingleton<IAgentInstanceBindingRepository, AgentInstanceBindingRepository>();
 builder.Services.AddSingleton<DispatchRepository>();
 builder.Services.AddSingleton<IAgentStreamRepository, AgentStreamRepository>();
+builder.Services.AddSingleton<IAgentRunRepository, AgentRunRepository>();
 builder.Services.AddSingleton<AgentStreamRealtimeHub>();
 builder.Services.AddSingleton<INotificationMessageRepository, NotificationMessageRepository>();
 builder.Services.AddSingleton<IAgentStreamOpsService, AgentStreamOpsService>();

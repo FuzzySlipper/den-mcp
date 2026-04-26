@@ -15,10 +15,71 @@ public sealed class SubagentRunService : ISubagentRunService
 {
     private const int MaxArtifactTailBytes = 64 * 1024;
     private readonly IAgentStreamRepository _stream;
+    private readonly IAgentRunRepository _runs;
 
-    public SubagentRunService(IAgentStreamRepository stream) => _stream = stream;
+    public SubagentRunService(IAgentStreamRepository stream, IAgentRunRepository runs)
+    {
+        _stream = stream;
+        _runs = runs;
+    }
 
     public async Task<List<SubagentRunSummary>> ListAsync(SubagentRunListOptions options)
+    {
+        var summariesByRunId = new Dictionary<string, SubagentRunSummary>(StringComparer.Ordinal);
+
+        foreach (var record in await _runs.ListAsync(options))
+        {
+            var summary = await BuildSummaryAsync(record);
+            if (summary is not null)
+                summariesByRunId[summary.RunId] = summary;
+        }
+
+        foreach (var summary in await ListStreamSummariesAsync(options))
+        {
+            if (!summariesByRunId.TryGetValue(summary.RunId, out var existing) || summary.Latest.Id > existing.Latest.Id)
+            {
+                _ = await _runs.RebuildFromStreamAsync(summary.RunId);
+                summariesByRunId[summary.RunId] = summary;
+            }
+        }
+
+        return summariesByRunId.Values
+            .Where(summary => MatchesStateFilter(summary.State, options.State))
+            .OrderByDescending(summary => summary.Latest.CreatedAt)
+            .ThenByDescending(summary => summary.Latest.Id)
+            .Take(Math.Clamp(options.Limit, 1, 50))
+            .ToList();
+    }
+
+    public async Task<SubagentRunDetail?> GetAsync(string runId, SubagentRunListOptions options)
+    {
+        if (string.IsNullOrWhiteSpace(runId))
+            return null;
+
+        var events = await LoadStreamEventsAsync(runId, options);
+        var record = events.Count > 0
+            ? await _runs.RebuildFromStreamAsync(runId)
+            : await _runs.GetAsync(runId, options);
+
+        SubagentRunSummary? summary = null;
+        if (record is not null && MatchesStateFilter(record.State, options.State))
+            summary = await BuildSummaryAsync(record);
+
+        summary ??= events.Count > 0 ? BuildSummary(runId, events) : null;
+        if (summary is null || !MatchesStateFilter(summary.State, options.State))
+            return null;
+
+        var artifacts = await ReadArtifactsAsync(runId, summary);
+        return new SubagentRunDetail
+        {
+            Summary = summary,
+            Events = events,
+            WorkEvents = BuildWorkEvents(events, artifacts),
+            Artifacts = artifacts
+        };
+    }
+
+    private async Task<List<SubagentRunSummary>> ListStreamSummariesAsync(SubagentRunListOptions options)
     {
         var entries = await _stream.ListAsync(new AgentStreamListOptions
         {
@@ -28,26 +89,18 @@ public sealed class SubagentRunService : ISubagentRunService
             Limit = Math.Clamp(options.SourceLimit, 1, 200)
         });
 
-        var summaries = entries
+        return entries
             .Where(entry => entry.EventType.StartsWith("subagent_", StringComparison.Ordinal))
             .Select(entry => new { Entry = entry, RunId = TextMetadata(entry, "run_id") })
             .Where(item => !string.IsNullOrWhiteSpace(item.RunId))
             .GroupBy(item => item.RunId!)
             .Select(group => BuildSummary(group.Key, group.Select(item => item.Entry)))
             .Where(summary => MatchesStateFilter(summary.State, options.State))
-            .OrderByDescending(summary => summary.Latest.CreatedAt)
-            .ThenByDescending(summary => summary.Latest.Id)
-            .Take(Math.Clamp(options.Limit, 1, 50))
             .ToList();
-
-        return summaries;
     }
 
-    public async Task<SubagentRunDetail?> GetAsync(string runId, SubagentRunListOptions options)
+    private async Task<List<AgentStreamEntry>> LoadStreamEventsAsync(string runId, SubagentRunListOptions options)
     {
-        if (string.IsNullOrWhiteSpace(runId))
-            return null;
-
         var entries = await _stream.ListAsync(new AgentStreamListOptions
         {
             ProjectId = options.ProjectId,
@@ -57,23 +110,56 @@ public sealed class SubagentRunService : ISubagentRunService
             Limit = Math.Clamp(options.SourceLimit, 1, 200)
         });
 
-        var events = entries
+        return entries
             .Where(entry => entry.EventType.StartsWith("subagent_", StringComparison.Ordinal))
             .OrderBy(entry => entry.CreatedAt)
             .ThenBy(entry => entry.Id)
             .ToList();
+    }
 
-        if (events.Count == 0)
+    private async Task<SubagentRunSummary?> BuildSummaryAsync(AgentRunRecord record)
+    {
+        var latest = record.LatestStreamEntryId is null ? null : await _stream.GetByIdAsync(record.LatestStreamEntryId.Value);
+        if (latest is null)
             return null;
 
-        var summary = BuildSummary(runId, events);
-        var artifacts = await ReadArtifactsAsync(runId, summary);
-        return new SubagentRunDetail
+        var started = record.StartedStreamEntryId is null ? null : await _stream.GetByIdAsync(record.StartedStreamEntryId.Value);
+        return BuildSummary(record, latest, started);
+    }
+
+    private static SubagentRunSummary BuildSummary(AgentRunRecord record, AgentStreamEntry latest, AgentStreamEntry? started)
+    {
+        return new SubagentRunSummary
         {
-            Summary = summary,
-            Events = events,
-            WorkEvents = BuildWorkEvents(events, artifacts),
-            Artifacts = artifacts
+            RunId = record.RunId,
+            State = record.State,
+            Schema = TextMetadata(latest, "schema") ?? TextMetadata(started, "schema"),
+            SchemaVersion = IntMetadata(latest, "schema_version") ?? IntMetadata(started, "schema_version"),
+            Latest = latest,
+            Started = started,
+            Role = record.Role ?? TextMetadata(latest, "role") ?? TextMetadata(started, "role"),
+            TaskId = record.TaskId ?? latest.TaskId ?? started?.TaskId ?? IntMetadata(latest, "task_id") ?? IntMetadata(started, "task_id"),
+            ProjectId = record.ProjectId ?? latest.ProjectId ?? started?.ProjectId,
+            Backend = record.Backend ?? TextMetadata(latest, "backend") ?? TextMetadata(started, "backend"),
+            Model = record.Model ?? TextMetadata(latest, "model") ?? TextMetadata(started, "model"),
+            OutputStatus = record.OutputStatus ?? TextMetadata(latest, "output_status"),
+            TimeoutKind = record.TimeoutKind ?? TextMetadata(latest, "timeout_kind"),
+            InfrastructureFailureReason = record.InfrastructureFailureReason ?? TextMetadata(latest, "infrastructure_failure_reason"),
+            InfrastructureWarningReason = record.InfrastructureWarningReason ?? TextMetadata(latest, "infrastructure_warning_reason"),
+            ExitCode = record.ExitCode ?? IntMetadata(latest, "exit_code"),
+            Signal = record.Signal ?? TextMetadata(latest, "signal"),
+            Pid = record.Pid ?? IntMetadata(latest, "pid"),
+            StderrPreview = TextMetadata(latest, "stderr_preview"),
+            FallbackModel = record.FallbackModel ?? TextMetadata(latest, "fallback_model"),
+            FallbackFromModel = record.FallbackFromModel ?? TextMetadata(latest, "fallback_from_model"),
+            FallbackFromExitCode = record.FallbackFromExitCode ?? IntMetadata(latest, "fallback_from_exit_code"),
+            HeartbeatCount = record.HeartbeatCount,
+            AssistantOutputCount = record.AssistantOutputCount,
+            LastHeartbeatAt = record.LastHeartbeatAt,
+            LastAssistantOutputAt = record.LastAssistantOutputAt,
+            DurationMs = record.DurationMs ?? IntMetadata(latest, "duration_ms"),
+            ArtifactDir = record.ArtifactDir ?? ArtifactDir(latest) ?? ArtifactDir(started),
+            EventCount = record.EventCount
         };
     }
 

@@ -324,6 +324,17 @@ public class AgentStreamApiTests : IAsyncLifetime
         Assert.Equal("/tmp/run-a", run.ArtifactDir);
         Assert.Equal(5, run.EventCount);
 
+        var runRecords = scope.ServiceProvider.GetRequiredService<IAgentRunRepository>();
+        var durableRecord = await runRecords.GetAsync("run-a", new SubagentRunListOptions
+        {
+            ProjectId = ProjectId,
+            TaskId = task.Id
+        });
+        Assert.NotNull(durableRecord);
+        Assert.Equal("timeout", durableRecord!.State);
+        Assert.Equal(timeout.Id, durableRecord.LatestStreamEntryId);
+        Assert.Equal(1, durableRecord.HeartbeatCount);
+
         var activeResponse = await _client.GetAsync($"/api/projects/{ProjectId}/subagent-runs?taskId={task.Id}&state=active");
         activeResponse.EnsureSuccessStatusCode();
         var activeRuns = await activeResponse.Content.ReadFromJsonAsync<List<SubagentRunSummary>>(JsonOpts);

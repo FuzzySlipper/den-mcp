@@ -451,11 +451,76 @@ public sealed class DatabaseInitializer
         CREATE INDEX IF NOT EXISTS idx_agent_stream_recipient_instance_created
             ON agent_stream_entries(recipient_instance_id, created_at DESC, id DESC)
             WHERE recipient_instance_id IS NOT NULL;
+
+        ------------------------------------------------------------
+        -- AGENT RUNS
+        ------------------------------------------------------------
+        CREATE TABLE IF NOT EXISTS agent_runs (
+            run_id                          TEXT PRIMARY KEY,
+            project_id                      TEXT REFERENCES projects(id) ON DELETE SET NULL,
+            task_id                         INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+            review_round_id                 INTEGER REFERENCES review_rounds(id) ON DELETE SET NULL,
+            workspace_id                    TEXT,
+            role                            TEXT,
+            backend                         TEXT,
+            model                           TEXT,
+            sender_instance_id              TEXT,
+            state                           TEXT NOT NULL DEFAULT 'unknown'
+                                            CHECK (state IN (
+                                                'running',
+                                                'retrying',
+                                                'aborting',
+                                                'rerun_requested',
+                                                'rerun_accepted',
+                                                'complete',
+                                                'failed',
+                                                'timeout',
+                                                'aborted',
+                                                'unknown'
+                                            )),
+            started_at                      TEXT,
+            ended_at                        TEXT,
+            duration_ms                     INTEGER,
+            pid                             INTEGER,
+            exit_code                       INTEGER,
+            signal                          TEXT,
+            timeout_kind                    TEXT,
+            output_status                   TEXT,
+            infrastructure_failure_reason   TEXT,
+            infrastructure_warning_reason   TEXT,
+            artifact_dir                    TEXT,
+            stdout_jsonl_path               TEXT,
+            stderr_log_path                 TEXT,
+            status_json_path                TEXT,
+            events_jsonl_path               TEXT,
+            rerun_of_run_id                 TEXT,
+            fallback_model                  TEXT,
+            fallback_from_model             TEXT,
+            fallback_from_exit_code         INTEGER,
+            latest_stream_entry_id          INTEGER REFERENCES agent_stream_entries(id) ON DELETE SET NULL,
+            started_stream_entry_id         INTEGER REFERENCES agent_stream_entries(id) ON DELETE SET NULL,
+            heartbeat_count                 INTEGER NOT NULL DEFAULT 0,
+            assistant_output_count          INTEGER NOT NULL DEFAULT 0,
+            event_count                     INTEGER NOT NULL DEFAULT 0,
+            last_heartbeat_at               TEXT,
+            last_assistant_output_at        TEXT,
+            created_at                      TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at                      TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_project_updated
+            ON agent_runs(project_id, updated_at DESC, latest_stream_entry_id DESC);
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_task_updated
+            ON agent_runs(task_id, updated_at DESC, latest_stream_entry_id DESC)
+            WHERE task_id IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_state_updated
+            ON agent_runs(state, updated_at DESC, latest_stream_entry_id DESC);
         """;
 
     private async Task RunMigrationsAsync(SqliteConnection connection)
     {
         await EnsureAgentGuidanceSchemaAsync(connection);
+        await EnsureAgentRunSchemaAsync(connection);
 
         // Add session_id column to agent_sessions if it doesn't exist.
         // SQLite has no ALTER TABLE ... ADD COLUMN IF NOT EXISTS,
@@ -579,6 +644,77 @@ public sealed class DatabaseInitializer
             CREATE INDEX IF NOT EXISTS idx_agent_guidance_document
             ON agent_guidance_entries(document_project_id, document_slug)
             """);
+    }
+
+    private static async Task EnsureAgentRunSchemaAsync(SqliteConnection connection)
+    {
+        await using var tableCmd = connection.CreateCommand();
+        tableCmd.CommandText = """
+            CREATE TABLE IF NOT EXISTS agent_runs (
+                run_id                          TEXT PRIMARY KEY,
+                project_id                      TEXT REFERENCES projects(id) ON DELETE SET NULL,
+                task_id                         INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+                review_round_id                 INTEGER REFERENCES review_rounds(id) ON DELETE SET NULL,
+                workspace_id                    TEXT,
+                role                            TEXT,
+                backend                         TEXT,
+                model                           TEXT,
+                sender_instance_id              TEXT,
+                state                           TEXT NOT NULL DEFAULT 'unknown'
+                                                CHECK (state IN (
+                                                    'running',
+                                                    'retrying',
+                                                    'aborting',
+                                                    'rerun_requested',
+                                                    'rerun_accepted',
+                                                    'complete',
+                                                    'failed',
+                                                    'timeout',
+                                                    'aborted',
+                                                    'unknown'
+                                                )),
+                started_at                      TEXT,
+                ended_at                        TEXT,
+                duration_ms                     INTEGER,
+                pid                             INTEGER,
+                exit_code                       INTEGER,
+                signal                          TEXT,
+                timeout_kind                    TEXT,
+                output_status                   TEXT,
+                infrastructure_failure_reason   TEXT,
+                infrastructure_warning_reason   TEXT,
+                artifact_dir                    TEXT,
+                stdout_jsonl_path               TEXT,
+                stderr_log_path                 TEXT,
+                status_json_path                TEXT,
+                events_jsonl_path               TEXT,
+                rerun_of_run_id                 TEXT,
+                fallback_model                  TEXT,
+                fallback_from_model             TEXT,
+                fallback_from_exit_code         INTEGER,
+                latest_stream_entry_id          INTEGER REFERENCES agent_stream_entries(id) ON DELETE SET NULL,
+                started_stream_entry_id         INTEGER REFERENCES agent_stream_entries(id) ON DELETE SET NULL,
+                heartbeat_count                 INTEGER NOT NULL DEFAULT 0,
+                assistant_output_count          INTEGER NOT NULL DEFAULT 0,
+                event_count                     INTEGER NOT NULL DEFAULT 0,
+                last_heartbeat_at               TEXT,
+                last_assistant_output_at        TEXT,
+                created_at                      TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at                      TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """;
+        await tableCmd.ExecuteNonQueryAsync();
+
+        await EnsureIndexAsync(connection, "idx_agent_runs_project_updated",
+            "CREATE INDEX IF NOT EXISTS idx_agent_runs_project_updated ON agent_runs(project_id, updated_at DESC, latest_stream_entry_id DESC)");
+        await EnsureIndexAsync(connection, "idx_agent_runs_task_updated",
+            """
+            CREATE INDEX IF NOT EXISTS idx_agent_runs_task_updated
+            ON agent_runs(task_id, updated_at DESC, latest_stream_entry_id DESC)
+            WHERE task_id IS NOT NULL
+            """);
+        await EnsureIndexAsync(connection, "idx_agent_runs_state_updated",
+            "CREATE INDEX IF NOT EXISTS idx_agent_runs_state_updated ON agent_runs(state, updated_at DESC, latest_stream_entry_id DESC)");
     }
 
     private static async Task TryAddColumnAsync(SqliteConnection connection, string table, string column, string columnDefinition)

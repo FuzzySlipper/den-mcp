@@ -19,11 +19,16 @@ public sealed class AgentStreamOpsService : IAgentStreamOpsService
 {
     private readonly IAgentStreamRepository _stream;
     private readonly ILogger<AgentStreamOpsService> _logger;
+    private readonly IAgentRunRepository? _agentRuns;
 
-    public AgentStreamOpsService(IAgentStreamRepository stream, ILogger<AgentStreamOpsService> logger)
+    public AgentStreamOpsService(
+        IAgentStreamRepository stream,
+        ILogger<AgentStreamOpsService> logger,
+        IAgentRunRepository? agentRuns = null)
     {
         _stream = stream;
         _logger = logger;
+        _agentRuns = agentRuns;
     }
 
     public async Task<AgentStreamEntry> AppendOpsAsync(AgentStreamEntry entry)
@@ -33,12 +38,32 @@ public sealed class AgentStreamOpsService : IAgentStreamOpsService
 
         try
         {
-            return await _stream.AppendAsync(entry);
+            var appended = await _stream.AppendAsync(entry);
+            await ProjectAgentRunAsync(appended);
+            return appended;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to append agent stream ops event {EventType}", entry.EventType);
             throw;
+        }
+    }
+
+    private async Task ProjectAgentRunAsync(AgentStreamEntry entry)
+    {
+        if (_agentRuns is null || !entry.EventType.StartsWith("subagent_", StringComparison.Ordinal))
+            return;
+
+        try
+        {
+            await _agentRuns.UpsertFromStreamEntryAsync(entry);
+        }
+        catch (Exception ex)
+        {
+            // agent_stream_entries remains the append-only audit log. If the mutable
+            // AgentRun projection misses an update, SubagentRunService can rebuild it
+            // from the stream during list/detail reads.
+            _logger.LogWarning(ex, "Failed to project sub-agent run event {EventType} from stream entry {EntryId}", entry.EventType, entry.Id);
         }
     }
 

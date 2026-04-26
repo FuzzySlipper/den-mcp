@@ -115,6 +115,28 @@ Completion metadata also includes execution status such as `exit_code`,
 `prompt_echo_detected`, `output_status`, and infrastructure failure/warning
 classification.
 
+## AgentRun Durable Projection
+
+Task `#806` promotes sub-agent run state into the first-class `agent_runs`
+table. `agent_stream_entries` remains the append-only lifecycle/audit log; the
+AgentRun record is a mutable projection optimized for list/detail filters,
+controls, retention, and future review/workspace linkage.
+
+The projection stores run identity and current state (`run_id`, project/task,
+optional `review_round_id`, optional `workspace_id`, role/backend/model,
+sender instance, state, start/end/duration, pid/exit/signal/timeout/output,
+infrastructure classification, artifact paths, rerun linkage, and counters such
+as heartbeats/assistant outputs/event count). New ops appended through
+`AgentStreamOpsService` update this projection from the existing `subagent_*`
+lifecycle events.
+
+Migration/backfill behavior is deliberately conservative: existing stream-only
+runs remain readable. `SubagentRunService` reads durable AgentRun records first,
+then merges stream-derived summaries as a fallback and rebuilds missing/stale
+AgentRun rows from `agent_stream_entries` during list/detail reads. This lets old
+artifact-backed runs stay inspectable without losing the audit log as the source
+of truth for event history.
+
 ## Agent Stream Events
 
 The agent stream is the live lifecycle bus. Important event types include:
