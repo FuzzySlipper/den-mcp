@@ -84,6 +84,7 @@ builder.Services.AddSingleton<IReviewWorkflowService, ReviewWorkflowService>();
 builder.Services.AddSingleton<IAgentRecipientResolver, AgentRecipientResolver>();
 builder.Services.AddSingleton<IAgentStreamMessageService, AgentStreamMessageService>();
 builder.Services.AddSingleton<ISubagentRunService, SubagentRunService>();
+builder.Services.AddSingleton<IAttentionService, AttentionService>();
 
 // Dispatch
 builder.Services.AddSingleton<IRoutingService, RoutingService>();
@@ -143,6 +144,7 @@ app.MapAgentRoutes();
 app.MapDispatchRoutes();
 app.MapAgentStreamRoutes();
 app.MapSubagentRunRoutes();
+app.MapAttentionRoutes();
 app.MapLibrarianRoutes();
 
 // MCP endpoint

@@ -13,6 +13,7 @@ import type {
   DocType,
   AgentSession,
   AgentStreamEntry,
+  AttentionItem,
   SubagentRunSummary,
   SubagentRunDetail,
   DispatchEntry,
@@ -205,6 +206,37 @@ export function searchDocuments(query: string, projectId?: string): Promise<Docu
 export function listActiveAgents(projectId?: string): Promise<AgentSession[]> {
   const q = buildQuery({ projectId });
   return get(`/api/agents/active${q}`);
+}
+
+// Attention
+
+export interface ListAttentionOpts {
+  projectId?: string;
+  taskId?: number;
+  kind?: string;
+  severity?: string;
+  limit?: number;
+}
+
+export function listAttention(opts: ListAttentionOpts = {}): Promise<AttentionItem[]> {
+  const q = buildQuery({
+    projectId: opts.projectId,
+    taskId: opts.taskId,
+    kind: opts.kind,
+    severity: opts.severity,
+    limit: opts.limit,
+  });
+  return get(`/api/attention${q}`);
+}
+
+export function listProjectAttention(projectId: string, opts: Omit<ListAttentionOpts, 'projectId'> = {}): Promise<AttentionItem[]> {
+  const q = buildQuery({
+    taskId: opts.taskId,
+    kind: opts.kind,
+    severity: opts.severity,
+    limit: opts.limit,
+  });
+  return get(`/api/projects/${esc(projectId)}/attention${q}`);
 }
 
 // Agent stream

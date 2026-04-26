@@ -361,6 +361,23 @@ export interface SubagentRunWorkEvent {
   [key: string]: unknown;
 }
 
+export interface AttentionItem {
+  id: string;
+  project_id: string;
+  task_id: number | null;
+  run_id: string | null;
+  review_round_id: number | null;
+  dispatch_id: number | null;
+  message_id: number | null;
+  kind: string;
+  severity: string;
+  title: string;
+  summary: string;
+  created_at: string;
+  latest_at: string;
+  suggested_action: string;
+}
+
 export interface SubagentRunArtifactSnapshot {
   dir: string;
   readable: boolean;
