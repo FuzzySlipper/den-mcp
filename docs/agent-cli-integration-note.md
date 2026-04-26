@@ -3,6 +3,8 @@
 Date: 2026-04-20
 Task: `#570`
 
+Status update, 2026-04-26: this dispatch-prompt delivery plan is historical/legacy bridge context. The canonical conductor workflow now uses task/thread messages plus agent-stream/run state; see [ADR: Retire dispatches from the canonical conductor workflow](dispatch-retirement-adr.md).
+
 This note verifies what the currently installed `claude`, `codex`, and `omp` CLIs support for startup prompts, session resume, automation, and integration hooks before `den-agent` hard-codes prompt delivery behavior.
 
 ## Versions checked locally

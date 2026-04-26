@@ -1,6 +1,6 @@
 # ADR: Retire dispatches from the canonical conductor workflow
 
-Status: Accepted  
+Status: Accepted
 Date: 2026-04-26
 
 ## Context
@@ -25,6 +25,6 @@ Dispatch rows and APIs remain for historical data and legacy bridges, but automa
 ## Consequences
 
 - Agents should not check pending dispatches during normal startup or drain loops.
-- Operator UI should not present dispatch approval/reject as a default main-path control.
+- The default Den web operator UI should not present dispatch approval/reject as a main-path control.
 - Existing dispatch rows are preserved and can still be inspected for debugging or bridge compatibility.
 - Legacy bridge deployments that still consume dispatches must opt in deliberately through routing config and should be treated as compatibility mode, not the default Den workflow.

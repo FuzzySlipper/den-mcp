@@ -2,12 +2,14 @@
 
 Date: 2026-04-23
 
+Status update, 2026-04-26: generated guidance now treats dispatches as legacy/debug artifacts rather than normal startup/drain work; see [ADR: Retire dispatches from the canonical conductor workflow](dispatch-retirement-adr.md).
+
 ## Decision
 
 Keep the AGENTS generator and the shared source-of-truth fragments in `den-mcp` directly.
 
 Rationale:
-- The workflow guidance already lives with Den concepts such as tasks, dispatches, review packets, and agent handoffs.
+- The workflow guidance already lives with Den concepts such as tasks, review packets, agent handoffs, agent-stream attention, and legacy dispatch compatibility notes.
 - The first consumers are existing Den-managed repos on the same machine, so a shared package would add distribution overhead before the format is stable.
 - A simple script in `den-mcp` is enough to validate the model before considering extraction.
 

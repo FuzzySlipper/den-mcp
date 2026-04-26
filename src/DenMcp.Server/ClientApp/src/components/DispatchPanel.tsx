@@ -1,6 +1,8 @@
 import type { DispatchEntry } from '../api/types';
 import { formatTimeAgo, truncate } from '../utils';
 
+// Legacy/debug component retained for a possible explicit dispatch view.
+// The default dashboard no longer renders dispatch approval/reject controls.
 interface Props {
   dispatches: DispatchEntry[];
   isGlobal: boolean;

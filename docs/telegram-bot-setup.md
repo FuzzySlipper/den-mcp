@@ -2,13 +2,15 @@
 
 Date: 2026-04-22
 
+Status update, 2026-04-26: this dispatch-based Telegram wake path is legacy bridge context. The canonical conductor workflow no longer uses dispatches by default; see [ADR: Retire dispatches from the canonical conductor workflow](dispatch-retirement-adr.md).
+
 This runbook covers the first real-world setup path for using Telegram as the
 wake surface for a per-project Codex bridge.
 
 The current design is:
 
-- Telegram is a wake and operator surface.
-- Den remains the source of truth for dispatch context.
+- Telegram is a wake and operator surface for the legacy bridge.
+- Den remains the source of truth for task/thread context; dispatch context is legacy-only.
 - `den-codex-bridge` owns the live Codex app-server session per project.
 - `den-telegram-relay` talks to the Telegram Bot API and forwards small wake
   requests into the local bridge.

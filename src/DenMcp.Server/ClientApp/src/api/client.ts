@@ -295,7 +295,9 @@ export function controlSubagentRun(runId: string, opts: ControlSubagentRunOpts):
   });
 }
 
-// Dispatches
+// Legacy dispatch helpers.
+// The default dashboard intentionally does not import these; keep them available
+// for historical dispatch detail links or a future explicit legacy/debug view.
 
 export interface ListDispatchesOpts {
   projectId?: string;
