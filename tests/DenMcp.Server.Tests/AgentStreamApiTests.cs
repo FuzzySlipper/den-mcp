@@ -172,6 +172,33 @@ public class AgentStreamApiTests : IAsyncLifetime
         var projectEntry = Assert.Single(projectEntries!);
         Assert.Equal(projectOps.Id, projectEntry.Id);
         Assert.Equal(ProjectId, projectEntry.ProjectId);
+
+        var metadataRun = await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_heartbeat",
+            ProjectId = ProjectId,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+            Metadata = Metadata("""{"run_id":"metadata-filter-run","role":"planner"}""")
+        });
+
+        await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_heartbeat",
+            ProjectId = ProjectId,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+            Metadata = Metadata("""{"run_id":"other-run","role":"planner"}""")
+        });
+
+        var metadataResponse = await _client.GetAsync($"/api/projects/{ProjectId}/agent-stream?streamKind=ops&metadataRunId=metadata-filter-run");
+        metadataResponse.EnsureSuccessStatusCode();
+
+        var metadataEntries = await metadataResponse.Content.ReadFromJsonAsync<List<AgentStreamEntry>>(JsonOpts);
+        var metadataEntry = Assert.Single(metadataEntries!);
+        Assert.Equal(metadataRun.Id, metadataEntry.Id);
     }
 
     [Fact]
@@ -363,6 +390,104 @@ public class AgentStreamApiTests : IAsyncLifetime
         Assert.Equal(1, detail.Summary.AssistantOutputCount);
         Assert.NotNull(detail.Summary.LastAssistantOutputAt);
         Assert.Equal(2, detail.Summary.EventCount);
+    }
+
+    [Fact]
+    public async Task RestSubagentRunControl_PostsAbortRequestForActiveRun()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IAgentStreamRepository>();
+
+        await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_started",
+            ProjectId = ProjectId,
+            Sender = "pi",
+            SenderInstanceId = "pi-runner-1",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+            Metadata = Metadata("""{"schema":"den_subagent_run","schema_version":1,"run_id":"run-control","role":"planner","backend":"pi-cli"}""")
+        });
+
+        var response = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/subagent-runs/run-control/control", new
+        {
+            action = "abort",
+            requested_by = "web-ui",
+            reason = "smoke test"
+        });
+        response.EnsureSuccessStatusCode();
+
+        var entry = await response.Content.ReadFromJsonAsync<AgentStreamEntry>(JsonOpts);
+        Assert.NotNull(entry);
+        Assert.Equal("subagent_abort_requested", entry!.EventType);
+        Assert.Equal(ProjectId, entry.ProjectId);
+        Assert.Equal("web-ui", entry.Sender);
+        Assert.Equal("pi-runner-1", entry.RecipientInstanceId);
+        Assert.Equal("run-control", entry.Metadata!.Value.GetProperty("run_id").GetString());
+        Assert.Equal("abort", entry.Metadata!.Value.GetProperty("action").GetString());
+        Assert.Equal("smoke test", entry.Metadata!.Value.GetProperty("reason").GetString());
+
+        var detailResponse = await _client.GetAsync($"/api/projects/{ProjectId}/subagent-runs/run-control");
+        detailResponse.EnsureSuccessStatusCode();
+
+        var detail = await detailResponse.Content.ReadFromJsonAsync<SubagentRunDetail>(JsonOpts);
+        Assert.NotNull(detail);
+        Assert.Equal("aborting", detail!.Summary.State);
+        Assert.Equal(entry.Id, detail.Summary.Latest.Id);
+    }
+
+    [Fact]
+    public async Task RestSubagentRunControl_PostsRerunRequestForTerminalRun()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IAgentStreamRepository>();
+
+        await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_completed",
+            ProjectId = ProjectId,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+            Metadata = Metadata("""{"schema":"den_subagent_run","schema_version":1,"run_id":"run-rerun","role":"coder","backend":"pi-cli"}""")
+        });
+
+        var response = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/subagent-runs/run-rerun/control", new
+        {
+            action = "rerun",
+            requested_by = "web-ui"
+        });
+        response.EnsureSuccessStatusCode();
+
+        var entry = await response.Content.ReadFromJsonAsync<AgentStreamEntry>(JsonOpts);
+        Assert.NotNull(entry);
+        Assert.Equal("subagent_rerun_requested", entry!.EventType);
+        Assert.Equal("run-rerun", entry.Metadata!.Value.GetProperty("run_id").GetString());
+        Assert.Equal("rerun", entry.Metadata!.Value.GetProperty("action").GetString());
+
+        var detailResponse = await _client.GetAsync($"/api/projects/{ProjectId}/subagent-runs/run-rerun");
+        detailResponse.EnsureSuccessStatusCode();
+
+        var detail = await detailResponse.Content.ReadFromJsonAsync<SubagentRunDetail>(JsonOpts);
+        Assert.NotNull(detail);
+        Assert.Equal("rerun_requested", detail!.Summary.State);
+
+        await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_rerun_accepted",
+            ProjectId = ProjectId,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+            Metadata = Metadata("""{"run_id":"run-rerun","role":"coder","action":"rerun"}""")
+        });
+
+        var acceptedResponse = await _client.GetAsync($"/api/projects/{ProjectId}/subagent-runs/run-rerun");
+        acceptedResponse.EnsureSuccessStatusCode();
+
+        var acceptedDetail = await acceptedResponse.Content.ReadFromJsonAsync<SubagentRunDetail>(JsonOpts);
+        Assert.NotNull(acceptedDetail);
+        Assert.Equal("rerun_accepted", acceptedDetail!.Summary.State);
     }
 
     [Fact]

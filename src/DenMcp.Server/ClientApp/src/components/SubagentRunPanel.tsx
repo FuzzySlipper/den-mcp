@@ -19,7 +19,7 @@ interface Props {
   onLimitChange: (limit: number) => void;
   onRefresh: () => void;
   onSelectRun: (run: SubagentRunSummary) => void;
-  onOpenTask: (taskId: number) => void;
+  onOpenTask: (taskId: number, projectId?: string | null) => void;
 }
 
 const SUBAGENT_LIMITS = [8, 20, 50];
@@ -116,7 +116,7 @@ export function SubagentRunPanel({
                       className="stream-link"
                       onClick={event => {
                         event.stopPropagation();
-                        onOpenTask(run.task_id!);
+                        onOpenTask(run.task_id!, run.project_id);
                       }}
                     >
                       Task #{run.task_id}

@@ -8,6 +8,9 @@ namespace DenMcp.Server.Routes;
 
 public static class SubagentRunRoutes
 {
+    private const string SubagentRunSchema = "den_subagent_run";
+    private const int SubagentRunSchemaVersion = 1;
+
     private static readonly JsonSerializerOptions SseJsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
@@ -54,6 +57,18 @@ public static class SubagentRunRoutes
                 : Results.NotFound(new { error = $"Sub-agent run {runId} not found" });
         });
 
+        app.MapPost("/api/subagent-runs/{runId}/control", async (
+            ISubagentRunService service,
+            IAgentStreamOpsService ops,
+            AgentStreamRealtimeHub realtime,
+            string runId,
+            SubagentRunControlRequest req,
+            string? projectId,
+            int? taskId) =>
+        {
+            return await RequestSubagentRunControlAsync(service, ops, realtime, runId, req, projectId, taskId);
+        });
+
         app.MapGet("/api/projects/{projectId}/subagent-runs", async (
             ISubagentRunService service,
             string projectId,
@@ -97,7 +112,93 @@ public static class SubagentRunRoutes
                 ? Results.Ok(detail)
                 : Results.NotFound(new { error = $"Sub-agent run {runId} not found" });
         });
+
+        app.MapPost("/api/projects/{projectId}/subagent-runs/{runId}/control", async (
+            ISubagentRunService service,
+            IAgentStreamOpsService ops,
+            AgentStreamRealtimeHub realtime,
+            string projectId,
+            string runId,
+            SubagentRunControlRequest req,
+            int? taskId) =>
+        {
+            return await RequestSubagentRunControlAsync(service, ops, realtime, runId, req, projectId, taskId);
+        });
     }
+
+    private static async Task<IResult> RequestSubagentRunControlAsync(
+        ISubagentRunService service,
+        IAgentStreamOpsService ops,
+        AgentStreamRealtimeHub realtime,
+        string runId,
+        SubagentRunControlRequest req,
+        string? projectId,
+        int? taskId)
+    {
+        var action = NormalizeAction(req.Action);
+        if (action is null)
+            return Results.BadRequest(new { error = "Control action must be 'abort' or 'rerun'." });
+
+        var detail = await service.GetAsync(runId, new SubagentRunListOptions
+        {
+            ProjectId = projectId,
+            TaskId = taskId
+        });
+        if (detail is null)
+            return Results.NotFound(new { error = $"Sub-agent run {runId} not found" });
+
+        var summary = detail.Summary;
+        if (action == "abort" && !IsAbortable(summary.State))
+            return Results.Conflict(new { error = $"Sub-agent run {runId} is {summary.State}; only active runs can be aborted." });
+
+        if (action == "rerun" && IsAbortable(summary.State))
+            return Results.Conflict(new { error = $"Sub-agent run {runId} is {summary.State}; abort it before requesting a rerun." });
+
+        var requestedBy = string.IsNullOrWhiteSpace(req.RequestedBy) ? "web-ui" : req.RequestedBy.Trim();
+        var eventType = action == "abort" ? "subagent_abort_requested" : "subagent_rerun_requested";
+        var entry = await ops.AppendOpsAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = eventType,
+            ProjectId = summary.ProjectId ?? projectId,
+            TaskId = summary.TaskId ?? taskId,
+            Sender = requestedBy,
+            RecipientAgent = summary.Latest.Sender,
+            RecipientInstanceId = summary.Latest.SenderInstanceId,
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+            Body = action == "abort"
+                ? $"Abort requested for {summary.Role ?? "sub-agent"} run {runId}."
+                : $"Rerun requested for {summary.Role ?? "sub-agent"} run {runId}.",
+            Metadata = JsonSerializer.SerializeToElement(new
+            {
+                schema = SubagentRunSchema,
+                schema_version = SubagentRunSchemaVersion,
+                run_id = runId,
+                role = summary.Role,
+                task_id = summary.TaskId ?? taskId,
+                backend = summary.Backend,
+                model = summary.Model,
+                action,
+                requested_by = requestedBy,
+                reason = string.IsNullOrWhiteSpace(req.Reason) ? null : req.Reason.Trim(),
+                source_state = summary.State,
+                requested_at = DateTime.UtcNow
+            }),
+            DedupKey = $"subagent-control:{summary.ProjectId ?? projectId ?? "_global"}:{runId}:{action}"
+        });
+        realtime.Publish(entry);
+
+        return Results.Created($"/api/agent-stream/{entry.Id}", entry);
+    }
+
+    private static string? NormalizeAction(string? action)
+    {
+        var normalized = action?.Trim().ToLowerInvariant();
+        return normalized is "abort" or "rerun" ? normalized : null;
+    }
+
+    private static bool IsAbortable(string state) =>
+        state is "running" or "retrying" or "aborting";
 
     private static async Task StreamSubagentRunEvents(
         HttpContext context,
@@ -140,3 +241,8 @@ public static class SubagentRunRoutes
         await response.Body.FlushAsync(cancellationToken);
     }
 }
+
+public sealed record SubagentRunControlRequest(
+    string? Action,
+    string? RequestedBy = null,
+    string? Reason = null);

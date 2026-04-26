@@ -3,7 +3,7 @@ import type { AgentStreamEntry } from '../api/types';
 interface Props {
   entry: AgentStreamEntry;
   onClose: () => void;
-  onOpenTask: (taskId: number) => void;
+  onOpenTask: (taskId: number, projectId?: string | null) => void;
   onOpenThread: (entry: AgentStreamEntry) => void;
   onOpenDispatch: (dispatchId: number) => void;
 }
@@ -69,7 +69,7 @@ export function AgentStreamDetail({
             <h3>Links</h3>
             <div className="detail-action-row">
               {entry.task_id != null && (
-                <button type="button" className="dispatch-action" onClick={() => onOpenTask(entry.task_id!)}>
+                <button type="button" className="dispatch-action" onClick={() => onOpenTask(entry.task_id!, entry.project_id)}>
                   Open task #{entry.task_id}
                 </button>
               )}

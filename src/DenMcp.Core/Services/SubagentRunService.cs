@@ -132,6 +132,10 @@ public sealed class SubagentRunService : ISubagentRunService
         "subagent_assistant_output" => "running",
         "subagent_prompt_echo_detected" => "running",
         "subagent_fallback_started" => "retrying",
+        "subagent_abort_requested" => "aborting",
+        "subagent_rerun_requested" => "rerun_requested",
+        "subagent_rerun_accepted" => "rerun_accepted",
+        "subagent_rerun_unavailable" => "failed",
         "subagent_completed" => "complete",
         "subagent_timeout" => "timeout",
         "subagent_startup_timeout" => "timeout",
@@ -150,7 +154,7 @@ public sealed class SubagentRunService : ISubagentRunService
 
         return filter.ToLowerInvariant() switch
         {
-            "active" => state is "running" or "retrying",
+            "active" => state is "running" or "retrying" or "aborting" or "rerun_requested",
             "problem" => state is "failed" or "timeout" or "aborted" or "unknown",
             "complete" => state == "complete",
             _ => state.Equals(filter, StringComparison.OrdinalIgnoreCase)

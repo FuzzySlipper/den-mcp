@@ -3,7 +3,7 @@ import type { DispatchEntry } from '../api/types';
 interface Props {
   dispatch: DispatchEntry;
   onClose: () => void;
-  onOpenTask: (taskId: number) => void;
+  onOpenTask: (taskId: number, projectId?: string | null) => void;
 }
 
 export function DispatchDetail({ dispatch, onClose, onOpenTask }: Props) {
@@ -28,7 +28,7 @@ export function DispatchDetail({ dispatch, onClose, onOpenTask }: Props) {
               <>
                 <dt>Task</dt>
                 <dd>
-                  <button type="button" className="stream-link" onClick={() => onOpenTask(dispatch.task_id!)}>
+                  <button type="button" className="stream-link" onClick={() => onOpenTask(dispatch.task_id!, dispatch.project_id)}>
                     #{dispatch.task_id}
                   </button>
                 </dd>

@@ -5,7 +5,7 @@ interface Props {
   entries: AgentStreamEntry[];
   isGlobal: boolean;
   onSelect: (entry: AgentStreamEntry) => void;
-  onOpenTask: (taskId: number) => void;
+  onOpenTask: (taskId: number, projectId?: string | null) => void;
   onOpenThread: (entry: AgentStreamEntry) => void;
   onOpenDispatch: (dispatchId: number) => void;
 }
@@ -82,7 +82,7 @@ export function AgentStreamFeed({
                     className="stream-link"
                     onClick={event => {
                       event.stopPropagation();
-                      onOpenTask(entry.task_id!);
+                      onOpenTask(entry.task_id!, entry.project_id);
                     }}
                   >
                     Task #{entry.task_id}

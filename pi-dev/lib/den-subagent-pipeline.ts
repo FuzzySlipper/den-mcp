@@ -21,12 +21,16 @@ export type SubagentRunIdentity = {
   tools?: string;
   sessionMode?: string;
   session?: string;
+  rerunOfRunId?: string;
   artifacts?: SubagentArtifacts;
 };
 
 export type SubagentRunState =
   | "running"
   | "retrying"
+  | "aborting"
+  | "rerun_requested"
+  | "rerun_accepted"
   | "complete"
   | "failed"
   | "timeout"
@@ -40,6 +44,10 @@ export type SubagentOpsEventType =
   | "subagent_assistant_output"
   | "subagent_prompt_echo_detected"
   | "subagent_fallback_started"
+  | "subagent_abort_requested"
+  | "subagent_rerun_requested"
+  | "subagent_rerun_accepted"
+  | "subagent_rerun_unavailable"
   | "subagent_completed"
   | "subagent_timeout"
   | "subagent_startup_timeout"
@@ -65,6 +73,7 @@ export function buildSubagentRunMetadata(
     tools: identity.tools ?? null,
     session_mode: identity.sessionMode ?? "fresh",
     session: identity.session ?? null,
+    rerun_of_run_id: identity.rerunOfRunId ?? null,
     artifacts: identity.artifacts ?? null,
     ...extra,
   });
@@ -111,6 +120,14 @@ export function subagentRunStateFromOpsEventType(eventType: string): SubagentRun
       return "running";
     case "subagent_fallback_started":
       return "retrying";
+    case "subagent_abort_requested":
+      return "aborting";
+    case "subagent_rerun_requested":
+      return "rerun_requested";
+    case "subagent_rerun_accepted":
+      return "rerun_accepted";
+    case "subagent_rerun_unavailable":
+      return "failed";
     case "subagent_completed":
       return "complete";
     case "subagent_timeout":

@@ -12,6 +12,14 @@ export function stateFromSubagentEvent(eventType: string): SubagentRunState {
       return 'running';
     case 'subagent_fallback_started':
       return 'retrying';
+    case 'subagent_abort_requested':
+      return 'aborting';
+    case 'subagent_rerun_requested':
+      return 'rerun_requested';
+    case 'subagent_rerun_accepted':
+      return 'rerun_accepted';
+    case 'subagent_rerun_unavailable':
+      return 'failed';
     case 'subagent_completed':
       return 'complete';
     case 'subagent_timeout':
@@ -63,7 +71,7 @@ export function summarizeSubagentRunEntry(entry: AgentStreamEntry): string {
 export function subagentRunMatchesFilter(run: SubagentRunSummary, filter: SubagentRunFilter): boolean {
   switch (filter) {
     case 'active':
-      return run.state === 'running' || run.state === 'retrying';
+      return run.state === 'running' || run.state === 'retrying' || run.state === 'aborting' || run.state === 'rerun_requested';
     case 'problem':
       return run.state === 'failed' || run.state === 'timeout' || run.state === 'aborted' || run.state === 'unknown';
     case 'complete':

@@ -31,6 +31,7 @@ export type RunOptions = {
   tools?: string;
   cwd?: string;
   postResult?: boolean;
+  rerunOfRunId?: string;
 };
 
 export type SubagentResult = {
@@ -74,6 +75,7 @@ export type SubagentBackendInput = {
   recorder: SubagentRunRecorder;
   startedAt: string;
   signal: AbortSignal | undefined;
+  controlSource?: SubagentControlSource;
   onUpdate: ((partial: string) => void) | undefined;
 };
 
@@ -82,10 +84,24 @@ export type SubagentBackend = {
   run(input: SubagentBackendInput): Promise<SubagentResult>;
 };
 
+export type SubagentControlAction = "abort" | "rerun";
+
+export type SubagentControlRequest = {
+  action: SubagentControlAction;
+  entryId?: number;
+  requestedBy?: string;
+  reason?: string;
+};
+
+export type SubagentControlSource = {
+  poll(): Promise<SubagentControlRequest | undefined>;
+};
+
 const DEFAULT_STARTUP_TIMEOUT_MS = 60_000;
 const DEFAULT_FINAL_DRAIN_MS = 5_000;
 const DEFAULT_FORCE_KILL_MS = 5_000;
 const DEFAULT_HEARTBEAT_MS = 30_000;
+const DEFAULT_CONTROL_POLL_MS = 2_000;
 
 export function createSubagentBackend(): SubagentBackend {
   return piCliSubagentBackend;
@@ -97,7 +113,7 @@ export const piCliSubagentBackend: SubagentBackend = {
 };
 
 export async function runPiCliSubagent(input: SubagentBackendInput): Promise<SubagentResult> {
-  const { cfg, options, cwd, runId, recorder, startedAt, signal, onUpdate } = input;
+  const { cfg, options, cwd, runId, recorder, startedAt, signal, controlSource, onUpdate } = input;
   const artifacts = recorder.artifacts;
   const sessionMode = options.sessionMode ?? "fresh";
   const args = ["--mode", "json", "-p"];
@@ -129,6 +145,7 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
   const finalDrainMs = envMillis("DEN_PI_SUBAGENT_FINAL_DRAIN_MS", DEFAULT_FINAL_DRAIN_MS);
   const forceKillMs = envMillis("DEN_PI_SUBAGENT_FORCE_KILL_MS", DEFAULT_FORCE_KILL_MS);
   const heartbeatMs = envMillis("DEN_PI_SUBAGENT_HEARTBEAT_MS", DEFAULT_HEARTBEAT_MS);
+  const controlPollMs = envMillis("DEN_PI_SUBAGENT_CONTROL_POLL_MS", DEFAULT_CONTROL_POLL_MS);
 
   const termination = await new Promise<{ exitCode: number; signal?: string }>((resolve) => {
     const proc = spawn(command, args, {
@@ -145,6 +162,9 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
     let finalDrainTimer: ReturnType<typeof setTimeout> | undefined;
     let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
     let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+    let controlTimer: ReturnType<typeof setInterval> | undefined;
+    let controlPollInFlight = false;
+    const handledControlEntryIds = new Set<number>();
     let abortHandler: (() => void) | undefined;
 
     const clearTimer = (timer: ReturnType<typeof setTimeout> | ReturnType<typeof setInterval> | undefined) => {
@@ -160,6 +180,7 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
       finalDrainTimer = undefined;
       forceKillTimer = undefined;
       heartbeatTimer = undefined;
+      controlTimer = undefined;
     };
 
     const resolveOnce = (code: number | null, closeSignal?: NodeJS.Signals | null) => {
@@ -181,7 +202,11 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
       forceKillTimer.unref?.();
     };
 
-    const terminate = (kind: SubagentResult["timeout_kind"], markAborted = false) => {
+    const terminate = (
+      kind: SubagentResult["timeout_kind"],
+      markAborted = false,
+      eventExtra: JsonObject = {},
+    ) => {
       if (settled) return;
       if (kind) timeoutKind = kind;
       if (markAborted) aborted = true;
@@ -189,9 +214,38 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
         type: kind ? `subagent.${kind}_timeout` : "subagent.abort",
         ts: Date.now(),
         pid: proc.pid ?? null,
+        ...eventExtra,
       });
       killProcessTree(proc, "SIGTERM");
       armForceKill();
+    };
+
+    const pollControls = async () => {
+      if (!controlSource || controlPollInFlight || settled) return;
+      controlPollInFlight = true;
+      try {
+        const request = await controlSource.poll();
+        if (!request || settled) return;
+        if (request.entryId !== undefined) {
+          if (handledControlEntryIds.has(request.entryId)) return;
+          handledControlEntryIds.add(request.entryId);
+        }
+
+        if (request.action === "abort") {
+          stderr += `\n[den-subagent] Abort requested${request.requestedBy ? ` by ${request.requestedBy}` : ""}.`;
+          await recorder.appendStderr(`${request.requestedBy ? `[den-subagent] Abort requested by ${request.requestedBy}.` : "[den-subagent] Abort requested."}\n`);
+          terminate(undefined, true, {
+            source: "den_control",
+            request_entry_id: request.entryId ?? null,
+            requested_by: request.requestedBy ?? null,
+            reason: request.reason ?? null,
+          });
+        }
+      } catch {
+        // Control polling is best-effort; Den outages should not break the child run.
+      } finally {
+        controlPollInFlight = false;
+      }
     };
 
     void recorder.writeStatus({
@@ -231,6 +285,11 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
         });
       }, heartbeatMs);
       heartbeatTimer.unref?.();
+    }
+    if (controlSource && controlPollMs > 0) {
+      void pollControls();
+      controlTimer = setInterval(() => void pollControls(), controlPollMs);
+      controlTimer.unref?.();
     }
 
     if (startupTimeoutMs > 0) {
@@ -288,7 +347,7 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
     });
 
     abortHandler = () => {
-      terminate(undefined, true);
+      terminate(undefined, true, { source: "tool_signal" });
     };
     if (signal?.aborted) abortHandler();
     else signal?.addEventListener("abort", abortHandler, { once: true });
@@ -340,7 +399,13 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
   await recorder.writeStatus({
     schema: SUBAGENT_RUN_SCHEMA,
     schema_version: SUBAGENT_RUN_SCHEMA_VERSION,
-    state: subagentSucceeded(result) ? "complete" : "failed",
+    state: subagentSucceeded(result)
+      ? "complete"
+      : result.aborted
+        ? "aborted"
+        : result.timeout_kind
+          ? "timeout"
+          : "failed",
     run_id: runId,
     role: options.role,
     task_id: options.taskId ?? null,

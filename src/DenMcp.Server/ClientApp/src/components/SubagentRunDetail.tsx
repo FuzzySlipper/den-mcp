@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { getSubagentRun } from '../api/client';
+import { controlSubagentRun, getSubagentRun, type SubagentRunControlAction } from '../api/client';
 import type { AgentStreamEntry, SubagentRunSummary } from '../api/types';
 import { usePolling } from '../hooks/usePolling';
 import { formatInfrastructureFailureReason, formatSubagentDuration, summarizeSubagentRunEntry } from '../subagentRuns';
@@ -8,7 +8,7 @@ import { truncate } from '../utils';
 interface Props {
   run: SubagentRunSummary;
   onClose: () => void;
-  onOpenTask: (taskId: number) => void;
+  onOpenTask: (taskId: number, projectId?: string | null) => void;
   onOpenEntry: (entry: AgentStreamEntry) => void;
 }
 
@@ -22,6 +22,8 @@ function formatDate(iso: string): string {
 
 export function SubagentRunDetail({ run, onClose, onOpenTask, onOpenEntry }: Props) {
   const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
+  const [controlPending, setControlPending] = useState<SubagentRunControlAction | null>(null);
+  const [controlError, setControlError] = useState<string | null>(null);
   const fetchRun = useCallback(
     () => getSubagentRun(run.run_id, {
       projectId: run.project_id ?? undefined,
@@ -29,15 +31,37 @@ export function SubagentRunDetail({ run, onClose, onOpenTask, onOpenEntry }: Pro
     }),
     [run.project_id, run.run_id, run.task_id],
   );
-  const { data: detail, error } = usePolling(fetchRun, run.state === 'running' || run.state === 'retrying' ? 2000 : 10_000);
+  const { data: detail, error, refresh } = usePolling(fetchRun, run.state === 'running' || run.state === 'retrying' || run.state === 'aborting' ? 2000 : 10_000);
   const summary = detail?.summary ?? run;
   const events = detail?.events ?? [run.latest];
   const artifacts = detail?.artifacts ?? null;
+  const canAbort = summary.state === 'running' || summary.state === 'retrying' || summary.state === 'aborting';
+  const canRequestRerun = !canAbort && summary.state !== 'rerun_requested';
   const handleCopy = useCallback(async (label: string, value: string) => {
     await navigator.clipboard.writeText(value);
     setCopiedLabel(label);
     window.setTimeout(() => setCopiedLabel(current => current === label ? null : current), 1400);
   }, []);
+  const handleControl = useCallback(async (action: SubagentRunControlAction) => {
+    const label = action === 'abort' ? 'Abort' : 'Request rerun for';
+    if (!window.confirm(`${label} sub-agent run ${summary.run_id}?`)) return;
+
+    setControlPending(action);
+    setControlError(null);
+    try {
+      await controlSubagentRun(summary.run_id, {
+        action,
+        projectId: summary.project_id ?? undefined,
+        taskId: summary.task_id ?? undefined,
+        requestedBy: 'web-ui',
+      });
+      refresh();
+    } catch (e) {
+      setControlError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setControlPending(null);
+    }
+  }, [refresh, summary.project_id, summary.run_id, summary.task_id]);
 
   return (
     <div className="detail-overlay">
@@ -144,6 +168,26 @@ export function SubagentRunDetail({ run, onClose, onOpenTask, onOpenEntry }: Pro
         <div className="detail-section">
           <h3>Links</h3>
           <div className="detail-action-row">
+            {canAbort && (
+              <button
+                type="button"
+                className="dispatch-action dispatch-action-reject"
+                disabled={controlPending !== null}
+                onClick={() => void handleControl('abort')}
+              >
+                {controlPending === 'abort' ? 'Aborting...' : 'Abort'}
+              </button>
+            )}
+            {canRequestRerun && (
+              <button
+                type="button"
+                className="dispatch-action dispatch-action-approve"
+                disabled={controlPending !== null}
+                onClick={() => void handleControl('rerun')}
+              >
+                {controlPending === 'rerun' ? 'Requesting...' : 'Request rerun'}
+              </button>
+            )}
             <button type="button" className="dispatch-action" onClick={() => void handleCopy('run', summary.run_id)}>
               {copiedLabel === 'run' ? 'Copied run' : 'Copy run'}
             </button>
@@ -156,7 +200,7 @@ export function SubagentRunDetail({ run, onClose, onOpenTask, onOpenEntry }: Pro
               </button>
             )}
             {summary.task_id != null && (
-              <button type="button" className="dispatch-action" onClick={() => onOpenTask(summary.task_id!)}>
+              <button type="button" className="dispatch-action" onClick={() => onOpenTask(summary.task_id!, summary.project_id)}>
                 Open task #{summary.task_id}
               </button>
             )}
@@ -168,6 +212,13 @@ export function SubagentRunDetail({ run, onClose, onOpenTask, onOpenEntry }: Pro
             {summary.artifact_dir && <span className="subagent-detail-artifact">{summary.artifact_dir}</span>}
           </div>
         </div>
+
+        {controlError && (
+          <div className="detail-section">
+            <h3>Control</h3>
+            <div className="detail-error">Control request failed: {controlError}</div>
+          </div>
+        )}
 
         {error && (
           <div className="detail-section">

@@ -220,6 +220,7 @@ export interface ListAgentStreamOpts {
   recipientAgent?: string;
   recipientRole?: string;
   recipientInstanceId?: string;
+  metadataRunId?: string;
   limit?: number;
 }
 
@@ -235,6 +236,7 @@ export function listAgentStream(opts: ListAgentStreamOpts = {}): Promise<AgentSt
     recipientAgent: opts.recipientAgent,
     recipientRole: opts.recipientRole,
     recipientInstanceId: opts.recipientInstanceId,
+    metadataRunId: opts.metadataRunId,
     limit: opts.limit,
   });
   return get(`/api/agent-stream${q}`);
@@ -271,6 +273,26 @@ export function getSubagentRun(runId: string, opts: Omit<ListSubagentRunsOpts, '
     taskId: opts.taskId,
   });
   return get(`/api/subagent-runs/${esc(runId)}${q}`);
+}
+
+export type SubagentRunControlAction = 'abort' | 'rerun';
+
+export interface ControlSubagentRunOpts extends Omit<ListSubagentRunsOpts, 'state' | 'limit'> {
+  action: SubagentRunControlAction;
+  requestedBy?: string;
+  reason?: string;
+}
+
+export function controlSubagentRun(runId: string, opts: ControlSubagentRunOpts): Promise<AgentStreamEntry> {
+  const q = buildQuery({
+    projectId: opts.projectId,
+    taskId: opts.taskId,
+  });
+  return post(`/api/subagent-runs/${esc(runId)}/control${q}`, {
+    action: opts.action,
+    requested_by: opts.requestedBy ?? 'web-ui',
+    reason: opts.reason,
+  });
 }
 
 // Dispatches

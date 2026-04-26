@@ -23,6 +23,7 @@ public sealed class AgentStreamTools
         [Description("Optional recipient agent filter.")] string? recipient_agent = null,
         [Description("Optional recipient role filter.")] string? recipient_role = null,
         [Description("Optional recipient instance id filter.")] string? recipient_instance_id = null,
+        [Description("Optional metadata run_id filter for sub-agent run events.")] string? metadata_run_id = null,
         [Description("Maximum entries to return. Default 50, max 200.")] int limit = 50)
     {
         AgentStreamKind? parsedKind = null;
@@ -50,6 +51,7 @@ public sealed class AgentStreamTools
             RecipientAgent = recipient_agent,
             RecipientRole = recipient_role,
             RecipientInstanceId = recipient_instance_id,
+            MetadataRunId = metadata_run_id,
             Limit = limit
         });
 

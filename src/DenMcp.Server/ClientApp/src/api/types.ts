@@ -285,7 +285,17 @@ export interface AgentStreamEntry {
   created_at: string;
 }
 
-export type SubagentRunState = 'running' | 'retrying' | 'complete' | 'failed' | 'timeout' | 'aborted' | 'unknown';
+export type SubagentRunState =
+  | 'running'
+  | 'retrying'
+  | 'aborting'
+  | 'rerun_requested'
+  | 'rerun_accepted'
+  | 'complete'
+  | 'failed'
+  | 'timeout'
+  | 'aborted'
+  | 'unknown';
 
 export interface SubagentRunSummary {
   run_id: string;

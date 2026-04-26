@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -7,6 +7,7 @@ import { createSubagentRunRecorder } from '../../pi-dev/lib/den-subagent-recorde
 import {
   addSessionArgs,
   buildSubagentPrompt,
+  runPiCliSubagent,
   subagentSucceeded,
 } from '../../pi-dev/lib/den-subagent-runner.ts';
 import {
@@ -32,6 +33,11 @@ function assistantMessage(text, extra = {}) {
     content: [{ type: 'text', text }],
     ...extra,
   };
+}
+
+function restoreEnv(name, value) {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
 }
 
 test('parsePiStdoutLine preserves json and raw stdout separately', () => {
@@ -75,6 +81,7 @@ test('subagent run schema helpers emit canonical metadata and event mapping', ()
     tools: null,
     session_mode: 'fresh',
     session: null,
+    rerun_of_run_id: null,
     artifacts,
     output_status: 'assistant_final',
   });
@@ -91,6 +98,10 @@ test('subagent run schema helpers emit canonical metadata and event mapping', ()
   assert.equal(subagentOpsEventTypeForEvent('subagent.spawn_error'), 'subagent_spawn_error');
   assert.equal(subagentOpsEventTypeForEvent('message_end'), undefined);
   assert.equal(subagentRunStateFromOpsEventType('subagent_assistant_output'), 'running');
+  assert.equal(subagentRunStateFromOpsEventType('subagent_abort_requested'), 'aborting');
+  assert.equal(subagentRunStateFromOpsEventType('subagent_rerun_requested'), 'rerun_requested');
+  assert.equal(subagentRunStateFromOpsEventType('subagent_rerun_accepted'), 'rerun_accepted');
+  assert.equal(subagentRunStateFromOpsEventType('subagent_rerun_unavailable'), 'failed');
   assert.equal(subagentRunStateFromOpsEventType('subagent_completed'), 'complete');
   assert.equal(subagentRunStateFromOpsEventType('subagent_failed'), 'failed');
   assert.equal(subagentRunStateFromOpsEventType('something_else'), 'unknown');
@@ -165,6 +176,69 @@ test('pi cli runner helpers keep prompt, session, and success semantics stable',
   }), true);
   assert.equal(subagentSucceeded({ assistant_final_found: false, aborted: false, exit_code: 0 }), false);
   assert.equal(subagentSucceeded({ assistant_final_found: true, aborted: true, exit_code: 0 }), false);
+});
+
+test('pi cli runner observes Den abort control request and terminates child', async (t) => {
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  const previousPiBin = process.env.DEN_PI_SUBAGENT_PI_BIN;
+  const previousPollMs = process.env.DEN_PI_SUBAGENT_CONTROL_POLL_MS;
+  const previousStartupMs = process.env.DEN_PI_SUBAGENT_STARTUP_TIMEOUT_MS;
+  const previousForceKillMs = process.env.DEN_PI_SUBAGENT_FORCE_KILL_MS;
+  const tmp = await mkdtemp(path.join(os.tmpdir(), 'den-subagent-abort-'));
+  const fakePi = path.join(tmp, 'fake-pi');
+  await writeFile(fakePi, [
+    '#!/usr/bin/env bash',
+    'trap "exit 143" TERM',
+    'while true; do sleep 1; done',
+    '',
+  ].join('\n'), 'utf8');
+  await chmod(fakePi, 0o755);
+
+  process.env.PI_CODING_AGENT_DIR = path.join(tmp, 'agent');
+  process.env.DEN_PI_SUBAGENT_PI_BIN = fakePi;
+  process.env.DEN_PI_SUBAGENT_CONTROL_POLL_MS = '25';
+  process.env.DEN_PI_SUBAGENT_STARTUP_TIMEOUT_MS = '10000';
+  process.env.DEN_PI_SUBAGENT_FORCE_KILL_MS = '1000';
+  t.after(async () => {
+    restoreEnv('PI_CODING_AGENT_DIR', previousAgentDir);
+    restoreEnv('DEN_PI_SUBAGENT_PI_BIN', previousPiBin);
+    restoreEnv('DEN_PI_SUBAGENT_CONTROL_POLL_MS', previousPollMs);
+    restoreEnv('DEN_PI_SUBAGENT_STARTUP_TIMEOUT_MS', previousStartupMs);
+    restoreEnv('DEN_PI_SUBAGENT_FORCE_KILL_MS', previousForceKillMs);
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  const recorder = await createSubagentRunRecorder('run-abort-control');
+  let polls = 0;
+  const result = await runPiCliSubagent({
+    cfg: { projectId: 'den-mcp', agent: 'pi', role: 'conductor', instanceId: 'pi-main', baseUrl: 'http://den' },
+    options: { role: 'planner', prompt: 'wait forever' },
+    cwd: tmp,
+    runId: 'run-abort-control',
+    recorder,
+    startedAt: new Date().toISOString(),
+    signal: undefined,
+    controlSource: {
+      async poll() {
+        polls++;
+        return polls === 1
+          ? { action: 'abort', entryId: 42, requestedBy: 'web-ui', reason: 'test abort' }
+          : undefined;
+      },
+    },
+    onUpdate: undefined,
+  });
+
+  assert.equal(result.aborted, true);
+  assert.equal(result.infrastructure_failure_reason, 'aborted');
+  assert.equal(subagentSucceeded(result), false);
+
+  const eventText = await readFile(recorder.artifacts.events_jsonl_path, 'utf8');
+  const statusText = await readFile(recorder.artifacts.status_json_path, 'utf8');
+  assert.match(eventText, /"type":"subagent.abort"/);
+  assert.match(eventText, /"request_entry_id":42/);
+  assert.match(eventText, /"requested_by":"web-ui"/);
+  assert.match(statusText, /"state": "aborted"/);
 });
 
 test('output extractor accepts assistant final output and records model', () => {

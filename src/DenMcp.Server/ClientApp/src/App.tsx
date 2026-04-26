@@ -38,6 +38,7 @@ import type { SubagentRunFilter } from './subagentRuns';
 export default function App() {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
+  const [selectedTaskProjectId, setSelectedTaskProjectId] = useState<string | null>(null);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
   const [selectedStreamEntry, setSelectedStreamEntry] = useState<AgentStreamEntry | null>(null);
   const [selectedSubagentRun, setSelectedSubagentRun] = useState<SubagentRunSummary | null>(null);
@@ -209,6 +210,7 @@ export default function App() {
   const handleProjectSelect = useCallback((id: string) => {
     setSelectedProject(id);
     setSelectedTaskId(null);
+    setSelectedTaskProjectId(null);
     setSelectedMessage(null);
     setSelectedStreamEntry(null);
     setSelectedSubagentRun(null);
@@ -216,14 +218,20 @@ export default function App() {
     setSelectedDoc(null);
   }, []);
 
-  const handleTaskSelect = useCallback((taskId: number) => {
+  const handleTaskSelect = useCallback((taskId: number, projectId?: string | null) => {
+    const targetProjectId = projectId?.trim() || effectiveProject;
+    if (targetProjectId && targetProjectId !== selectedProject) {
+      setSelectedProject(targetProjectId);
+    }
     setSelectedTaskId(taskId);
+    setSelectedTaskProjectId(targetProjectId ?? null);
     setSelectedMessage(null);
     setSelectedStreamEntry(null);
     setSelectedSubagentRun(null);
     setSelectedDispatch(null);
     setSelectedDoc(null);
-  }, []);
+    setViewMode('tasks');
+  }, [effectiveProject, selectedProject]);
 
   const handleMessageSelect = useCallback((message: Message) => {
     setSelectedMessage(message);
@@ -541,12 +549,15 @@ export default function App() {
       {/* Detail overlays */}
       {selectedTaskId != null && effectiveProject && (
         <TaskDetail
-          key={`${effectiveProject}:${selectedTaskId}`}
-          projectId={effectiveProject}
+          key={`${selectedTaskProjectId ?? effectiveProject}:${selectedTaskId}`}
+          projectId={selectedTaskProjectId ?? effectiveProject}
           taskId={selectedTaskId}
           onSelectTask={handleTaskSelect}
           onSelectMessage={handleMessageSelect}
-          onClose={() => setSelectedTaskId(null)}
+          onClose={() => {
+            setSelectedTaskId(null);
+            setSelectedTaskProjectId(null);
+          }}
         />
       )}
 

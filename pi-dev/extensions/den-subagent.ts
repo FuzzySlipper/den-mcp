@@ -12,6 +12,8 @@ import {
   defaultToolsForRole,
   formatDuration,
   subagentSucceeded,
+  type SubagentControlRequest,
+  type SubagentControlSource,
   type DenConfig,
   type RunOptions,
   type SubagentResult,
@@ -42,8 +44,40 @@ const CODER_PROMPT_SLUG = "pi-coder-subagent-prompt";
 const REVIEWER_PROMPT_SLUG = "pi-reviewer-subagent-prompt";
 const GLOBAL_SUFFIX = "-default";
 const DEN_CONFIG_FILENAME = "den-config.json";
+const RERUN_POLL_MS = 3_000;
+const MAX_RERUN_SNAPSHOTS = 50;
+
+type RerunSnapshot = {
+  cfg: DenConfig;
+  options: RunOptions;
+  defaultCwd: string;
+  cwd: string;
+  backend: string;
+};
+
+let rerunPollTimer: ReturnType<typeof setInterval> | undefined;
+let rerunPollInFlight = false;
+const rerunSnapshots = new Map<string, RerunSnapshot>();
+const handledRerunRequestIds = new Set<number>();
+const activeRerunRequestIds = new Set<number>();
 
 export default function denSubagent(pi: ExtensionAPI) {
+  clearRerunExecutor();
+
+  pi.on("session_start", async (_event, ctx) => {
+    clearRerunExecutor();
+    try {
+      const cfg = await resolveConfig(ctx);
+      startRerunExecutor(cfg, ctx);
+    } catch {
+      // The main Den extension owns user-facing offline/unbound status.
+    }
+  });
+
+  pi.on("session_shutdown", () => {
+    clearRerunExecutor();
+  });
+
   pi.registerCommand("den-config", {
     description: "Configure Den Pi integration settings, including sub-agent role defaults.",
     handler: async (_args, ctx) => {
@@ -403,6 +437,10 @@ async function runDenSubagent(
   const effectiveOptions = await applyConfiguredDefaults(options, cwd);
   const runId = makeRunId(cfg, effectiveOptions);
   const backend = createSubagentBackend();
+  rememberRerunSnapshot(cfg, runId, {
+    ...effectiveOptions,
+    cwd,
+  }, defaultCwd, cwd, backend.name);
   const recorder = await createSubagentRunRecorder(runId, {
     createProgressPublisher: (artifacts) => createSubagentProgressPublisher({
       cfg,
@@ -439,6 +477,7 @@ async function runDenSubagent(
       tools: effectiveOptions.tools ?? defaultToolsForRole(effectiveOptions.role),
       sessionMode: effectiveOptions.sessionMode ?? "fresh",
       session: effectiveOptions.session,
+      rerunOfRunId: effectiveOptions.rerunOfRunId,
       artifacts,
     }, { started_at: startedAt }),
   });
@@ -451,6 +490,7 @@ async function runDenSubagent(
     recorder,
     startedAt,
     signal,
+    controlSource: createSubagentControlSource(cfg, runId),
     onUpdate,
   });
   await recorder.flushEvents();
@@ -472,6 +512,7 @@ async function runDenSubagent(
         tools: effectiveOptions.tools ?? defaultToolsForRole(effectiveOptions.role),
         sessionMode: effectiveOptions.sessionMode ?? "fresh",
         session: effectiveOptions.session,
+        rerunOfRunId: effectiveOptions.rerunOfRunId,
         artifacts: result.artifacts,
       }, {
         failed_model: result.model ?? effectiveOptions.model ?? null,
@@ -496,6 +537,7 @@ async function runDenSubagent(
       recorder,
       startedAt,
       signal,
+      controlSource: createSubagentControlSource(cfg, runId),
       onUpdate,
     });
     await recorder.flushEvents();
@@ -524,6 +566,7 @@ async function runDenSubagent(
       tools: effectiveOptions.tools ?? defaultToolsForRole(effectiveOptions.role),
       sessionMode: result.session_mode,
       session: result.session,
+      rerunOfRunId: effectiveOptions.rerunOfRunId,
       artifacts: result.artifacts,
     }, {
       fallback_model: effectiveOptions.fallbackModel ?? null,
@@ -565,6 +608,7 @@ async function runDenSubagent(
         tools: effectiveOptions.tools ?? defaultToolsForRole(effectiveOptions.role),
         sessionMode: result.session_mode,
         session: result.session,
+        rerunOfRunId: effectiveOptions.rerunOfRunId,
         artifacts: result.artifacts,
       }),
       exit_code: result.exit_code,
@@ -943,6 +987,7 @@ function createSubagentProgressPublisher(
           tools: context.options.tools ?? defaultToolsForRole(context.options.role),
           sessionMode: context.options.sessionMode ?? "fresh",
           session: context.options.session,
+          rerunOfRunId: context.options.rerunOfRunId,
           artifacts: context.artifacts,
         }, { event }),
       });
@@ -975,10 +1020,209 @@ function formatProgressOpsBody(role: string, event: JsonObject): string {
   }
 }
 
+function rememberRerunSnapshot(
+  cfg: DenConfig,
+  runId: string,
+  options: RunOptions,
+  defaultCwd: string,
+  cwd: string,
+  backend: string,
+) {
+  const key = rerunSnapshotKey(cfg.projectId, runId);
+  rerunSnapshots.delete(key);
+  rerunSnapshots.set(key, {
+    cfg: { ...cfg },
+    options: { ...options },
+    defaultCwd,
+    cwd,
+    backend,
+  });
+
+  while (rerunSnapshots.size > MAX_RERUN_SNAPSHOTS) {
+    const oldest = rerunSnapshots.keys().next().value;
+    if (!oldest) break;
+    rerunSnapshots.delete(oldest);
+  }
+}
+
+function startRerunExecutor(cfg: DenConfig, ctx: any) {
+  clearRerunExecutor();
+  rerunPollTimer = setInterval(() => {
+    void pollRerunRequests(cfg, ctx);
+  }, RERUN_POLL_MS);
+  rerunPollTimer.unref?.();
+}
+
+function clearRerunExecutor() {
+  if (rerunPollTimer) clearInterval(rerunPollTimer);
+  rerunPollTimer = undefined;
+  rerunPollInFlight = false;
+}
+
+async function pollRerunRequests(cfg: DenConfig, _ctx: any) {
+  if (rerunPollInFlight) return;
+  rerunPollInFlight = true;
+  try {
+    const query = new URLSearchParams({
+      streamKind: "ops",
+      eventType: "subagent_rerun_requested",
+      recipientInstanceId: cfg.instanceId,
+      limit: "20",
+    });
+    const entries = await denFetch(cfg, `/api/projects/${esc(cfg.projectId)}/agent-stream?${query.toString()}`);
+    if (!Array.isArray(entries)) return;
+
+    const requests = entries
+      .filter((entry) => typeof entry?.id === "number")
+      .filter((entry) => !handledRerunRequestIds.has(entry.id) && !activeRerunRequestIds.has(entry.id))
+      .sort((a, b) => a.id - b.id);
+
+    for (const entry of requests) {
+      const runId = metadataString(entry, "run_id");
+      if (!runId) {
+        handledRerunRequestIds.add(entry.id);
+        continue;
+      }
+
+      const snapshot = rerunSnapshots.get(rerunSnapshotKey(cfg.projectId, runId));
+      if (!snapshot) {
+        handledRerunRequestIds.add(entry.id);
+        await appendRerunUnavailable(cfg, entry, runId, "snapshot_not_available");
+        continue;
+      }
+
+      activeRerunRequestIds.add(entry.id);
+      void executeRerunRequest(entry, runId, snapshot)
+        .catch((error) => appendRerunUnavailable(
+          cfg,
+          entry,
+          runId,
+          "rerun_failed_to_start",
+          error instanceof Error ? error.message : String(error),
+        ))
+        .finally(() => {
+          activeRerunRequestIds.delete(entry.id);
+          handledRerunRequestIds.add(entry.id);
+        })
+        .catch(() => {
+          // The request will remain visible in Den; avoid an unhandled timer rejection.
+        });
+    }
+  } catch {
+    // Rerun polling is advisory; Den outages should not disturb active Pi use.
+  } finally {
+    rerunPollInFlight = false;
+  }
+}
+
+async function executeRerunRequest(entry: any, sourceRunId: string, snapshot: RerunSnapshot) {
+  await appendOps(snapshot.cfg, "subagent_rerun_accepted", {
+    taskId: snapshot.options.taskId,
+    body: `Accepted rerun request for ${snapshot.options.role} sub-agent run ${sourceRunId}.`,
+    metadata: buildSubagentRunMetadata({
+      runId: sourceRunId,
+      role: snapshot.options.role,
+      taskId: snapshot.options.taskId,
+      cwd: snapshot.cwd,
+      backend: snapshot.backend,
+      model: snapshot.options.model,
+      tools: snapshot.options.tools ?? defaultToolsForRole(snapshot.options.role),
+      sessionMode: snapshot.options.sessionMode ?? "fresh",
+      session: snapshot.options.session,
+    }, {
+      action: "rerun",
+      request_entry_id: entry.id,
+      requested_by: metadataString(entry, "requested_by") ?? normalizeString(entry.sender),
+    }),
+    dedupKey: `subagent-rerun-accepted:${snapshot.cfg.projectId}:${entry.id}`,
+  });
+
+  await runDenSubagent(
+    snapshot.cfg,
+    {
+      ...snapshot.options,
+      cwd: snapshot.cwd,
+      sessionMode: "fresh",
+      session: undefined,
+      rerunOfRunId: sourceRunId,
+    },
+    snapshot.defaultCwd,
+    undefined,
+    undefined,
+  );
+}
+
+async function appendRerunUnavailable(
+  cfg: DenConfig,
+  entry: any,
+  runId: string,
+  reason: string,
+  error?: string,
+) {
+  const role = metadataString(entry, "role") ?? "subagent";
+  const taskId = optionalNumber(entry.task_id) ?? optionalNumber(entry.metadata?.task_id);
+  await appendOps(cfg, "subagent_rerun_unavailable", {
+    taskId,
+    body: `Cannot rerun ${role} sub-agent run ${runId}: ${reason.replace(/_/g, " ")}.`,
+    metadata: {
+      schema: SUBAGENT_RUN_SCHEMA,
+      schema_version: SUBAGENT_RUN_SCHEMA_VERSION,
+      run_id: runId,
+      role,
+      task_id: taskId ?? null,
+      action: "rerun",
+      request_entry_id: entry.id,
+      requested_by: metadataString(entry, "requested_by") ?? normalizeString(entry.sender) ?? null,
+      reason,
+      error: error ?? null,
+    },
+    dedupKey: `subagent-rerun-unavailable:${cfg.projectId}:${entry.id}`,
+  });
+}
+
+function rerunSnapshotKey(projectId: string, runId: string): string {
+  return `${projectId}:${runId}`;
+}
+
+function createSubagentControlSource(cfg: DenConfig, runId: string): SubagentControlSource {
+  let lastSeenEntryId = 0;
+  return {
+    async poll(): Promise<SubagentControlRequest | undefined> {
+      const query = new URLSearchParams({
+        streamKind: "ops",
+        eventType: "subagent_abort_requested",
+        metadataRunId: runId,
+        limit: "5",
+      });
+      const entries = await denFetch(cfg, `/api/projects/${esc(cfg.projectId)}/agent-stream?${query.toString()}`);
+      if (!Array.isArray(entries)) return undefined;
+
+      const controls = entries
+        .filter((entry) => typeof entry?.id === "number" && entry.id > lastSeenEntryId)
+        .sort((a, b) => a.id - b.id);
+
+      for (const entry of controls) {
+        lastSeenEntryId = Math.max(lastSeenEntryId, entry.id);
+        return {
+          action: "abort",
+          entryId: entry.id,
+          requestedBy: metadataString(entry, "requested_by") ?? normalizeString(entry.sender),
+          reason: metadataString(entry, "reason"),
+        };
+      }
+      return undefined;
+    },
+  };
+}
+
+function metadataString(entry: any, key: string): string | undefined {
+  return normalizeString(entry?.metadata?.[key]);
+}
+
 async function appendOps(
   cfg: DenConfig,
   eventType: string,
-  options: { taskId?: number; body: string; metadata: JsonObject },
+  options: { taskId?: number; body: string; metadata: JsonObject; dedupKey?: string },
 ) {
   return denFetch(cfg, `/api/projects/${esc(cfg.projectId)}/agent-stream/ops`, {
     method: "POST",
@@ -992,6 +1236,7 @@ async function appendOps(
       delivery_mode: "record_only",
       body: options.body,
       metadata: JSON.stringify(options.metadata),
+      dedup_key: options.dedupKey,
     },
   });
 }

@@ -37,6 +37,10 @@ test('subagent run helpers format labels and summaries', () => {
   assert.equal(stateFromSubagentEvent('subagent_heartbeat'), 'running');
   assert.equal(stateFromSubagentEvent('subagent_assistant_output'), 'running');
   assert.equal(stateFromSubagentEvent('subagent_fallback_started'), 'retrying');
+  assert.equal(stateFromSubagentEvent('subagent_abort_requested'), 'aborting');
+  assert.equal(stateFromSubagentEvent('subagent_rerun_requested'), 'rerun_requested');
+  assert.equal(stateFromSubagentEvent('subagent_rerun_accepted'), 'rerun_accepted');
+  assert.equal(stateFromSubagentEvent('subagent_rerun_unavailable'), 'failed');
   assert.equal(stateFromSubagentEvent('subagent_completed'), 'complete');
   assert.equal(stateFromSubagentEvent('subagent_timeout'), 'timeout');
   assert.equal(stateFromSubagentEvent('subagent_startup_timeout'), 'timeout');
@@ -63,6 +67,8 @@ test('subagent run filters group operational states', () => {
 
   assert.equal(subagentRunMatchesFilter(run('running'), 'active'), true);
   assert.equal(subagentRunMatchesFilter(run('retrying'), 'active'), true);
+  assert.equal(subagentRunMatchesFilter(run('aborting'), 'active'), true);
+  assert.equal(subagentRunMatchesFilter(run('rerun_requested'), 'active'), true);
   assert.equal(subagentRunMatchesFilter(run('complete'), 'active'), false);
   assert.equal(subagentRunMatchesFilter(run('failed'), 'problem'), true);
   assert.equal(subagentRunMatchesFilter(run('timeout'), 'problem'), true);

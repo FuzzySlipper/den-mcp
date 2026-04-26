@@ -1134,7 +1134,9 @@ html, body, #root {
 }
 
 .subagent-state-running,
-.subagent-state-retrying {
+.subagent-state-retrying,
+.subagent-state-aborting,
+.subagent-state-rerun_requested {
   background: #3b2a14;
   color: var(--yellow);
 }
@@ -1142,6 +1144,11 @@ html, body, #root {
 .subagent-state-complete {
   background: #1a2e1a;
   color: var(--green);
+}
+
+.subagent-state-rerun_accepted {
+  background: #233029;
+  color: var(--cyan);
 }
 
 .subagent-state-failed,
