@@ -75,10 +75,11 @@ function summarizeRun(run: SubagentRunSummary): string {
 
 function nextAction(detail: TaskDetailType, runs: SubagentRunSummary[]): string {
   const activeRun = runs.find(run => isActiveRunState(run.state));
-  const problemRun = runs.find(run => isProblemRunState(run.state));
+  const latestRun = runs[0] ?? null;
+  const currentProblemRun = latestRun && isProblemRunState(latestRun.state) ? latestRun : null;
   const currentRound = detail.review_workflow.current_round;
   if (activeRun) return `Monitor ${activeRun.role ?? 'agent'} run ${activeRun.run_id.slice(0, 8)} or abort if it drifts.`;
-  if (problemRun) return `Inspect ${problemRun.state} run ${problemRun.run_id.slice(0, 8)} and rerun or fix the task.`;
+  if (currentProblemRun) return `Inspect latest ${currentProblemRun.state} run ${currentProblemRun.run_id.slice(0, 8)} and rerun or fix the task.`;
   if (detail.task.status === 'blocked') return 'Resolve dependencies or unblock the task before assigning more work.';
   if (detail.open_review_findings.length > 0) return 'Address open review findings, then request rereview.';
   if (detail.task.status === 'review' && currentRound?.verdict === 'looks_good') return 'Confirm the reviewed head still matches, then merge.';
@@ -162,8 +163,8 @@ export function TaskDetail({ projectId, taskId, onSelectTask, onSelectMessage, o
   const { task } = detail;
   const currentRound = detail.review_workflow.current_round;
   const activeRuns = runs.filter(run => isActiveRunState(run.state));
-  const problemRuns = runs.filter(run => isProblemRunState(run.state));
   const latestRun = runs[0] ?? null;
+  const latestProblemRun = latestRun && isProblemRunState(latestRun.state) ? latestRun : null;
   const operatorNextAction = nextAction(detail, runs);
 
   const handleTaskNavigation = (nextTaskId: number) => {
@@ -207,7 +208,7 @@ export function TaskDetail({ projectId, taskId, onSelectTask, onSelectMessage, o
         <div className="detail-section workspace-section">
           <h3>Workspace</h3>
           <div className="workspace-grid">
-            <div className={`workspace-card ${activeRuns.length > 0 ? 'workspace-card-active' : problemRuns.length > 0 ? 'workspace-card-problem' : ''}`}>
+            <div className={`workspace-card ${activeRuns.length > 0 ? 'workspace-card-active' : latestProblemRun ? 'workspace-card-problem' : ''}`}>
               <span>Running</span>
               <strong>{activeRuns.length > 0 ? `${activeRuns.length} active run${activeRuns.length === 1 ? '' : 's'}` : latestRun ? `last ${latestRun.state}` : 'no runs yet'}</strong>
               <p>{activeRuns[0] ? summarizeRun(activeRuns[0]) : latestRun ? summarizeRun(latestRun) : 'No sub-agent activity is linked to this task yet.'}</p>

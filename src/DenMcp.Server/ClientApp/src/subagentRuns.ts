@@ -285,6 +285,9 @@ export function groupSubagentWorkEvents(events: SubagentRunWorkEvent[]): Subagen
 
   events.forEach((event, index) => {
     if (event.type === 'subagent.work_message_end' && hasToolCalls(event)) {
+      if (preview(event.text_preview)) {
+        cards.push(createCardFromEvent(event, index, 'assistant', 'Assistant commentary'));
+      }
       event.tool_calls?.forEach((toolCall, toolIndex) => {
         const synthetic: SubagentRunWorkEvent = {
           ...event,

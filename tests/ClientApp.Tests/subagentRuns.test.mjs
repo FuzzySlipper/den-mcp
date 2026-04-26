@@ -106,6 +106,7 @@ test('subagent work event grouping creates operator cards and activity summary',
       type: 'subagent.work_message_end',
       ts: 2000,
       role: 'assistant',
+      text_preview: 'I found the likely area and will search broadly.',
       tool_calls: [{ id: 'call-1', name: 'bash', args_preview: '{"command":"find / -name secrets"}' }],
     },
     {
@@ -130,24 +131,27 @@ test('subagent work event grouping creates operator cards and activity summary',
   ];
 
   const cards = groupSubagentWorkEvents(events);
-  assert.equal(cards.length, 3);
+  assert.equal(cards.length, 4);
   assert.equal(cards[0].kind, 'assistant');
   assert.equal(cards[0].textPreview, 'I will inspect the project.');
-  assert.equal(cards[1].kind, 'tool');
-  assert.equal(cards[1].toolName, 'bash');
-  assert.equal(cards[1].status, 'error');
-  assert.equal(cards[1].eventCount, 3);
-  assert.equal(cards[1].warning, 'broad filesystem search');
-  assert.match(summarizeSubagentWorkCard(cards[1]), /permission denied/);
-  assert.equal(cards[2].kind, 'lifecycle');
+  assert.equal(cards[1].kind, 'assistant');
+  assert.equal(cards[1].title, 'Assistant commentary');
+  assert.equal(cards[1].textPreview, 'I found the likely area and will search broadly.');
+  assert.equal(cards[2].kind, 'tool');
+  assert.equal(cards[2].toolName, 'bash');
+  assert.equal(cards[2].status, 'error');
+  assert.equal(cards[2].eventCount, 3);
+  assert.equal(cards[2].warning, 'broad filesystem search');
+  assert.match(summarizeSubagentWorkCard(cards[2]), /permission denied/);
+  assert.equal(cards[3].kind, 'lifecycle');
 
   const activity = summarizeSubagentWorkActivity(events);
   assert.equal(activity.toolCallCount, 1);
   assert.equal(activity.errorCount, 1);
-  assert.equal(activity.assistantMessageCount, 1);
+  assert.equal(activity.assistantMessageCount, 2);
   assert.equal(activity.lifecycleCount, 1);
   assert.equal(activity.lastToolName, 'bash');
-  assert.equal(activity.lastAssistantPreview, 'I will inspect the project.');
+  assert.equal(activity.lastAssistantPreview, 'I found the likely area and will search broadly.');
   assert.equal(activity.latestAt, 2500);
 });
 
