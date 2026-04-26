@@ -17,7 +17,7 @@ public sealed class MessageTools
         IDispatchDetectionService detection,
         ILogger<MessageTools> logger,
         [Description("Project ID.")] string project_id,
-        [Description("Your agent identity, e.g. 'claude-code'.")] string sender,
+        [Description("Your agent identity, e.g. 'pi' or another manual agent identity.")] string sender,
         [Description("Message body (markdown).")] string content,
         [Description("Attach to a task by ID.")] int? task_id = null,
         [Description("Reply to an existing message (forms a thread).")] int? thread_id = null,

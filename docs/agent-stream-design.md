@@ -2,13 +2,13 @@
 
 Date: 2026-04-23
 
-Status update, 2026-04-26: dispatches are no longer the canonical wake/work queue. See [ADR: Retire dispatches from the canonical conductor workflow](dispatch-retirement-adr.md). Signal/Telegram mobile bridges are retired from the supported runtime; see [Legacy Mobile Bridge Integrations](legacy-mobile-bridges.md). Historical dispatch/bridge references in this document describe the original bridge design; the current normal path is task/thread records plus agent-stream ops/run state.
+Status update, 2026-04-26: dispatches are no longer the canonical wake/work queue. See [ADR: Retire dispatches from the canonical conductor workflow](dispatch-retirement-adr.md). Signal/Telegram mobile bridges and Codex/Claude dispatch bridges are retired from the supported runtime; see [Legacy Mobile Bridge Integrations](legacy-mobile-bridges.md) and [Legacy Codex/Claude Bridge Notes](legacy-codex-claude-bridges.md). Historical dispatch/bridge references in this document describe the original bridge design; the current normal path is Pi/Den web plus task/thread records and agent-stream ops/run state.
 
 This note proposes a Den-native global agent stream for thin operational
 handoffs and targeted lightweight messages across all projects.
 
 The intent is to make agent-to-agent coordination visible and auditable without
-turning adapter transports, Claude Channels, or Codex app-server bridges into the primary
+turning adapter transports or retired bridge experiments into the primary
 record of workflow state.
 
 ## Why add this layer
@@ -102,9 +102,9 @@ The stream records that a handoff or attention-worthy event happened. Bridges sh
 
 The stream is Den-owned. Delivery remains adapter-specific:
 
-- Codex receives work through `den-codex-bridge` and app-server.
-- Claude receives work through a Den-backed Claude Channel plugin.
-- Retired mobile bridges such as Telegram are historical examples only; future adapters should consume Den-owned stream/attention/task context rather than becoming a workflow record.
+- Pi/conductor runs and Den web/operator views are the supported active path.
+- Retired Codex/Claude bridge experiments (`den-codex-bridge`, `den-agent`, Claude channel snippets) are historical examples only.
+- Future adapters should consume Den-owned stream/attention/task context rather than becoming a workflow record.
 
 The stream should therefore be treated as a coordination layer, not a transport
 implementation.
@@ -202,8 +202,9 @@ CREATE TABLE agent_instance_bindings (
     role             TEXT,
     transport_kind   TEXT NOT NULL
                      CHECK (transport_kind IN (
-                         'codex_app_server',
-                         'claude_channel',
+                         'pi_conductor',
+                         'local_adapter',
+                         'manual_mcp',
                          'other'
                      )),
     session_id       TEXT,
@@ -223,8 +224,7 @@ CREATE INDEX idx_agent_bindings_family_project
 
 This is what allows a single global stream to coexist with:
 
-- multiple Codex instances
-- multiple Claude instances
+- multiple Pi/conductor or future adapter instances
 - multiple projects
 - project-local reviewer/implementer pairings
 
@@ -361,7 +361,7 @@ This keeps the stream thin while making the workflow globally visible.
 The design should deliberately leave room for flows like:
 
 - `@user should I do X?`
-- `@codex-mcp-den yes, do X`
+- `@pi yes, do X`
 
 That does not require chat-first UX in v1. It only requires:
 
@@ -485,9 +485,8 @@ chat-heavy workflow too early.
 
 ### Slice 6: bridge integration
 
-- Codex bridge consumes relevant wake-worthy stream entries or future attention
-  items; derived dispatch events are legacy-only
-- Claude Den channel consumes the same Den-native semantics
+- Pi/Den web consumes run state and future attention items as the supported operator path
+- Codex/Claude dispatch bridges remain retired legacy experiments unless a future adapter is explicitly reintroduced under a new design
 - retired mobile bridges stay out of the supported runtime unless a future adapter is explicitly reintroduced
 
 ## Design summary

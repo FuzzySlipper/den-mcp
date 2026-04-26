@@ -60,7 +60,7 @@ class DenWatcherTests(unittest.TestCase):
         return 3
 
     def test_partial_state_does_not_render_or_fetch(self) -> None:
-        self.watcher.on_set_user_var(self.boss, self.window, {"key": "den_agent", "value": "codex"})
+        self.watcher.on_set_user_var(self.boss, self.window, {"key": "den_agent", "value": "pi-reviewer"})
         self.assertEqual([], self.boss.commands)
         self.assertEqual([], self.fetches)
 
@@ -70,18 +70,18 @@ class DenWatcherTests(unittest.TestCase):
         self.assertEqual([], self.fetches)
 
     def test_on_set_user_var_updates_titles_and_colors(self) -> None:
-        self.watcher.on_set_user_var(self.boss, self.window, {"key": "den_agent", "value": "codex"})
+        self.watcher.on_set_user_var(self.boss, self.window, {"key": "den_agent", "value": "pi-reviewer"})
         self.watcher.on_set_user_var(self.boss, self.window, {"key": "den_project", "value": "den-mcp"})
         self.watcher.on_set_user_var(self.boss, self.window, {"key": "den_task", "value": "560"})
         self.watcher.on_set_user_var(self.boss, self.window, {"key": "den_status", "value": "working"})
 
         joined = [" ".join(command) for command in self.boss.commands]
-        self.assertTrue(any("set-window-title" in command and "codex · den-mcp · #560 · working" in command for command in joined))
-        self.assertTrue(any("set-tab-title" in command and "den-mcp · codex · working · #560 · 3 pending" in command for command in joined))
+        self.assertTrue(any("set-window-title" in command and "pi-reviewer · den-mcp · #560 · working" in command for command in joined))
+        self.assertTrue(any("set-tab-title" in command and "den-mcp · pi-reviewer · working · #560 · 3 pending" in command for command in joined))
         self.assertTrue(any("set-tab-color" in command and "active_tab_background=#1e66f5" in command for command in joined))
 
     def test_on_set_user_var_sends_notification_only_for_notable_transition(self) -> None:
-        self.watcher.on_set_user_var(self.boss, self.window, {"key": "den_agent", "value": "codex"})
+        self.watcher.on_set_user_var(self.boss, self.window, {"key": "den_agent", "value": "pi-reviewer"})
         self.watcher.on_set_user_var(self.boss, self.window, {"key": "den_project", "value": "den-mcp"})
         self.watcher.on_set_user_var(self.boss, self.window, {"key": "den_task", "value": "560"})
         self.watcher.on_set_user_var(self.boss, self.window, {"key": "den_status", "value": "working"})
@@ -90,11 +90,11 @@ class DenWatcherTests(unittest.TestCase):
 
         self.assertEqual(1, len(self.notifications))
         title, body = self.notifications[0]
-        self.assertEqual("den-mcp: codex is done", title)
+        self.assertEqual("den-mcp: pi-reviewer is done", title)
         self.assertIn("task #560", body)
 
     def test_project_fetch_is_scheduled_for_dispatch_related_updates(self) -> None:
-        self.watcher.on_set_user_var(self.boss, self.window, {"key": "den_agent", "value": "codex"})
+        self.watcher.on_set_user_var(self.boss, self.window, {"key": "den_agent", "value": "pi-reviewer"})
         self.watcher.on_set_user_var(self.boss, self.window, {"key": "den_project", "value": "den-mcp"})
         self.watcher.on_set_user_var(self.boss, self.window, {"key": "den_status", "value": "waiting"})
 
@@ -102,7 +102,7 @@ class DenWatcherTests(unittest.TestCase):
         self.assertEqual(3, self.watcher._project_pending_counts["den-mcp"])
 
     def test_on_close_clears_project_cache_when_last_window_closes(self) -> None:
-        self.watcher.on_set_user_var(self.boss, self.window, {"key": "den_agent", "value": "codex"})
+        self.watcher.on_set_user_var(self.boss, self.window, {"key": "den_agent", "value": "pi-reviewer"})
         self.watcher.on_set_user_var(self.boss, self.window, {"key": "den_project", "value": "den-mcp"})
         self.assertEqual(3, self.watcher._project_pending_counts["den-mcp"])
 

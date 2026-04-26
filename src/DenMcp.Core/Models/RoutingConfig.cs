@@ -11,7 +11,7 @@ namespace DenMcp.Core.Models;
 public sealed class RoutingConfig
 {
     /// <summary>
-    /// Maps role names to agent identities. E.g. "implementer" → "claude-code", "reviewer" → "codex".
+    /// Maps role names to agent identities. E.g. "implementer" → "pi", "reviewer" → "pi".
     /// </summary>
     [JsonPropertyName("roles")]
     public Dictionary<string, string> Roles { get; set; } = new();

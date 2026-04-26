@@ -37,7 +37,7 @@ public class AgentStreamMessageServiceTests : IAsyncLifetime
             AgentIdentity = "codex",
             AgentFamily = "codex",
             Role = "implementer",
-            TransportKind = "codex_app_server",
+            TransportKind = "local_adapter",
             Status = AgentInstanceBindingStatus.Active
         });
 
@@ -71,7 +71,7 @@ public class AgentStreamMessageServiceTests : IAsyncLifetime
             AgentIdentity = "codex",
             AgentFamily = "codex",
             Role = "reviewer",
-            TransportKind = "codex_app_server",
+            TransportKind = "local_adapter",
             Status = AgentInstanceBindingStatus.Active
         });
 
@@ -101,7 +101,7 @@ public class AgentStreamMessageServiceTests : IAsyncLifetime
             AgentIdentity = "codex",
             AgentFamily = "codex",
             Role = "reviewer",
-            TransportKind = "codex_app_server",
+            TransportKind = "local_adapter",
             Status = AgentInstanceBindingStatus.Active
         });
         await _bindings.UpsertAsync(new AgentInstanceBinding
@@ -111,7 +111,7 @@ public class AgentStreamMessageServiceTests : IAsyncLifetime
             AgentIdentity = "claude-code",
             AgentFamily = "claude",
             Role = "reviewer",
-            TransportKind = "claude_channel",
+            TransportKind = "manual_mcp",
             Status = AgentInstanceBindingStatus.Active
         });
 

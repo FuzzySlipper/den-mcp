@@ -92,7 +92,7 @@ class FakeBridge:
 
 
 class DenApproveTests(unittest.TestCase):
-    def make_dispatch(self, dispatch_id: int, *, project_id: str = "den-mcp", target_agent: str = "claude-code") -> dict:
+    def make_dispatch(self, dispatch_id: int, *, project_id: str = "den-mcp", target_agent: str = "pi") -> dict:
         return {
             "id": dispatch_id,
             "project_id": project_id,
@@ -154,7 +154,7 @@ class DenApproveTests(unittest.TestCase):
                 title="older",
                 is_active=False,
                 is_focused=False,
-                user_vars={"den_project": "den-mcp", "den_agent": "claude-code"},
+                user_vars={"den_project": "den-mcp", "den_agent": "pi"},
             ),
             den_approve.KittyWindowSnapshot(
                 id=12,
@@ -162,7 +162,7 @@ class DenApproveTests(unittest.TestCase):
                 title="exact",
                 is_active=False,
                 is_focused=False,
-                user_vars={"den_project": "den-mcp", "den_agent": "claude-code", "den_dispatch": "41"},
+                user_vars={"den_project": "den-mcp", "den_agent": "pi", "den_dispatch": "41"},
             ),
             den_approve.KittyWindowSnapshot(
                 id=13,
@@ -170,7 +170,7 @@ class DenApproveTests(unittest.TestCase):
                 title="active",
                 is_active=True,
                 is_focused=False,
-                user_vars={"den_project": "den-mcp", "den_agent": "claude-code"},
+                user_vars={"den_project": "den-mcp", "den_agent": "pi"},
             ),
         ]
 
@@ -186,10 +186,10 @@ class DenApproveTests(unittest.TestCase):
                 den_approve.KittyWindowSnapshot(
                     id=55,
                     tab_id=7,
-                    title="claude-code",
+                    title="pi",
                     is_active=True,
                     is_focused=True,
-                    user_vars={"den_project": "den-mcp", "den_agent": "claude-code"},
+                    user_vars={"den_project": "den-mcp", "den_agent": "pi"},
                 )
             ]
         )
@@ -209,17 +209,17 @@ class DenApproveTests(unittest.TestCase):
                 den_approve.KittyWindowSnapshot(
                     id=60,
                     tab_id=8,
-                    title="codex",
+                    title="pi-reviewer",
                     is_active=True,
                     is_focused=True,
-                    user_vars={"den_project": "den-mcp", "den_agent": "codex"},
+                    user_vars={"den_project": "den-mcp", "den_agent": "pi-reviewer"},
                 )
             ]
         )
         payload = {
             "approved": [
-                self.make_dispatch(41, target_agent="claude-code"),
-                self.make_dispatch(42, target_agent="codex"),
+                self.make_dispatch(41, target_agent="pi"),
+                self.make_dispatch(42, target_agent="pi-reviewer"),
             ],
             "approved_all": True,
         }

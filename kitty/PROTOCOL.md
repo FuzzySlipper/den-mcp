@@ -2,13 +2,14 @@
 
 Task: `#559`
 
-This document defines the OSC 1337 user-variable contract between Den-managed
-agent wrappers and Kitty-side integrations such as the watcher, custom tab bar,
-and future layout helpers.
+This document defines the OSC 1337 user-variable contract between optional
+Den-aware local terminal processes and Kitty-side integrations such as the
+watcher, custom tab bar, and future layout helpers. Retired Codex/Claude dispatch
+wrappers are not part of the supported runtime.
 
 The protocol is intentionally small:
 
-- wrapper scripts publish state with escape sequences only
+- local helpers publish state with escape sequences only
 - Kitty-side code observes window-local user variables
 - no server calls are required to emit signals
 
@@ -22,17 +23,17 @@ printf '\033]1337;SetUserVar=%s=%s\007' "$key" "$encoded_value"
 
 Values must be base64-encoded without trailing newlines.
 
-The helper for wrappers lives at [den-signal.sh](./den-signal.sh).
+The helper for local terminal integrations lives at [den-signal.sh](./den-signal.sh).
 
 ## Variables
 
 | Variable | Values | Meaning | Typical update point |
 |---|---|---|---|
-| `den_agent` | agent identity such as `claude-code`, `codex` | which agent owns the window | immediately after wrapper startup |
-| `den_project` | Den project id such as `den-mcp`, `quillforge` | which project the window is currently working in | immediately after wrapper startup, and when re-targeting the window |
-| `den_status` | `idle`, `working`, `reviewing`, `waiting`, `done`, `error` | current lifecycle state for the agent session | whenever the wrapper's work state changes |
+| `den_agent` | agent identity such as `pi`, `claude-code`, `codex` | which agent owns the window | when a Den-aware local helper starts or retargets |
+| `den_project` | Den project id such as `den-mcp`, `quillforge` | which project the window is currently working in | when a Den-aware local helper starts or retargets |
+| `den_status` | `idle`, `working`, `reviewing`, `waiting`, `done`, `error` | current lifecycle state for the agent session | whenever the local helper's work state changes |
 | `den_task` | task id as text, or empty string | active task in the window | when a task is claimed, changed, or cleared |
-| `den_dispatch` | dispatch id as text, or empty string | active approved dispatch being worked | when a dispatch starts or completes |
+| `den_dispatch` | dispatch id as text, or empty string | legacy dispatch id, if a debug/legacy flow is explicitly active | legacy/debug dispatch flows only |
 
 ## Status semantics
 
@@ -43,43 +44,42 @@ The helper for wrappers lives at [den-signal.sh](./den-signal.sh).
 - `reviewing`: active code review or rereview work
 - `waiting`: blocked on user input, dependency, or external completion
 - `done`: just completed a meaningful unit of work and may need attention
-- `error`: wrapper or agent hit a terminal failure that needs attention
+- `error`: helper or agent hit a terminal failure that needs attention
 
 `done` is expected to be an edge state, not a permanent resting state. A common
 pattern is:
 
 1. set `den_status=done`
-2. optionally clear `den_task` / `den_dispatch`
+2. optionally clear `den_task` / legacy `den_dispatch`
 3. after the completion is acknowledged or the next task is picked up, move to
    `idle`, `working`, or `reviewing`
 
 ## Lifecycle contract
 
-Wrappers should publish the minimum stable context first, then update dynamic
-fields as work changes.
+Local helpers should publish the minimum stable context first, then update
+dynamic fields as work changes.
 
 ### Startup
 
 Set these as soon as the window is known to be Den-managed:
 
 ```bash
-den_signal den_agent "codex"
+den_signal den_agent "pi"
 den_signal den_project "den-mcp"
 den_signal den_status "idle"
 den_signal_clear den_task
 den_signal_clear den_dispatch
 ```
 
-### Approved dispatch claimed
+### Active task started
 
 ```bash
-den_signal den_dispatch "42"
 den_signal den_task "559"
 den_signal den_status "working"
 ```
 
-If the dispatch is specifically review work, use `reviewing` instead of
-`working`.
+If the task is specifically review work, use `reviewing` instead of `working`.
+`den_dispatch` should only be set for explicit legacy/debug dispatch flows.
 
 ### Waiting on something external
 
@@ -87,9 +87,9 @@ If the dispatch is specifically review work, use `reviewing` instead of
 den_signal den_status "waiting"
 ```
 
-Do not clear task or dispatch just because the agent is temporarily waiting.
-Those fields describe ownership/context, not whether the terminal is actively
-typing.
+Do not clear task or legacy dispatch just because the agent is temporarily
+waiting. Those fields describe ownership/context, not whether the terminal is
+actively typing.
 
 ### Completion
 
@@ -99,7 +99,7 @@ den_signal_clear den_dispatch
 den_signal_clear den_task
 ```
 
-After the completion state has been surfaced to the user, the wrapper can
+After the completion state has been surfaced to the user, the local helper can
 transition back to `idle` or directly to the next active state.
 
 ### Error
@@ -108,8 +108,8 @@ transition back to `idle` or directly to the next active state.
 den_signal den_status "error"
 ```
 
-Keep `den_task` and `den_dispatch` populated when possible so the watcher can
-show where the failure happened.
+Keep `den_task` and any legacy `den_dispatch` populated when possible so the
+watcher can show where the failure happened.
 
 ## Watcher expectations
 
@@ -126,9 +126,9 @@ Watcher behavior should assume:
 - missing variables should not crash the watcher; partial state is normal during
   startup and teardown
 
-## Wrapper helper
+## Local helper
 
-Source the helper from bash or zsh wrappers:
+Source the helper from bash or zsh terminal integrations:
 
 ```bash
 source /path/to/den-mcp/kitty/den-signal.sh
@@ -142,8 +142,8 @@ den_signal den_task "559"
 den_signal_clear den_dispatch
 ```
 
-The helper intentionally no-ops when `KITTY_WINDOW_ID` is not set so wrappers
-can call it unconditionally outside Kitty.
+The helper intentionally no-ops when `KITTY_WINDOW_ID` is not set so local
+terminal integrations can call it unconditionally outside Kitty.
 
 When Kitty is active, the helper targets a terminal device instead of blindly
 writing OSC 1337 bytes into captured stdout. In a normal interactive Kitty
@@ -164,11 +164,10 @@ source ./kitty/den-signal.sh
 Emit a full state sequence:
 
 ```bash
-den_signal den_agent "codex"
+den_signal den_agent "pi"
 den_signal den_project "den-mcp"
 den_signal den_status "reviewing"
 den_signal den_task "597"
-den_signal den_dispatch "84"
 den_signal den_status "done"
 den_signal_clear den_dispatch
 den_signal_clear den_task
@@ -191,7 +190,7 @@ For `#560` and later Kitty tasks, the manual verification loop should confirm:
 
 - the watcher sees each variable update for the correct window
 - tab state changes when `den_status` changes
-- task and dispatch context are retained while `waiting`
+- task and legacy dispatch context are retained while `waiting`
 - completion notifications key off `done`, not just process exit
 - outside Kitty, sourcing and calling the helper produces no errors and no
   escape output

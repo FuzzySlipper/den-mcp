@@ -2,7 +2,7 @@
 
 Date: 2026-04-20
 
-Status update, 2026-04-26: this dispatch-centered bridge plan is historical/legacy context. The canonical conductor workflow now uses task/thread messages plus agent-stream/run state; Signal/Telegram mobile bridges are retired from the supported runtime. See [ADR: Retire dispatches from the canonical conductor workflow](dispatch-retirement-adr.md) and [Legacy Mobile Bridge Integrations](legacy-mobile-bridges.md).
+Status update, 2026-04-26: this dispatch-centered Codex app-server bridge plan is historical/legacy context. The `den-codex-bridge` and `den-agent` binaries were removed from the active runtime in task `#812`; the canonical conductor workflow now uses Pi/Den web plus task/thread messages and agent-stream/run state. Signal/Telegram mobile bridges are also retired from the supported runtime. See [ADR: Retire dispatches from the canonical conductor workflow](dispatch-retirement-adr.md), [Legacy Mobile Bridge Integrations](legacy-mobile-bridges.md), and [Legacy Codex/Claude Bridge Notes](legacy-codex-claude-bridges.md).
 
 This note replaces the earlier tmux-conductor direction for the current
 experimentation path. The new goal is to validate a per-project Codex

@@ -89,7 +89,7 @@ CREATE TABLE messages (
     project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     task_id     INTEGER REFERENCES tasks(id) ON DELETE SET NULL,  -- null = project-level channel
     thread_id   INTEGER REFERENCES messages(id) ON DELETE SET NULL, -- null = thread root
-    sender      TEXT NOT NULL,               -- agent identity, e.g. "claude-code", "codex", "user"
+    sender      TEXT NOT NULL,               -- agent identity, e.g. "pi", "user", or a manual agent identity
     content     TEXT NOT NULL,               -- message body (markdown)
     metadata    TEXT,                        -- optional JSON blob (e.g. { "type": "plan_review" })
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
@@ -291,7 +291,7 @@ Returns: confirmation.
 | Parameter    | Type   | Required | Notes                                           |
 |--------------|--------|----------|-------------------------------------------------|
 | `project_id` | string | yes      |                                                 |
-| `sender`     | string | yes      | Agent identity, e.g. `"claude-code"`            |
+| `sender`     | string | yes      | Agent identity, e.g. `"pi"`                    |
 | `content`    | string | yes      | Markdown body                                   |
 | `task_id`    | int    | no       | Attach to a task. Null = project-level channel  |
 | `thread_id`  | int    | no       | Reply to an existing message (forms thread)     |
@@ -391,14 +391,10 @@ Returns: confirmation.
 
 ## Agent Identity Convention
 
-Agents identify themselves with a simple string. Suggested conventions:
-
-| Agent            | Identity String   |
-|------------------|-------------------|
-| Claude Code      | `claude-code`     |
-| Codex CLI        | `codex`           |
-| Kimi Code        | `kimi-code`       |
-| User (manual)    | `user`            |
+Agents identify themselves with a simple string. Current Den-managed conductor
+work usually uses `pi`; manually launched agents may use identities such as
+`claude-code`, `codex`, `kimi-code`, or `user` for audit/read-state purposes.
+Those manual identities are not dispatch-routing instructions.
 
 This is used in `sender`, `assigned_to`, `agent`, and `unread_for` fields.
 Not authenticated — it's a trust-based convention for a single-user system.
@@ -407,17 +403,18 @@ Not authenticated — it's a trust-based convention for a single-user system.
 
 ## Deployment Notes
 
-- **Transport**: HTTP + SSE, single long-lived process
+- **Transport**: Streamable HTTP MCP endpoint plus REST API, single long-lived process
 - **Hosting**: systemd service or Docker container on local machine
 - **Database**: single SQLite file, e.g. `~/.den-mcp/den-mcp.db` or configurable path
 - **Networking**: listen on localhost only (or Tailscale for cross-machine access)
 - **Config**: database path and listen port via environment variables or appsettings.json
 - **Stack**: ASP.NET Core (Kestrel) + ModelContextProtocol + Microsoft.Data.Sqlite
 
-## CLAUDE.md / AGENTS.md Snippet
+## Manual Agent Snippet
 
-For each project that uses den-mcp, agents should be told how to identify themselves
-and what's available. Example for a CLAUDE.md:
+For each project that uses den-mcp, manually launched agents should be told how
+to identify themselves and what's available. Prefer global MCP configuration and
+avoid project-local files that shadow it. Example guidance:
 
 ```markdown
 ## Project Management — den-mcp
@@ -426,10 +423,9 @@ This project uses a centralized den-mcp server for task management, agent messag
 and document storage. The MCP server is connected as "den".
 
 - Project ID: `rpg-system`
-- Your agent identity: `claude-code`
+- Use Den as the durable record for task/thread/review updates.
 - When updating task status, always include your identity as the `agent` parameter.
-- Check for unread messages at the start of each session:
-  `get_messages(project_id="rpg-system", unread_for="claude-code")`
+- Check unread task-thread messages at the start of each session.
 - When you want a sanity check from another agent, send a message with
   `metadata: {"type": "review_request"}` on the relevant task.
 - If a review comes back approved, the implementer merges the reviewed head

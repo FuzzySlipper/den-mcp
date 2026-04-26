@@ -188,9 +188,10 @@ automatic fallback retry. If a configured/default model run exits non-zero and a
 and retries once with that provider-qualified fallback model. The project-local
 file is gitignored because model choices are user/machine-specific.
 
-For compatibility with existing Codex-targeted dispatches during migration,
-launching with `DEN_PI_AGENT=codex` lets the Pi conductor see work currently
-targeted at `codex`.
+Historical note: during the dispatch migration, Pi could be launched with
+`DEN_PI_AGENT=codex` to drain old Codex-targeted dispatch rows. New workflow
+should leave Pi identified as `pi` (or another explicit Pi instance identity)
+and should not create Codex-targeted dispatches by default.
 
 ## Run
 

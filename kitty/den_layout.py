@@ -17,11 +17,12 @@ from typing import Any, Iterable
 
 DEFAULT_BASE_URL = os.environ.get("DEN_MCP_URL") or os.environ.get("DEN_MCP_BASE_URL") or "http://127.0.0.1:5199"
 DEFAULT_ROLES = {
-    "implementer": "claude-code",
-    "reviewer": "codex",
+    "implementer": "pi",
+    "reviewer": "pi",
 }
 PREFERRED_ROLE_ORDER = ("implementer", "reviewer")
-KNOWN_WRAPPED_AGENTS = {
+KNOWN_AGENT_COMMANDS = {
+    "pi": "pi",
     "claude-code": "claude",
     "codex": "codex",
     "omp": "omp",
@@ -272,11 +273,9 @@ def ordered_agent_identities(roles: dict[str, str]) -> list[str]:
 
 
 def build_launch_command(agent: str, project_id: str) -> tuple[str, ...]:
-    wrapper = repo_root() / "bin" / "den-agent"
-    wrapped_vendor = KNOWN_WRAPPED_AGENTS.get(agent)
-    if wrapped_vendor and wrapper.exists():
-        return (str(wrapper), wrapped_vendor, "--project", project_id)
-    return (agent,)
+    del project_id  # kept for API compatibility with existing layout callers
+    command = KNOWN_AGENT_COMMANDS.get(agent, agent)
+    return (command,)
 
 
 def build_project_layout(project_id: str, api: DenApiClient) -> ProjectLayout:

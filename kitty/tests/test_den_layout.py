@@ -104,14 +104,14 @@ class DenLayoutTests(unittest.TestCase):
         }
         return FakeApi(projects={"den-mcp": project}, documents=documents)
 
-    def test_build_project_layout_prefers_standard_roles_and_wrapper_commands(self) -> None:
+    def test_build_project_layout_prefers_standard_roles_and_direct_commands(self) -> None:
         api = self.make_api(
             routing_content="""
             {
               "roles": {
-                "planner": "codex",
-                "reviewer": "codex",
-                "implementer": "claude-code"
+                "planner": "pi-planner",
+                "reviewer": "pi-reviewer",
+                "implementer": "pi"
               }
             }
             """
@@ -121,34 +121,37 @@ class DenLayoutTests(unittest.TestCase):
 
         self.assertEqual("den-mcp", layout.project_id)
         self.assertEqual("/workspace/den-mcp", layout.root_path)
-        self.assertEqual(["claude-code", "codex"], [window.agent for window in layout.windows])
-        self.assertEqual(
-            (str(den_layout.repo_root() / "bin" / "den-agent"), "claude", "--project", "den-mcp"),
-            layout.windows[0].command,
-        )
+        self.assertEqual(["pi", "pi-reviewer", "pi-planner"], [window.agent for window in layout.windows])
+        self.assertEqual(("pi",), layout.windows[0].command)
 
-    def test_render_session_outputs_split_layout_and_wrapper_commands(self) -> None:
+    def test_render_session_outputs_split_layout_and_direct_commands(self) -> None:
         api = self.make_api()
         layout = den_layout.build_project_layout("den-mcp", api)
-        expected_wrapper = str(den_layout.repo_root() / "bin" / "den-agent")
 
         session_text = den_layout.render_session([layout])
 
         self.assertIn("new_tab den-mcp", session_text)
         self.assertIn("layout splits", session_text)
-        self.assertIn("launch --title claude-code --var den_project=den-mcp --var den_agent=claude-code --cwd /workspace/den-mcp", session_text)
-        self.assertIn("launch --location=vsplit --title codex", session_text)
-        self.assertIn(f"{expected_wrapper} claude --project den-mcp", session_text)
+        self.assertIn("launch --title pi --var den_project=den-mcp --var den_agent=pi --cwd /workspace/den-mcp", session_text)
+        self.assertNotIn("launch --location=vsplit", session_text)
+        self.assertIn("--cwd /workspace/den-mcp pi", session_text)
 
-    def test_build_launch_command_wraps_omp_agent_identity(self) -> None:
-        expected_wrapper = str(den_layout.repo_root() / "bin" / "den-agent")
-
+    def test_build_launch_command_maps_known_agent_identity(self) -> None:
         command = den_layout.build_launch_command("omp", "den-mcp")
 
-        self.assertEqual((expected_wrapper, "omp", "--project", "den-mcp"), command)
+        self.assertEqual(("omp",), command)
 
     def test_apply_layout_reuses_existing_managed_window_and_only_launches_missing_agent(self) -> None:
-        api = self.make_api()
+        api = self.make_api(
+            routing_content='''
+            {
+              "roles": {
+                "implementer": "pi",
+                "reviewer": "pi-reviewer"
+              }
+            }
+            '''
+        )
         layout = den_layout.build_project_layout("den-mcp", api)
         existing_tab = den_layout.TabSnapshot(
             id=7,
@@ -156,8 +159,8 @@ class DenLayoutTests(unittest.TestCase):
             windows=(
                 den_layout.WindowSnapshot(
                     id=11,
-                    title="claude-code",
-                    user_vars={"den_project": "den-mcp", "den_agent": "claude-code"},
+                    title="pi",
+                    user_vars={"den_project": "den-mcp", "den_agent": "pi"},
                 ),
             ),
         )
@@ -167,11 +170,11 @@ class DenLayoutTests(unittest.TestCase):
         second_actions = den_layout.apply_layout([layout], kitty)
 
         self.assertEqual(
-            [("launch_window", 7, "den-mcp", "codex", "/workspace/den-mcp")],
+            [("launch_window", 7, "den-mcp", "pi-reviewer", "/workspace/den-mcp")],
             kitty.actions,
         )
-        self.assertTrue(any(action.action == "reused_window" and action.agent == "claude-code" for action in first_actions))
-        self.assertTrue(any(action.action == "created_window" and action.agent == "codex" for action in first_actions))
+        self.assertTrue(any(action.action == "reused_window" and action.agent == "pi" for action in first_actions))
+        self.assertTrue(any(action.action == "created_window" and action.agent == "pi-reviewer" for action in first_actions))
         self.assertFalse(any(action.action == "created_window" for action in second_actions))
 
     def test_resolve_project_ids_uses_cwd_when_no_projects_are_supplied(self) -> None:

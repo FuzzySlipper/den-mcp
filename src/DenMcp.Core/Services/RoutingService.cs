@@ -287,8 +287,8 @@ public sealed class RoutingService : IRoutingService
     {
         Roles = new Dictionary<string, string>
         {
-            ["implementer"] = "claude-code",
-            ["reviewer"] = "codex"
+            ["implementer"] = "pi",
+            ["reviewer"] = "pi"
         },
         Triggers =
         [

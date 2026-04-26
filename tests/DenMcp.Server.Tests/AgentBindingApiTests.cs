@@ -56,7 +56,7 @@ public class AgentBindingApiTests : IAsyncLifetime
             instance_id = "codex-reviewer-1",
             agent_family = "codex",
             role = "reviewer",
-            transport_kind = "codex_app_server"
+            transport_kind = "local_adapter"
         });
         response.EnsureSuccessStatusCode();
 
@@ -66,7 +66,7 @@ public class AgentBindingApiTests : IAsyncLifetime
         var bindings = await bindingsResponse.Content.ReadFromJsonAsync<List<AgentInstanceBinding>>(JsonOpts);
         var binding = Assert.Single(bindings!);
         Assert.Equal("codex-reviewer-1", binding.InstanceId);
-        Assert.Equal("codex_app_server", binding.TransportKind);
+        Assert.Equal("local_adapter", binding.TransportKind);
     }
 
     [Fact]
@@ -97,7 +97,7 @@ public class AgentBindingApiTests : IAsyncLifetime
             AgentIdentity = "claude-code",
             AgentFamily = "claude",
             Role = "reviewer",
-            TransportKind = "claude_channel",
+            TransportKind = "manual_mcp",
             Status = AgentInstanceBindingStatus.Active
         });
 

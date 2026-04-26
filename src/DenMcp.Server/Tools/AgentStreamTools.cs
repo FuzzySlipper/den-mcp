@@ -76,7 +76,7 @@ public sealed class AgentStreamTools
         "Use this for question, answer, note, or nudge entries; detailed work context should stay in task-thread messages.")]
     public static async Task<string> SendAgentStreamMessage(
         IAgentStreamMessageService service,
-        [Description("Sender identity, e.g. user, codex, or claude-code.")] string sender,
+        [Description("Sender identity, e.g. user, pi, or another manual agent identity.")] string sender,
         [Description("Message subtype: question, answer, note, or nudge.")] string event_type,
         [Description("Short freeform message body.")] string body,
         [Description("Optional project scope. Required for recipient_role routing unless recipient_instance_id is provided.")] string? project_id = null,

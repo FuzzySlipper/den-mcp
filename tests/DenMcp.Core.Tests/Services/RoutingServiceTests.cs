@@ -550,7 +550,7 @@ public class RoutingServiceTests : IAsyncLifetime
         var trigger = new RoutingTrigger { Event = "x", DispatchTo = "reviewer" };
         var evt = new DispatchEvent { EventKind = "x", ProjectId = "proj" };
 
-        Assert.Equal("codex", _service.ResolveAgent(config, trigger, evt));
+        Assert.Equal("pi", _service.ResolveAgent(config, trigger, evt));
     }
 
     [Fact]
@@ -590,7 +590,7 @@ public class RoutingServiceTests : IAsyncLifetime
             MessageTargetRole = "reviewer"
         };
 
-        Assert.Equal("codex", _service.ResolveAgent(config, trigger, evt));
+        Assert.Equal("pi", _service.ResolveAgent(config, trigger, evt));
     }
 
     [Fact]

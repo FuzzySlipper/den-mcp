@@ -29,7 +29,7 @@ public class AgentInstanceBindingRepositoryTests : IAsyncLifetime
             AgentIdentity = "codex",
             AgentFamily = "codex",
             Role = "reviewer",
-            TransportKind = "codex_app_server",
+            TransportKind = "local_adapter",
             SessionId = "session-1",
             Status = AgentInstanceBindingStatus.Active,
             Metadata = """{"thread":"abc"}"""
@@ -40,7 +40,7 @@ public class AgentInstanceBindingRepositoryTests : IAsyncLifetime
         var active = await _repo.GetActiveByInstanceIdAsync("codex-proj-reviewer-1");
         Assert.NotNull(active);
         Assert.Equal("reviewer", active!.Role);
-        Assert.Equal("codex_app_server", active.TransportKind);
+        Assert.Equal("local_adapter", active.TransportKind);
 
         var listed = await _repo.ListAsync(new AgentInstanceBindingListOptions
         {
@@ -66,7 +66,7 @@ public class AgentInstanceBindingRepositoryTests : IAsyncLifetime
             AgentIdentity = "claude-code",
             AgentFamily = "claude",
             Role = "reviewer",
-            TransportKind = "claude_channel",
+            TransportKind = "manual_mcp",
             SessionId = "session-2",
             Status = AgentInstanceBindingStatus.Active
         });

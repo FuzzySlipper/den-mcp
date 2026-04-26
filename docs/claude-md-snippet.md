@@ -1,75 +1,55 @@
-# CLAUDE.md Snippet Template
+# Manual Den MCP Usage For Claude/Codex Agents
 
-Add this to any project's CLAUDE.md to integrate with den-mcp:
+Status: current manual MCP reference. This is **not** a bridge/wake workflow and
+should not be used to configure dispatch-driven Codex/Claude launchers.
 
-```markdown
-## Project Management — den-mcp
-
-This project uses a centralized den-mcp server for task management, agent messaging,
-and document storage. The MCP server is connected as "den".
-
-- Project ID: `<directory-name>`
-- Your agent identity: `claude-code`
-- When updating tasks, always include your identity as the `agent` parameter.
-- Check for unread messages at the start of each session:
-  `get_messages(project_id="<directory-name>", unread_for="claude-code")`
-- When you complete a task, update its status:
-  `update_task(task_id=N, agent="claude-code", status="done")`
-- To see what to work on next:
-  `next_task(project_id="<directory-name>")`
-- Cross-project docs (conventions, shared specs) are under project `_global`.
-```
+Den's supported operator path is Den web plus Pi/conductor runs, task-thread
+messages, review workflow records, agent-stream ops, and AgentRun state. Claude
+Code, Codex CLI, and similar agents may still connect to Den MCP manually when a
+human launches them, but they should not be treated as the default conductor or
+as dispatch-injection targets.
 
 ## MCP Server Configuration
 
-Add to your `.mcp.json` or MCP settings:
+Prefer the user's/global MCP configuration for the agent runtime. Avoid random
+per-project `.mcp.json` files unless the user explicitly wants a project-local
+override, because project-local MCP files can shadow the working global config.
+
+Current Den MCP endpoint:
 
 ```json
 {
   "mcpServers": {
     "den": {
-      "type": "sse",
-      "url": "http://localhost:5199/sse"
+      "type": "http",
+      "url": "http://localhost:5199/mcp"
     }
   }
 }
 ```
 
-## Agent Identity Convention
+## Suggested Manual Agent Guidance
 
-| Agent       | Identity String |
-|-------------|----------------|
-| Claude Code | `claude-code`  |
-| Codex CLI   | `codex`        |
-| OMP         | `omp`          |
-| Kimi Code   | `kimi-code`    |
-| User        | `user`         |
+If a manually launched Claude/Codex session uses Den MCP, include guidance like:
 
-## Available MCP Tools (19)
+```markdown
+## Project Management — den-mcp
 
-### Projects (3)
-- `create_project` — Register a new project
-- `list_projects` — List all projects
-- `get_project` — Get project with stats
+This project uses a centralized den-mcp server for task management, agent
+messaging, review workflow records, and document storage. The MCP server is
+connected as "den".
 
-### Tasks (7)
-- `create_task` — Create a task or subtask
-- `update_task` — Update task fields (records audit history)
-- `get_task` — Get full task with deps, subtasks, messages
-- `list_tasks` — List tasks with filters
-- `next_task` — Get next unblocked task
-- `add_dependency` — Add dependency (rejects cycles)
-- `remove_dependency` — Remove dependency
+- Project ID: `<directory-name>`
+- Use Den as the durable record for task/thread/review updates.
+- When updating tasks, always include your agent identity as the `agent`
+  parameter.
+- Check unread task-thread messages at the start of a work session.
+- Use task-thread messages and structured review packets for handoffs; do not
+  rely on dispatches unless a task explicitly says it is debugging legacy bridge
+  behavior.
+- Cross-project docs and global conventions are under project `_global`.
+```
 
-### Messages (4)
-- `send_message` — Send a message (project/task/thread scoped)
-- `get_messages` — Get messages with filters (unread, since, etc.)
-- `get_thread` — Get complete message thread
-- `mark_read` — Mark messages as read
-
-### Documents (5)
-- `store_document` — Create or update a document
-- `get_document` — Get full document content
-- `list_documents` — List document summaries
-- `search_documents` — Full-text search (FTS5)
-- `delete_document` — Delete a document
+Agent identity strings such as `claude-code`, `codex`, `omp`, or `kimi-code` are
+still acceptable as audit identities for manually launched agents. They are not
+routing instructions for a supported Codex/Claude bridge.

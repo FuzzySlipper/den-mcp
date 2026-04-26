@@ -98,11 +98,11 @@ Example wire shape:
   "project_id": "den-mcp",
   "task_id": 658,
   "thread_id": 294,
-  "sender": "codex",
+  "sender": "pi-reviewer",
   "intent": "review_feedback",
   "content": "Findings addressed and ready for rereview.",
   "metadata": {
-    "recipient": "claude-code",
+    "recipient": "pi",
     "review_round_id": 2,
     "handoff_kind": "review_feedback"
   },

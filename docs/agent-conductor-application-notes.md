@@ -41,7 +41,7 @@ In short:
 ```text
 Den Core:       durable truth, invariants, task/review/run/workspace models
 Den Runtime:    spawn/stop/observe agents, worktrees, artifacts, policy decisions
-Adapters:       MCP, Pi, Codex, Claude, terminal muxers, local shell
+Adapters:       MCP, Pi, future local adapters, terminal muxers, local shell
 Web Console:    operator cockpit over the above
 ```
 
@@ -90,10 +90,12 @@ Agents report: structured events, summaries, decisions, questions,
                 tool/result state
 ```
 
-For Pi/Codex/Claude runs launched by Den, the preferred path is a Den-controlled
-runner or supervisor. That gives Den hard truth about process start/stop/crash,
-pid or process group, stdout/stderr/JSONL logs, cwd/worktree, timeouts, aborts,
-artifact paths, final output extraction, and state.
+For Pi runs launched by Den, the preferred path is a Den-controlled runner or
+supervisor. Future local desktop/agent companions should use the same explicit
+adapter boundary rather than reviving Codex/Claude dispatch injection. That gives
+Den hard truth about process start/stop/crash, pid or process group,
+stdout/stderr/JSONL logs, cwd/worktree, timeouts, aborts, artifact paths, final
+output extraction, and state.
 
 For user-owned terminal sessions, a reporting bridge is still useful. It should
 register the live client, publish status, and respond to wake or focus requests.

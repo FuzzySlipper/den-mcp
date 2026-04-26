@@ -10,8 +10,8 @@ Built for workflows where multiple AI coding agents (Claude Code, Codex, OMP, Ki
 - **Agent Messaging** — Threaded messages scoped to projects and tasks, with per-agent read state tracking
 - **Document Storage** — Markdown documents (PRDs, specs, ADRs, conventions) with full-text search via SQLite FTS5
 - **Multi-Project** — Single server instance manages all projects from one SQLite database
-- **19 MCP Tools** — Full tool suite exposed via HTTP+SSE for any MCP-compatible agent
-- **REST API** — Matching HTTP endpoints for the CLI and potential future UIs
+- **MCP Tools** — Full tool suite exposed at `/mcp` for any MCP-compatible agent
+- **REST API** — Matching HTTP endpoints for the CLI and web/operator UI
 - **CLI** — Rich terminal commands for all operations plus a live Terminal.Gui dashboard
 
 ## Quick Start
@@ -30,32 +30,37 @@ dotnet run --project src/DenMcp.Server -- --port 5200
 dotnet run --project src/DenMcp.Server -- --db-path /tmp/dev.db
 ```
 
-### Connect an Agent
+### Connect an Agent Manually
 
-Add to your project's MCP configuration (`.mcp.json` or equivalent):
+Pi/Den web is the current supported conductor/operator path. Claude Code,
+Codex, and similar agents can still use Den MCP manually when a human starts
+that session. Prefer a user/global MCP configuration over ad-hoc per-project
+`.mcp.json` files so project-local config does not shadow the working global
+endpoint.
 
 ```json
 {
   "mcpServers": {
     "den": {
-      "type": "sse",
-      "url": "http://localhost:5199/sse"
+      "type": "http",
+      "url": "http://localhost:5199/mcp"
     }
   }
 }
 ```
 
-Then add to the project's `CLAUDE.md`:
+Suggested guidance for manually launched agents:
 
 ```markdown
 ## Project Management — den-mcp
 
 - Project ID: `my-project`
-- Your agent identity: `claude-code`
-- Check for unread messages at the start of each session:
-  `get_messages(project_id="my-project", unread_for="claude-code")`
+- Use Den as the durable record for task/thread/review updates.
+- Check unread task-thread messages at the start of a work session.
 - To see what to work on next: `next_task(project_id="my-project")`
 - Cross-project docs are under project `_global`.
+- Do not rely on legacy dispatch bridges unless a task explicitly says it is
+  debugging legacy bridge behavior.
 ```
 
 ### Use the CLI

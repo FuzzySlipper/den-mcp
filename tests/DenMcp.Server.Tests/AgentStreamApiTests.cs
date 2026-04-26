@@ -659,16 +659,16 @@ public class AgentStreamApiTests : IAsyncLifetime
     {
         var payload = new
         {
-            sender = "den-codex-bridge",
-            sender_instance_id = "codex-agent-stream-api-test-bridge",
+            sender = "local-adapter",
+            sender_instance_id = "local-agent-stream-api-test-adapter",
             event_type = "wake_delivered",
-            recipient_agent = "codex",
+            recipient_agent = "pi",
             recipient_role = "implementer",
-            recipient_instance_id = "codex-agent-stream-api-test-bridge",
+            recipient_instance_id = "local-agent-stream-api-test-adapter",
             delivery_mode = "record_only",
-            body = "Delivered agent stream entry #101 to Codex bridge.",
+            body = "Delivered agent stream entry #101 to local adapter.",
             metadata = """{"source_entry_id":101,"thread_id":"thread-1"}""",
-            dedup_key = "wake-delivered:agent-stream:101:codex-agent-stream-api-test-bridge"
+            dedup_key = "wake-delivered:agent-stream:101:local-agent-stream-api-test-adapter"
         };
 
         var response = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/agent-stream/ops", payload);
@@ -680,7 +680,7 @@ public class AgentStreamApiTests : IAsyncLifetime
         Assert.Equal("wake_delivered", entry.EventType);
         Assert.Equal(ProjectId, entry.ProjectId);
         Assert.Equal(AgentStreamDeliveryMode.RecordOnly, entry.DeliveryMode);
-        Assert.Equal("codex-agent-stream-api-test-bridge", entry.RecipientInstanceId);
+        Assert.Equal("local-agent-stream-api-test-adapter", entry.RecipientInstanceId);
         Assert.Equal(101, entry.Metadata!.Value.GetProperty("source_entry_id").GetInt32());
 
         var repeat = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/agent-stream/ops", payload);
@@ -738,7 +738,7 @@ public class AgentStreamApiTests : IAsyncLifetime
                 AgentIdentity = "codex",
                 AgentFamily = "codex",
                 Role = "implementer",
-                TransportKind = "codex_app_server",
+                TransportKind = "local_adapter",
                 Status = AgentInstanceBindingStatus.Active
             });
         }
@@ -775,7 +775,7 @@ public class AgentStreamApiTests : IAsyncLifetime
                 AgentIdentity = "codex",
                 AgentFamily = "codex",
                 Role = "reviewer",
-                TransportKind = "codex_app_server",
+                TransportKind = "local_adapter",
                 Status = AgentInstanceBindingStatus.Active
             });
             await bindings.UpsertAsync(new AgentInstanceBinding
@@ -785,7 +785,7 @@ public class AgentStreamApiTests : IAsyncLifetime
                 AgentIdentity = "claude-code",
                 AgentFamily = "claude",
                 Role = "reviewer",
-                TransportKind = "claude_channel",
+                TransportKind = "manual_mcp",
                 Status = AgentInstanceBindingStatus.Active
             });
         }
@@ -829,7 +829,7 @@ public class AgentStreamApiTests : IAsyncLifetime
                 AgentIdentity = "codex",
                 AgentFamily = "codex",
                 Role = "reviewer",
-                TransportKind = "codex_app_server",
+                TransportKind = "local_adapter",
                 Status = AgentInstanceBindingStatus.Active
             });
         }

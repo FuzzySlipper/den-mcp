@@ -142,11 +142,11 @@ public class DispatchDetectionServiceTests : IAsyncLifetime
     {
         var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Feature X" });
 
-        await _detection.OnTaskStatusChangedAsync(task, "in_progress", "review", "claude-code");
+        await _detection.OnTaskStatusChangedAsync(task, "in_progress", "review", "coder");
 
         var pending = await _dispatches.ListAsync("proj", statuses: [DispatchStatus.Pending]);
         Assert.Single(pending);
-        Assert.Equal("codex", pending[0].TargetAgent); // Default reviewer
+        Assert.Equal("pi", pending[0].TargetAgent); // Default reviewer
         Assert.Equal(task.Id, pending[0].TaskId);
         Assert.Contains("Feature X", pending[0].Summary!);
         Assert.Contains("Feature X", pending[0].ContextPrompt!);
@@ -157,7 +157,7 @@ public class DispatchDetectionServiceTests : IAsyncLifetime
     {
         var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Feature X" });
 
-        await _detection.OnTaskStatusChangedAsync(task, "in_progress", "review", "claude-code");
+        await _detection.OnTaskStatusChangedAsync(task, "in_progress", "review", "coder");
 
         var pending = Assert.Single(await _dispatches.ListAsync("proj", statuses: [DispatchStatus.Pending]));
         var context = JsonSerializer.Deserialize<DispatchContextSnapshot>(pending.ContextJson!);
@@ -172,11 +172,11 @@ public class DispatchDetectionServiceTests : IAsyncLifetime
     {
         var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Bug fix" });
 
-        await _detection.OnTaskStatusChangedAsync(task, "review", "planned", "codex");
+        await _detection.OnTaskStatusChangedAsync(task, "review", "planned", "reviewer-agent");
 
         var pending = await _dispatches.ListAsync("proj", statuses: [DispatchStatus.Pending]);
         Assert.Single(pending);
-        Assert.Equal("claude-code", pending[0].TargetAgent); // Default implementer
+        Assert.Equal("pi", pending[0].TargetAgent); // Default implementer
         Assert.Contains("feedback", pending[0].Summary!);
     }
 
@@ -211,14 +211,14 @@ public class DispatchDetectionServiceTests : IAsyncLifetime
     [Fact]
     public async Task SameAgentAsSender_NoDispatch()
     {
-        // If codex sets a task to review and the reviewer is also codex,
+        // If pi sets a task to review and the reviewer is also pi,
         // don't dispatch to yourself
         var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Self-review" });
 
-        await _detection.OnTaskStatusChangedAsync(task, "in_progress", "review", "codex");
+        await _detection.OnTaskStatusChangedAsync(task, "in_progress", "review", "pi");
 
         var pending = await _dispatches.ListAsync("proj", statuses: [DispatchStatus.Pending]);
-        Assert.Empty(pending); // Codex is both sender and default reviewer
+        Assert.Empty(pending); // Pi is both sender and default reviewer
     }
 
     #endregion
@@ -272,7 +272,7 @@ public class DispatchDetectionServiceTests : IAsyncLifetime
         var msg = await _messages.CreateAsync(new Message
         {
             ProjectId = "proj",
-            Sender = "claude-code",
+            Sender = "coder",
             Content = "Please review the latest pass.",
             Intent = MessageIntent.ReviewRequest,
             Metadata = JsonSerializer.Deserialize<JsonElement>(
@@ -282,7 +282,7 @@ public class DispatchDetectionServiceTests : IAsyncLifetime
         await _detection.OnMessageCreatedAsync(msg);
 
         var pending = Assert.Single(await _dispatches.ListAsync("proj", statuses: [DispatchStatus.Pending]));
-        Assert.Equal("codex", pending.TargetAgent);
+        Assert.Equal("pi", pending.TargetAgent);
 
         var context = JsonSerializer.Deserialize<DispatchContextSnapshot>(pending.ContextJson!);
         Assert.NotNull(context);
@@ -319,23 +319,23 @@ public class DispatchDetectionServiceTests : IAsyncLifetime
     public async Task MessageDispatch_ExpiresOlderTaskDispatchForSameTarget()
     {
         var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Review cleanup" });
-        await _detection.OnTaskStatusChangedAsync(task, "in_progress", "review", "claude-code");
-        var older = Assert.Single(await _dispatches.ListAsync("proj", "codex", [DispatchStatus.Pending]));
+        await _detection.OnTaskStatusChangedAsync(task, "in_progress", "review", "coder");
+        var older = Assert.Single(await _dispatches.ListAsync("proj", "pi", [DispatchStatus.Pending]));
 
         var msg = await _messages.CreateAsync(new Message
         {
             ProjectId = "proj",
             TaskId = task.Id,
-            Sender = "patch-codex",
+            Sender = "patch-coder",
             Content = "Please review the latest pass.",
             Intent = MessageIntent.ReviewRequest,
             Metadata = JsonSerializer.Deserialize<JsonElement>(
-                """{"recipient":"codex","handoff_kind":"review_request"}""")
+                """{"recipient":"pi","handoff_kind":"review_request"}""")
         });
 
         await _detection.OnMessageCreatedAsync(msg);
 
-        var pending = await _dispatches.ListAsync("proj", "codex", [DispatchStatus.Pending]);
+        var pending = await _dispatches.ListAsync("proj", "pi", [DispatchStatus.Pending]);
         Assert.Single(pending);
         Assert.Equal(msg.Id, pending[0].TriggerId);
 

@@ -112,8 +112,8 @@ class TabBarTests(unittest.TestCase):
         real_tab = FakeRealTab(
             id=11,
             windows=[
-                FakeWindow(1, {"den_agent": "claude-code", "den_project": "quillforge", "den_status": "working", "den_task": "10"}),
-                FakeWindow(2, {"den_agent": "codex", "den_project": "den-mcp", "den_status": "reviewing", "den_task": "561"}),
+                FakeWindow(1, {"den_agent": "pi", "den_project": "quillforge", "den_status": "working", "den_task": "10"}),
+                FakeWindow(2, {"den_agent": "pi-reviewer", "den_project": "den-mcp", "den_status": "reviewing", "den_task": "561"}),
             ],
             active_window_id=2,
         )
@@ -128,7 +128,7 @@ class TabBarTests(unittest.TestCase):
         self.assertIsNotNone(snapshot)
         assert snapshot is not None
         self.assertEqual("den-mcp", snapshot.project)
-        self.assertEqual("codex", snapshot.agent)
+        self.assertEqual("pi-reviewer", snapshot.agent)
         self.assertEqual("561", snapshot.task_id)
         self.assertEqual(3, snapshot.pending_dispatch_count)
         self.assertEqual(["den-mcp"], count_cache.projects)
@@ -137,9 +137,9 @@ class TabBarTests(unittest.TestCase):
         real_tab = FakeRealTab(
             id=12,
             windows=[
-                FakeWindow(1, {"den_agent": "codex"}),
+                FakeWindow(1, {"den_agent": "pi-reviewer"}),
                 FakeWindow(2, {"den_project": "den-mcp"}),
-                FakeWindow(3, {"den_agent": "codex", "den_project": "den-mcp", "den_status": "working"}),
+                FakeWindow(3, {"den_agent": "pi-reviewer", "den_project": "den-mcp", "den_status": "working"}),
             ],
             active_window_id=1,
         )
@@ -154,7 +154,7 @@ class TabBarTests(unittest.TestCase):
         self.assertIsNotNone(snapshot)
         assert snapshot is not None
         self.assertEqual("den-mcp", snapshot.project)
-        self.assertEqual("codex", snapshot.agent)
+        self.assertEqual("pi-reviewer", snapshot.agent)
         self.assertEqual("working", snapshot.status)
         self.assertEqual(["den-mcp"], count_cache.projects)
 
@@ -186,7 +186,7 @@ class TabBarTests(unittest.TestCase):
     def test_build_tab_text_and_colors_for_managed_tab(self) -> None:
         snapshot = tab_bar.TabStateSnapshot(
             project="den-mcp",
-            agent="codex",
+            agent="pi-reviewer",
             status="reviewing",
             task_id="561",
             dispatch_id=None,
@@ -196,7 +196,7 @@ class TabBarTests(unittest.TestCase):
         text = tab_bar.build_tab_text(FakeTabData(tab_id=1, title="Fallback"), 0, snapshot)
         fg, bg = tab_bar.resolve_tab_colors(FakeTabData(tab_id=1, is_active=True), snapshot)
 
-        self.assertEqual("den-mcp | codex | review | #561 | 2 pending", text)
+        self.assertEqual("den-mcp | pi-reviewer | review | #561 | 2 pending", text)
         self.assertEqual(tab_bar.STATUS_STYLE["reviewing"]["fg"], fg)
         self.assertEqual(tab_bar.STATUS_STYLE["reviewing"]["bg"], bg)
 
@@ -216,7 +216,7 @@ class TabBarTests(unittest.TestCase):
         self.assertIn("Shell", screen.buffer)
 
     def test_truncate_text_adds_ellipsis(self) -> None:
-        self.assertEqual("den-m...", tab_bar.truncate_text("den-mcp | codex", 8))
+        self.assertEqual("den-m...", tab_bar.truncate_text("den-mcp | pi-reviewer", 8))
 
 
 if __name__ == "__main__":

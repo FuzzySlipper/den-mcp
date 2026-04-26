@@ -710,7 +710,7 @@ def build_batch_handoff_text(
         lines.append(f"Focused window: {focused_window.title or f'id {focused_window.id}'}")
     else:
         lines.append("No matching managed agent window was found for the most recent approval.")
-    lines.append("Prompts were not copied in batch mode. Let den-agent pick them up on next launch, or use the details below for manual handoff.")
+    lines.append("Prompts were not copied in batch mode. Legacy dispatch wrappers are retired; use the details below for manual/debug handoff.")
     lines.append("")
     for dispatch in dispatches:
         lines.append(build_dispatch_row(dispatch, 200))

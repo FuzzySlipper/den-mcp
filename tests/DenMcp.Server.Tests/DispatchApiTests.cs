@@ -170,12 +170,12 @@ public class DispatchApiTests : IAsyncLifetime
             {
                 ProjectId = ProjectId,
                 Slug = "dispatch-routing",
-                Title = "Dispatch Routing",
+                Title = "Legacy Dispatch Routing",
                 DocType = DocType.Convention,
                 Content = """
                     {
                       "roles": {
-                        "reviewer": "codex"
+                        "reviewer": "pi-reviewer"
                       },
                       "triggers": [
                         {
@@ -196,28 +196,28 @@ public class DispatchApiTests : IAsyncLifetime
             var message = await messages.CreateAsync(new Message
             {
                 ProjectId = ProjectId,
-                Sender = "claude-code",
+                Sender = "pi",
                 Content = "Please review this role-targeted handoff.",
                 Intent = MessageIntent.ReviewRequest,
                 Metadata = JsonSerializer.Deserialize<JsonElement>(
-                    """{"recipient":"claude-code","target_role":"reviewer","handoff_kind":"review_request"}""")
+                    """{"recipient":"pi","target_role":"reviewer","handoff_kind":"review_request"}""")
             });
 
             var dispatches = scope.ServiceProvider.GetRequiredService<IDispatchRepository>();
             await dispatches.CreateIfAbsentAsync(new DispatchEntry
             {
                 ProjectId = ProjectId,
-                TargetAgent = "codex",
+                TargetAgent = "pi-reviewer",
                 TriggerType = DispatchTriggerType.Message,
                 TriggerId = message.Id,
                 Summary = "Fallback addressedVia test",
                 ContextJson = null,
-                DedupKey = DispatchEntry.BuildDedupKey(DispatchTriggerType.Message, message.Id, "codex"),
+                DedupKey = DispatchEntry.BuildDedupKey(DispatchTriggerType.Message, message.Id, "pi-reviewer"),
                 ExpiresAt = DateTime.UtcNow.AddHours(24)
             });
         }
 
-        var entries = await _client.GetFromJsonAsync<List<DispatchEntry>>("/api/dispatch?targetAgent=codex", JsonOpts);
+        var entries = await _client.GetFromJsonAsync<List<DispatchEntry>>("/api/dispatch?targetAgent=pi-reviewer", JsonOpts);
         var entry = Assert.Single(entries!);
 
         var response = await _client.GetAsync($"/api/dispatch/{entry.Id}/context");
@@ -227,7 +227,7 @@ public class DispatchApiTests : IAsyncLifetime
         Assert.NotNull(envelope);
         Assert.Equal("target_role", envelope!.Context.AddressedVia);
         Assert.Equal("reviewer", envelope.Context.MessageTargetRole);
-        Assert.Equal("claude-code", envelope.Context.Recipient);
+        Assert.Equal("pi", envelope.Context.Recipient);
     }
 
     #endregion
