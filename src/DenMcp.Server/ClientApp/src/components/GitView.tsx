@@ -13,12 +13,15 @@ import {
   formatBranchLabel,
   gitDiffBadges,
   gitFileStatusLabel,
+  gitFocusKey,
   gitNoticeCounts,
   groupGitFiles,
+  pickFocusedGitTargetId,
   sameGitFile,
   shortSha,
   shouldRequestStagedDiff,
   summarizeGitStatus,
+  type GitFocus,
   type GitStatusTarget,
 } from '../git';
 
@@ -26,9 +29,11 @@ interface Props {
   projectId: string | null;
   projects: Project[];
   isGlobal: boolean;
+  focus?: GitFocus | null;
+  onClearFocus?: () => void;
 }
 
-export function GitView({ projectId, projects, isGlobal }: Props) {
+export function GitView({ projectId, projects, isGlobal, focus, onClearFocus }: Props) {
   const [targets, setTargets] = useState<GitStatusTarget[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +42,7 @@ export function GitView({ projectId, projects, isGlobal }: Props) {
   const [diff, setDiff] = useState<GitDiffResponse | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffError, setDiffError] = useState<string | null>(null);
+  const [appliedFocusKey, setAppliedFocusKey] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,12 +63,17 @@ export function GitView({ projectId, projects, isGlobal }: Props) {
           ? projectTargets
           : [{ id: projectId, name: projectId, root_path: null, description: null, created_at: '', updated_at: '' }];
 
-        const loaded = (await Promise.all(fallbackProjects.map(loadProjectTargets))).flat();
+        const loaded = (await Promise.all(fallbackProjects.map(project => loadProjectTargets(project, focus)))).flat();
         if (cancelled) return;
         setTargets(loaded);
-        const nextSelectedTargetId = selectedTargetId && loaded.some(target => target.id === selectedTargetId)
-          ? selectedTargetId
-          : (loaded[0]?.id ?? null);
+        const focusKey = gitFocusKey(focus);
+        if (!focusKey && appliedFocusKey) setAppliedFocusKey(null);
+        const focusedTargetId = focusKey !== appliedFocusKey ? pickFocusedGitTargetId(loaded, focus) : null;
+        const nextSelectedTargetId = focusedTargetId
+          ?? (selectedTargetId && loaded.some(target => target.id === selectedTargetId)
+            ? selectedTargetId
+            : (loaded[0]?.id ?? null));
+        if (focusKey !== appliedFocusKey && focusedTargetId) setAppliedFocusKey(focusKey);
         setSelectedTargetId(nextSelectedTargetId);
         setSelectedFile(current => {
           if (!current || !nextSelectedTargetId) return null;
@@ -78,7 +89,7 @@ export function GitView({ projectId, projects, isGlobal }: Props) {
 
     void load();
     return () => { cancelled = true; };
-  }, [isGlobal, projectId, projects, selectedTargetId]);
+  }, [appliedFocusKey, focus, isGlobal, projectId, projects, selectedTargetId]);
 
   const selectedTarget = useMemo(
     () => targets.find(target => target.id === selectedTargetId) ?? targets[0] ?? null,
@@ -120,6 +131,11 @@ export function GitView({ projectId, projects, isGlobal }: Props) {
   return (
     <div className="git-view">
       <div className="git-summary-line">
+        {focus && (
+          <button className="git-focus-chip" type="button" onClick={onClearFocus} title="Clear task/workspace git focus">
+            Focus task {focus.taskId ? `#${focus.taskId}` : ''}{focus.workspaceId ? ` · ${focus.workspaceId}` : ''}{focus.branch ? ` · ${focus.branch}` : ''} ✕
+          </button>
+        )}
         <span>{dirtyTargets} dirty target{dirtyTargets === 1 ? '' : 's'}</span>
         <span>{totalDirtyFiles} changed file{totalDirtyFiles === 1 ? '' : 's'}</span>
         {loading && <span>Refreshing git state...</span>}
@@ -239,7 +255,7 @@ export function GitView({ projectId, projects, isGlobal }: Props) {
   );
 }
 
-async function loadProjectTargets(project: Project): Promise<GitStatusTarget[]> {
+async function loadProjectTargets(project: Project, focus?: GitFocus | null): Promise<GitStatusTarget[]> {
   const targets: GitStatusTarget[] = [];
   try {
     const status = await getProjectGitStatus(project.id);
@@ -263,7 +279,10 @@ async function loadProjectTargets(project: Project): Promise<GitStatusTarget[]> 
   }
 
   try {
-    const workspaces = await listProjectAgentWorkspaces(project.id, { limit: 50 });
+    const workspaces = await listProjectAgentWorkspaces(project.id, {
+      taskId: focus?.projectId === project.id ? focus.taskId : undefined,
+      limit: 50,
+    });
     const workspaceTargets = await Promise.all(workspaces.map(async workspace => {
       try {
         const status = await getWorkspaceGitStatus(project.id, workspace.id);

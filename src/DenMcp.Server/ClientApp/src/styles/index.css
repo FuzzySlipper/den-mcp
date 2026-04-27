@@ -611,9 +611,22 @@ html, body, #root {
 .workspace-card {
   border: 1px solid var(--border);
   background: var(--bg);
+  color: var(--text);
   border-radius: 5px;
   padding: 8px;
   min-width: 0;
+  text-align: left;
+}
+
+.workspace-card-button {
+  appearance: none;
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+
+.workspace-card-button:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent-dim);
 }
 
 .workspace-card span {
@@ -658,6 +671,22 @@ html, body, #root {
 
 .workspace-card-next {
   border-color: #5b3b17;
+}
+
+.workspace-warning-list {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.workspace-warning {
+  border: 1px solid #5b3b17;
+  border-radius: 4px;
+  background: #3b2a14;
+  color: var(--yellow);
+  padding: 5px 8px;
+  font-size: 11px;
 }
 
 .workspace-run-list {
@@ -1858,6 +1887,21 @@ html, body, #root {
   font-family: var(--font-mono);
   font-size: 11px;
   flex-wrap: wrap;
+}
+
+.git-focus-chip {
+  border: 1px solid var(--accent-dim);
+  border-radius: 999px;
+  background: #1a2744;
+  color: var(--accent);
+  padding: 2px 9px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.git-focus-chip:hover {
+  background: var(--bg-hover);
 }
 
 .git-target-grid {

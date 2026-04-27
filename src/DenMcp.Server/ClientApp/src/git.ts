@@ -1,4 +1,4 @@
-import type { GitDiffResponse, GitFileStatus, GitStatusResponse } from './api/types';
+import type { AgentWorkspace, GitDiffResponse, GitFileStatus, GitStatusResponse, ReviewRound } from './api/types';
 
 export type GitTargetKind = 'project' | 'workspace';
 
@@ -10,6 +10,13 @@ export interface GitStatusTarget {
   title: string;
   subtitle: string;
   status: GitStatusResponse;
+}
+
+export interface GitFocus {
+  projectId: string;
+  taskId?: number;
+  workspaceId?: string;
+  branch?: string;
 }
 
 export interface GitFileGroup {
@@ -60,6 +67,59 @@ export function summarizeGitStatus(status: GitStatusResponse): string {
   const head = shortSha(status.head_sha);
   const sync = formatAheadBehind(status);
   return `${dirty} dirty · ${branch} · ${sync} · ${head}`;
+}
+
+export function buildTaskGitFocus(projectId: string, taskId: number, workspace?: AgentWorkspace | null, branch?: string | null): GitFocus {
+  return {
+    projectId,
+    taskId,
+    workspaceId: workspace?.id,
+    branch: workspace?.branch ?? branch ?? undefined,
+  };
+}
+
+export function gitFocusKey(focus: GitFocus | null | undefined): string | null {
+  if (!focus) return null;
+  return [focus.projectId, focus.taskId ?? '', focus.workspaceId ?? '', focus.branch ?? ''].join(':');
+}
+
+export function gitTargetMatchesFocus(target: GitStatusTarget, focus: GitFocus): boolean {
+  if (target.projectId !== focus.projectId) return false;
+  if (focus.workspaceId && target.workspaceId !== focus.workspaceId) return false;
+  if (focus.taskId != null && target.status.task_id != null && target.status.task_id !== focus.taskId) return false;
+  if (focus.branch) {
+    const branches = [target.status.branch, target.status.workspace_branch, target.title]
+      .filter((value): value is string => Boolean(value));
+    if (!branches.some(branch => branch.includes(focus.branch!))) return false;
+  }
+  return true;
+}
+
+export function pickFocusedGitTargetId(targets: GitStatusTarget[], focus: GitFocus | null | undefined): string | null {
+  if (!focus) return null;
+  const workspaceMatch = targets.find(target => target.kind === 'workspace' && gitTargetMatchesFocus(target, focus));
+  if (workspaceMatch) return workspaceMatch.id;
+  const projectMatch = targets.find(target => target.kind === 'project' && gitTargetMatchesFocus(target, focus));
+  return projectMatch?.id ?? null;
+}
+
+export function reviewGitAlignmentWarnings(round: ReviewRound | null | undefined, status: GitStatusResponse | null | undefined): string[] {
+  if (!round || !status || status.errors.length > 0) return [];
+  const warnings: string[] = [];
+  const liveBranch = status.branch ?? status.workspace_branch;
+  if (liveBranch && round.branch && liveBranch !== round.branch) {
+    warnings.push(`Review branch '${round.branch}' differs from live git branch '${liveBranch}'.`);
+  }
+  if (status.workspace_base_branch && round.base_branch && status.workspace_base_branch !== round.base_branch) {
+    warnings.push(`Review base branch '${round.base_branch}' differs from workspace base branch '${status.workspace_base_branch}'.`);
+  }
+  if (status.workspace_base_commit && round.base_commit && !sameCommit(status.workspace_base_commit, round.base_commit)) {
+    warnings.push(`Review base ${shortSha(round.base_commit)} differs from workspace base ${shortSha(status.workspace_base_commit)}.`);
+  }
+  if (status.head_sha && round.head_commit && !sameCommit(status.head_sha, round.head_commit)) {
+    warnings.push(`Review head ${shortSha(round.head_commit)} differs from live git HEAD ${shortSha(status.head_sha)}.`);
+  }
+  return warnings;
 }
 
 export function classifyGitFile(file: GitFileStatus): string {
@@ -127,4 +187,8 @@ function normalizeStatus(value: string | null): string {
 
 function isChangedStatus(value: string | null): boolean {
   return Boolean(value && value !== '.' && value !== '?' && value !== ' ');
+}
+
+function sameCommit(left: string, right: string): boolean {
+  return left.startsWith(right) || right.startsWith(left);
 }

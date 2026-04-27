@@ -35,6 +35,7 @@ import { AgentBar } from './components/AgentBar';
 import { DispatchDetail } from './components/DispatchDetail';
 import { MESSAGE_INTENT_OPTIONS, messageIntentLabel } from './messageIntents';
 import type { SubagentRunFilter } from './subagentRuns';
+import type { GitFocus } from './git';
 import {
   filterThoughtItems,
   hasRawReasoningPreview,
@@ -52,6 +53,7 @@ export default function App() {
   const [selectedSubagentRun, setSelectedSubagentRun] = useState<SubagentRunSummary | null>(null);
   const [selectedDispatch, setSelectedDispatch] = useState<DispatchEntry | null>(null);
   const [selectedDoc, setSelectedDoc] = useState<DocumentSummary | null>(null);
+  const [gitFocus, setGitFocus] = useState<GitFocus | null>(null);
   const [viewMode, setViewMode] = useState<'tasks' | 'documents' | 'librarian' | 'git'>('tasks');
   const [feedMode, setFeedMode] = useState<'stream' | 'messages' | 'thoughts'>('stream');
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
@@ -385,6 +387,21 @@ export default function App() {
     }
   }, []);
 
+  const handleOpenGitFocus = useCallback((focus: GitFocus) => {
+    if (focus.projectId !== selectedProject) {
+      setSelectedProject(focus.projectId);
+    }
+    setGitFocus(focus);
+    setViewMode('git');
+    setSelectedTaskId(null);
+    setSelectedTaskProjectId(null);
+    setSelectedMessage(null);
+    setSelectedStreamEntry(null);
+    setSelectedSubagentRun(null);
+    setSelectedDispatch(null);
+    setSelectedDoc(null);
+  }, [selectedProject]);
+
   const handleStreamThreadOpen = useCallback(async (entry: AgentStreamEntry) => {
     if (!entry.project_id || entry.thread_id == null) {
       return;
@@ -671,6 +688,8 @@ export default function App() {
               projectId={effectiveProject}
               projects={projects ?? []}
               isGlobal={isGlobal}
+              focus={gitFocus}
+              onClearFocus={() => setGitFocus(null)}
             />
           ) : (
             <LibrarianView
@@ -694,6 +713,7 @@ export default function App() {
           onSelectTask={handleTaskSelect}
           onSelectMessage={handleMessageSelect}
           onSelectRun={handleSubagentRunSelect}
+          onOpenGit={handleOpenGitFocus}
           onClose={() => {
             setSelectedTaskId(null);
             setSelectedTaskProjectId(null);

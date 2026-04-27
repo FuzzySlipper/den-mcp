@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import type {
+  AgentWorkspace,
+  GitStatusResponse,
   Message,
   ReviewFinding,
   ReviewTimelineEntry,
@@ -9,10 +11,11 @@ import type {
   TaskDetail as TaskDetailType,
   TaskStatus,
 } from '../api/types';
-import { getTask, listSubagentRuns, updateTask } from '../api/client';
+import { getProjectGitStatus, getTask, getWorkspaceGitStatus, listProjectAgentWorkspaces, listSubagentRuns, updateTask } from '../api/client';
 import { formatSubagentDuration } from '../subagentRuns';
 import { formatTimeAgo, truncate } from '../utils';
 import { messageIntentLabel } from '../messageIntents';
+import { buildTaskGitFocus, dirtyCount, reviewGitAlignmentWarnings, summarizeGitStatus, type GitFocus } from '../git';
 
 interface Props {
   projectId: string;
@@ -20,6 +23,7 @@ interface Props {
   onSelectTask: (taskId: number) => void;
   onSelectMessage: (message: Message) => void;
   onSelectRun: (run: SubagentRunSummary) => void;
+  onOpenGit: (focus: GitFocus) => void;
   onClose: () => void;
 }
 
@@ -73,6 +77,15 @@ function summarizeRun(run: SubagentRunSummary): string {
   return bits.length > 0 ? bits.join(' · ') : run.run_id;
 }
 
+function selectRelevantWorkspace(workspaces: AgentWorkspace[], branch?: string | null): AgentWorkspace | null {
+  if (workspaces.length === 0) return null;
+  if (branch) {
+    const byBranch = workspaces.find(workspace => workspace.branch === branch);
+    if (byBranch) return byBranch;
+  }
+  return workspaces[0];
+}
+
 function nextAction(detail: TaskDetailType, runs: SubagentRunSummary[]): string {
   const activeRun = runs.find(run => isActiveRunState(run.state));
   const latestRun = runs[0] ?? null;
@@ -90,9 +103,12 @@ function nextAction(detail: TaskDetailType, runs: SubagentRunSummary[]): string 
   return 'Triage task state and decide the next operator action.';
 }
 
-export function TaskDetail({ projectId, taskId, onSelectTask, onSelectMessage, onSelectRun, onClose }: Props) {
+export function TaskDetail({ projectId, taskId, onSelectTask, onSelectMessage, onSelectRun, onOpenGit, onClose }: Props) {
   const [detail, setDetail] = useState<TaskDetailType | null>(null);
   const [runs, setRuns] = useState<SubagentRunSummary[]>([]);
+  const [gitStatus, setGitStatus] = useState<GitStatusResponse | null>(null);
+  const [gitWorkspace, setGitWorkspace] = useState<AgentWorkspace | null>(null);
+  const [gitError, setGitError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [runsError, setRunsError] = useState<string | null>(null);
 
@@ -126,6 +142,33 @@ export function TaskDetail({ projectId, taskId, onSelectTask, onSelectMessage, o
       if (timer != null) window.clearInterval(timer);
     };
   }, [projectId, taskId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadGitStatus() {
+      if (!detail) return;
+      try {
+        const workspaces = await listProjectAgentWorkspaces(projectId, { taskId, limit: 20 });
+        const workspace = selectRelevantWorkspace(workspaces, detail.review_workflow.current_round?.branch);
+        const status = workspace
+          ? await getWorkspaceGitStatus(projectId, workspace.id)
+          : await getProjectGitStatus(projectId);
+        if (!cancelled) {
+          setGitWorkspace(workspace);
+          setGitStatus(status);
+          setGitError(null);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setGitWorkspace(null);
+          setGitStatus(null);
+          setGitError(e instanceof Error ? e.message : String(e));
+        }
+      }
+    }
+    void loadGitStatus();
+    return () => { cancelled = true; };
+  }, [detail, projectId, taskId]);
 
   const handleStatusChange = async (newStatus: string) => {
     try {
@@ -166,6 +209,8 @@ export function TaskDetail({ projectId, taskId, onSelectTask, onSelectMessage, o
   const latestRun = runs[0] ?? null;
   const latestProblemRun = latestRun && isProblemRunState(latestRun.state) ? latestRun : null;
   const operatorNextAction = nextAction(detail, runs);
+  const gitWarnings = reviewGitAlignmentWarnings(currentRound, gitStatus);
+  const gitFocus = buildTaskGitFocus(projectId, task.id, gitWorkspace, currentRound?.branch);
 
   const handleTaskNavigation = (nextTaskId: number) => {
     if (nextTaskId !== task.id) {
@@ -213,11 +258,16 @@ export function TaskDetail({ projectId, taskId, onSelectTask, onSelectMessage, o
               <strong>{activeRuns.length > 0 ? `${activeRuns.length} active run${activeRuns.length === 1 ? '' : 's'}` : latestRun ? `last ${latestRun.state}` : 'no runs yet'}</strong>
               <p>{activeRuns[0] ? summarizeRun(activeRuns[0]) : latestRun ? summarizeRun(latestRun) : 'No sub-agent activity is linked to this task yet.'}</p>
             </div>
-            <div className="workspace-card">
+            <button
+              type="button"
+              className={`workspace-card workspace-card-button ${gitStatus && dirtyCount(gitStatus) > 0 ? 'workspace-card-active' : ''}`}
+              onClick={() => onOpenGit(gitFocus)}
+              title="Open Git view for this task/workspace"
+            >
               <span>Changed</span>
-              <strong>{currentRound ? `${currentRound.preferred_diff.base_ref}...${currentRound.preferred_diff.head_ref}` : 'no review diff yet'}</strong>
-              <p>{currentRound ? `head ${shortSha(currentRound.head_commit)} on ${currentRound.branch}` : 'Changed-file projection is not available yet; review metadata will appear here once a review is requested.'}</p>
-            </div>
+              <strong>{gitStatus ? `${dirtyCount(gitStatus)} live changed file${dirtyCount(gitStatus) === 1 ? '' : 's'}` : currentRound ? `${currentRound.preferred_diff.base_ref}...${currentRound.preferred_diff.head_ref}` : 'open Git view'}</strong>
+              <p>{gitStatus ? summarizeGitStatus(gitStatus) : gitError ? `Could not load live git state: ${gitError}` : currentRound ? `head ${shortSha(currentRound.head_commit)} on ${currentRound.branch}` : 'Open the read-only Git view for project/workspace changes.'}</p>
+            </button>
             <div className={`workspace-card ${detail.open_review_findings.length > 0 ? 'workspace-card-problem' : detail.review_workflow.current_verdict === 'looks_good' ? 'workspace-card-ready' : ''}`}>
               <span>Review</span>
               <strong>{currentRound ? formatVerdict(detail.review_workflow.current_verdict) : 'not requested'}</strong>
@@ -229,6 +279,12 @@ export function TaskDetail({ projectId, taskId, onSelectTask, onSelectMessage, o
               <p>{operatorNextAction}</p>
             </div>
           </div>
+          {gitWorkspace && <div className="detail-description">Git view target: workspace <code>{gitWorkspace.id}</code> on <code>{gitWorkspace.branch}</code>.</div>}
+          {gitWarnings.length > 0 && (
+            <div className="workspace-warning-list">
+              {gitWarnings.map(warning => <div key={warning} className="workspace-warning">{warning}</div>)}
+            </div>
+          )}
           {runsError && <div className="detail-description">Could not load agent runs: {runsError}</div>}
           {runs.length > 0 && (
             <div className="workspace-run-list">
