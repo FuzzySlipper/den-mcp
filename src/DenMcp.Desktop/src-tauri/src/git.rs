@@ -1,4 +1,5 @@
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Component, Path};
 use std::process::Command;
 
 use chrono::Utc;
@@ -6,6 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::den_client::{AgentWorkspace, Project};
 use crate::settings::OperatorSettings;
+
+const MAX_DIFF_FILES_PER_SCOPE: usize = 20;
+const MAX_DIFF_BYTES: usize = 64 * 1024;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -48,6 +52,25 @@ pub struct DesktopGitSnapshotRequest {
     pub truncated: bool,
     pub source_instance_id: String,
     pub source_display_name: Option<String>,
+    pub observed_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct DesktopDiffSnapshotRequest {
+    pub task_id: Option<i64>,
+    pub workspace_id: Option<String>,
+    pub root_path: String,
+    pub path: Option<String>,
+    pub base_ref: Option<String>,
+    pub head_ref: Option<String>,
+    pub max_bytes: i64,
+    pub staged: bool,
+    pub diff: String,
+    pub truncated: bool,
+    pub binary: bool,
+    pub warnings: Vec<String>,
+    pub source_instance_id: String,
     pub observed_at: String,
 }
 
@@ -470,6 +493,153 @@ fn category_from_status(index: &str, worktree: &str, untracked: bool) -> String 
     }
 }
 
+pub fn inspect_diff_snapshots(snapshot: &LocalGitSnapshot) -> Vec<DesktopDiffSnapshotRequest> {
+    if snapshot.request.state != DesktopSnapshotState::Ok {
+        return Vec::new();
+    }
+
+    let mut seen = HashSet::new();
+    let mut diff_snapshots = Vec::new();
+    for file in &snapshot.request.changed_files {
+        if diff_snapshots.len() >= MAX_DIFF_FILES_PER_SCOPE {
+            break;
+        }
+        if !seen.insert(file.path.clone()) {
+            continue;
+        }
+        if !is_safe_relative_git_path(&file.path) {
+            continue;
+        }
+        if let Some(diff) = build_diff_snapshot(snapshot, &file.path, false) {
+            diff_snapshots.push(diff);
+        }
+        if file
+            .index_status
+            .as_deref()
+            .is_some_and(|status| status != "." && status != "?")
+        {
+            if let Some(diff) = build_diff_snapshot(snapshot, &file.path, true) {
+                diff_snapshots.push(diff);
+            }
+        }
+    }
+    diff_snapshots
+}
+
+fn build_diff_snapshot(
+    snapshot: &LocalGitSnapshot,
+    path: &str,
+    staged: bool,
+) -> Option<DesktopDiffSnapshotRequest> {
+    let args = diff_args(path, staged);
+    let result = run_git(&snapshot.request.root_path, &args).ok()?;
+    if result.exit_code != 0 {
+        return Some(diff_warning_snapshot(
+            snapshot,
+            path,
+            staged,
+            format_git_error(
+                if staged {
+                    "git diff --cached"
+                } else {
+                    "git diff HEAD"
+                },
+                &result,
+            ),
+        ));
+    }
+    let mut warnings = result.warnings;
+    if result.stdout.is_empty() {
+        return None;
+    }
+    let (diff, output_truncated) = bound_text(&result.stdout, MAX_DIFF_BYTES);
+    let truncated = result.truncated || output_truncated;
+    if truncated {
+        warnings.push(format!("Diff output truncated to {MAX_DIFF_BYTES} bytes."));
+    }
+    let binary = looks_like_binary_diff(&result.stdout);
+    if binary {
+        warnings.push("Diff appears to describe binary content.".to_string());
+    }
+
+    Some(DesktopDiffSnapshotRequest {
+        task_id: snapshot.request.task_id,
+        workspace_id: snapshot.request.workspace_id.clone(),
+        root_path: snapshot.request.root_path.clone(),
+        path: Some(path.to_string()),
+        base_ref: Some("HEAD".to_string()),
+        head_ref: None,
+        max_bytes: MAX_DIFF_BYTES as i64,
+        staged,
+        diff,
+        truncated,
+        binary,
+        warnings,
+        source_instance_id: snapshot.request.source_instance_id.clone(),
+        observed_at: now_string(),
+    })
+}
+
+fn diff_warning_snapshot(
+    snapshot: &LocalGitSnapshot,
+    path: &str,
+    staged: bool,
+    warning: String,
+) -> DesktopDiffSnapshotRequest {
+    DesktopDiffSnapshotRequest {
+        task_id: snapshot.request.task_id,
+        workspace_id: snapshot.request.workspace_id.clone(),
+        root_path: snapshot.request.root_path.clone(),
+        path: Some(path.to_string()),
+        base_ref: Some("HEAD".to_string()),
+        head_ref: None,
+        max_bytes: MAX_DIFF_BYTES as i64,
+        staged,
+        diff: String::new(),
+        truncated: false,
+        binary: false,
+        warnings: vec![warning],
+        source_instance_id: snapshot.request.source_instance_id.clone(),
+        observed_at: now_string(),
+    }
+}
+
+fn diff_args(path: &str, staged: bool) -> Vec<&str> {
+    if staged {
+        vec!["diff", "--cached", "--", path]
+    } else {
+        vec!["diff", "HEAD", "--", path]
+    }
+}
+
+fn is_safe_relative_git_path(path: &str) -> bool {
+    let path = Path::new(path);
+    !path.as_os_str().is_empty()
+        && !path.is_absolute()
+        && path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_) | Component::CurDir))
+}
+
+fn looks_like_binary_diff(diff: &str) -> bool {
+    diff.contains("Binary files ") || diff.contains("GIT binary patch")
+}
+
+fn bound_text(value: &str, max_bytes: usize) -> (String, bool) {
+    if value.len() <= max_bytes {
+        return (value.to_string(), false);
+    }
+    let mut end = max_bytes;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    (value[..end].to_string(), true)
+}
+
+fn now_string() -> String {
+    Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
 #[derive(Debug)]
 struct GitCommandResult {
     exit_code: i32,
@@ -764,6 +934,64 @@ mod tests {
         assert!(scopes
             .iter()
             .any(|scope| scope.workspace_id.as_deref() == Some("ws_active")));
+    }
+
+    #[test]
+    fn diff_helpers_validate_paths_and_build_safe_arguments() {
+        assert!(is_safe_relative_git_path("src/main.rs"));
+        assert!(is_safe_relative_git_path("./src/main.rs"));
+        assert!(!is_safe_relative_git_path(""));
+        assert!(!is_safe_relative_git_path("../secret"));
+        assert!(!is_safe_relative_git_path("/tmp/secret"));
+
+        assert_eq!(
+            diff_args("src/main.rs", false),
+            vec!["diff", "HEAD", "--", "src/main.rs"]
+        );
+        assert_eq!(
+            diff_args("src/main.rs", true),
+            vec!["diff", "--cached", "--", "src/main.rs"]
+        );
+    }
+
+    #[test]
+    fn bounded_diff_output_preserves_char_boundaries_and_binary_warning_detection() {
+        let (bounded, truncated) = bound_text("αβγδε", 5);
+        assert_eq!(bounded, "αβ");
+        assert!(truncated);
+        assert!(looks_like_binary_diff(
+            "diff --git a/bin b/bin\nBinary files a/bin and b/bin differ"
+        ));
+        assert!(looks_like_binary_diff("GIT binary patch\nliteral 0"));
+    }
+
+    #[test]
+    fn inspect_diff_snapshots_skips_non_ok_snapshots_and_unsafe_paths() {
+        let mut local = LocalGitSnapshot {
+            scope: scope(),
+            request: base_request(
+                &scope(),
+                &settings(),
+                "2026-04-27T00:00:00.000Z".to_string(),
+                DesktopSnapshotState::GitError,
+                Vec::new(),
+            ),
+            last_publish_status: "pending".to_string(),
+            last_publish_error: None,
+            last_published_at: None,
+        };
+        assert!(inspect_diff_snapshots(&local).is_empty());
+
+        local.request.state = DesktopSnapshotState::Ok;
+        local.request.changed_files = vec![GitFileStatus {
+            path: "../outside".to_string(),
+            old_path: None,
+            index_status: Some("M".to_string()),
+            worktree_status: Some("M".to_string()),
+            category: "modified".to_string(),
+            is_untracked: false,
+        }];
+        assert!(inspect_diff_snapshots(&local).is_empty());
     }
 
     #[test]

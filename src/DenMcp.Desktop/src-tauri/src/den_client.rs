@@ -3,7 +3,7 @@ use std::time::Duration;
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 
-use crate::git::{DesktopGitSnapshotRequest, DesktopSnapshotState};
+use crate::git::{DesktopDiffSnapshotRequest, DesktopGitSnapshotRequest, DesktopSnapshotState};
 use crate::session::DesktopSessionSnapshotRequest;
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(8);
@@ -117,6 +117,35 @@ impl DenClient {
             let body = response.text().await.unwrap_or_default();
             return Err(format!(
                 "Desktop git snapshot publish for {project_id} returned HTTP {status}: {body}"
+            ));
+        }
+        Ok(())
+    }
+
+    pub async fn publish_diff_snapshot(
+        &self,
+        base_url: &str,
+        project_id: &str,
+        snapshot: &DesktopDiffSnapshotRequest,
+    ) -> Result<(), String> {
+        let path = format!(
+            "/api/projects/{}/desktop/diff-snapshots",
+            url_escape(project_id)
+        );
+        let response = self
+            .http
+            .put(join_url(base_url, &path)?)
+            .json(snapshot)
+            .send()
+            .await
+            .map_err(|error| {
+                format!("Unable to publish desktop diff snapshot for {project_id}: {error}")
+            })?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(format!(
+                "Desktop diff snapshot publish for {project_id} returned HTTP {status}: {body}"
             ));
         }
         Ok(())

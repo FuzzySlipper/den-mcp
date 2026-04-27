@@ -10,7 +10,9 @@ use tokio::time::sleep;
 use crate::den_client::{
     AgentWorkspace, DenClient, DesktopDiffSnapshotLatestResult, LatestDiffSnapshotRequest, Project,
 };
-use crate::git::{build_git_scopes, inspect_scope, GitScope, LocalGitSnapshot};
+use crate::git::{
+    build_git_scopes, inspect_diff_snapshots, inspect_scope, GitScope, LocalGitSnapshot,
+};
 use crate::session::{scan_pi_session_snapshots, LocalSessionSnapshot};
 use crate::settings::{
     load_settings, save_settings, OperatorSettings, SaveOperatorSettingsRequest,
@@ -473,6 +475,7 @@ async fn run_refresh(app: AppHandle) {
     let mut snapshots = Vec::new();
     let mut warning_count = 0;
     let mut publish_successes = 0;
+    let mut diff_publish_successes = 0;
     let mut publish_errors = Vec::new();
 
     for scope in &scopes {
@@ -500,6 +503,24 @@ async fn run_refresh(app: AppHandle) {
                 Some("Den is offline; latest local snapshot is retained in memory.".to_string());
         }
         snapshots.push(snapshot);
+    }
+
+    if den_connected {
+        for snapshot in &snapshots {
+            for diff_snapshot in inspect_diff_snapshots(snapshot) {
+                match den
+                    .publish_diff_snapshot(
+                        &settings.den_base_url,
+                        &snapshot.scope.project_id,
+                        &diff_snapshot,
+                    )
+                    .await
+                {
+                    Ok(()) => diff_publish_successes += 1,
+                    Err(error) => publish_errors.push(error),
+                }
+            }
+        }
     }
 
     let mut session_result = scan_pi_session_snapshots(&settings, &projects);
@@ -558,7 +579,7 @@ async fn run_refresh(app: AppHandle) {
                 Some(seconds_from_now(settings.poll_interval_seconds)),
             ),
         ];
-        if publish_successes > 0 || session_publish_successes > 0 {
+        if publish_successes > 0 || diff_publish_successes > 0 || session_publish_successes > 0 {
             runtime.status.last_publish_at = Some(now_string());
         }
         for error in publish_errors.into_iter().take(5) {
