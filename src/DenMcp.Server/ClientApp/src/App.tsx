@@ -30,6 +30,7 @@ import { SubagentRunDetail } from './components/SubagentRunDetail';
 import { DocumentList } from './components/DocumentList';
 import { DocumentDetail } from './components/DocumentDetail';
 import { LibrarianView } from './components/LibrarianView';
+import { GitView } from './components/GitView';
 import { AgentBar } from './components/AgentBar';
 import { DispatchDetail } from './components/DispatchDetail';
 import { MESSAGE_INTENT_OPTIONS, messageIntentLabel } from './messageIntents';
@@ -51,7 +52,7 @@ export default function App() {
   const [selectedSubagentRun, setSelectedSubagentRun] = useState<SubagentRunSummary | null>(null);
   const [selectedDispatch, setSelectedDispatch] = useState<DispatchEntry | null>(null);
   const [selectedDoc, setSelectedDoc] = useState<DocumentSummary | null>(null);
-  const [viewMode, setViewMode] = useState<'tasks' | 'documents' | 'librarian'>('tasks');
+  const [viewMode, setViewMode] = useState<'tasks' | 'documents' | 'librarian' | 'git'>('tasks');
   const [feedMode, setFeedMode] = useState<'stream' | 'messages' | 'thoughts'>('stream');
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [messageIntentFilter, setMessageIntentFilter] = useState<MessageIntent | ''>('');
@@ -636,7 +637,9 @@ export default function App() {
             ? <>Tasks {effectiveProject && <span className="count">({taskCount}{filterLabel}{sortLabel})</span>}</>
             : viewMode === 'documents'
               ? <>Documents {effectiveProject && <span className="count">({sortedDocs.length})</span>}</>
-              : <>Librarian</>
+              : viewMode === 'git'
+                ? <>Git</>
+                : <>Librarian</>
           }
         </div>
         <FilterBar
@@ -662,6 +665,12 @@ export default function App() {
               projectId={effectiveProject}
               isGlobal={isGlobal}
               onSelect={handleDocumentSelect}
+            />
+          ) : viewMode === 'git' ? (
+            <GitView
+              projectId={effectiveProject}
+              projects={projects ?? []}
+              isGlobal={isGlobal}
             />
           ) : (
             <LibrarianView

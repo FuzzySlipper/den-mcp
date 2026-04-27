@@ -21,6 +21,8 @@ export type ReviewVerdict = 'changes_requested' | 'looks_good' | 'follow_up_need
 export type ReviewFindingCategory = 'blocking_bug' | 'acceptance_gap' | 'test_weakness' | 'follow_up_candidate';
 export type ReviewFindingStatus = 'open' | 'claimed_fixed' | 'verified_fixed' | 'not_fixed' | 'superseded' | 'split_to_follow_up';
 export type ReviewPacketKind = 'review_request' | 'rereview_request' | 'review_findings';
+export type AgentWorkspaceState = 'planned' | 'active' | 'review' | 'complete' | 'failed' | 'archived';
+export type AgentWorkspaceCleanupPolicy = 'keep' | 'delete_worktree' | 'archive';
 
 export interface Project {
   id: string;
@@ -198,6 +200,106 @@ export interface ReviewPacketResult {
   findings_addressed: string[];
   open_findings: string[];
   test_commands: string[];
+}
+
+export interface AgentWorkspace {
+  id: string;
+  project_id: string;
+  task_id: number;
+  branch: string;
+  worktree_path: string;
+  base_branch: string;
+  base_commit: string | null;
+  head_commit: string | null;
+  state: AgentWorkspaceState;
+  created_by_run_id: string | null;
+  dev_server_url: string | null;
+  preview_url: string | null;
+  cleanup_policy: AgentWorkspaceCleanupPolicy;
+  changed_file_summary: unknown | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GitDirtyCounts {
+  total: number;
+  staged: number;
+  unstaged: number;
+  untracked: number;
+  modified: number;
+  added: number;
+  deleted: number;
+  renamed: number;
+}
+
+export interface GitFileStatus {
+  path: string;
+  old_path: string | null;
+  index_status: string | null;
+  worktree_status: string | null;
+  category: string;
+  is_untracked: boolean;
+}
+
+export interface GitStatusResponse {
+  project_id: string;
+  workspace_id: string | null;
+  task_id: number | null;
+  workspace_branch: string | null;
+  workspace_base_branch: string | null;
+  workspace_base_commit: string | null;
+  workspace_head_commit: string | null;
+  root_path: string;
+  is_git_repository: boolean;
+  branch: string | null;
+  is_detached: boolean;
+  head_sha: string | null;
+  upstream: string | null;
+  ahead: number | null;
+  behind: number | null;
+  dirty_counts: GitDirtyCounts;
+  files: GitFileStatus[];
+  warnings: string[];
+  errors: string[];
+  truncated: boolean;
+}
+
+export interface GitFilesResponse {
+  project_id: string;
+  workspace_id: string | null;
+  task_id: number | null;
+  workspace_branch: string | null;
+  workspace_base_branch: string | null;
+  workspace_base_commit: string | null;
+  workspace_head_commit: string | null;
+  root_path: string;
+  base_ref: string | null;
+  head_ref: string | null;
+  files: GitFileStatus[];
+  warnings: string[];
+  errors: string[];
+  truncated: boolean;
+}
+
+export interface GitDiffResponse {
+  project_id: string;
+  workspace_id: string | null;
+  task_id: number | null;
+  workspace_branch: string | null;
+  workspace_base_branch: string | null;
+  workspace_base_commit: string | null;
+  workspace_head_commit: string | null;
+  root_path: string;
+  path: string | null;
+  base_ref: string | null;
+  head_ref: string | null;
+  max_bytes: number;
+  staged: boolean;
+  diff: string;
+  truncated: boolean;
+  binary: boolean;
+  warnings: string[];
+  errors: string[];
 }
 
 export interface Message {

@@ -3,8 +3,8 @@ interface Props {
   onStatusFilterChange: (status: string | null) => void;
   sortMode: string;
   onSortChange: (sort: string) => void;
-  viewMode: 'tasks' | 'documents' | 'librarian';
-  onViewModeChange: (mode: 'tasks' | 'documents' | 'librarian') => void;
+  viewMode: 'tasks' | 'documents' | 'librarian' | 'git';
+  onViewModeChange: (mode: 'tasks' | 'documents' | 'librarian' | 'git') => void;
 }
 
 const STATUSES = ['planned', 'in_progress', 'review', 'blocked', 'done', 'cancelled'];
@@ -51,6 +51,12 @@ export function FilterBar({
           onClick={() => onViewModeChange('documents')}
         >
           Docs
+        </button>
+        <button
+          className={viewMode === 'git' ? 'active' : ''}
+          onClick={() => onViewModeChange('git')}
+        >
+          Git
         </button>
         <button
           className={viewMode === 'librarian' ? 'active' : ''}

@@ -1840,3 +1840,216 @@ html, body, #root {
   padding-left: 18px;
   color: var(--text);
 }
+
+/* Git inspection */
+.git-view {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  min-height: 100%;
+}
+
+.git-summary-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  flex-wrap: wrap;
+}
+
+.git-target-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.git-target-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+
+.git-target-card:hover,
+.git-target-card-selected {
+  background: var(--bg-hover);
+  border-color: var(--accent-dim);
+}
+
+.git-target-card strong {
+  color: var(--text-bright);
+  font-size: 12px;
+}
+
+.git-target-card span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.git-target-kind {
+  color: var(--accent) !important;
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.git-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(320px, 1.1fr);
+  gap: 10px;
+  min-height: 0;
+  flex: 1;
+}
+
+.git-files-panel,
+.git-diff-panel {
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+}
+
+.git-section-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.git-section-header div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.git-section-header strong {
+  color: var(--text-bright);
+}
+
+.git-section-header span,
+.git-meta-list span,
+.git-workspace-meta span {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.git-meta-list {
+  align-items: flex-end;
+  flex-shrink: 0;
+}
+
+.git-workspace-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(122, 162, 247, 0.06);
+}
+
+.git-notices {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 8px;
+  padding: 6px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.git-notices-warning {
+  background: #3b2a14;
+  color: var(--yellow);
+}
+
+.git-notices-error {
+  background: #3a1a24;
+  color: var(--red);
+}
+
+.git-warning-text { color: var(--yellow) !important; }
+.git-error-text { color: var(--red) !important; }
+
+.git-file-group {
+  border-top: 1px solid var(--border);
+}
+
+.git-file-group h4 {
+  padding: 6px 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.git-file-group h4 span {
+  color: var(--accent);
+}
+
+.git-file-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.git-file-row:hover,
+.git-file-row-selected {
+  background: var(--bg-hover);
+}
+
+.git-file-status {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.git-file-status-deleted { color: var(--red); }
+.git-file-status-renamed { color: var(--purple); }
+.git-file-status-untracked { color: var(--green); }
+.git-file-status-added { color: var(--green); }
+.git-file-status-modified { color: var(--yellow); }
+
+.git-file-path {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.git-file-old-path,
+.git-file-category {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.git-diff-text {
+  padding: 10px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
