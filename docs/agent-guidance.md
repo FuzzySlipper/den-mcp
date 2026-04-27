@@ -120,8 +120,10 @@ file should tell agents:
 5. Regenerate/export compatibility snapshots only after the Den guidance source
    is updated.
 
-The existing `scripts/generate_agents.py` workflow remains supported while the
-Den-native path proves itself.
+The existing `scripts/generate_agents.py` workflow now emits a small bootstrap
+snapshot instead of inlining shared policy. It remains supported for tools that
+still read `AGENTS.md`, while Den documents and guidance entries remain the live
+source of truth.
 
 ## Editing workflow
 
