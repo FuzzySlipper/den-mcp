@@ -373,7 +373,15 @@ export interface DesktopDiffSnapshot {
 }
 
 export interface DesktopDiffSnapshotLatestResult {
-  state: 'fresh' | 'stale' | 'missing';
+  project_id: string;
+  task_id: number | null;
+  workspace_id: string | null;
+  root_path: string | null;
+  path: string | null;
+  source_instance_id: string | null;
+  state: DesktopSnapshotState;
+  is_stale: boolean;
+  freshness_status: string;
   snapshot: DesktopDiffSnapshot | null;
 }
 

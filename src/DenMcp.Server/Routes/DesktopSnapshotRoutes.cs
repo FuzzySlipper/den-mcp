@@ -134,9 +134,33 @@ public static class DesktopSnapshotRoutes
                 ObservedAt = DateTime.UtcNow
             };
             var latest = await repo.GetLatestDiffSnapshotAsync(key, StaleAfter(staleAfterSeconds));
-            return latest is null
-                ? Results.Ok(new { state = "missing", snapshot = (DesktopDiffSnapshot?)null })
-                : Results.Ok(new { state = latest.IsStale ? "stale" : "fresh", snapshot = latest });
+            var result = latest is null
+                ? new DesktopDiffSnapshotLatestResult
+                {
+                    ProjectId = projectId,
+                    TaskId = taskId,
+                    WorkspaceId = workspaceId,
+                    RootPath = rootPath,
+                    Path = path,
+                    SourceInstanceId = sourceInstanceId,
+                    State = DesktopSnapshotState.Missing,
+                    IsStale = false,
+                    FreshnessStatus = "missing"
+                }
+                : new DesktopDiffSnapshotLatestResult
+                {
+                    ProjectId = latest.ProjectId,
+                    TaskId = latest.TaskId,
+                    WorkspaceId = latest.WorkspaceId,
+                    RootPath = latest.RootPath,
+                    Path = latest.Path,
+                    SourceInstanceId = latest.SourceInstanceId,
+                    State = latest.IsStale ? DesktopSnapshotState.SourceOffline : DesktopSnapshotState.Ok,
+                    IsStale = latest.IsStale,
+                    FreshnessStatus = latest.IsStale ? "stale" : "fresh",
+                    Snapshot = latest
+                };
+            return Results.Ok(result);
         });
 
         group.MapPut("/session-snapshots", async (

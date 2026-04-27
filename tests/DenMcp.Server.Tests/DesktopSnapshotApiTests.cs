@@ -123,7 +123,9 @@ public class DesktopSnapshotApiTests : IAsyncLifetime
         var diffLatest = await _client.GetAsync($"/api/projects/{ProjectId}/desktop/diff-snapshots/latest?taskId={_task.Id}&workspaceId={_workspace.Id}&sourceInstanceId=desktop-a&rootPath={Uri.EscapeDataString(_workspace.WorktreePath)}&path=src%2FFoo.cs&baseRef=main&headRef=task%2Fdesktop-api");
         diffLatest.EnsureSuccessStatusCode();
         using var diffJson = JsonDocument.Parse(await diffLatest.Content.ReadAsStringAsync());
-        Assert.Equal("fresh", diffJson.RootElement.GetProperty("state").GetString());
+        Assert.Equal("ok", diffJson.RootElement.GetProperty("state").GetString());
+        Assert.False(diffJson.RootElement.GetProperty("is_stale").GetBoolean());
+        Assert.Equal("fresh", diffJson.RootElement.GetProperty("freshness_status").GetString());
         Assert.Contains("diff --git", diffJson.RootElement.GetProperty("snapshot").GetProperty("diff").GetString());
 
         var sessionResponse = await _client.PutAsJsonAsync($"/api/projects/{ProjectId}/desktop/session-snapshots", new

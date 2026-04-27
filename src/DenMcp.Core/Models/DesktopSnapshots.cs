@@ -65,6 +65,20 @@ public sealed class DesktopGitSnapshotLatestResult
     public DesktopGitSnapshot? Snapshot { get; set; }
 }
 
+public sealed class DesktopDiffSnapshotLatestResult
+{
+    public required string ProjectId { get; set; }
+    public int? TaskId { get; set; }
+    public string? WorkspaceId { get; set; }
+    public string? RootPath { get; set; }
+    public string? Path { get; set; }
+    public string? SourceInstanceId { get; set; }
+    public required DesktopSnapshotState State { get; set; }
+    public required bool IsStale { get; set; }
+    public required string FreshnessStatus { get; set; }
+    public DesktopDiffSnapshot? Snapshot { get; set; }
+}
+
 public sealed class DesktopDiffSnapshot
 {
     public long Id { get; set; }
