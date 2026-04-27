@@ -3,6 +3,7 @@ import { ConnectionPanel } from './components/ConnectionPanel';
 import { DiagnosticsPane } from './components/DiagnosticsPane';
 import { DiffPane } from './components/DiffPane';
 import { GitSnapshotPane } from './components/GitSnapshotPane';
+import { SessionPane } from './components/SessionPane';
 import { WorkspaceSummaryPane } from './components/WorkspaceSummaryPane';
 import { DesktopDiffSnapshotLatestResult, getLatestDiffSnapshot, GitFileStatus, LocalGitSnapshot } from './desktop/tauriApi';
 import { useOperatorRuntime } from './desktop/useOperatorRuntime';
@@ -102,6 +103,8 @@ export function App() {
         <WorkspaceSummaryPane snapshots={runtime.snapshots} activeKey={activeSnapshot ? snapshotKey(activeSnapshot) : null} onSelect={selectSnapshot} />
         <DiffPane snapshot={activeSnapshot} file={selectedFile} diff={diff} loading={diffLoading} error={diffError} />
       </div>
+
+      <SessionPane snapshots={runtime.sessionSnapshots} />
 
       <GitSnapshotPane
         snapshots={runtime.snapshots}

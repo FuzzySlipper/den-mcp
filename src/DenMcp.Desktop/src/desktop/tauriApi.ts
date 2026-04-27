@@ -52,6 +52,7 @@ export interface OperatorStatus {
   projectCount: number;
   workspaceCount: number;
   localSnapshotCount: number;
+  localSessionSnapshotCount: number;
 }
 
 export type DesktopSnapshotState =
@@ -124,6 +125,36 @@ export interface LocalSnapshotList {
   snapshots: LocalGitSnapshot[];
 }
 
+export interface DesktopSessionSnapshotRequest {
+  task_id: number | null;
+  workspace_id: string | null;
+  session_id: string;
+  parent_session_id: string | null;
+  agent_identity: string | null;
+  role: string | null;
+  current_command: string | null;
+  current_phase: string | null;
+  recent_activity: unknown;
+  child_sessions: unknown;
+  control_capabilities: unknown;
+  warnings: string[];
+  source_instance_id: string;
+  observed_at: string;
+}
+
+export interface LocalSessionSnapshot {
+  projectId: string;
+  request: DesktopSessionSnapshotRequest;
+  lastPublishStatus: 'pending' | 'published' | 'failed' | 'queued' | string;
+  lastPublishError: string | null;
+  lastPublishedAt: string | null;
+  artifactRoot: string | null;
+}
+
+export interface LocalSessionSnapshotList {
+  snapshots: LocalSessionSnapshot[];
+}
+
 export interface LatestDiffSnapshotRequest {
   projectId: string;
   taskId: number | null;
@@ -189,6 +220,10 @@ export async function listLocalSnapshots(): Promise<LocalSnapshotList> {
   return invoke('list_local_snapshots');
 }
 
+export async function listLocalSessionSnapshots(): Promise<LocalSessionSnapshotList> {
+  return invoke('list_local_session_snapshots');
+}
+
 export async function getLatestDiffSnapshot(request: LatestDiffSnapshotRequest): Promise<DesktopDiffSnapshotLatestResult> {
   return invoke('get_latest_diff_snapshot', { request });
 }
@@ -199,4 +234,8 @@ export function onOperatorStatus(callback: (status: OperatorStatus) => void): Pr
 
 export function onGitSnapshots(callback: (snapshots: LocalGitSnapshot[]) => void): Promise<() => void> {
   return listen<LocalGitSnapshot[]>('den://git-snapshot-updated', (event) => callback(event.payload));
+}
+
+export function onSessionSnapshots(callback: (snapshots: LocalSessionSnapshot[]) => void): Promise<() => void> {
+  return listen<LocalSessionSnapshot[]>('den://session-snapshot-updated', (event) => callback(event.payload));
 }

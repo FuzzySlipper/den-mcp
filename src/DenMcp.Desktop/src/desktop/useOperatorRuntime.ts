@@ -2,10 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   getOperatorStatus,
   getSettings,
+  listLocalSessionSnapshots,
   listLocalSnapshots,
   LocalGitSnapshot,
+  LocalSessionSnapshot,
   onGitSnapshots,
   onOperatorStatus,
+  onSessionSnapshots,
   OperatorSettings,
   OperatorStatus,
   refreshNow,
@@ -17,6 +20,7 @@ export interface RuntimeState {
   status: OperatorStatus | null;
   settings: OperatorSettings | null;
   snapshots: LocalGitSnapshot[];
+  sessionSnapshots: LocalSessionSnapshot[];
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -27,20 +31,23 @@ export function useOperatorRuntime(): RuntimeState {
   const [status, setStatus] = useState<OperatorStatus | null>(null);
   const [settings, setSettings] = useState<OperatorSettings | null>(null);
   const [snapshots, setSnapshots] = useState<LocalGitSnapshot[]>([]);
+  const [sessionSnapshots, setSessionSnapshots] = useState<LocalSessionSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [nextStatus, nextSettings, snapshotList] = await Promise.all([
+      const [nextStatus, nextSettings, snapshotList, sessionSnapshotList] = await Promise.all([
         getOperatorStatus(),
         getSettings(),
         listLocalSnapshots(),
+        listLocalSessionSnapshots(),
       ]);
       setStatus(nextStatus);
       setSettings(nextSettings);
       setSnapshots(snapshotList.snapshots);
+      setSessionSnapshots(sessionSnapshotList.snapshots);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -52,6 +59,7 @@ export function useOperatorRuntime(): RuntimeState {
     void load();
     let disposeStatus: (() => void) | null = null;
     let disposeSnapshots: (() => void) | null = null;
+    let disposeSessionSnapshots: (() => void) | null = null;
 
     void onOperatorStatus((next) => setStatus(next)).then((dispose) => {
       disposeStatus = dispose;
@@ -59,10 +67,14 @@ export function useOperatorRuntime(): RuntimeState {
     void onGitSnapshots((next) => setSnapshots(next)).then((dispose) => {
       disposeSnapshots = dispose;
     });
+    void onSessionSnapshots((next) => setSessionSnapshots(next)).then((dispose) => {
+      disposeSessionSnapshots = dispose;
+    });
 
     return () => {
       disposeStatus?.();
       disposeSnapshots?.();
+      disposeSessionSnapshots?.();
     };
   }, [load]);
 
@@ -91,7 +103,7 @@ export function useOperatorRuntime(): RuntimeState {
   );
 
   return useMemo(
-    () => ({ status, settings, snapshots, loading, error, refresh, saveSettings }),
-    [status, settings, snapshots, loading, error, refresh, saveSettings],
+    () => ({ status, settings, snapshots, sessionSnapshots, loading, error, refresh, saveSettings }),
+    [status, settings, snapshots, sessionSnapshots, loading, error, refresh, saveSettings],
   );
 }

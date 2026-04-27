@@ -4,6 +4,7 @@ use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 
 use crate::git::{DesktopGitSnapshotRequest, DesktopSnapshotState};
+use crate::session::DesktopSessionSnapshotRequest;
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(8);
 
@@ -37,7 +38,10 @@ impl DenClient {
             .await
             .map_err(|error| format!("Den health check failed: {error}"))?;
         if !response.status().is_success() {
-            return Err(format!("Den health check returned HTTP {}", response.status()));
+            return Err(format!(
+                "Den health check returned HTTP {}",
+                response.status()
+            ));
         }
         response
             .json::<DenHealth>()
@@ -54,7 +58,10 @@ impl DenClient {
             .await
             .map_err(|error| format!("Unable to fetch Den projects: {error}"))?;
         if !response.status().is_success() {
-            return Err(format!("Den projects request returned HTTP {}", response.status()));
+            return Err(format!(
+                "Den projects request returned HTTP {}",
+                response.status()
+            ));
         }
         response
             .json::<Vec<Project>>()
@@ -62,7 +69,10 @@ impl DenClient {
             .map_err(|error| format!("Unable to parse Den projects: {error}"))
     }
 
-    pub async fn list_agent_workspaces(&self, base_url: &str) -> Result<Vec<AgentWorkspace>, String> {
+    pub async fn list_agent_workspaces(
+        &self,
+        base_url: &str,
+    ) -> Result<Vec<AgentWorkspace>, String> {
         let mut url = join_url(base_url, "/api/agent-workspaces")?;
         url.query_pairs_mut().append_pair("limit", "200");
         let response = self
@@ -72,7 +82,10 @@ impl DenClient {
             .await
             .map_err(|error| format!("Unable to fetch Den agent workspaces: {error}"))?;
         if !response.status().is_success() {
-            return Err(format!("Den agent workspaces request returned HTTP {}", response.status()));
+            return Err(format!(
+                "Den agent workspaces request returned HTTP {}",
+                response.status()
+            ));
         }
         response
             .json::<Vec<AgentWorkspace>>()
@@ -86,19 +99,53 @@ impl DenClient {
         project_id: &str,
         snapshot: &DesktopGitSnapshotRequest,
     ) -> Result<(), String> {
-        let path = format!("/api/projects/{}/desktop/git-snapshots", url_escape(project_id));
+        let path = format!(
+            "/api/projects/{}/desktop/git-snapshots",
+            url_escape(project_id)
+        );
         let response = self
             .http
             .put(join_url(base_url, &path)?)
             .json(snapshot)
             .send()
             .await
-            .map_err(|error| format!("Unable to publish desktop git snapshot for {project_id}: {error}"))?;
+            .map_err(|error| {
+                format!("Unable to publish desktop git snapshot for {project_id}: {error}")
+            })?;
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
             return Err(format!(
                 "Desktop git snapshot publish for {project_id} returned HTTP {status}: {body}"
+            ));
+        }
+        Ok(())
+    }
+
+    pub async fn publish_session_snapshot(
+        &self,
+        base_url: &str,
+        project_id: &str,
+        snapshot: &DesktopSessionSnapshotRequest,
+    ) -> Result<(), String> {
+        let path = format!(
+            "/api/projects/{}/desktop/session-snapshots",
+            url_escape(project_id)
+        );
+        let response = self
+            .http
+            .put(join_url(base_url, &path)?)
+            .json(snapshot)
+            .send()
+            .await
+            .map_err(|error| {
+                format!("Unable to publish desktop session snapshot for {project_id}: {error}")
+            })?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(format!(
+                "Desktop session snapshot publish for {project_id} returned HTTP {status}: {body}"
             ));
         }
         Ok(())
@@ -119,10 +166,18 @@ impl DenClient {
             query.append_pair("sourceInstanceId", &request.source_instance_id);
             query.append_pair("rootPath", &request.root_path);
             query.append_pair("staleAfterSeconds", "120");
-            if let Some(path) = request.path.as_ref().filter(|value| !value.trim().is_empty()) {
+            if let Some(path) = request
+                .path
+                .as_ref()
+                .filter(|value| !value.trim().is_empty())
+            {
                 query.append_pair("path", path);
             }
-            if let Some(workspace_id) = request.workspace_id.as_ref().filter(|value| !value.trim().is_empty()) {
+            if let Some(workspace_id) = request
+                .workspace_id
+                .as_ref()
+                .filter(|value| !value.trim().is_empty())
+            {
                 query.append_pair("workspaceId", workspace_id);
             }
             if let Some(task_id) = request.task_id {
@@ -130,16 +185,16 @@ impl DenClient {
             }
         }
 
-        let response = self
-            .http
-            .get(url)
-            .send()
-            .await
-            .map_err(|error| format!("Unable to fetch latest desktop diff snapshot: {error}"))?;
+        let response =
+            self.http.get(url).send().await.map_err(|error| {
+                format!("Unable to fetch latest desktop diff snapshot: {error}")
+            })?;
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(format!("Latest desktop diff snapshot returned HTTP {status}: {body}"));
+            return Err(format!(
+                "Latest desktop diff snapshot returned HTTP {status}: {body}"
+            ));
         }
         response
             .json::<DesktopDiffSnapshotLatestResult>()
@@ -241,7 +296,8 @@ pub struct DesktopDiffSnapshot {
 }
 
 fn join_url(base_url: &str, path: &str) -> Result<Url, String> {
-    let base = Url::parse(base_url).map_err(|error| format!("Invalid Den server URL '{base_url}': {error}"))?;
+    let base = Url::parse(base_url)
+        .map_err(|error| format!("Invalid Den server URL '{base_url}': {error}"))?;
     base.join(path.trim_start_matches('/'))
         .map_err(|error| format!("Unable to construct Den URL for {path}: {error}"))
 }

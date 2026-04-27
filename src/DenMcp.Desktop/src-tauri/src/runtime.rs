@@ -8,14 +8,17 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::time::sleep;
 
 use crate::den_client::{
-    AgentWorkspace, DenClient, DesktopDiffSnapshotLatestResult, LatestDiffSnapshotRequest,
-    Project,
+    AgentWorkspace, DenClient, DesktopDiffSnapshotLatestResult, LatestDiffSnapshotRequest, Project,
 };
 use crate::git::{build_git_scopes, inspect_scope, GitScope, LocalGitSnapshot};
-use crate::settings::{load_settings, save_settings, OperatorSettings, SaveOperatorSettingsRequest};
+use crate::session::{scan_pi_session_snapshots, LocalSessionSnapshot};
+use crate::settings::{
+    load_settings, save_settings, OperatorSettings, SaveOperatorSettingsRequest,
+};
 
 const STATUS_EVENT: &str = "den://operator-status";
 const GIT_SNAPSHOT_EVENT: &str = "den://git-snapshot-updated";
+const SESSION_SNAPSHOT_EVENT: &str = "den://session-snapshot-updated";
 const MAX_DIAGNOSTICS: usize = 200;
 
 #[derive(Default)]
@@ -32,6 +35,7 @@ struct RuntimeState {
     projects: Vec<Project>,
     workspaces: Vec<AgentWorkspace>,
     local_snapshots: Vec<LocalGitSnapshot>,
+    local_session_snapshots: Vec<LocalSessionSnapshot>,
     diagnostics: VecDeque<DiagnosticEntry>,
 }
 
@@ -45,6 +49,7 @@ impl Default for RuntimeState {
             projects: Vec::new(),
             workspaces: Vec::new(),
             local_snapshots: Vec::new(),
+            local_session_snapshots: Vec::new(),
             diagnostics: VecDeque::new(),
         }
     }
@@ -64,6 +69,7 @@ pub struct OperatorStatus {
     pub project_count: usize,
     pub workspace_count: usize,
     pub local_snapshot_count: usize,
+    pub local_session_snapshot_count: usize,
 }
 
 impl OperatorStatus {
@@ -75,11 +81,15 @@ impl OperatorStatus {
             den_base_url: settings.den_base_url.clone(),
             last_sync_at: None,
             last_publish_at: None,
-            observer_statuses: vec![ObserverStatus::stopped("git")],
+            observer_statuses: vec![
+                ObserverStatus::stopped("git"),
+                ObserverStatus::stopped("session"),
+            ],
             diagnostics: Vec::new(),
             project_count: 0,
             workspace_count: 0,
             local_snapshot_count: 0,
+            local_session_snapshot_count: 0,
         }
     }
 }
@@ -115,7 +125,12 @@ impl DenConnectionStatus {
         }
     }
 
-    fn offline(previous: &Self, message: impl Into<String>, at: String, next_retry_at: String) -> Self {
+    fn offline(
+        previous: &Self,
+        message: impl Into<String>,
+        at: String,
+        next_retry_at: String,
+    ) -> Self {
         Self {
             state: "offline".to_string(),
             message: Some(message.into()),
@@ -125,7 +140,12 @@ impl DenConnectionStatus {
         }
     }
 
-    fn degraded(previous: &Self, message: impl Into<String>, at: String, next_retry_at: String) -> Self {
+    fn degraded(
+        previous: &Self,
+        message: impl Into<String>,
+        at: String,
+        next_retry_at: String,
+    ) -> Self {
         Self {
             state: "degraded".to_string(),
             message: Some(message.into()),
@@ -180,7 +200,12 @@ impl ObserverStatus {
         }
     }
 
-    fn ready(kind: impl Into<String>, scopes_scanned: usize, warning_count: usize, next_run_at: Option<String>) -> Self {
+    fn ready(
+        kind: impl Into<String>,
+        scopes_scanned: usize,
+        warning_count: usize,
+        next_run_at: Option<String>,
+    ) -> Self {
         Self {
             kind: kind.into(),
             state: "ready".to_string(),
@@ -208,8 +233,16 @@ pub struct LocalSnapshotList {
     pub snapshots: Vec<LocalGitSnapshot>,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalSessionSnapshotList {
+    pub snapshots: Vec<LocalSessionSnapshot>,
+}
+
 #[tauri::command]
-pub async fn get_operator_status(state: State<'_, OperatorRuntime>) -> Result<OperatorStatus, String> {
+pub async fn get_operator_status(
+    state: State<'_, OperatorRuntime>,
+) -> Result<OperatorStatus, String> {
     Ok(state.inner.lock().await.status.clone())
 }
 
@@ -234,7 +267,12 @@ pub async fn save_operator_settings(
         runtime.status.phase = "running".to_string();
         runtime.status.source_instance_id = next.source_instance_id.clone();
         runtime.status.den_base_url = next.den_base_url.clone();
-        push_diagnostic(&mut runtime, "info", "settings", "Saved Den operator settings.");
+        push_diagnostic(
+            &mut runtime,
+            "info",
+            "settings",
+            "Saved Den operator settings.",
+        );
         sync_status_from_state(&mut runtime);
     }
     emit_status(&app).await;
@@ -249,12 +287,24 @@ pub async fn refresh_now(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn list_local_snapshots(state: State<'_, OperatorRuntime>) -> Result<LocalSnapshotList, String> {
+pub async fn list_local_snapshots(
+    state: State<'_, OperatorRuntime>,
+) -> Result<LocalSnapshotList, String> {
     let runtime = state.inner.lock().await;
     let scopes = build_git_scopes(&runtime.projects, &runtime.workspaces);
     Ok(LocalSnapshotList {
         scopes,
         snapshots: runtime.local_snapshots.clone(),
+    })
+}
+
+#[tauri::command]
+pub async fn list_local_session_snapshots(
+    state: State<'_, OperatorRuntime>,
+) -> Result<LocalSessionSnapshotList, String> {
+    let runtime = state.inner.lock().await;
+    Ok(LocalSessionSnapshotList {
+        snapshots: runtime.local_session_snapshots.clone(),
     })
 }
 
@@ -267,7 +317,8 @@ pub async fn get_latest_diff_snapshot(
         let runtime = state.inner.lock().await;
         (runtime.settings.clone(), state.den.clone())
     };
-    den.latest_diff_snapshot(&settings.den_base_url, &request).await
+    den.latest_diff_snapshot(&settings.den_base_url, &request)
+        .await
 }
 
 pub async fn start_runtime(app: AppHandle) {
@@ -278,7 +329,12 @@ pub async fn start_runtime(app: AppHandle) {
         runtime.settings = settings.clone();
         runtime.status = OperatorStatus::starting(&settings);
         runtime.status.phase = "running".to_string();
-        push_diagnostic(&mut runtime, "info", "runtime", "Started Den operator runtime.");
+        push_diagnostic(
+            &mut runtime,
+            "info",
+            "runtime",
+            "Started Den operator runtime.",
+        );
         sync_status_from_state(&mut runtime);
     }
     emit_status(&app).await;
@@ -303,7 +359,10 @@ async fn run_refresh(app: AppHandle) {
         let den = state.den.clone();
         let mut runtime = state.inner.lock().await;
         runtime.status.phase = "running".to_string();
-        runtime.status.observer_statuses = vec![ObserverStatus::running("git")];
+        runtime.status.observer_statuses = vec![
+            ObserverStatus::running("git"),
+            ObserverStatus::running("session"),
+        ];
         sync_status_from_state(&mut runtime);
         (
             runtime.settings.clone(),
@@ -323,8 +382,16 @@ async fn run_refresh(app: AppHandle) {
             format!("Invalid Den server URL: {}", settings.den_base_url),
             at,
         );
-        runtime.status.observer_statuses = vec![ObserverStatus::stopped("git")];
-        push_diagnostic(&mut runtime, "warn", "den", "Den server URL is invalid; observers are waiting for valid settings.");
+        runtime.status.observer_statuses = vec![
+            ObserverStatus::stopped("git"),
+            ObserverStatus::stopped("session"),
+        ];
+        push_diagnostic(
+            &mut runtime,
+            "warn",
+            "den",
+            "Den server URL is invalid; observers are waiting for valid settings.",
+        );
         sync_status_from_state(&mut runtime);
         drop(runtime);
         emit_status(&app).await;
@@ -429,9 +496,43 @@ async fn run_refresh(app: AppHandle) {
             }
         } else {
             snapshot.last_publish_status = "queued".to_string();
-            snapshot.last_publish_error = Some("Den is offline; latest local snapshot is retained in memory.".to_string());
+            snapshot.last_publish_error =
+                Some("Den is offline; latest local snapshot is retained in memory.".to_string());
         }
         snapshots.push(snapshot);
+    }
+
+    let mut session_result = scan_pi_session_snapshots(&settings, &projects);
+    let mut session_publish_successes = 0;
+    if den_connected {
+        for session in &mut session_result.snapshots {
+            match den
+                .publish_session_snapshot(
+                    &settings.den_base_url,
+                    &session.project_id,
+                    &session.request,
+                )
+                .await
+            {
+                Ok(()) => {
+                    session_publish_successes += 1;
+                    session.last_publish_status = "published".to_string();
+                    session.last_published_at = Some(now_string());
+                }
+                Err(error) => {
+                    session.last_publish_status = "failed".to_string();
+                    session.last_publish_error = Some(error.clone());
+                    publish_errors.push(error);
+                }
+            }
+        }
+    } else {
+        for session in &mut session_result.snapshots {
+            session.last_publish_status = "queued".to_string();
+            session.last_publish_error = Some(
+                "Den is offline; latest local session snapshot is retained in memory.".to_string(),
+            );
+        }
     }
 
     {
@@ -440,14 +541,24 @@ async fn run_refresh(app: AppHandle) {
         runtime.projects = projects;
         runtime.workspaces = workspaces;
         runtime.local_snapshots = snapshots.clone();
+        runtime.local_session_snapshots = session_result.snapshots.clone();
         runtime.status.local_snapshot_count = snapshots.len();
-        runtime.status.observer_statuses = vec![ObserverStatus::ready(
-            "git",
-            scopes.len(),
-            warning_count,
-            Some(seconds_from_now(settings.poll_interval_seconds)),
-        )];
-        if publish_successes > 0 {
+        runtime.status.local_session_snapshot_count = session_result.snapshots.len();
+        runtime.status.observer_statuses = vec![
+            ObserverStatus::ready(
+                "git",
+                scopes.len(),
+                warning_count,
+                Some(seconds_from_now(settings.poll_interval_seconds)),
+            ),
+            ObserverStatus::ready(
+                "session",
+                session_result.snapshots.len(),
+                session_result.warning_count,
+                Some(seconds_from_now(settings.poll_interval_seconds)),
+            ),
+        ];
+        if publish_successes > 0 || session_publish_successes > 0 {
             runtime.status.last_publish_at = Some(now_string());
         }
         for error in publish_errors.into_iter().take(5) {
@@ -464,6 +575,7 @@ async fn run_refresh(app: AppHandle) {
 
     emit_status(&app).await;
     let _ = app.emit(GIT_SNAPSHOT_EVENT, snapshots);
+    let _ = app.emit(SESSION_SNAPSHOT_EVENT, session_result.snapshots);
 }
 
 async fn emit_status(app: &AppHandle) {
@@ -481,6 +593,7 @@ fn sync_status_from_state(runtime: &mut RuntimeState) {
     runtime.status.project_count = runtime.projects.len();
     runtime.status.workspace_count = runtime.workspaces.len();
     runtime.status.local_snapshot_count = runtime.local_snapshots.len();
+    runtime.status.local_session_snapshot_count = runtime.local_session_snapshots.len();
     runtime.status.diagnostics = runtime.diagnostics.iter().cloned().collect();
 }
 

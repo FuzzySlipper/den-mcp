@@ -1,11 +1,12 @@
 mod den_client;
 mod git;
 mod runtime;
+mod session;
 mod settings;
 
 use runtime::{
-    get_latest_diff_snapshot, get_operator_status, get_settings, list_local_snapshots, refresh_now,
-    save_operator_settings, start_runtime, OperatorRuntime,
+    get_latest_diff_snapshot, get_operator_status, get_settings, list_local_session_snapshots,
+    list_local_snapshots, refresh_now, save_operator_settings, start_runtime, OperatorRuntime,
 };
 use tauri::Manager;
 
@@ -26,6 +27,7 @@ pub fn run() {
             save_operator_settings,
             refresh_now,
             list_local_snapshots,
+            list_local_session_snapshots,
             get_latest_diff_snapshot
         ])
         .setup(|app| {
