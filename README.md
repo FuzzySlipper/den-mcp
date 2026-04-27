@@ -9,6 +9,7 @@ Built for workflows where multiple AI coding agents (Claude Code, Codex, OMP, Ki
 - **Task Management** — Hierarchical tasks with subtasks, dependencies (cycle-safe), priority, status workflow, audit history, and a smart next-task algorithm
 - **Agent Messaging** — Threaded messages scoped to projects and tasks, with per-agent read state tracking
 - **Document Storage** — Markdown documents (PRDs, specs, ADRs, conventions) with full-text search via SQLite FTS5
+- **Shared Blackboard Memory** — Cross-project Markdown memory with optional idle TTL for scratch/handoff notes
 - **Multi-Project** — Single server instance manages all projects from one SQLite database
 - **MCP Tools** — Full tool suite exposed at `/mcp` for any MCP-compatible agent
 - **REST API** — Matching HTTP endpoints for the CLI and web/operator UI
@@ -80,6 +81,7 @@ den send --content "Ready for review" --project my-project
 den docs --project my-project         # list documents
 den doc prd --project my-project      # view a document
 den search "authentication"           # full-text search
+den blackboard list                   # shared cross-project memory entries
 den dashboard                         # live TUI dashboard
 # Legacy/debug only: den dashboard --legacy-dispatches
 ```
@@ -155,6 +157,15 @@ tests/
 | `list_documents` | List summaries (no content) |
 | `search_documents` | Full-text search with snippets |
 | `delete_document` | Delete a document |
+
+### Shared Blackboard Memory (5)
+| Tool | Description |
+|------|-------------|
+| `store_blackboard_entry` | Create or update cross-project Markdown memory |
+| `get_blackboard_entry` | Get an entry and refresh idle TTL |
+| `list_blackboard_entries` | List summaries, optionally filtered by tags |
+| `delete_blackboard_entry` | Delete an entry by slug |
+| `cleanup_blackboard_entries` | Delete expired idle-TTL entries |
 
 ## Next-Task Algorithm
 

@@ -210,6 +210,27 @@ public sealed class DatabaseInitializer
         END;
 
         ------------------------------------------------------------
+        -- SHARED BLACKBOARD MEMORY
+        ------------------------------------------------------------
+        CREATE TABLE IF NOT EXISTS blackboard_entries (
+            id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+            slug                 TEXT NOT NULL UNIQUE,
+            title                TEXT NOT NULL,
+            content              TEXT NOT NULL,
+            tags                 TEXT,
+            idle_ttl_seconds     INTEGER CHECK (idle_ttl_seconds IS NULL OR idle_ttl_seconds > 0),
+            created_at           TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at           TEXT NOT NULL DEFAULT (datetime('now')),
+            last_accessed_at     TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_blackboard_updated
+            ON blackboard_entries(updated_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_blackboard_last_accessed
+            ON blackboard_entries(last_accessed_at ASC)
+            WHERE idle_ttl_seconds IS NOT NULL;
+
+        ------------------------------------------------------------
         -- AGENT SESSIONS
         ------------------------------------------------------------
         CREATE TABLE IF NOT EXISTS agent_sessions (
@@ -553,6 +574,7 @@ public sealed class DatabaseInitializer
         await EnsureAgentGuidanceSchemaAsync(connection);
         await EnsureAgentRunSchemaAsync(connection);
         await EnsureAgentWorkspaceSchemaAsync(connection);
+        await EnsureBlackboardSchemaAsync(connection);
 
         // Add session_id column to agent_sessions if it doesn't exist.
         // SQLite has no ALTER TABLE ... ADD COLUMN IF NOT EXISTS,
@@ -799,6 +821,34 @@ public sealed class DatabaseInitializer
             CREATE INDEX IF NOT EXISTS idx_agent_workspaces_created_by_run
             ON agent_workspaces(created_by_run_id)
             WHERE created_by_run_id IS NOT NULL
+            """);
+    }
+
+    private static async Task EnsureBlackboardSchemaAsync(SqliteConnection connection)
+    {
+        await using var tableCmd = connection.CreateCommand();
+        tableCmd.CommandText = """
+            CREATE TABLE IF NOT EXISTS blackboard_entries (
+                id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+                slug                 TEXT NOT NULL UNIQUE,
+                title                TEXT NOT NULL,
+                content              TEXT NOT NULL,
+                tags                 TEXT,
+                idle_ttl_seconds     INTEGER CHECK (idle_ttl_seconds IS NULL OR idle_ttl_seconds > 0),
+                created_at           TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at           TEXT NOT NULL DEFAULT (datetime('now')),
+                last_accessed_at     TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """;
+        await tableCmd.ExecuteNonQueryAsync();
+
+        await EnsureIndexAsync(connection, "idx_blackboard_updated",
+            "CREATE INDEX IF NOT EXISTS idx_blackboard_updated ON blackboard_entries(updated_at DESC, id DESC)");
+        await EnsureIndexAsync(connection, "idx_blackboard_last_accessed",
+            """
+            CREATE INDEX IF NOT EXISTS idx_blackboard_last_accessed
+            ON blackboard_entries(last_accessed_at ASC)
+            WHERE idle_ttl_seconds IS NOT NULL
             """);
     }
 

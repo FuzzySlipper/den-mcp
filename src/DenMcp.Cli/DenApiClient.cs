@@ -178,6 +178,43 @@ public sealed class DenApiClient : IDisposable
             $"api/documents/search?query={Uri.EscapeDataString(query)}");
     }
 
+    // Blackboard
+    public async Task<BlackboardEntry> StoreBlackboardEntryAsync(BlackboardEntry entry)
+    {
+        var body = new
+        {
+            entry.Slug,
+            entry.Title,
+            entry.Content,
+            entry.Tags,
+            idle_ttl_seconds = entry.IdleTtlSeconds
+        };
+        return await PostAsync<BlackboardEntry>("api/blackboard", body);
+    }
+
+    public async Task<BlackboardEntry?> GetBlackboardEntryAsync(string slug)
+    {
+        var response = await _http.GetAsync($"api/blackboard/{Uri.EscapeDataString(slug)}");
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<BlackboardEntry>(JsonOpts);
+    }
+
+    public async Task<List<BlackboardEntrySummary>> ListBlackboardEntriesAsync(string? tags = null)
+    {
+        var query = BuildQuery(("tags", tags));
+        return await GetAsync<List<BlackboardEntrySummary>>($"api/blackboard{query}");
+    }
+
+    public async Task DeleteBlackboardEntryAsync(string slug) =>
+        await DeleteAsync<object>($"api/blackboard/{Uri.EscapeDataString(slug)}");
+
+    public async Task<int> CleanupBlackboardEntriesAsync()
+    {
+        var result = await PostAsync<Dictionary<string, int>>("api/blackboard/cleanup", new { });
+        return result.TryGetValue("deleted", out var deleted) ? deleted : 0;
+    }
+
     // Agent guidance
     public async Task<ResolvedAgentGuidance> ResolveAgentGuidanceAsync(string projectId) =>
         await GetAsync<ResolvedAgentGuidance>($"api/projects/{Esc(projectId)}/agent-guidance");
