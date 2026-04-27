@@ -1,10 +1,15 @@
-import { LocalGitSnapshot } from '../desktop/tauriApi';
+import { GitFileStatus, LocalGitSnapshot } from '../desktop/tauriApi';
+import { calmStateLabel, freshnessLabel, groupChangedFiles, snapshotKey, snapshotTitle } from '../snapshotView';
 
 interface Props {
   snapshots: LocalGitSnapshot[];
+  activeSnapshotKey: string | null;
+  selectedFilePath: string | null;
+  onSelectSnapshot: (snapshot: LocalGitSnapshot) => void;
+  onSelectFile: (snapshot: LocalGitSnapshot, file: GitFileStatus) => void;
 }
 
-export function GitSnapshotPane({ snapshots }: Props) {
+export function GitSnapshotPane({ snapshots, activeSnapshotKey, selectedFilePath, onSelectSnapshot, onSelectFile }: Props) {
   const sorted = [...snapshots].sort((a, b) => a.scope.projectId.localeCompare(b.scope.projectId));
 
   return (
@@ -24,41 +29,62 @@ export function GitSnapshotPane({ snapshots }: Props) {
         </div>
       ) : (
         <div className="snapshot-list">
-          {sorted.map((snapshot) => (
-            <SnapshotCard key={`${snapshot.scope.projectId}:${snapshot.scope.workspaceId ?? 'root'}:${snapshot.scope.rootPath}`} snapshot={snapshot} />
-          ))}
+          {sorted.map((snapshot) => {
+            const key = snapshotKey(snapshot);
+            return (
+              <SnapshotCard
+                key={key}
+                snapshot={snapshot}
+                active={key === activeSnapshotKey}
+                selectedFilePath={key === activeSnapshotKey ? selectedFilePath : null}
+                onSelectSnapshot={onSelectSnapshot}
+                onSelectFile={onSelectFile}
+              />
+            );
+          })}
         </div>
       )}
     </section>
   );
 }
 
-function SnapshotCard({ snapshot }: { snapshot: LocalGitSnapshot }) {
+function SnapshotCard({
+  snapshot,
+  active,
+  selectedFilePath,
+  onSelectSnapshot,
+  onSelectFile,
+}: {
+  snapshot: LocalGitSnapshot;
+  active: boolean;
+  selectedFilePath: string | null;
+  onSelectSnapshot: (snapshot: LocalGitSnapshot) => void;
+  onSelectFile: (snapshot: LocalGitSnapshot, file: GitFileStatus) => void;
+}) {
   const request = snapshot.request;
   const dirty = request.dirty_counts;
-  const title = snapshot.scope.workspaceId
-    ? `${snapshot.scope.projectId} · workspace ${snapshot.scope.workspaceId}`
-    : `${snapshot.scope.projectId} · project root`;
+  const groups = groupChangedFiles(request.changed_files);
 
   return (
-    <article className="snapshot-card">
+    <article className={`snapshot-card ${active ? 'active' : ''}`} onFocus={() => onSelectSnapshot(snapshot)}>
       <div className="snapshot-topline">
         <div>
-          <h3>{title}</h3>
+          <h3>{snapshotTitle(snapshot)}</h3>
           <p className="path-line">{request.root_path}</p>
         </div>
         <div className="pill-stack">
-          <span className={`status-pill status-${request.state}`}>{labelState(request.state)}</span>
+          <span className={`status-pill status-${request.state}`}>{calmStateLabel(request.state)}</span>
           <span className={`publish-pill publish-${snapshot.lastPublishStatus}`}>{snapshot.lastPublishStatus}</span>
         </div>
       </div>
 
       <div className="snapshot-meta">
+        <span>source <strong>{request.source_display_name ?? request.source_instance_id}</strong></span>
+        <span>freshness <strong>{freshnessLabel(snapshot)}</strong></span>
         <span>branch <strong>{request.branch ?? (request.is_detached ? 'detached' : '—')}</strong></span>
         <span>head <strong>{shortSha(request.head_sha)}</strong></span>
         <span>upstream <strong>{request.upstream ?? '—'}</strong></span>
         <span>ahead/behind <strong>{formatAheadBehind(request.ahead, request.behind)}</strong></span>
-        <span>observed <strong>{formatDate(request.observed_at)}</strong></span>
       </div>
 
       <div className="dirty-grid">
@@ -82,17 +108,28 @@ function SnapshotCard({ snapshot }: { snapshot: LocalGitSnapshot }) {
 
       {snapshot.lastPublishError && <p className="error-note">{snapshot.lastPublishError}</p>}
 
-      {request.changed_files.length > 0 && (
-        <details className="file-details">
-          <summary>{request.changed_files.length}{request.truncated ? '+' : ''} changed files</summary>
-          <ul>
-            {request.changed_files.slice(0, 80).map((file) => (
-              <li key={`${file.path}:${file.index_status}:${file.worktree_status}`}>
-                <code>{file.category}</code> {file.path}
-              </li>
-            ))}
-          </ul>
-        </details>
+      {groups.length > 0 && (
+        <div className="file-groups">
+          {groups.map((group) => (
+            <div className="file-group" key={group.category}>
+              <h4>{group.category} · {group.files.length}</h4>
+              <ul>
+                {group.files.slice(0, 80).map((file) => (
+                  <li key={`${file.path}:${file.index_status}:${file.worktree_status}`}>
+                    <button
+                      type="button"
+                      className={`file-button ${selectedFilePath === file.path ? 'active' : ''}`}
+                      onClick={() => onSelectFile(snapshot, file)}
+                    >
+                      <code>{file.index_status ?? '.'}{file.worktree_status ?? '.'}</code>
+                      <span>{file.path}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
       )}
     </article>
   );
@@ -107,10 +144,6 @@ function Dirty({ label, value }: { label: string; value: number }) {
   );
 }
 
-function labelState(state: string) {
-  return state.replaceAll('_', ' ');
-}
-
 function shortSha(value: string | null) {
   return value ? value.slice(0, 10) : '—';
 }
@@ -118,9 +151,4 @@ function shortSha(value: string | null) {
 function formatAheadBehind(ahead: number | null, behind: number | null) {
   if (ahead == null && behind == null) return '—';
   return `+${ahead ?? 0}/-${behind ?? 0}`;
-}
-
-function formatDate(value: string | null | undefined) {
-  if (!value) return '—';
-  return new Date(value).toLocaleTimeString();
 }

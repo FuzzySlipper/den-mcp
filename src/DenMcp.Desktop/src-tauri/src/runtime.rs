@@ -7,7 +7,10 @@ use tauri::async_runtime::{spawn, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::time::sleep;
 
-use crate::den_client::{AgentWorkspace, DenClient, Project};
+use crate::den_client::{
+    AgentWorkspace, DenClient, DesktopDiffSnapshotLatestResult, LatestDiffSnapshotRequest,
+    Project,
+};
 use crate::git::{build_git_scopes, inspect_scope, GitScope, LocalGitSnapshot};
 use crate::settings::{load_settings, save_settings, OperatorSettings, SaveOperatorSettingsRequest};
 
@@ -253,6 +256,18 @@ pub async fn list_local_snapshots(state: State<'_, OperatorRuntime>) -> Result<L
         scopes,
         snapshots: runtime.local_snapshots.clone(),
     })
+}
+
+#[tauri::command]
+pub async fn get_latest_diff_snapshot(
+    state: State<'_, OperatorRuntime>,
+    request: LatestDiffSnapshotRequest,
+) -> Result<DesktopDiffSnapshotLatestResult, String> {
+    let (settings, den) = {
+        let runtime = state.inner.lock().await;
+        (runtime.settings.clone(), state.den.clone())
+    };
+    den.latest_diff_snapshot(&settings.den_base_url, &request).await
 }
 
 pub async fn start_runtime(app: AppHandle) {

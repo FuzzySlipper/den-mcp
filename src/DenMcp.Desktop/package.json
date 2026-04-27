@@ -6,6 +6,7 @@
   "scripts": {
     "ui:dev": "vite --host 127.0.0.1 --port 1421",
     "ui:build": "tsc --noEmit && vite build",
+    "test:helpers": "node --test tests/*.test.mjs",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
   },

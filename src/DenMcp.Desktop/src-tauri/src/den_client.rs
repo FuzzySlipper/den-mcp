@@ -3,7 +3,7 @@ use std::time::Duration;
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 
-use crate::git::DesktopGitSnapshotRequest;
+use crate::git::{DesktopGitSnapshotRequest, DesktopSnapshotState};
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(8);
 
@@ -103,6 +103,49 @@ impl DenClient {
         }
         Ok(())
     }
+
+    pub async fn latest_diff_snapshot(
+        &self,
+        base_url: &str,
+        request: &LatestDiffSnapshotRequest,
+    ) -> Result<DesktopDiffSnapshotLatestResult, String> {
+        let path = format!(
+            "/api/projects/{}/desktop/diff-snapshots/latest",
+            url_escape(&request.project_id)
+        );
+        let mut url = join_url(base_url, &path)?;
+        {
+            let mut query = url.query_pairs_mut();
+            query.append_pair("sourceInstanceId", &request.source_instance_id);
+            query.append_pair("rootPath", &request.root_path);
+            query.append_pair("staleAfterSeconds", "120");
+            if let Some(path) = request.path.as_ref().filter(|value| !value.trim().is_empty()) {
+                query.append_pair("path", path);
+            }
+            if let Some(workspace_id) = request.workspace_id.as_ref().filter(|value| !value.trim().is_empty()) {
+                query.append_pair("workspaceId", workspace_id);
+            }
+            if let Some(task_id) = request.task_id {
+                query.append_pair("taskId", &task_id.to_string());
+            }
+        }
+
+        let response = self
+            .http
+            .get(url)
+            .send()
+            .await
+            .map_err(|error| format!("Unable to fetch latest desktop diff snapshot: {error}"))?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(format!("Latest desktop diff snapshot returned HTTP {status}: {body}"));
+        }
+        response
+            .json::<DesktopDiffSnapshotLatestResult>()
+            .await
+            .map_err(|error| format!("Unable to parse desktop diff snapshot response: {error}"))
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -144,6 +187,57 @@ pub struct AgentWorkspace {
     pub changed_file_summary: Option<serde_json::Value>,
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LatestDiffSnapshotRequest {
+    pub project_id: String,
+    pub task_id: Option<i64>,
+    pub workspace_id: Option<String>,
+    pub root_path: String,
+    pub path: Option<String>,
+    pub source_instance_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct DesktopDiffSnapshotLatestResult {
+    pub project_id: String,
+    pub task_id: Option<i64>,
+    pub workspace_id: Option<String>,
+    pub root_path: Option<String>,
+    pub path: Option<String>,
+    pub source_instance_id: Option<String>,
+    pub state: DesktopSnapshotState,
+    pub is_stale: bool,
+    pub freshness_status: String,
+    pub snapshot: Option<DesktopDiffSnapshot>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct DesktopDiffSnapshot {
+    pub id: i64,
+    pub project_id: String,
+    pub task_id: Option<i64>,
+    pub workspace_id: Option<String>,
+    pub root_path: String,
+    pub path: Option<String>,
+    pub base_ref: Option<String>,
+    pub head_ref: Option<String>,
+    pub max_bytes: i64,
+    pub staged: bool,
+    pub diff: String,
+    pub truncated: bool,
+    pub binary: bool,
+    pub warnings: Vec<String>,
+    pub source_instance_id: String,
+    pub observed_at: String,
+    pub received_at: String,
+    pub updated_at: String,
+    pub is_stale: bool,
+    pub freshness_seconds: i64,
 }
 
 fn join_url(base_url: &str, path: &str) -> Result<Url, String> {

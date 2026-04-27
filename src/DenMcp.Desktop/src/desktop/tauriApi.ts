@@ -124,6 +124,51 @@ export interface LocalSnapshotList {
   snapshots: LocalGitSnapshot[];
 }
 
+export interface LatestDiffSnapshotRequest {
+  projectId: string;
+  taskId: number | null;
+  workspaceId: string | null;
+  rootPath: string;
+  path: string | null;
+  sourceInstanceId: string;
+}
+
+export interface DesktopDiffSnapshotLatestResult {
+  project_id: string;
+  task_id: number | null;
+  workspace_id: string | null;
+  root_path: string | null;
+  path: string | null;
+  source_instance_id: string | null;
+  state: DesktopSnapshotState;
+  is_stale: boolean;
+  freshness_status: string;
+  snapshot: DesktopDiffSnapshot | null;
+}
+
+export interface DesktopDiffSnapshot {
+  id: number;
+  project_id: string;
+  task_id: number | null;
+  workspace_id: string | null;
+  root_path: string;
+  path: string | null;
+  base_ref: string | null;
+  head_ref: string | null;
+  max_bytes: number;
+  staged: boolean;
+  diff: string;
+  truncated: boolean;
+  binary: boolean;
+  warnings: string[];
+  source_instance_id: string;
+  observed_at: string;
+  received_at: string;
+  updated_at: string;
+  is_stale: boolean;
+  freshness_seconds: number;
+}
+
 export async function getOperatorStatus(): Promise<OperatorStatus> {
   return invoke('get_operator_status');
 }
@@ -142,6 +187,10 @@ export async function refreshNow(): Promise<void> {
 
 export async function listLocalSnapshots(): Promise<LocalSnapshotList> {
   return invoke('list_local_snapshots');
+}
+
+export async function getLatestDiffSnapshot(request: LatestDiffSnapshotRequest): Promise<DesktopDiffSnapshotLatestResult> {
+  return invoke('get_latest_diff_snapshot', { request });
 }
 
 export function onOperatorStatus(callback: (status: OperatorStatus) => void): Promise<() => void> {

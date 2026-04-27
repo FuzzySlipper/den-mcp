@@ -4,8 +4,8 @@ mod runtime;
 mod settings;
 
 use runtime::{
-    get_operator_status, get_settings, list_local_snapshots, refresh_now, save_operator_settings,
-    start_runtime, OperatorRuntime,
+    get_latest_diff_snapshot, get_operator_status, get_settings, list_local_snapshots, refresh_now,
+    save_operator_settings, start_runtime, OperatorRuntime,
 };
 use tauri::Manager;
 
@@ -25,7 +25,8 @@ pub fn run() {
             get_settings,
             save_operator_settings,
             refresh_now,
-            list_local_snapshots
+            list_local_snapshots,
+            get_latest_diff_snapshot
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();

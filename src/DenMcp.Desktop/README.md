@@ -10,6 +10,7 @@ This app is intentionally a sibling to `src/DenMcp.Server/ClientApp`: it bundles
 cd src/DenMcp.Desktop
 npm install
 npm run ui:build
+npm run test:helpers
 npm run tauri:dev
 ```
 
@@ -28,7 +29,7 @@ cargo check
 - Scans locally visible project roots/worktrees with safe Rust-side `git` process calls.
 - Publishes desktop git snapshots to `/api/projects/{projectId}/desktop/git-snapshots`.
 - Keeps local in-memory snapshots and shows queued/stale/offline-style status when Den is disconnected.
-- Renders a local React UI for connection health, observer status, diagnostics, and git snapshot cards.
+- Renders a local React UI for connection health, observer status, diagnostics, task/workspace snapshot cards, changed-file grouping, and bounded diff lookup status.
 
 ## Boundaries
 
