@@ -413,12 +413,27 @@ mod tests {
     impl TestHttpServer {
         fn new(responses: Vec<TestResponse>) -> Self {
             let listener = TcpListener::bind("127.0.0.1:0").expect("test listener");
+            listener
+                .set_nonblocking(true)
+                .expect("nonblocking listener");
             let address = listener.local_addr().expect("local address").to_string();
             let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
             let request_log = requests.clone();
             let handle = thread::spawn(move || {
                 for response in responses {
-                    let (mut stream, _) = listener.accept().expect("test request");
+                    let started = std::time::Instant::now();
+                    let mut stream = loop {
+                        match listener.accept() {
+                            Ok((stream, _)) => break stream,
+                            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                                if started.elapsed() > std::time::Duration::from_secs(2) {
+                                    return;
+                                }
+                                std::thread::sleep(std::time::Duration::from_millis(10));
+                            }
+                            Err(error) => panic!("test request failed: {error}"),
+                        }
+                    };
                     let mut buffer = [0_u8; 4096];
                     let read = stream.read(&mut buffer).expect("read request");
                     let request = String::from_utf8_lossy(&buffer[..read]).to_string();
