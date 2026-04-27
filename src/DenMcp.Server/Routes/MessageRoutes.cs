@@ -45,6 +45,14 @@ public static class MessageRoutes
             }
         });
 
+        group.MapGet("/{messageId:int}", async (IMessageRepository repo, string projectId, int messageId) =>
+        {
+            var message = await repo.GetByIdAsync(messageId);
+            if (message is null || message.ProjectId != projectId)
+                return Results.NotFound(new { error = $"Message {messageId} not found" });
+            return Results.Ok(message);
+        });
+
         group.MapGet("/", async (IMessageRepository repo, string projectId,
             int? taskId, string? since, string? unreadFor, int? limit, string? intent) =>
         {

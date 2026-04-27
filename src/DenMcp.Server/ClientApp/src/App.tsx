@@ -4,6 +4,7 @@ import {
   getDispatch,
   listProjects,
   listTasks,
+  getMessage,
   getMessageFeed,
   getThread,
   listAgentStream,
@@ -28,6 +29,7 @@ import { SubagentRunPanel } from './components/SubagentRunPanel';
 import { SubagentRunDetail } from './components/SubagentRunDetail';
 import { DocumentList } from './components/DocumentList';
 import { DocumentDetail } from './components/DocumentDetail';
+import { LibrarianView } from './components/LibrarianView';
 import { AgentBar } from './components/AgentBar';
 import { DispatchDetail } from './components/DispatchDetail';
 import { MESSAGE_INTENT_OPTIONS, messageIntentLabel } from './messageIntents';
@@ -49,7 +51,7 @@ export default function App() {
   const [selectedSubagentRun, setSelectedSubagentRun] = useState<SubagentRunSummary | null>(null);
   const [selectedDispatch, setSelectedDispatch] = useState<DispatchEntry | null>(null);
   const [selectedDoc, setSelectedDoc] = useState<DocumentSummary | null>(null);
-  const [viewMode, setViewMode] = useState<'tasks' | 'documents'>('tasks');
+  const [viewMode, setViewMode] = useState<'tasks' | 'documents' | 'librarian'>('tasks');
   const [feedMode, setFeedMode] = useState<'stream' | 'messages' | 'thoughts'>('stream');
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [messageIntentFilter, setMessageIntentFilter] = useState<MessageIntent | ''>('');
@@ -329,6 +331,19 @@ export default function App() {
     }
   }, []);
 
+  const handleDocumentSelect = useCallback((doc: DocumentSummary) => {
+    if (doc.project_id && doc.project_id !== selectedProject) {
+      setSelectedProject(doc.project_id);
+    }
+    setSelectedDoc(doc);
+    setSelectedTaskId(null);
+    setSelectedTaskProjectId(null);
+    setSelectedMessage(null);
+    setSelectedStreamEntry(null);
+    setSelectedSubagentRun(null);
+    setSelectedDispatch(null);
+  }, [selectedProject]);
+
   const handleDocumentSaved = useCallback((doc: Document) => {
     setSelectedDoc({
       id: doc.id,
@@ -342,13 +357,23 @@ export default function App() {
     refreshDocs();
   }, [refreshDocs]);
 
-  const handleStreamThreadOpen = useCallback(async (entry: AgentStreamEntry) => {
-    if (!entry.project_id || entry.thread_id == null) {
-      return;
-    }
-
+  const handleMessageOpen = useCallback(async (projectId: string, messageId: number) => {
     try {
-      const thread = await getThread(entry.project_id, entry.thread_id);
+      const message = await getMessage(projectId, messageId);
+      if (!message) return;
+      setSelectedMessage(message);
+      setSelectedStreamEntry(null);
+      setSelectedSubagentRun(null);
+      setSelectedDispatch(null);
+      setSelectedDoc(null);
+    } catch (error) {
+      console.error('Failed to load message detail', error);
+    }
+  }, []);
+
+  const handleThreadOpen = useCallback(async (projectId: string, threadId: number) => {
+    try {
+      const thread = await getThread(projectId, threadId);
       setSelectedMessage(thread.root);
       setSelectedStreamEntry(null);
       setSelectedSubagentRun(null);
@@ -358,6 +383,14 @@ export default function App() {
       console.error('Failed to load thread detail', error);
     }
   }, []);
+
+  const handleStreamThreadOpen = useCallback(async (entry: AgentStreamEntry) => {
+    if (!entry.project_id || entry.thread_id == null) {
+      return;
+    }
+
+    await handleThreadOpen(entry.project_id, entry.thread_id);
+  }, [handleThreadOpen]);
 
   const feedCount = feedMode === 'stream'
     ? filteredAgentStream.length
@@ -601,7 +634,9 @@ export default function App() {
         <div className="panel-header">
           {viewMode === 'tasks'
             ? <>Tasks {effectiveProject && <span className="count">({taskCount}{filterLabel}{sortLabel})</span>}</>
-            : <>Documents {effectiveProject && <span className="count">({sortedDocs.length})</span>}</>
+            : viewMode === 'documents'
+              ? <>Documents {effectiveProject && <span className="count">({sortedDocs.length})</span>}</>
+              : <>Librarian</>
           }
         </div>
         <FilterBar
@@ -621,12 +656,21 @@ export default function App() {
               statusFilter={statusFilter}
               sortMode={sortMode}
             />
-          ) : (
+          ) : viewMode === 'documents' ? (
             <DocumentList
               documents={sortedDocs}
               projectId={effectiveProject}
               isGlobal={isGlobal}
-              onSelect={setSelectedDoc}
+              onSelect={handleDocumentSelect}
+            />
+          ) : (
+            <LibrarianView
+              projects={projects ?? []}
+              currentProjectId={effectiveProject}
+              onOpenTask={handleTaskSelect}
+              onOpenDocument={handleDocumentSelect}
+              onOpenMessage={(projectId, messageId) => void handleMessageOpen(projectId, messageId)}
+              onOpenThread={(projectId, threadId) => void handleThreadOpen(projectId, threadId)}
             />
           )}
         </div>

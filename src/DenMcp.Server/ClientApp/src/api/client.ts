@@ -11,6 +11,7 @@ import type {
   Document,
   DocumentSearchResult,
   DocType,
+  LibrarianResponse,
   AgentSession,
   AgentStreamEntry,
   AttentionItem,
@@ -136,6 +137,15 @@ export interface GetMessagesOpts {
   intent?: string;
 }
 
+export function getMessage(projectId: string, messageId: number): Promise<Message | null> {
+  return fetch(`/api/projects/${esc(projectId)}/messages/${messageId}`)
+    .then(res => {
+      if (res.status === 404) return null;
+      if (!res.ok) throw new Error(`GET message: ${res.status}`);
+      return res.json();
+    });
+}
+
 export function getMessages(projectId: string, opts: GetMessagesOpts = {}): Promise<Message[]> {
   const q = buildQuery({
     taskId: opts.taskId,
@@ -199,6 +209,20 @@ export function searchDocuments(query: string, projectId?: string): Promise<Docu
   }
   const q = buildQuery({ query, projectId });
   return get(`/api/documents/search${q}`);
+}
+
+export interface QueryLibrarianRequest {
+  query: string;
+  taskId?: number;
+  includeGlobal?: boolean;
+}
+
+export function queryLibrarian(projectId: string, request: QueryLibrarianRequest): Promise<LibrarianResponse> {
+  return post(`/api/projects/${esc(projectId)}/librarian/query`, {
+    query: request.query,
+    task_id: request.taskId,
+    include_global: request.includeGlobal ?? true,
+  });
 }
 
 // Agents

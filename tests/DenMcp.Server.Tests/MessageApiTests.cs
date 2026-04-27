@@ -101,6 +101,41 @@ public class MessageApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RestMessageById_ReturnsMessageWithinProject()
+    {
+        var postResponse = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/messages", new
+        {
+            sender = "alice",
+            content = "Source-attributed librarian message"
+        });
+        postResponse.EnsureSuccessStatusCode();
+        var created = await postResponse.Content.ReadFromJsonAsync<Message>(JsonOpts);
+
+        var getResponse = await _client.GetAsync($"/api/projects/{ProjectId}/messages/{created!.Id}");
+        getResponse.EnsureSuccessStatusCode();
+
+        var loaded = await getResponse.Content.ReadFromJsonAsync<Message>(JsonOpts);
+        Assert.Equal(created.Id, loaded!.Id);
+        Assert.Equal("Source-attributed librarian message", loaded.Content);
+    }
+
+    [Fact]
+    public async Task RestMessageById_Returns404ForWrongProject()
+    {
+        var postResponse = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/messages", new
+        {
+            sender = "alice",
+            content = "Project-scoped message"
+        });
+        postResponse.EnsureSuccessStatusCode();
+        var created = await postResponse.Content.ReadFromJsonAsync<Message>(JsonOpts);
+
+        var getResponse = await _client.GetAsync($"/api/projects/other-project/messages/{created!.Id}");
+
+        Assert.Equal(HttpStatusCode.NotFound, getResponse.StatusCode);
+    }
+
+    [Fact]
     public async Task RestMessageFeed_ReturnsThreadSummaries()
     {
         var rootResponse = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/messages", new

@@ -1684,3 +1684,143 @@ html, body, #root {
     grid-auto-rows: minmax(92px, auto);
   }
 }
+
+/* Librarian */
+.librarian-view {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 10px;
+}
+
+.librarian-query {
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.librarian-query-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+
+.librarian-query label,
+.librarian-query-row label {
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.librarian-query textarea,
+.librarian-query input,
+.librarian-query select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 7px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+
+.librarian-query textarea {
+  resize: vertical;
+  min-height: 72px;
+}
+
+.librarian-query-controls {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.librarian-query-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.librarian-checkbox {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 6px !important;
+  padding-bottom: 5px;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+}
+
+.librarian-results,
+.librarian-group,
+.librarian-item-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.librarian-result-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.librarian-confidence-high { color: var(--green); }
+.librarian-confidence-medium { color: var(--yellow); }
+.librarian-confidence-low { color: var(--text-muted); }
+
+.librarian-group h3 {
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.librarian-item {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-surface);
+  padding: 9px 10px;
+}
+
+.librarian-item-head,
+.librarian-links {
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.librarian-item-head {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.librarian-item-summary {
+  color: var(--text-bright);
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.librarian-item-why {
+  color: var(--text);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.librarian-item blockquote {
+  border-left: 2px solid var(--accent-dim);
+  color: var(--text-muted);
+  padding-left: 8px;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.librarian-recommendations {
+  padding-left: 18px;
+  color: var(--text);
+}
