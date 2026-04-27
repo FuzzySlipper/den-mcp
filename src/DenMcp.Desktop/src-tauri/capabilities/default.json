@@ -1,0 +1,9 @@
+{
+  "identifier": "default",
+  "description": "enables Den operator desktop commands for the main window",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "shell:allow-open"
+  ]
+}

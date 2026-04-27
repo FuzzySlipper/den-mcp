@@ -1,0 +1,33 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Den Operator",
+  "version": "0.1.0",
+  "identifier": "dev.den-mcp.operator",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://127.0.0.1:1421",
+    "beforeDevCommand": "npm run ui:dev",
+    "beforeBuildCommand": "npm run ui:build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Den Operator",
+        "width": 1440,
+        "height": 960,
+        "minWidth": 1100,
+        "minHeight": 720,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; connect-src 'self' ipc: tauri: http://127.0.0.1:* http://localhost:*; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'none'"
+    }
+  },
+  "bundle": {
+    "active": false,
+    "targets": "all"
+  }
+}

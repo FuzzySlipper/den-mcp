@@ -1,0 +1,25 @@
+{
+  "name": "den-mcp-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "ui:dev": "vite --host 127.0.0.1 --port 1421",
+    "ui:build": "tsc --noEmit && vite build",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.8.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.10.0",
+    "@vitejs/plugin-react": "^5.1.0",
+    "@types/react": "^19.1.15",
+    "@types/react-dom": "^19.1.9",
+    "typescript": "~5.9.3",
+    "vite": "^8.0.0"
+  }
+}
