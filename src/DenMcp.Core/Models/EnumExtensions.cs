@@ -190,6 +190,28 @@ public static class EnumExtensions
         _ => throw new ArgumentException($"Unknown agent workspace cleanup policy: {value}", nameof(value))
     };
 
+    public static string ToDbValue(this DesktopSnapshotState state) => state switch
+    {
+        DesktopSnapshotState.Ok => "ok",
+        DesktopSnapshotState.PathNotVisible => "path_not_visible",
+        DesktopSnapshotState.NotGitRepository => "not_git_repository",
+        DesktopSnapshotState.GitError => "git_error",
+        DesktopSnapshotState.SourceOffline => "source_offline",
+        DesktopSnapshotState.Missing => "missing",
+        _ => throw new ArgumentOutOfRangeException(nameof(state), state, null)
+    };
+
+    public static DesktopSnapshotState ParseDesktopSnapshotState(string value) => value switch
+    {
+        "ok" => DesktopSnapshotState.Ok,
+        "path_not_visible" => DesktopSnapshotState.PathNotVisible,
+        "not_git_repository" => DesktopSnapshotState.NotGitRepository,
+        "git_error" => DesktopSnapshotState.GitError,
+        "source_offline" => DesktopSnapshotState.SourceOffline,
+        "missing" => DesktopSnapshotState.Missing,
+        _ => throw new ArgumentException($"Unknown desktop snapshot state: {value}", nameof(value))
+    };
+
     public static string ToDbValue(this DispatchStatus status) => status switch
     {
         DispatchStatus.Pending => "pending",

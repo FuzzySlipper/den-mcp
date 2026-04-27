@@ -302,6 +302,104 @@ export interface GitDiffResponse {
   errors: string[];
 }
 
+export type DesktopSnapshotState =
+  | 'ok'
+  | 'path_not_visible'
+  | 'not_git_repository'
+  | 'git_error'
+  | 'source_offline'
+  | 'missing';
+
+export interface DesktopGitSnapshot {
+  id: number;
+  project_id: string;
+  task_id: number | null;
+  workspace_id: string | null;
+  root_path: string;
+  state: DesktopSnapshotState;
+  branch: string | null;
+  is_detached: boolean;
+  head_sha: string | null;
+  upstream: string | null;
+  ahead: number | null;
+  behind: number | null;
+  dirty_counts: GitDirtyCounts;
+  changed_files: GitFileStatus[];
+  warnings: string[];
+  truncated: boolean;
+  source_instance_id: string;
+  source_display_name: string | null;
+  observed_at: string;
+  received_at: string;
+  updated_at: string;
+  is_stale: boolean;
+  freshness_seconds: number;
+  freshness_status: string;
+}
+
+export interface DesktopGitSnapshotLatestResult {
+  project_id: string;
+  task_id: number | null;
+  workspace_id: string | null;
+  root_path: string | null;
+  source_instance_id: string | null;
+  state: DesktopSnapshotState;
+  is_stale: boolean;
+  freshness_status: string;
+  snapshot: DesktopGitSnapshot | null;
+}
+
+export interface DesktopDiffSnapshot {
+  id: number;
+  project_id: string;
+  task_id: number | null;
+  workspace_id: string | null;
+  root_path: string;
+  path: string | null;
+  base_ref: string | null;
+  head_ref: string | null;
+  max_bytes: number;
+  staged: boolean;
+  diff: string;
+  truncated: boolean;
+  binary: boolean;
+  warnings: string[];
+  source_instance_id: string;
+  observed_at: string;
+  received_at: string;
+  updated_at: string;
+  is_stale: boolean;
+  freshness_seconds: number;
+}
+
+export interface DesktopDiffSnapshotLatestResult {
+  state: 'fresh' | 'stale' | 'missing';
+  snapshot: DesktopDiffSnapshot | null;
+}
+
+export interface DesktopSessionSnapshot {
+  id: number;
+  project_id: string;
+  task_id: number | null;
+  workspace_id: string | null;
+  session_id: string;
+  parent_session_id: string | null;
+  agent_identity: string | null;
+  role: string | null;
+  current_command: string | null;
+  current_phase: string | null;
+  recent_activity: unknown | null;
+  child_sessions: unknown | null;
+  control_capabilities: unknown | null;
+  warnings: string[];
+  source_instance_id: string;
+  observed_at: string;
+  received_at: string;
+  updated_at: string;
+  is_stale: boolean;
+  freshness_seconds: number;
+}
+
 export interface Message {
   id: number;
   project_id: string;

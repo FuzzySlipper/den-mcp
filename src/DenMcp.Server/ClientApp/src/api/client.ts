@@ -23,6 +23,11 @@ import type {
   GitStatusResponse,
   GitFilesResponse,
   GitDiffResponse,
+  DesktopGitSnapshot,
+  DesktopGitSnapshotLatestResult,
+  DesktopDiffSnapshot,
+  DesktopDiffSnapshotLatestResult,
+  DesktopSessionSnapshot,
 } from './types';
 
 async function get<T>(url: string): Promise<T> {
@@ -433,6 +438,82 @@ export function getWorkspaceGitDiff(projectId: string, workspaceId: string, opts
   });
   return get(`/api/projects/${esc(projectId)}/agent-workspaces/${esc(workspaceId)}/git/diff${q}`);
 }
+
+// Desktop-published snapshots
+
+export interface ListDesktopSnapshotsOpts {
+  taskId?: number;
+  workspaceId?: string;
+  sourceInstanceId?: string;
+  rootPath?: string;
+  state?: string;
+  staleAfterSeconds?: number;
+  limit?: number;
+}
+
+export function listDesktopGitSnapshots(projectId: string, opts: ListDesktopSnapshotsOpts = {}): Promise<DesktopGitSnapshot[]> {
+  const q = buildQuery({
+    taskId: opts.taskId,
+    workspaceId: opts.workspaceId,
+    sourceInstanceId: opts.sourceInstanceId,
+    rootPath: opts.rootPath,
+    state: opts.state,
+    staleAfterSeconds: opts.staleAfterSeconds,
+    limit: opts.limit,
+  });
+  return get(`/api/projects/${esc(projectId)}/desktop/git-snapshots${q}`);
+}
+
+export function getLatestDesktopGitSnapshot(projectId: string, opts: Omit<ListDesktopSnapshotsOpts, 'state' | 'limit'> = {}): Promise<DesktopGitSnapshotLatestResult> {
+  const q = buildQuery({
+    taskId: opts.taskId,
+    workspaceId: opts.workspaceId,
+    sourceInstanceId: opts.sourceInstanceId,
+    rootPath: opts.rootPath,
+    staleAfterSeconds: opts.staleAfterSeconds,
+  });
+  return get(`/api/projects/${esc(projectId)}/desktop/git-snapshots/latest${q}`);
+}
+
+export interface DesktopDiffSnapshotOpts extends Omit<ListDesktopSnapshotsOpts, 'state' | 'limit'> {
+  path?: string;
+  baseRef?: string;
+  headRef?: string;
+  staged?: boolean;
+}
+
+export function getLatestDesktopDiffSnapshot(projectId: string, opts: DesktopDiffSnapshotOpts = {}): Promise<DesktopDiffSnapshotLatestResult> {
+  const q = buildQuery({
+    taskId: opts.taskId,
+    workspaceId: opts.workspaceId,
+    sourceInstanceId: opts.sourceInstanceId,
+    rootPath: opts.rootPath,
+    path: opts.path,
+    baseRef: opts.baseRef,
+    headRef: opts.headRef,
+    staged: opts.staged,
+    staleAfterSeconds: opts.staleAfterSeconds,
+  });
+  return get(`/api/projects/${esc(projectId)}/desktop/diff-snapshots/latest${q}`);
+}
+
+export interface ListDesktopSessionSnapshotsOpts extends Omit<ListDesktopSnapshotsOpts, 'rootPath' | 'state'> {
+  sessionId?: string;
+}
+
+export function listDesktopSessionSnapshots(projectId: string, opts: ListDesktopSessionSnapshotsOpts = {}): Promise<DesktopSessionSnapshot[]> {
+  const q = buildQuery({
+    taskId: opts.taskId,
+    workspaceId: opts.workspaceId,
+    sourceInstanceId: opts.sourceInstanceId,
+    sessionId: opts.sessionId,
+    staleAfterSeconds: opts.staleAfterSeconds,
+    limit: opts.limit,
+  });
+  return get(`/api/projects/${esc(projectId)}/desktop/session-snapshots${q}`);
+}
+
+export type { DesktopGitSnapshot, DesktopDiffSnapshot, DesktopSessionSnapshot };
 
 // Legacy dispatch helpers.
 // The default dashboard intentionally does not import these; keep them available

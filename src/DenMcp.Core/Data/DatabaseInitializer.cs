@@ -567,6 +567,112 @@ public sealed class DatabaseInitializer
         CREATE INDEX IF NOT EXISTS idx_agent_workspaces_created_by_run
             ON agent_workspaces(created_by_run_id)
             WHERE created_by_run_id IS NOT NULL;
+
+        ------------------------------------------------------------
+        -- DESKTOP-PUBLISHED SNAPSHOTS
+        ------------------------------------------------------------
+        CREATE TABLE IF NOT EXISTS desktop_git_snapshots (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id            TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            task_id               INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+            workspace_id          TEXT REFERENCES agent_workspaces(id) ON DELETE SET NULL,
+            root_path             TEXT NOT NULL,
+            scope_key             TEXT NOT NULL,
+            state                 TEXT NOT NULL DEFAULT 'ok'
+                                  CHECK (state IN (
+                                      'ok',
+                                      'path_not_visible',
+                                      'not_git_repository',
+                                      'git_error',
+                                      'source_offline',
+                                      'missing'
+                                  )),
+            branch                TEXT,
+            is_detached           INTEGER NOT NULL DEFAULT 0,
+            head_sha              TEXT,
+            upstream              TEXT,
+            ahead                 INTEGER,
+            behind                INTEGER,
+            dirty_counts          TEXT NOT NULL,
+            changed_files         TEXT NOT NULL,
+            warnings              TEXT NOT NULL,
+            truncated             INTEGER NOT NULL DEFAULT 0,
+            source_instance_id    TEXT NOT NULL,
+            source_display_name   TEXT,
+            observed_at           TEXT NOT NULL,
+            received_at           TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at            TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(project_id, scope_key)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_desktop_git_snapshots_project_observed
+            ON desktop_git_snapshots(project_id, observed_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_desktop_git_snapshots_task_observed
+            ON desktop_git_snapshots(task_id, observed_at DESC, id DESC)
+            WHERE task_id IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_desktop_git_snapshots_workspace_observed
+            ON desktop_git_snapshots(workspace_id, observed_at DESC, id DESC)
+            WHERE workspace_id IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_desktop_git_snapshots_source_observed
+            ON desktop_git_snapshots(source_instance_id, observed_at DESC, id DESC);
+
+        CREATE TABLE IF NOT EXISTS desktop_diff_snapshots (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id            TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            task_id               INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+            workspace_id          TEXT REFERENCES agent_workspaces(id) ON DELETE SET NULL,
+            root_path             TEXT NOT NULL,
+            path                  TEXT,
+            base_ref              TEXT,
+            head_ref              TEXT,
+            diff_key              TEXT NOT NULL,
+            max_bytes             INTEGER NOT NULL,
+            staged                INTEGER NOT NULL DEFAULT 0,
+            diff                  TEXT NOT NULL,
+            truncated             INTEGER NOT NULL DEFAULT 0,
+            binary                INTEGER NOT NULL DEFAULT 0,
+            warnings              TEXT NOT NULL,
+            source_instance_id    TEXT NOT NULL,
+            observed_at           TEXT NOT NULL,
+            received_at           TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at            TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(project_id, diff_key)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_desktop_diff_snapshots_project_observed
+            ON desktop_diff_snapshots(project_id, observed_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_desktop_diff_snapshots_source_observed
+            ON desktop_diff_snapshots(source_instance_id, observed_at DESC, id DESC);
+
+        CREATE TABLE IF NOT EXISTS desktop_session_snapshots (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id            TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            task_id               INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+            workspace_id          TEXT REFERENCES agent_workspaces(id) ON DELETE SET NULL,
+            session_id            TEXT NOT NULL,
+            parent_session_id     TEXT,
+            agent_identity        TEXT,
+            role                  TEXT,
+            current_command       TEXT,
+            current_phase         TEXT,
+            recent_activity       TEXT,
+            child_sessions        TEXT,
+            control_capabilities  TEXT,
+            warnings              TEXT NOT NULL,
+            source_instance_id    TEXT NOT NULL,
+            observed_at           TEXT NOT NULL,
+            received_at           TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at            TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(project_id, source_instance_id, session_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_desktop_session_snapshots_project_observed
+            ON desktop_session_snapshots(project_id, observed_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_desktop_session_snapshots_task_observed
+            ON desktop_session_snapshots(task_id, observed_at DESC, id DESC)
+            WHERE task_id IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_desktop_session_snapshots_source_observed
+            ON desktop_session_snapshots(source_instance_id, observed_at DESC, id DESC);
         """;
 
     private async Task RunMigrationsAsync(SqliteConnection connection)
@@ -574,6 +680,7 @@ public sealed class DatabaseInitializer
         await EnsureAgentGuidanceSchemaAsync(connection);
         await EnsureAgentRunSchemaAsync(connection);
         await EnsureAgentWorkspaceSchemaAsync(connection);
+        await EnsureDesktopSnapshotSchemaAsync(connection);
         await EnsureBlackboardSchemaAsync(connection);
 
         // Add session_id column to agent_sessions if it doesn't exist.
@@ -822,6 +929,123 @@ public sealed class DatabaseInitializer
             ON agent_workspaces(created_by_run_id)
             WHERE created_by_run_id IS NOT NULL
             """);
+    }
+
+    private static async Task EnsureDesktopSnapshotSchemaAsync(SqliteConnection connection)
+    {
+        await using var tableCmd = connection.CreateCommand();
+        tableCmd.CommandText = """
+            CREATE TABLE IF NOT EXISTS desktop_git_snapshots (
+                id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id            TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                task_id               INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+                workspace_id          TEXT REFERENCES agent_workspaces(id) ON DELETE SET NULL,
+                root_path             TEXT NOT NULL,
+                scope_key             TEXT NOT NULL,
+                state                 TEXT NOT NULL DEFAULT 'ok'
+                                      CHECK (state IN (
+                                          'ok',
+                                          'path_not_visible',
+                                          'not_git_repository',
+                                          'git_error',
+                                          'source_offline',
+                                          'missing'
+                                      )),
+                branch                TEXT,
+                is_detached           INTEGER NOT NULL DEFAULT 0,
+                head_sha              TEXT,
+                upstream              TEXT,
+                ahead                 INTEGER,
+                behind                INTEGER,
+                dirty_counts          TEXT NOT NULL,
+                changed_files         TEXT NOT NULL,
+                warnings              TEXT NOT NULL,
+                truncated             INTEGER NOT NULL DEFAULT 0,
+                source_instance_id    TEXT NOT NULL,
+                source_display_name   TEXT,
+                observed_at           TEXT NOT NULL,
+                received_at           TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at            TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(project_id, scope_key)
+            );
+
+            CREATE TABLE IF NOT EXISTS desktop_diff_snapshots (
+                id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id            TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                task_id               INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+                workspace_id          TEXT REFERENCES agent_workspaces(id) ON DELETE SET NULL,
+                root_path             TEXT NOT NULL,
+                path                  TEXT,
+                base_ref              TEXT,
+                head_ref              TEXT,
+                diff_key              TEXT NOT NULL,
+                max_bytes             INTEGER NOT NULL,
+                staged                INTEGER NOT NULL DEFAULT 0,
+                diff                  TEXT NOT NULL,
+                truncated             INTEGER NOT NULL DEFAULT 0,
+                binary                INTEGER NOT NULL DEFAULT 0,
+                warnings              TEXT NOT NULL,
+                source_instance_id    TEXT NOT NULL,
+                observed_at           TEXT NOT NULL,
+                received_at           TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at            TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(project_id, diff_key)
+            );
+
+            CREATE TABLE IF NOT EXISTS desktop_session_snapshots (
+                id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id            TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                task_id               INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+                workspace_id          TEXT REFERENCES agent_workspaces(id) ON DELETE SET NULL,
+                session_id            TEXT NOT NULL,
+                parent_session_id     TEXT,
+                agent_identity        TEXT,
+                role                  TEXT,
+                current_command       TEXT,
+                current_phase         TEXT,
+                recent_activity       TEXT,
+                child_sessions        TEXT,
+                control_capabilities  TEXT,
+                warnings              TEXT NOT NULL,
+                source_instance_id    TEXT NOT NULL,
+                observed_at           TEXT NOT NULL,
+                received_at           TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at            TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(project_id, source_instance_id, session_id)
+            )
+            """;
+        await tableCmd.ExecuteNonQueryAsync();
+
+        await EnsureIndexAsync(connection, "idx_desktop_git_snapshots_project_observed",
+            "CREATE INDEX IF NOT EXISTS idx_desktop_git_snapshots_project_observed ON desktop_git_snapshots(project_id, observed_at DESC, id DESC)");
+        await EnsureIndexAsync(connection, "idx_desktop_git_snapshots_task_observed",
+            """
+            CREATE INDEX IF NOT EXISTS idx_desktop_git_snapshots_task_observed
+            ON desktop_git_snapshots(task_id, observed_at DESC, id DESC)
+            WHERE task_id IS NOT NULL
+            """);
+        await EnsureIndexAsync(connection, "idx_desktop_git_snapshots_workspace_observed",
+            """
+            CREATE INDEX IF NOT EXISTS idx_desktop_git_snapshots_workspace_observed
+            ON desktop_git_snapshots(workspace_id, observed_at DESC, id DESC)
+            WHERE workspace_id IS NOT NULL
+            """);
+        await EnsureIndexAsync(connection, "idx_desktop_git_snapshots_source_observed",
+            "CREATE INDEX IF NOT EXISTS idx_desktop_git_snapshots_source_observed ON desktop_git_snapshots(source_instance_id, observed_at DESC, id DESC)");
+        await EnsureIndexAsync(connection, "idx_desktop_diff_snapshots_project_observed",
+            "CREATE INDEX IF NOT EXISTS idx_desktop_diff_snapshots_project_observed ON desktop_diff_snapshots(project_id, observed_at DESC, id DESC)");
+        await EnsureIndexAsync(connection, "idx_desktop_diff_snapshots_source_observed",
+            "CREATE INDEX IF NOT EXISTS idx_desktop_diff_snapshots_source_observed ON desktop_diff_snapshots(source_instance_id, observed_at DESC, id DESC)");
+        await EnsureIndexAsync(connection, "idx_desktop_session_snapshots_project_observed",
+            "CREATE INDEX IF NOT EXISTS idx_desktop_session_snapshots_project_observed ON desktop_session_snapshots(project_id, observed_at DESC, id DESC)");
+        await EnsureIndexAsync(connection, "idx_desktop_session_snapshots_task_observed",
+            """
+            CREATE INDEX IF NOT EXISTS idx_desktop_session_snapshots_task_observed
+            ON desktop_session_snapshots(task_id, observed_at DESC, id DESC)
+            WHERE task_id IS NOT NULL
+            """);
+        await EnsureIndexAsync(connection, "idx_desktop_session_snapshots_source_observed",
+            "CREATE INDEX IF NOT EXISTS idx_desktop_session_snapshots_source_observed ON desktop_session_snapshots(source_instance_id, observed_at DESC, id DESC)");
     }
 
     private static async Task EnsureBlackboardSchemaAsync(SqliteConnection connection)
