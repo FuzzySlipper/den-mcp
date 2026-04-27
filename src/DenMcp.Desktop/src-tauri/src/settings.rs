@@ -57,13 +57,22 @@ impl OperatorSettings {
         self
     }
 
-    pub fn from_save_request(current: &OperatorSettings, request: SaveOperatorSettingsRequest) -> Self {
+    pub fn from_save_request(
+        current: &OperatorSettings,
+        request: SaveOperatorSettingsRequest,
+    ) -> Self {
         Self {
             den_base_url: request.den_base_url,
             source_instance_id: current.source_instance_id.clone(),
-            source_display_name: request.source_display_name.and_then(|value| trim_to_option(&value)),
-            poll_interval_seconds: request.poll_interval_seconds.unwrap_or(current.poll_interval_seconds),
-            max_changed_files: request.max_changed_files.unwrap_or(current.max_changed_files),
+            source_display_name: request
+                .source_display_name
+                .and_then(|value| trim_to_option(&value)),
+            poll_interval_seconds: request
+                .poll_interval_seconds
+                .unwrap_or(current.poll_interval_seconds),
+            max_changed_files: request
+                .max_changed_files
+                .unwrap_or(current.max_changed_files),
         }
         .normalized()
     }
@@ -78,17 +87,32 @@ pub fn load_settings(app: &AppHandle) -> OperatorSettings {
         }
     };
 
-    let contents = match fs::read_to_string(&path) {
-        Ok(contents) => contents,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            let settings = OperatorSettings::default().normalized();
-            if let Err(save_error) = save_settings(app, &settings) {
-                log::warn!("Unable to write default Den operator settings: {save_error}");
-            }
-            return settings;
+    load_settings_from_path(&path, || {
+        let settings = OperatorSettings::default().normalized();
+        if let Err(save_error) = save_settings_to_path(&path, &settings) {
+            log::warn!("Unable to write default Den operator settings: {save_error}");
         }
+        settings
+    })
+}
+
+pub fn save_settings(app: &AppHandle, settings: &OperatorSettings) -> Result<(), String> {
+    let settings_path = settings_path(app)?;
+    save_settings_to_path(&settings_path, settings)
+}
+
+fn load_settings_from_path(
+    path: &PathBuf,
+    default_factory: impl FnOnce() -> OperatorSettings,
+) -> OperatorSettings {
+    let contents = match fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return default_factory(),
         Err(error) => {
-            log::warn!("Unable to read Den operator settings from {}: {error}", path.display());
+            log::warn!(
+                "Unable to read Den operator settings from {}: {error}",
+                path.display()
+            );
             return OperatorSettings::default().normalized();
         }
     };
@@ -96,14 +120,19 @@ pub fn load_settings(app: &AppHandle) -> OperatorSettings {
     match serde_json::from_str::<OperatorSettings>(&contents) {
         Ok(settings) => settings.normalized(),
         Err(error) => {
-            log::warn!("Unable to parse Den operator settings from {}: {error}", path.display());
+            log::warn!(
+                "Unable to parse Den operator settings from {}: {error}",
+                path.display()
+            );
             OperatorSettings::default().normalized()
         }
     }
 }
 
-pub fn save_settings(app: &AppHandle, settings: &OperatorSettings) -> Result<(), String> {
-    let settings_path = settings_path(app)?;
+fn save_settings_to_path(
+    settings_path: &PathBuf,
+    settings: &OperatorSettings,
+) -> Result<(), String> {
     if let Some(parent) = settings_path.parent() {
         fs::create_dir_all(parent).map_err(|error| {
             format!(
@@ -115,7 +144,7 @@ pub fn save_settings(app: &AppHandle, settings: &OperatorSettings) -> Result<(),
 
     let payload = serde_json::to_vec_pretty(&settings.clone().normalized())
         .map_err(|error| format!("Unable to serialize Den operator settings: {error}"))?;
-    let atomic_file = AtomicFile::new(&settings_path, OverwriteBehavior::AllowOverwrite);
+    let atomic_file = AtomicFile::new(settings_path, OverwriteBehavior::AllowOverwrite);
     atomic_file
         .write(|file| {
             file.write_all(&payload)?;
@@ -141,5 +170,66 @@ fn trim_to_option(value: &str) -> Option<String> {
         None
     } else {
         Some(trimmed.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_settings_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "den-desktop-{name}-{}.json",
+            Uuid::new_v4().simple()
+        ))
+    }
+
+    #[test]
+    fn save_and_load_settings_round_trip_preserves_source_instance_id() {
+        let path = temp_settings_path("settings-round-trip");
+        let settings = OperatorSettings {
+            den_base_url: "http://localhost:5199/".to_string(),
+            source_instance_id: "stable-source".to_string(),
+            source_display_name: Some("  Desk  ".to_string()),
+            poll_interval_seconds: 2,
+            max_changed_files: 10_000,
+        };
+
+        save_settings_to_path(&path, &settings).expect("settings should save");
+        let loaded = load_settings_from_path(&path, OperatorSettings::default);
+
+        assert_eq!(loaded.den_base_url, "http://localhost:5199");
+        assert_eq!(loaded.source_instance_id, "stable-source");
+        assert_eq!(loaded.source_display_name.as_deref(), Some("Desk"));
+        assert_eq!(loaded.poll_interval_seconds, 5);
+        assert_eq!(loaded.max_changed_files, 2000);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn save_request_keeps_existing_source_instance_id() {
+        let current = OperatorSettings {
+            den_base_url: "http://old".to_string(),
+            source_instance_id: "stable-source".to_string(),
+            source_display_name: Some("Old".to_string()),
+            poll_interval_seconds: 30,
+            max_changed_files: 200,
+        };
+
+        let next = OperatorSettings::from_save_request(
+            &current,
+            SaveOperatorSettingsRequest {
+                den_base_url: " http://new/ ".to_string(),
+                source_display_name: Some(" New Desk ".to_string()),
+                poll_interval_seconds: Some(60),
+                max_changed_files: Some(400),
+            },
+        );
+
+        assert_eq!(next.source_instance_id, "stable-source");
+        assert_eq!(next.den_base_url, "http://new");
+        assert_eq!(next.source_display_name.as_deref(), Some("New Desk"));
+        assert_eq!(next.poll_interval_seconds, 60);
+        assert_eq!(next.max_changed_files, 400);
     }
 }

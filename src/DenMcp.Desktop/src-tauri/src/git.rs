@@ -101,7 +101,11 @@ pub fn build_git_scopes(projects: &[Project], workspaces: &[AgentWorkspace]) -> 
     let mut seen = std::collections::HashSet::new();
 
     for project in projects {
-        if let Some(root_path) = project.root_path.as_ref().and_then(|value| trim_to_option(value)) {
+        if let Some(root_path) = project
+            .root_path
+            .as_ref()
+            .and_then(|value| trim_to_option(value))
+        {
             let scope = GitScope {
                 project_id: project.id.clone(),
                 project_name: Some(project.name.clone()),
@@ -143,14 +147,34 @@ pub fn inspect_scope(scope: &GitScope, settings: &OperatorSettings) -> LocalGitS
     let observed_at = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
     let request = if !Path::new(&scope.root_path).is_dir() {
-        warnings.push(format!("Path is not visible on this machine: {}", scope.root_path));
-        base_request(scope, settings, observed_at, DesktopSnapshotState::PathNotVisible, warnings)
+        warnings.push(format!(
+            "Path is not visible on this machine: {}",
+            scope.root_path
+        ));
+        base_request(
+            scope,
+            settings,
+            observed_at,
+            DesktopSnapshotState::PathNotVisible,
+            warnings,
+        )
     } else {
-        match inspect_visible_git_scope(scope, settings, observed_at.clone(), settings.max_changed_files) {
+        match inspect_visible_git_scope(
+            scope,
+            settings,
+            observed_at.clone(),
+            settings.max_changed_files,
+        ) {
             Ok(snapshot) => snapshot,
             Err(error) => {
                 warnings.push(error);
-                base_request(scope, settings, observed_at, DesktopSnapshotState::GitError, warnings)
+                base_request(
+                    scope,
+                    settings,
+                    observed_at,
+                    DesktopSnapshotState::GitError,
+                    warnings,
+                )
             }
         }
     };
@@ -170,7 +194,31 @@ fn inspect_visible_git_scope(
     observed_at: String,
     max_changed_files: usize,
 ) -> Result<DesktopGitSnapshotRequest, String> {
-    let status = run_git(&scope.root_path, &["status", "--porcelain=v2", "--branch", "--untracked-files=all"])?;
+    let status = run_git(
+        &scope.root_path,
+        &[
+            "status",
+            "--porcelain=v2",
+            "--branch",
+            "--untracked-files=all",
+        ],
+    )?;
+    Ok(snapshot_from_git_status(
+        scope,
+        settings,
+        observed_at,
+        status,
+        max_changed_files,
+    ))
+}
+
+fn snapshot_from_git_status(
+    scope: &GitScope,
+    settings: &OperatorSettings,
+    observed_at: String,
+    status: GitCommandResult,
+    max_changed_files: usize,
+) -> DesktopGitSnapshotRequest {
     if status.exit_code != 0 {
         let state = if status.stderr.contains("not a git repository") {
             DesktopSnapshotState::NotGitRepository
@@ -185,19 +233,29 @@ fn inspect_visible_git_scope(
             vec![format_git_error("git status", &status)],
         );
         request.truncated = status.truncated;
-        return Ok(request);
+        return request;
     }
 
-    let mut request = parse_porcelain_v2(scope, settings, observed_at, &status.stdout, max_changed_files);
+    let mut request = parse_porcelain_v2(
+        scope,
+        settings,
+        observed_at,
+        &status.stdout,
+        max_changed_files,
+    );
     request.truncated = status.truncated || request.changed_files.len() >= max_changed_files;
     request.warnings.extend(status.warnings);
     if request.upstream.is_none() {
-        request.warnings.push("No upstream branch reported by git status.".to_string());
+        request
+            .warnings
+            .push("No upstream branch reported by git status.".to_string());
     }
     if request.is_detached {
-        request.warnings.push("Repository is in detached HEAD state.".to_string());
+        request
+            .warnings
+            .push("Repository is in detached HEAD state.".to_string());
     }
-    Ok(request)
+    request
 }
 
 fn base_request(
@@ -235,7 +293,13 @@ fn parse_porcelain_v2(
     output: &str,
     max_changed_files: usize,
 ) -> DesktopGitSnapshotRequest {
-    let mut request = base_request(scope, settings, observed_at, DesktopSnapshotState::Ok, Vec::new());
+    let mut request = base_request(
+        scope,
+        settings,
+        observed_at,
+        DesktopSnapshotState::Ok,
+        Vec::new(),
+    );
 
     for raw_line in output.lines() {
         let line = raw_line.trim_end_matches('\r');
@@ -261,19 +325,33 @@ fn parse_porcelain_v2(
 fn parse_branch_header(request: &mut DesktopGitSnapshotRequest, header: &str) {
     if let Some(value) = header.strip_prefix("branch.oid ") {
         let oid = value.trim();
-        request.head_sha = if oid == "(initial)" { None } else { Some(oid.to_string()) };
+        request.head_sha = if oid == "(initial)" {
+            None
+        } else {
+            Some(oid.to_string())
+        };
     } else if let Some(value) = header.strip_prefix("branch.head ") {
         let head = value.trim();
         request.is_detached = head == "(detached)";
-        request.branch = if request.is_detached { None } else { Some(head.to_string()) };
+        request.branch = if request.is_detached {
+            None
+        } else {
+            Some(head.to_string())
+        };
     } else if let Some(value) = header.strip_prefix("branch.upstream ") {
         request.upstream = trim_to_option(value);
     } else if let Some(value) = header.strip_prefix("branch.ab ") {
         for token in value.split_whitespace() {
-            if let Some(ahead) = token.strip_prefix('+').and_then(|raw| raw.parse::<i64>().ok()) {
+            if let Some(ahead) = token
+                .strip_prefix('+')
+                .and_then(|raw| raw.parse::<i64>().ok())
+            {
                 request.ahead = Some(ahead);
             }
-            if let Some(behind) = token.strip_prefix('-').and_then(|raw| raw.parse::<i64>().ok()) {
+            if let Some(behind) = token
+                .strip_prefix('-')
+                .and_then(|raw| raw.parse::<i64>().ok())
+            {
                 request.behind = Some(behind);
             }
         }
@@ -425,7 +503,10 @@ fn format_git_error(command: &str, result: &GitCommandResult) -> String {
     if stderr.is_empty() {
         format!("{command} failed with exit code {}", result.exit_code)
     } else {
-        format!("{command} failed with exit code {}: {stderr}", result.exit_code)
+        format!(
+            "{command} failed with exit code {}: {stderr}",
+            result.exit_code
+        )
     }
 }
 
@@ -467,12 +548,24 @@ mod tests {
     fn parses_porcelain_v2_branch_and_dirty_counts() {
         let output = "# branch.oid 1234567890abcdef\n# branch.head task/880-tauri-operator-app\n# branch.upstream origin/task/880-tauri-operator-app\n# branch.ab +2 -1\n1 M. N... 100644 100644 100644 aaa bbb src/lib.rs\n1 .D N... 100644 100644 000000 aaa bbb old.txt\n? scratch.txt\n";
 
-        let snapshot = parse_porcelain_v2(&scope(), &settings(), "2026-04-27T00:00:00.000Z".to_string(), output, 200);
+        let snapshot = parse_porcelain_v2(
+            &scope(),
+            &settings(),
+            "2026-04-27T00:00:00.000Z".to_string(),
+            output,
+            200,
+        );
 
         assert_eq!(snapshot.state, DesktopSnapshotState::Ok);
-        assert_eq!(snapshot.branch.as_deref(), Some("task/880-tauri-operator-app"));
+        assert_eq!(
+            snapshot.branch.as_deref(),
+            Some("task/880-tauri-operator-app")
+        );
         assert_eq!(snapshot.head_sha.as_deref(), Some("1234567890abcdef"));
-        assert_eq!(snapshot.upstream.as_deref(), Some("origin/task/880-tauri-operator-app"));
+        assert_eq!(
+            snapshot.upstream.as_deref(),
+            Some("origin/task/880-tauri-operator-app")
+        );
         assert_eq!(snapshot.ahead, Some(2));
         assert_eq!(snapshot.behind, Some(1));
         assert_eq!(snapshot.dirty_counts.total, 3);
@@ -485,17 +578,94 @@ mod tests {
 
     #[test]
     fn parses_rename_paths_with_tab_or_nul_separator() {
-        let tab = parse_porcelain_file("2 R. N... 100644 100644 100644 aaa bbb R100 new-name.txt\told-name.txt")
-            .expect("tab-separated rename should parse");
+        let tab = parse_porcelain_file(
+            "2 R. N... 100644 100644 100644 aaa bbb R100 new-name.txt\told-name.txt",
+        )
+        .expect("tab-separated rename should parse");
         assert_eq!(tab.path, "new-name.txt");
         assert_eq!(tab.old_path.as_deref(), Some("old-name.txt"));
         assert_eq!(tab.category, "renamed");
 
-        let nul = parse_porcelain_file("2 R. N... 100644 100644 100644 aaa bbb R100 new-name.txt\0old-name.txt")
-            .expect("nul-separated rename should parse");
+        let nul = parse_porcelain_file(
+            "2 R. N... 100644 100644 100644 aaa bbb R100 new-name.txt\0old-name.txt",
+        )
+        .expect("nul-separated rename should parse");
         assert_eq!(nul.path, "new-name.txt");
         assert_eq!(nul.old_path.as_deref(), Some("old-name.txt"));
         assert_eq!(nul.category, "renamed");
+    }
+
+    #[test]
+    fn inspect_scope_reports_missing_path_without_running_git() {
+        let mut missing_scope = scope();
+        missing_scope.root_path = std::env::temp_dir()
+            .join(format!("den-missing-{}", uuid::Uuid::new_v4().simple()))
+            .display()
+            .to_string();
+
+        let snapshot = inspect_scope(&missing_scope, &settings());
+
+        assert_eq!(snapshot.request.state, DesktopSnapshotState::PathNotVisible);
+        assert_eq!(snapshot.request.dirty_counts.total, 0);
+        assert!(snapshot
+            .request
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("Path is not visible")));
+    }
+
+    #[test]
+    fn inspect_scope_reports_visible_non_git_directory() {
+        let root = temp_dir("den-non-git");
+        let mut visible_scope = scope();
+        visible_scope.root_path = root.display().to_string();
+
+        let snapshot = inspect_scope(&visible_scope, &settings());
+
+        assert_eq!(
+            snapshot.request.state,
+            DesktopSnapshotState::NotGitRepository
+        );
+        assert!(snapshot
+            .request
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("git status failed")));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn non_repository_status_maps_to_not_git_and_other_failures_map_to_git_error() {
+        let not_git = snapshot_from_git_status(
+            &scope(),
+            &settings(),
+            "2026-04-27T00:00:00.000Z".to_string(),
+            GitCommandResult {
+                exit_code: 128,
+                stdout: String::new(),
+                stderr: "fatal: not a git repository".to_string(),
+                truncated: false,
+                warnings: Vec::new(),
+            },
+            200,
+        );
+        assert_eq!(not_git.state, DesktopSnapshotState::NotGitRepository);
+
+        let git_error = snapshot_from_git_status(
+            &scope(),
+            &settings(),
+            "2026-04-27T00:00:00.000Z".to_string(),
+            GitCommandResult {
+                exit_code: 129,
+                stdout: String::new(),
+                stderr: "fatal: unsupported git invocation".to_string(),
+                truncated: true,
+                warnings: vec!["stdout truncated".to_string()],
+            },
+            200,
+        );
+        assert_eq!(git_error.state, DesktopSnapshotState::GitError);
+        assert!(git_error.truncated);
     }
 
     #[test]
@@ -530,17 +700,112 @@ mod tests {
         let scopes = build_git_scopes(&projects, &workspaces);
 
         assert_eq!(scopes.len(), 2);
-        assert!(scopes.iter().any(|scope| scope.source_kind == "project_root"));
-        assert!(scopes.iter().any(|scope| scope.workspace_id.as_deref() == Some("ws_test")));
+        assert!(scopes
+            .iter()
+            .any(|scope| scope.source_kind == "project_root"));
+        assert!(scopes
+            .iter()
+            .any(|scope| scope.workspace_id.as_deref() == Some("ws_test")));
+    }
+
+    #[test]
+    fn build_git_scopes_deduplicates_roots_and_filters_inactive_workspaces() {
+        let projects = vec![
+            crate::den_client::Project {
+                id: "den-mcp".to_string(),
+                name: "Den MCP".to_string(),
+                root_path: Some(" /repo ".to_string()),
+                description: None,
+                created_at: None,
+                updated_at: None,
+            },
+            crate::den_client::Project {
+                id: "den-mcp".to_string(),
+                name: "Den MCP duplicate".to_string(),
+                root_path: Some("/repo".to_string()),
+                description: None,
+                created_at: None,
+                updated_at: None,
+            },
+            crate::den_client::Project {
+                id: "blank".to_string(),
+                name: "Blank".to_string(),
+                root_path: Some("   ".to_string()),
+                description: None,
+                created_at: None,
+                updated_at: None,
+            },
+        ];
+        let workspaces = vec![
+            workspace("active", "ws_active", "/repo-worktree"),
+            workspace("archived", "ws_archived", "/archived"),
+            workspace("complete", "ws_complete", "/complete"),
+            workspace("active", "ws_blank", "   "),
+            workspace("active", "ws_active", "/repo-worktree"),
+        ];
+
+        let scopes = build_git_scopes(&projects, &workspaces);
+
+        assert_eq!(scopes.len(), 2);
+        assert_eq!(
+            scopes
+                .iter()
+                .filter(|scope| scope.source_kind == "project_root")
+                .count(),
+            1
+        );
+        assert_eq!(
+            scopes
+                .iter()
+                .filter(|scope| scope.source_kind == "agent_workspace")
+                .count(),
+            1
+        );
+        assert!(scopes
+            .iter()
+            .any(|scope| scope.workspace_id.as_deref() == Some("ws_active")));
     }
 
     #[test]
     fn truncates_changed_file_list_at_configured_limit() {
         let output = "? one.txt\n? two.txt\n? three.txt\n";
-        let snapshot = parse_porcelain_v2(&scope(), &settings(), "2026-04-27T00:00:00.000Z".to_string(), output, 2);
+        let snapshot = parse_porcelain_v2(
+            &scope(),
+            &settings(),
+            "2026-04-27T00:00:00.000Z".to_string(),
+            output,
+            2,
+        );
 
         assert!(snapshot.truncated);
         assert_eq!(snapshot.changed_files.len(), 2);
         assert_eq!(snapshot.dirty_counts.total, 2);
+    }
+
+    fn temp_dir(prefix: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("{prefix}-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&path).expect("temp dir should be created");
+        path
+    }
+
+    fn workspace(state: &str, id: &str, path: &str) -> crate::den_client::AgentWorkspace {
+        crate::den_client::AgentWorkspace {
+            id: id.to_string(),
+            project_id: "den-mcp".to_string(),
+            task_id: 880,
+            branch: "task/880-tauri-operator-app".to_string(),
+            worktree_path: path.to_string(),
+            base_branch: "main".to_string(),
+            base_commit: None,
+            head_commit: None,
+            state: state.to_string(),
+            created_by_run_id: None,
+            dev_server_url: None,
+            preview_url: None,
+            cleanup_policy: None,
+            changed_file_summary: None,
+            created_at: None,
+            updated_at: None,
+        }
     }
 }

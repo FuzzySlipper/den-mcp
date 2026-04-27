@@ -313,3 +313,164 @@ fn url_escape(value: &str) -> String {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::git::{DesktopGitSnapshotRequest, GitDirtyCounts};
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
+    #[test]
+    fn health_and_projects_parse_success_responses() {
+        let server = TestHttpServer::new(vec![
+            TestResponse::json(
+                200,
+                r#"{"status":"ok","version":"1.0","informational_version":null,"commit":null}"#,
+            ),
+            TestResponse::json(
+                200,
+                r#"[{"id":"den-mcp","name":"Den MCP","root_path":"/repo","description":null,"created_at":null,"updated_at":null}]"#,
+            ),
+        ]);
+        let client = DenClient::new();
+
+        let health = tauri::async_runtime::block_on(client.health(&server.base_url()))
+            .expect("health should parse");
+        let projects = tauri::async_runtime::block_on(client.list_projects(&server.base_url()))
+            .expect("projects should parse");
+
+        assert_eq!(health.status, "ok");
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].id, "den-mcp");
+        assert!(server
+            .requests()
+            .iter()
+            .any(|request| request.starts_with("GET /health ")));
+        assert!(server
+            .requests()
+            .iter()
+            .any(|request| request.starts_with("GET /api/projects ")));
+    }
+
+    #[test]
+    fn client_reports_http_body_for_snapshot_publish_failures() {
+        let server =
+            TestHttpServer::new(vec![TestResponse::json(400, r#"{"error":"bad snapshot"}"#)]);
+        let client = DenClient::new();
+
+        let error = tauri::async_runtime::block_on(client.publish_git_snapshot(
+            &server.base_url(),
+            "den mcp",
+            &git_snapshot_request(),
+        ))
+        .expect_err("publish should fail");
+
+        assert!(error.contains("HTTP 400"));
+        assert!(error.contains("bad snapshot"));
+        assert!(
+            server.requests()[0].starts_with("PUT /api/projects/den%20mcp/desktop/git-snapshots ")
+        );
+    }
+
+    #[test]
+    fn client_reports_invalid_base_urls_before_network_calls() {
+        let client = DenClient::new();
+        let error = tauri::async_runtime::block_on(client.health("not a url"))
+            .expect_err("invalid URL should fail");
+        assert!(error.contains("Invalid Den server URL"));
+    }
+
+    fn git_snapshot_request() -> DesktopGitSnapshotRequest {
+        DesktopGitSnapshotRequest {
+            task_id: Some(889),
+            workspace_id: None,
+            root_path: "/repo".to_string(),
+            state: DesktopSnapshotState::Ok,
+            branch: Some("main".to_string()),
+            is_detached: false,
+            head_sha: Some("abc".to_string()),
+            upstream: None,
+            ahead: None,
+            behind: None,
+            dirty_counts: GitDirtyCounts::default(),
+            changed_files: Vec::new(),
+            warnings: Vec::new(),
+            truncated: false,
+            source_instance_id: "desktop-test".to_string(),
+            source_display_name: None,
+            observed_at: "2026-04-27T12:00:00.000Z".to_string(),
+        }
+    }
+
+    struct TestHttpServer {
+        address: String,
+        requests: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+        handle: Option<thread::JoinHandle<()>>,
+    }
+
+    impl TestHttpServer {
+        fn new(responses: Vec<TestResponse>) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("test listener");
+            let address = listener.local_addr().expect("local address").to_string();
+            let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let request_log = requests.clone();
+            let handle = thread::spawn(move || {
+                for response in responses {
+                    let (mut stream, _) = listener.accept().expect("test request");
+                    let mut buffer = [0_u8; 4096];
+                    let read = stream.read(&mut buffer).expect("read request");
+                    let request = String::from_utf8_lossy(&buffer[..read]).to_string();
+                    if let Some(first_line) = request.lines().next() {
+                        request_log.lock().unwrap().push(first_line.to_string());
+                    }
+                    let payload = format!(
+                        "HTTP/1.1 {} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        response.status,
+                        response.body.len(),
+                        response.body
+                    );
+                    stream
+                        .write_all(payload.as_bytes())
+                        .expect("write response");
+                }
+            });
+            Self {
+                address,
+                requests,
+                handle: Some(handle),
+            }
+        }
+
+        fn base_url(&self) -> String {
+            format!("http://{}", self.address)
+        }
+
+        fn requests(&self) -> Vec<String> {
+            self.requests.lock().unwrap().clone()
+        }
+    }
+
+    impl Drop for TestHttpServer {
+        fn drop(&mut self) {
+            if let Some(handle) = self.handle.take() {
+                let _ = handle.join();
+            }
+        }
+    }
+
+    struct TestResponse {
+        status: u16,
+        body: String,
+    }
+
+    impl TestResponse {
+        fn json(status: u16, body: &str) -> Self {
+            Self {
+                status,
+                body: body.to_string(),
+            }
+        }
+    }
+}
