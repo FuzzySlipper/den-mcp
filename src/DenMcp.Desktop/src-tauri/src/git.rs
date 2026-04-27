@@ -318,7 +318,7 @@ fn parse_porcelain_file(line: &str) -> Option<GitFileStatus> {
         let xy = parts[1];
         let index = xy.chars().next().unwrap_or('R').to_string();
         let worktree = xy.chars().nth(1).unwrap_or('.').to_string();
-        let paths: Vec<&str> = parts[9].splitn(2, '\t').collect();
+        let paths: Vec<&str> = split_rename_paths(parts[9]).collect();
         return Some(GitFileStatus {
             path: paths[0].to_string(),
             old_path: paths.get(1).map(|value| value.to_string()),
@@ -330,6 +330,14 @@ fn parse_porcelain_file(line: &str) -> Option<GitFileStatus> {
     }
 
     None
+}
+
+fn split_rename_paths(value: &str) -> std::str::SplitN<'_, char> {
+    if value.contains('\0') {
+        value.splitn(2, '\0')
+    } else {
+        value.splitn(2, '\t')
+    }
 }
 
 fn count_dirty(files: &[GitFileStatus]) -> GitDirtyCounts {
@@ -473,6 +481,57 @@ mod tests {
         assert_eq!(snapshot.dirty_counts.untracked, 1);
         assert_eq!(snapshot.changed_files[0].category, "modified");
         assert_eq!(snapshot.changed_files[1].category, "deleted");
+    }
+
+    #[test]
+    fn parses_rename_paths_with_tab_or_nul_separator() {
+        let tab = parse_porcelain_file("2 R. N... 100644 100644 100644 aaa bbb R100 new-name.txt\told-name.txt")
+            .expect("tab-separated rename should parse");
+        assert_eq!(tab.path, "new-name.txt");
+        assert_eq!(tab.old_path.as_deref(), Some("old-name.txt"));
+        assert_eq!(tab.category, "renamed");
+
+        let nul = parse_porcelain_file("2 R. N... 100644 100644 100644 aaa bbb R100 new-name.txt\0old-name.txt")
+            .expect("nul-separated rename should parse");
+        assert_eq!(nul.path, "new-name.txt");
+        assert_eq!(nul.old_path.as_deref(), Some("old-name.txt"));
+        assert_eq!(nul.category, "renamed");
+    }
+
+    #[test]
+    fn build_git_scopes_includes_project_and_workspace_roots() {
+        let projects = vec![crate::den_client::Project {
+            id: "den-mcp".to_string(),
+            name: "Den MCP".to_string(),
+            root_path: Some("/home/patch/dev/den-mcp".to_string()),
+            description: None,
+            created_at: None,
+            updated_at: None,
+        }];
+        let workspaces = vec![crate::den_client::AgentWorkspace {
+            id: "ws_test".to_string(),
+            project_id: "den-mcp".to_string(),
+            task_id: 880,
+            branch: "task/880-tauri-operator-app".to_string(),
+            worktree_path: "/home/patch/dev/den-mcp".to_string(),
+            base_branch: "main".to_string(),
+            base_commit: None,
+            head_commit: None,
+            state: "active".to_string(),
+            created_by_run_id: None,
+            dev_server_url: None,
+            preview_url: None,
+            cleanup_policy: None,
+            changed_file_summary: None,
+            created_at: None,
+            updated_at: None,
+        }];
+
+        let scopes = build_git_scopes(&projects, &workspaces);
+
+        assert_eq!(scopes.len(), 2);
+        assert!(scopes.iter().any(|scope| scope.source_kind == "project_root"));
+        assert!(scopes.iter().any(|scope| scope.workspace_id.as_deref() == Some("ws_test")));
     }
 
     #[test]
