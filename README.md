@@ -81,6 +81,7 @@ den docs --project my-project         # list documents
 den doc prd --project my-project      # view a document
 den search "authentication"           # full-text search
 den dashboard                         # live TUI dashboard
+# Legacy/debug only: den dashboard --legacy-dispatches
 ```
 
 The `--project` flag auto-detects from the current directory name when omitted.
@@ -94,9 +95,12 @@ den dashboard
 Full-screen Terminal.Gui interface with:
 - Project selector sidebar
 - Task list with status/priority indicators
+- Document view
 - Message feed
-- Keyboard shortcuts: `Tab` switch panels, `S` change status, `N` next task, `R` refresh, `^Q` quit
+- Keyboard shortcuts: `Tab` switch panels, `S` change status, `N` next task, `R` refresh, `V` cycle Tasks/Docs, `^Q` quit
 - Auto-refreshes every 5 seconds
+
+Dispatches are legacy/debug artifacts, not the normal operator work queue. The default dashboard does not show a dispatch pane or approve/reject shortcuts. Use `den dashboard --legacy-dispatches` only when inspecting old dispatch rows or legacy bridge behavior; in that mode the pane is labeled `Legacy Dispatches` and the approve/reject controls are explicitly legacy/debug controls.
 
 ## Architecture
 

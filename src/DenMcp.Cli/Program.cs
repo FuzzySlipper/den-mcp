@@ -71,10 +71,12 @@ static int ShowHelp()
           search <query>                 Full-text search documents
           guidance                       Resolve/list/manage agent guidance
           dashboard                      Live TUI dashboard
+                                         Use --legacy-dispatches to inspect legacy dispatches
 
         Global options:
           --project, -p <id>             Project ID (auto-detected from directory name)
           --server <url>                 Server URL (default: http://localhost:5199)
+          --legacy-dispatches            Dashboard only: show legacy/debug dispatch pane
           --help, -h                     Show this help
         """);
     return 0;

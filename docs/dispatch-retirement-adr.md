@@ -26,5 +26,6 @@ Dispatch rows and APIs remain for historical data and legacy bridges, but automa
 
 - Agents should not check pending dispatches during normal startup or drain loops.
 - The default Den web operator UI should not present dispatch approval/reject as a main-path control.
+- The default CLI dashboard should not present dispatches as a top-level work queue; use `den dashboard --legacy-dispatches` for explicitly labeled legacy/debug inspection.
 - Existing dispatch rows are preserved and can still be inspected for debugging or bridge compatibility.
 - Legacy bridge deployments that still consume dispatches must opt in deliberately through routing config and should be treated as compatibility mode, not the default Den workflow.

@@ -15,7 +15,7 @@ public static class DashboardCommand
 
         try
         {
-            var dashboard = new DashboardView(client, router.Project);
+            var dashboard = new DashboardView(client, router.Project, router.HasFlag("legacy-dispatches"));
             Application.Top.Add(dashboard);
             _ = dashboard.StartPolling();
             Application.Run();
@@ -77,6 +77,7 @@ internal sealed class DashboardView : Toplevel
 {
     private readonly DenApiClient _client;
     private readonly string? _initialProject;
+    private readonly bool _showLegacyDispatches;
     private string? _currentProject;
     private readonly FrameView _projectFrame;
     private readonly ListView _projectList;
@@ -119,10 +120,11 @@ internal sealed class DashboardView : Toplevel
     private bool _refreshing;
     private bool _updatingProjectList;
 
-    public DashboardView(DenApiClient client, string? initialProject)
+    public DashboardView(DenApiClient client, string? initialProject, bool showLegacyDispatches)
     {
         _client = client;
         _initialProject = initialProject;
+        _showLegacyDispatches = showLegacyDispatches;
 
         // --- Layout: bottom-up preference ---
         // Bottom: Projects (left sidebar) + Tasks/Docs (main area) — 55%
@@ -228,10 +230,12 @@ internal sealed class DashboardView : Toplevel
 
         // Status bar
         _changeStatusStatusItem = new(Key.S, "~S~ Status", OnChangeStatus, () => _paneMode == DashboardPaneMode.Tasks);
-        _approveDispatchStatusItem = new(Key.A, "~A~ Approve", ApproveSelectedDispatch, () => _paneMode == DashboardPaneMode.Dispatches);
-        _rejectDispatchStatusItem = new(Key.X, "~X~ Reject", RejectSelectedDispatch, () => _paneMode == DashboardPaneMode.Dispatches);
+        _approveDispatchStatusItem = new(Key.A, "~A~ Approve", ApproveSelectedDispatch,
+            () => _showLegacyDispatches && _paneMode == DashboardPaneMode.Dispatches);
+        _rejectDispatchStatusItem = new(Key.X, "~X~ Reject", RejectSelectedDispatch,
+            () => _showLegacyDispatches && _paneMode == DashboardPaneMode.Dispatches);
 
-        _statusBar = new StatusBar(new StatusItem[]
+        var statusItems = new List<StatusItem>
         {
             new(Key.Q | Key.CtrlMask, "~^Q~ Quit", () => Application.RequestStop()),
             new(Key.R, "~R~ Refresh", () => _ = RefreshData()),
@@ -239,11 +243,15 @@ internal sealed class DashboardView : Toplevel
             new(Key.N, "~N~ Next", OnShowNext),
             new(Key.F, "~F~ Filter", OnOpenFilter),
             new(Key.O, "~O~ Sort", OnChangeSort),
-            new(Key.V, "~V~ View", CyclePaneMode),
-            _approveDispatchStatusItem,
-            _rejectDispatchStatusItem,
-            new(Key.Tab, "~Tab~ Switch", CycleFocus)
-        });
+            new(Key.V, "~V~ View", CyclePaneMode)
+        };
+        if (_showLegacyDispatches)
+        {
+            statusItems.Add(_approveDispatchStatusItem);
+            statusItems.Add(_rejectDispatchStatusItem);
+        }
+        statusItems.Add(new(Key.Tab, "~Tab~ Switch", CycleFocus));
+        _statusBar = new StatusBar(statusItems.ToArray());
 
         Add(_messageFrame, _agentFrame, _projectFrame, _taskFrame, _statusBar);
         ApplyPaneMode();
@@ -254,7 +262,7 @@ internal sealed class DashboardView : Toplevel
         _paneMode = _paneMode switch
         {
             DashboardPaneMode.Tasks => DashboardPaneMode.Documents,
-            DashboardPaneMode.Documents => DashboardPaneMode.Dispatches,
+            DashboardPaneMode.Documents when _showLegacyDispatches => DashboardPaneMode.Dispatches,
             _ => DashboardPaneMode.Tasks
         };
 
@@ -268,8 +276,12 @@ internal sealed class DashboardView : Toplevel
             case DashboardPaneMode.Documents:
                 _ = RefreshDocuments();
                 break;
-            case DashboardPaneMode.Dispatches:
+            case DashboardPaneMode.Dispatches when _showLegacyDispatches:
                 _ = RefreshDispatches();
+                break;
+            case DashboardPaneMode.Dispatches:
+                _paneMode = DashboardPaneMode.Tasks;
+                _ = RefreshProjectData();
                 break;
             default:
                 _ = RefreshProjectData();
@@ -281,7 +293,7 @@ internal sealed class DashboardView : Toplevel
     {
         _taskTree.Visible = _paneMode == DashboardPaneMode.Tasks;
         _docList.Visible = _paneMode == DashboardPaneMode.Documents;
-        _dispatchList.Visible = _paneMode == DashboardPaneMode.Dispatches;
+        _dispatchList.Visible = _showLegacyDispatches && _paneMode == DashboardPaneMode.Dispatches;
         _statusBar.SetNeedsDisplay();
     }
 
@@ -336,8 +348,12 @@ internal sealed class DashboardView : Toplevel
                     case DashboardPaneMode.Documents:
                         await RefreshDocuments();
                         break;
-                    case DashboardPaneMode.Dispatches:
+                    case DashboardPaneMode.Dispatches when _showLegacyDispatches:
                         await RefreshDispatches();
+                        break;
+                    case DashboardPaneMode.Dispatches:
+                        _paneMode = DashboardPaneMode.Tasks;
+                        await RefreshProjectData();
                         break;
                     default:
                         await RefreshProjectData();
@@ -455,8 +471,10 @@ internal sealed class DashboardView : Toplevel
             var dispatchLines = _dispatches
                 .Select(dispatch => FormatDispatchLine(dispatch, isGlobal))
                 .ToList();
-            _dispatchList.SetSource(dispatchLines.Count > 0 ? dispatchLines : new List<string> { " (no pending dispatches)" });
-            _taskFrame.Title = $"Dispatches — {_currentProject} ({_dispatches.Count})";
+            _dispatchList.SetSource(dispatchLines.Count > 0
+                ? dispatchLines
+                : new List<string> { " (legacy/debug only; no pending dispatches)" });
+            _taskFrame.Title = $"Legacy Dispatches — {_currentProject} (pending {_dispatches.Count})";
 
             if (_selectedDispatchId is not null)
             {
@@ -587,7 +605,7 @@ internal sealed class DashboardView : Toplevel
         }
         catch { /* fall back to list summary */ }
 
-        var dlg = new Dialog($"Dispatch #{dispatch.Id}", 84, 28);
+        var dlg = new Dialog($"Legacy Dispatch #{dispatch.Id}", 84, 28);
 
         var lines = new List<string>
         {
@@ -746,8 +764,12 @@ internal sealed class DashboardView : Toplevel
                 case DashboardPaneMode.Documents:
                     _ = RefreshDocuments();
                     break;
-                case DashboardPaneMode.Dispatches:
+                case DashboardPaneMode.Dispatches when _showLegacyDispatches:
                     _ = RefreshDispatches();
+                    break;
+                case DashboardPaneMode.Dispatches:
+                    _paneMode = DashboardPaneMode.Tasks;
+                    _ = RefreshProjectData();
                     break;
                 default:
                     _ = RefreshProjectData();
@@ -995,14 +1017,14 @@ internal sealed class DashboardView : Toplevel
 
     private void ApproveSelectedDispatch()
     {
-        if (_paneMode != DashboardPaneMode.Dispatches) return;
+        if (!_showLegacyDispatches || _paneMode != DashboardPaneMode.Dispatches) return;
         if (_dispatchList.SelectedItem < 0 || _dispatchList.SelectedItem >= _dispatches.Count) return;
         ApproveDispatch(_dispatches[_dispatchList.SelectedItem]);
     }
 
     private void RejectSelectedDispatch()
     {
-        if (_paneMode != DashboardPaneMode.Dispatches) return;
+        if (!_showLegacyDispatches || _paneMode != DashboardPaneMode.Dispatches) return;
         if (_dispatchList.SelectedItem < 0 || _dispatchList.SelectedItem >= _dispatches.Count) return;
         RejectDispatch(_dispatches[_dispatchList.SelectedItem]);
     }
@@ -1010,8 +1032,8 @@ internal sealed class DashboardView : Toplevel
     private async void ApproveDispatch(DispatchEntry dispatch)
     {
         var confirmed = MessageBox.Query(
-            "Approve Dispatch",
-            $"Approve dispatch #{dispatch.Id} for {dispatch.TargetAgent} on {dispatch.ProjectId}?",
+            "Approve Legacy Dispatch",
+            $"Approve legacy/debug dispatch #{dispatch.Id} for {dispatch.TargetAgent} on {dispatch.ProjectId}?",
             "Approve",
             "Cancel");
         if (confirmed != 0) return;
@@ -1030,8 +1052,8 @@ internal sealed class DashboardView : Toplevel
     private async void RejectDispatch(DispatchEntry dispatch)
     {
         var confirmed = MessageBox.Query(
-            "Reject Dispatch",
-            $"Reject dispatch #{dispatch.Id} for {dispatch.TargetAgent} on {dispatch.ProjectId}?",
+            "Reject Legacy Dispatch",
+            $"Reject legacy/debug dispatch #{dispatch.Id} for {dispatch.TargetAgent} on {dispatch.ProjectId}?",
             "Reject",
             "Cancel");
         if (confirmed != 0) return;
@@ -1203,8 +1225,8 @@ internal sealed class DashboardView : Toplevel
                 case 'f': OnOpenFilter(); return true;
                 case 'o': OnChangeSort(); return true;
                 case 'v': CyclePaneMode(); return true;
-                case 'a': ApproveSelectedDispatch(); return true;
-                case 'x': RejectSelectedDispatch(); return true;
+                case 'a' when _showLegacyDispatches: ApproveSelectedDispatch(); return true;
+                case 'x' when _showLegacyDispatches: RejectSelectedDispatch(); return true;
             }
         }
         return base.ProcessKey(kb);
