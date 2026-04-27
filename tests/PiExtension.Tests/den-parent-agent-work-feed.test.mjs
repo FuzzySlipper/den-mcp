@@ -125,6 +125,34 @@ test('parent agent reasoning normalization is redacted by default and raw only b
   }
 });
 
+test('parent agent reasoning normalization preserves provider-visible summaries without raw local availability', () => {
+  const previous = process.env.DEN_PI_SUBAGENT_RAW_REASONING;
+  process.env.DEN_PI_SUBAGENT_RAW_REASONING = '1';
+  const summary = 'Checked the relevant Den workflow state.';
+  try {
+    const event = normalizeParentAgentWorkEvent({
+      type: 'message_update',
+      assistantMessageEvent: { type: 'thinking_delta', reasoning_summary: summary },
+      message: {
+        role: 'assistant',
+        provider: 'openai',
+        model: 'gpt-test',
+        content: [{ type: 'thinking', thinking: summary }],
+      },
+    }, identity, 1238);
+
+    assert.equal(event?.type, 'agent.work_reasoning_update');
+    assert.equal(event?.reasoning_redacted, true);
+    assert.equal(event?.text_preview, undefined);
+    assert.equal(event?.reasoning_summary_preview, summary);
+    assert.equal(event?.reasoning_summary_chars, summary.length);
+    assert.equal(event?.reasoning_summary_source, 'provider_visible');
+    assert.equal(event?.project_id, 'den-mcp');
+  } finally {
+    restoreEnv('DEN_PI_SUBAGENT_RAW_REASONING', previous);
+  }
+});
+
 test('parent agent work events map to agent stream ops event types', () => {
   assert.equal(parentAgentOpsEventTypeForWorkEvent({ type: 'agent.work_reasoning_update' }), 'agent_work_reasoning_update');
   assert.equal(parentAgentOpsEventTypeForWorkEvent({ type: 'subagent.work_reasoning_update' }), undefined);

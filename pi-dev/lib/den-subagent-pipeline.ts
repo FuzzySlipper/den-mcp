@@ -507,20 +507,31 @@ function summarizeAssistantMessage(message: any): JsonObject {
 function summarizeReasoningActivity(event: any, message: any): JsonObject | undefined {
   const eventKind = normalizeString(event?.assistantMessageEvent?.type);
   const reasoningText = extractReasoningText(event, message);
+  const providerVisibleSummaryText = extractProviderVisibleReasoningSummaryText(event, message);
+  const rawReasoningText = providerVisibleSummaryText && reasoningText === providerVisibleSummaryText
+    ? undefined
+    : reasoningText;
   const contentTypes = extractContentTypes(message) ?? [];
-  const looksLikeReasoning = Boolean(reasoningText)
+  const looksLikeReasoning = Boolean(reasoningText || providerVisibleSummaryText)
     || isReasoningUpdateKind(eventKind)
     || contentTypes.some((type) => /thinking|reasoning/i.test(type));
   if (!looksLikeReasoning) return undefined;
 
-  const chars = typeof reasoningText === "string" ? reasoningText.length : finiteNumber(event?.assistantMessageEvent?.chars ?? event?.assistantMessageEvent?.length);
+  const chars = typeof rawReasoningText === "string"
+    ? rawReasoningText.length
+    : typeof providerVisibleSummaryText === "string"
+      ? providerVisibleSummaryText.length
+      : finiteNumber(event?.assistantMessageEvent?.chars ?? event?.assistantMessageEvent?.length);
   const sourceRedacted = hasRedactedReasoning(message);
-  const exposeRaw = rawReasoningCaptureEnabled() && !sourceRedacted;
+  const exposeRaw = rawReasoningCaptureEnabled() && !sourceRedacted && Boolean(rawReasoningText);
   return omitUndefined({
     reasoning_kind: eventKind ?? "thinking",
     reasoning_chars: chars,
     reasoning_redacted: !exposeRaw,
-    text_preview: exposeRaw ? boundedPreview(reasoningText, 240) : undefined,
+    text_preview: exposeRaw ? boundedPreview(rawReasoningText, 240) : undefined,
+    reasoning_summary_preview: boundedPreview(providerVisibleSummaryText, 240),
+    reasoning_summary_chars: typeof providerVisibleSummaryText === "string" ? providerVisibleSummaryText.length : undefined,
+    reasoning_summary_source: providerVisibleSummaryText ? "provider_visible" : undefined,
     content_types: contentTypes.length > 0 ? contentTypes : undefined,
     stop_reason: normalizeString(message?.stopReason ?? message?.stop_reason),
   });
@@ -542,7 +553,8 @@ function extractReasoningText(event: any, message: any): string | undefined {
     assistantEvent?.partial?.reasoning,
   ];
   for (const candidate of eventCandidates) {
-    if (typeof candidate === "string" && candidate.length > 0) return candidate;
+    const text = normalizeString(candidate);
+    if (text) return text;
   }
 
   if (!Array.isArray(message?.content)) return undefined;
@@ -551,6 +563,98 @@ function extractReasoningText(event: any, message: any): string | undefined {
     .map((part: any) => typeof part.thinking === "string" ? part.thinking : typeof part.reasoning === "string" ? part.reasoning : "")
     .filter((text: string) => text.length > 0);
   return parts.length > 0 ? parts.join("") : undefined;
+}
+
+function extractProviderVisibleReasoningSummaryText(event: any, message: any): string | undefined {
+  const assistantEvent = event?.assistantMessageEvent;
+  const eventCandidates = [
+    assistantEvent?.summary,
+    assistantEvent?.summaryText,
+    assistantEvent?.summary_text,
+    assistantEvent?.reasoningSummary,
+    assistantEvent?.reasoning_summary,
+    assistantEvent?.reasoningSummaryText,
+    assistantEvent?.reasoning_summary_text,
+    assistantEvent?.thinkingSummary,
+    assistantEvent?.thinking_summary,
+  ];
+  for (const candidate of eventCandidates) {
+    const text = extractSummaryText(candidate);
+    if (text) return text;
+  }
+
+  const summaryEventType = normalizeString(assistantEvent?.type);
+  if (summaryEventType && /summary/i.test(summaryEventType)) {
+    const text = extractSummaryText(assistantEvent?.delta)
+      ?? extractSummaryText(assistantEvent?.content)
+      ?? extractSummaryText(assistantEvent?.text)
+      ?? extractSummaryText(assistantEvent?.part);
+    if (text) return text;
+  }
+
+  const partialSummary = extractReasoningSummaryFromContent(assistantEvent?.partial?.content);
+  if (partialSummary) return partialSummary;
+
+  return extractReasoningSummaryFromContent(message?.content);
+}
+
+function extractReasoningSummaryFromContent(content: unknown): string | undefined {
+  if (!Array.isArray(content)) return undefined;
+  for (const part of content) {
+    if (!part || typeof part !== "object") continue;
+    const item = part as Record<string, unknown>;
+    if (item.type !== "thinking" && item.type !== "reasoning") continue;
+
+    const directSummary = extractSummaryText(item.summary)
+      ?? extractSummaryText(item.summaryText)
+      ?? extractSummaryText(item.summary_text)
+      ?? extractSummaryText(item.reasoningSummary)
+      ?? extractSummaryText(item.reasoning_summary)
+      ?? extractSummaryText(item.thinkingSummary)
+      ?? extractSummaryText(item.thinking_summary);
+    if (directSummary) return directSummary;
+
+    const signatureSummary = extractReasoningSummaryFromSignature(
+      item.thinkingSignature ?? item.reasoningSignature ?? item.signature,
+    );
+    if (signatureSummary) return signatureSummary;
+  }
+  return undefined;
+}
+
+function extractReasoningSummaryFromSignature(value: unknown): string | undefined {
+  const signature = normalizeString(value);
+  if (!signature || !signature.startsWith("{")) return undefined;
+
+  try {
+    const parsed = JSON.parse(signature);
+    return extractSummaryText(parsed?.summary)
+      ?? extractSummaryText(parsed?.reasoning_summary)
+      ?? extractSummaryText(parsed?.thinking_summary);
+  } catch {
+    return undefined;
+  }
+}
+
+function extractSummaryText(value: unknown): string | undefined {
+  const direct = normalizeString(value);
+  if (direct) return direct;
+
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((entry) => extractSummaryText(entry))
+      .filter((entry): entry is string => Boolean(entry));
+    return normalizeString(parts.join("\n\n"));
+  }
+
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return extractSummaryText(record.text)
+      ?? extractSummaryText(record.summary)
+      ?? extractSummaryText(record.content);
+  }
+
+  return undefined;
 }
 
 function hasRedactedReasoning(message: any): boolean {

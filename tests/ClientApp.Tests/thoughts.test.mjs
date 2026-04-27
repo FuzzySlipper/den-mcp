@@ -183,6 +183,31 @@ test('subagent run thoughts include reasoning and assistant messages without too
   assert.equal(items.every(item => item.run?.run_id === 'run-1234567890'), true);
 });
 
+test('redacted provider-visible reasoning summaries display without enabling Raw local', () => {
+  const summary = 'Checked available context and identified the relevant UI path.';
+  const item = thoughtItemFromStreamEntry(streamEntry({
+    metadata: {
+      schema: 'den_parent_agent_work',
+      role: 'conductor',
+      event: {
+        type: 'agent.work_reasoning_update',
+        ts: 1_000,
+        reasoning_chars: 58,
+        reasoning_redacted: true,
+        reasoning_summary_preview: summary,
+        reasoning_summary_source: 'provider_visible',
+      },
+    },
+  }));
+
+  assert.equal(item?.kind, 'reasoning');
+  assert.equal(item?.reasoningSummaryPreview, summary);
+  assert.equal(item?.rawPreviewAvailable, false);
+  assert.equal(hasRawReasoningPreview([item].filter(Boolean)), false);
+  assert.equal(summarizeThoughtItem(item, false), summary);
+  assert.equal(summarizeThoughtItem(item, true), summary);
+});
+
 test('thought filters and sorting support project task agent role controls', () => {
   const first = thoughtItemFromStreamEntry(streamEntry({
     id: 1,

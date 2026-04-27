@@ -355,6 +355,9 @@ export interface SubagentRunWorkEvent {
   reasoning_kind?: string | null;
   reasoning_chars?: number | null;
   reasoning_redacted?: boolean | null;
+  reasoning_summary_preview?: string | null;
+  reasoning_summary_chars?: number | null;
+  reasoning_summary_source?: string | null;
   thinking_chars?: number | null;
   stop_reason?: string | null;
   tool_call_id?: string | null;

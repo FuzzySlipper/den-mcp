@@ -19,6 +19,7 @@ export interface ThoughtFeedItem {
   textPreview: string | null;
   reasoningChars: number | null;
   reasoningRedacted: boolean | null;
+  reasoningSummaryPreview: string | null;
   rawPreviewAvailable: boolean;
   streamEntry?: AgentStreamEntry;
   run?: SubagentRunSummary;
@@ -135,6 +136,10 @@ export function summarizeThoughtItem(item: ThoughtFeedItem, showRawReasoning: bo
     return item.textPreview;
   }
 
+  if (item.reasoningSummaryPreview) {
+    return item.reasoningSummaryPreview;
+  }
+
   const chars = item.reasoningChars != null ? `${item.reasoningChars} chars` : 'reasoning activity';
   const redaction = item.reasoningRedacted === false ? 'raw preview hidden' : 'redacted';
   return `${chars}, ${redaction}.`;
@@ -174,6 +179,7 @@ function thoughtItemFromWorkEvent(workEvent: SubagentRunWorkEvent, context: Thou
   const taskId = numberValue(workEvent.task_id) ?? context.taskId ?? null;
   const model = stringValue(workEvent.model) ?? stringValue(workEvent.requested_model) ?? null;
   const reasoningRedacted = booleanValue(workEvent.reasoning_redacted);
+  const reasoningSummaryPreview = stringValue(workEvent.reasoning_summary_preview);
   const rawPreviewAvailable = kind === 'reasoning' && reasoningRedacted === false && Boolean(textPreview);
 
   return {
@@ -192,6 +198,7 @@ function thoughtItemFromWorkEvent(workEvent: SubagentRunWorkEvent, context: Thou
     textPreview: textPreview ?? null,
     reasoningChars: numberValue(workEvent.reasoning_chars) ?? numberValue(workEvent.thinking_chars) ?? null,
     reasoningRedacted: reasoningRedacted ?? null,
+    reasoningSummaryPreview: reasoningSummaryPreview ?? null,
     rawPreviewAvailable,
     streamEntry: context.streamEntry,
     run: context.run,

@@ -304,10 +304,14 @@ records:
 User-role session messages are intentionally skipped so generated prompts do not
 become Den API/work-feed content. Thinking blocks are represented by dedicated
 reasoning cards, counts, redaction flags, and content type flags rather than raw
-full reasoning text. Set `DEN_PI_SUBAGENT_RAW_REASONING=1` only in trusted local
-debugging contexts if Den web/API should include bounded reasoning previews from
-local artifacts; task-thread result messages never include raw reasoning. The
-session JSONL remains a local artifact for forensic inspection.
+full reasoning text. When Pi/provider output includes an explicit, already
+provider-visible reasoning summary (for example an OpenAI Responses reasoning
+summary), Den may store it separately as a bounded `reasoning_summary_preview`
+operator breadcrumb while keeping `reasoning_redacted: true`. Set
+`DEN_PI_SUBAGENT_RAW_REASONING=1` only in trusted local debugging contexts if Den
+web/API should include bounded raw reasoning previews from local artifacts;
+task-thread result messages never include raw reasoning. The session JSONL
+remains a local artifact for forensic inspection.
 
 ## Parent Pi Agent Work Mirror
 
@@ -337,10 +341,11 @@ extension knows one, cwd, model, timestamp, and the bounded normalized event.
 
 Reasoning/thinking content follows the same local policy as sub-agent reasoning:
 raw previews are redacted by default and represented by event kind, provider,
-model, char counts, and `reasoning_redacted`. Set
-`DEN_PI_SUBAGENT_RAW_REASONING=1` only in trusted local debugging contexts to
-allow bounded raw reasoning previews in Den stream metadata. Task-thread messages
-still never include raw reasoning.
+model, char counts, and `reasoning_redacted`. Provider-visible summaries are
+stored separately as bounded `reasoning_summary_preview` breadcrumbs and do not
+make a raw preview available. Set `DEN_PI_SUBAGENT_RAW_REASONING=1` only in
+trusted local debugging contexts to allow bounded raw reasoning previews in Den
+stream metadata. Task-thread messages still never include raw reasoning.
 
 This parent mirror is best-effort observability, not a durable run transcript.
 It avoids raw terminal streaming as a signal, throttles high-frequency assistant
@@ -361,9 +366,12 @@ The lane combines parent-agent stream ops with recent sub-agent run-detail work
 events. It supports selected-project and `_global` views, plus project, task,
 agent, and role filters. Items deep-link to the stream entry for parent/stream
 ops or to the sub-agent run detail for artifact-backed child work events.
-Reasoning items render as redacted markers by default; when a trusted local run
-captured bounded raw reasoning previews, the `Raw local` toggle can reveal those
-previews in the lane without changing task-thread messages.
+Reasoning items render as redacted markers by default. If a provider-visible
+summary breadcrumb is present, the lane shows that bounded summary even while the
+item remains redacted. When a trusted local run captured bounded raw reasoning
+previews, the `Raw local` toggle can reveal those previews in the lane without
+changing task-thread messages; provider-visible summaries alone do not enable the
+raw toggle.
 
 ## Pi Session Manager / psm-bridge Reference
 

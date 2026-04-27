@@ -1205,6 +1205,11 @@ html, body, #root {
   color: var(--yellow);
 }
 
+.thought-chip-summary {
+  background: #18324a;
+  color: var(--cyan);
+}
+
 .thought-chip-redacted {
   background: #2b2b35;
   color: var(--text-muted);

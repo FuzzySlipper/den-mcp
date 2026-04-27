@@ -129,6 +129,9 @@ export function summarizeSubagentWorkEvent(event: SubagentRunWorkEvent): string 
     case 'subagent.work_reasoning_start':
     case 'subagent.work_reasoning_update':
     case 'subagent.work_reasoning_end':
+      if (event.reasoning_summary_preview) {
+        return `reasoning summary: ${event.reasoning_summary_preview}`;
+      }
       if (event.reasoning_redacted) {
         return `reasoning ${event.update_kind ?? event.reasoning_kind ?? 'activity'} (${event.reasoning_chars ?? 0} chars, redacted)`;
       }

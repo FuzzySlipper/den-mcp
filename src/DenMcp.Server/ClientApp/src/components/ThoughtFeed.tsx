@@ -84,6 +84,7 @@ export function ThoughtFeed({
               {item.agent && <span className="stream-sender">{truncate(item.agent, 18)}</span>}
               {item.role && <span className="thought-role">{truncate(item.role, 18)}</span>}
               {item.rawPreviewAvailable && <span className="stream-chip thought-chip-raw">raw local</span>}
+              {item.kind === 'reasoning' && item.reasoningSummaryPreview && <span className="stream-chip thought-chip-summary">summary</span>}
               {item.kind === 'reasoning' && item.reasoningRedacted !== false && <span className="stream-chip thought-chip-redacted">redacted</span>}
             </div>
 

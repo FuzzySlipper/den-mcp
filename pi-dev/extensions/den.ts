@@ -599,6 +599,9 @@ function formatParentAgentWorkBody(role: string, workEvent: JsonObject): string 
     case "agent.work_reasoning_start":
     case "agent.work_reasoning_update":
     case "agent.work_reasoning_end":
+      if (typeof workEvent.reasoning_summary_preview === "string") {
+        return `${role} agent reasoning summary: ${oneLine(workEvent.reasoning_summary_preview)}.`;
+      }
       return `${role} agent reasoning activity${typeof workEvent.reasoning_chars === "number" ? ` (${workEvent.reasoning_chars} chars${workEvent.reasoning_redacted === false ? " visible" : ", redacted"})` : ""}.`;
     case "agent.work_tool_start":
       return `${role} agent started tool ${formatWorkToolName(workEvent)}${typeof workEvent.args_preview === "string" ? `: ${oneLine(workEvent.args_preview)}` : ""}.`;

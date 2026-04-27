@@ -91,6 +91,13 @@ test('subagent work event helpers render bounded live-feed summaries', () => {
     reasoning_chars: 12,
     reasoning_redacted: true,
   }), 'reasoning thinking_delta (12 chars, redacted)');
+  assert.equal(summarizeSubagentWorkEvent({
+    type: 'subagent.work_reasoning_update',
+    update_kind: 'thinking_delta',
+    reasoning_chars: 64,
+    reasoning_redacted: true,
+    reasoning_summary_preview: 'Checked the safe provider-visible summary.',
+  }), 'reasoning summary: Checked the safe provider-visible summary.');
   assert.equal(formatSubagentWorkEventType('subagent.work_tool_start'), 'tool start');
   assert.equal(formatSubagentWorkTimestamp(1234), new Date(1234).toLocaleString());
   assert.equal(formatSubagentWorkTimestamp(null), '');

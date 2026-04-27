@@ -238,6 +238,37 @@ test('subagent reasoning normalization can include raw local preview when enable
   }
 });
 
+test('subagent reasoning normalization preserves provider-visible summaries without raw preview', () => {
+  const previous = process.env.DEN_PI_SUBAGENT_RAW_REASONING;
+  process.env.DEN_PI_SUBAGENT_RAW_REASONING = '1';
+  const summary = 'Reviewed the affected files and test scope.';
+  try {
+    const event = normalizePiWorkEvent({
+      type: 'message_end',
+      assistantMessageEvent: { type: 'thinking_end' },
+      message: {
+        role: 'assistant',
+        provider: 'openai',
+        model: 'gpt-test',
+        content: [{
+          type: 'thinking',
+          thinking: summary,
+          thinkingSignature: JSON.stringify({ type: 'reasoning', summary: [{ type: 'summary_text', text: summary }] }),
+        }],
+      },
+    }, 1239);
+
+    assert.equal(event?.type, 'subagent.work_reasoning_end');
+    assert.equal(event?.reasoning_redacted, true);
+    assert.equal(event?.text_preview, undefined);
+    assert.equal(event?.reasoning_summary_preview, summary);
+    assert.equal(event?.reasoning_summary_chars, summary.length);
+    assert.equal(event?.reasoning_summary_source, 'provider_visible');
+  } finally {
+    restoreEnv('DEN_PI_SUBAGENT_RAW_REASONING', previous);
+  }
+});
+
 test('subagent run schema helpers emit canonical metadata and event mapping', () => {
   const artifacts = {
     dir: '/tmp/den-subagent-runs/run-1',
