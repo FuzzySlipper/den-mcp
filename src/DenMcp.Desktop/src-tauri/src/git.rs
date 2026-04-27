@@ -552,8 +552,7 @@ fn build_diff_snapshot(
     if result.stdout.is_empty() {
         return None;
     }
-    let (diff, output_truncated) = bound_text(&result.stdout, MAX_DIFF_BYTES);
-    let truncated = result.truncated || output_truncated;
+    let (diff, truncated) = bound_text(&result.stdout, MAX_DIFF_BYTES);
     if truncated {
         warnings.push(format!("Diff output truncated to {MAX_DIFF_BYTES} bytes."));
     }
