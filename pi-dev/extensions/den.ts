@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import {
+  buildDenContextStatusToolResult,
+  captureDenContextStatus,
+  formatDenContextStatusLines,
+  summarizeDenContextStatusForMetadata,
+} from "../lib/den-context-status.ts";
 import { normalizePiWorkEvent } from "../lib/den-subagent-pipeline.ts";
 
 type JsonObject = Record<string, unknown>;
@@ -40,6 +46,11 @@ const DEFAULT_BASE_URL = "http://192.168.1.10:5199";
 const HEARTBEAT_SECONDS = 60;
 const CONDUCTOR_GUIDANCE_SLUG = "pi-conductor-guidance";
 const GLOBAL_CONDUCTOR_GUIDANCE_SLUG = "pi-conductor-guidance-default";
+const EMPTY_TOOL_PARAMETERS = {
+  type: "object",
+  properties: {},
+  additionalProperties: false,
+} as any;
 
 export default function denExtension(pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
@@ -323,6 +334,33 @@ export default function denExtension(pi: ExtensionAPI) {
     },
   });
 
+  const showContextStatus = async (_args: string | undefined, ctx: any) => {
+    const status = captureDenContextStatus(ctx);
+    const lines = formatDenContextStatusLines(status);
+    ctx.ui.setWidget("den-context-status", lines);
+    ctx.ui.notify(lines.join("\n"), status.recommendation.status === "compact_after_current_task" ? "warning" : "info");
+  };
+
+  pi.registerCommand("den-context-status", {
+    description: "Show the current Pi conductor context budget estimate and compaction recommendation.",
+    handler: showContextStatus,
+  });
+
+  pi.registerCommand("den-compaction-status", {
+    description: "Alias for /den-context-status.",
+    handler: showContextStatus,
+  });
+
+  pi.registerTool({
+    name: "den_context_status",
+    label: "Den Context Status",
+    description: "Inspect the parent Pi conductor session context budget. Returns an estimate, confidence/limitations, and a recommendation for whether to compact between tasks.",
+    parameters: EMPTY_TOOL_PARAMETERS,
+    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+      return buildDenContextStatusToolResult(captureDenContextStatus(ctx));
+    },
+  });
+
   // General Den data access is intentionally provided by the configured Den MCP server.
   // This extension keeps Pi-native session binding, TUI commands, and conductor UX only.
 }
@@ -429,9 +467,18 @@ async function checkIn(cfg: DenConfig, ctx: any, state: string) {
         current_task_id: currentTaskId ?? null,
         session_file: ctx.sessionManager?.getSessionFile?.() ?? null,
         model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : null,
+        context_status: safeDenContextStatusMetadata(ctx),
       }),
     },
   });
+}
+
+function safeDenContextStatusMetadata(ctx: any): JsonObject | null {
+  try {
+    return summarizeDenContextStatusForMetadata(captureDenContextStatus(ctx));
+  } catch {
+    return null;
+  }
 }
 
 function scheduleParentAgentWorkMirror(sourceEvent: any, ctx: any) {

@@ -1,7 +1,7 @@
 # Pi Sub-Agent Infrastructure
 
 Date: 2026-04-26
-Status: current stable shape after tasks `#785`, `#806`, `#813`, `#808`, `#815`, `#824`, `#825`, `#826`, and `#851`
+Status: current stable shape after tasks `#785`, `#806`, `#813`, `#808`, `#815`, `#824`, `#825`, `#826`, `#851`, and `#852`
 
 This note captures the intended shape for Pi-launched Den sub-agents after the
 observability and control hardening work. The goal is not to make Pi the whole
@@ -119,6 +119,13 @@ Full forensic data remains in `stdout.jsonl`, `stderr.log`, `events.jsonl`,
 result/failure messages where appropriate. The parent tool return may point at
 those artifacts, but it must not copy their raw contents into the conductor
 conversation.
+
+Task `#852` adds the complementary parent-session budget surface documented in
+[`pi-conductor-context-status.md`](pi-conductor-context-status.md). The
+model-callable `den_context_status` tool and `/den-context-status` command report
+a clearly labeled estimate of the conductor's current Pi context budget so the
+conductor can compact between tasks instead of relying on child-run transcript
+artifacts or stale intuition.
 
 The canonical metadata schema is:
 
