@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { DocumentSummary, Document } from '../api/types';
 import { getDocument, saveDocument } from '../api/client';
+import { isDocumentEditorSaveShortcut } from '../documentEditor';
 import { documentSummaryFromReference, splitDocumentReferenceText } from '../documentRefs';
 
 interface Props {
@@ -8,9 +9,13 @@ interface Props {
   onClose: () => void;
   onSaved?: (doc: Document) => void;
   onOpenDocument?: (doc: DocumentSummary) => void;
+  onDirtyChange?: (dirty: boolean) => void;
+  pendingSwitch?: DocumentSummary | null;
+  onCancelSwitch?: () => void;
+  onConfirmSwitch?: (doc: DocumentSummary) => void;
 }
 
-export function DocumentDetail({ summary, onClose, onSaved, onOpenDocument }: Props) {
+export function DocumentDetail({ summary, onClose, onSaved, onOpenDocument, onDirtyChange, pendingSwitch, onCancelSwitch, onConfirmSwitch }: Props) {
   const [doc, setDoc] = useState<Document | null>(null);
   const [draft, setDraft] = useState('');
   const [isEditing, setIsEditing] = useState(false);
@@ -22,6 +27,12 @@ export function DocumentDetail({ summary, onClose, onSaved, onOpenDocument }: Pr
   const displayed = doc ?? summary;
   const tags = displayed.tags ?? [];
   const dirty = doc !== null && draft !== doc.content;
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,7 +97,7 @@ export function DocumentDetail({ summary, onClose, onSaved, onOpenDocument }: Pr
   }, [confirmDiscard, doc]);
 
   const handleSave = useCallback(async () => {
-    if (!doc || !dirty || saving) return;
+    if (!doc || !dirty || saving) return false;
 
     setSaving(true);
     setSaveError(null);
@@ -104,12 +115,40 @@ export function DocumentDetail({ summary, onClose, onSaved, onOpenDocument }: Pr
       setDraft(saved.content);
       setIsEditing(false);
       onSaved?.(saved);
+      return true;
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : String(error));
+      return false;
     } finally {
       setSaving(false);
     }
   }, [doc, dirty, draft, onSaved, saving]);
+
+  const handleSaveAndSwitch = useCallback(async () => {
+    if (!pendingSwitch) return;
+    const saved = await handleSave();
+    if (saved) onConfirmSwitch?.(pendingSwitch);
+  }, [handleSave, onConfirmSwitch, pendingSwitch]);
+
+  const handleDiscardAndSwitch = useCallback(() => {
+    if (!pendingSwitch) return;
+    onConfirmSwitch?.(pendingSwitch);
+  }, [onConfirmSwitch, pendingSwitch]);
+
+  useEffect(() => {
+    if (!isEditing) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!isDocumentEditorSaveShortcut(event)) return;
+      event.preventDefault();
+      if (dirty && !saving) {
+        void handleSave();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [dirty, handleSave, isEditing, saving]);
 
   return (
     <div className="detail-overlay document-detail-overlay">
@@ -158,9 +197,27 @@ export function DocumentDetail({ summary, onClose, onSaved, onOpenDocument }: Pr
 
         {loadError && <div className="detail-error" role="alert">{loadError}</div>}
         {saveError && <div className="detail-error" role="alert">Save failed: {saveError}</div>}
+        {pendingSwitch && dirty && (
+          <div className="detail-info document-switch-guard" role="status">
+            <div>
+              Switching to <strong>{pendingSwitch.title}</strong> would discard unsaved edits to this document.
+            </div>
+            <div className="document-switch-actions">
+              <button
+                className="detail-action detail-action-primary"
+                onClick={() => void handleSaveAndSwitch()}
+                disabled={!dirty || saving}
+              >
+                Save & switch
+              </button>
+              <button className="detail-action" onClick={handleDiscardAndSwitch} disabled={saving}>Discard & switch</button>
+              <button className="detail-action" onClick={onCancelSwitch} disabled={saving}>Keep editing</button>
+            </div>
+          </div>
+        )}
         {isEditing && dirty && (
           <div className="detail-info" role="status">
-            You have unsaved changes. Save persists Markdown through the Den document API; Cancel discards the draft.
+            You have unsaved changes. Save persists Markdown through the Den document API; Cancel discards the draft. Ctrl+S / Cmd+S also saves while editing.
           </div>
         )}
 

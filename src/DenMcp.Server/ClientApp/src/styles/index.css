@@ -476,6 +476,20 @@ html, body, #root {
   color: var(--yellow);
 }
 
+.document-switch-guard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.document-switch-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .document-editor {
   width: 100%;
   min-height: 52vh;

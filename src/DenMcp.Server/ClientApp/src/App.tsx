@@ -35,6 +35,7 @@ import { AgentBar } from './components/AgentBar';
 import { DispatchDetail } from './components/DispatchDetail';
 import { MESSAGE_INTENT_OPTIONS, messageIntentLabel } from './messageIntents';
 import type { SubagentRunFilter } from './subagentRuns';
+import { documentSelectionAction } from './documentEditor';
 import type { GitFocus } from './git';
 import {
   filterThoughtItems,
@@ -53,6 +54,8 @@ export default function App() {
   const [selectedSubagentRun, setSelectedSubagentRun] = useState<SubagentRunSummary | null>(null);
   const [selectedDispatch, setSelectedDispatch] = useState<DispatchEntry | null>(null);
   const [selectedDoc, setSelectedDoc] = useState<DocumentSummary | null>(null);
+  const [documentDetailDirty, setDocumentDetailDirty] = useState(false);
+  const [pendingDocumentSwitch, setPendingDocumentSwitch] = useState<DocumentSummary | null>(null);
   const [gitFocus, setGitFocus] = useState<GitFocus | null>(null);
   const [viewMode, setViewMode] = useState<'tasks' | 'documents' | 'librarian' | 'git'>('tasks');
   const [feedMode, setFeedMode] = useState<'stream' | 'messages' | 'thoughts'>('stream');
@@ -334,11 +337,13 @@ export default function App() {
     }
   }, []);
 
-  const handleDocumentSelect = useCallback((doc: DocumentSummary) => {
+  const applyDocumentSelection = useCallback((doc: DocumentSummary) => {
     if (doc.project_id && doc.project_id !== selectedProject) {
       setSelectedProject(doc.project_id);
     }
     setSelectedDoc(doc);
+    setDocumentDetailDirty(false);
+    setPendingDocumentSwitch(null);
     setSelectedTaskId(null);
     setSelectedTaskProjectId(null);
     setSelectedMessage(null);
@@ -346,6 +351,19 @@ export default function App() {
     setSelectedSubagentRun(null);
     setSelectedDispatch(null);
   }, [selectedProject]);
+
+  const handleDocumentSelect = useCallback((doc: DocumentSummary) => {
+    const action = documentSelectionAction(selectedDoc, doc, documentDetailDirty);
+    if (action === 'keep_current') {
+      setPendingDocumentSwitch(null);
+      return;
+    }
+    if (action === 'prompt_for_dirty_switch') {
+      setPendingDocumentSwitch(doc);
+      return;
+    }
+    applyDocumentSelection(doc);
+  }, [applyDocumentSelection, documentDetailDirty, selectedDoc]);
 
   const handleDocumentSaved = useCallback((doc: Document) => {
     setSelectedDoc({
@@ -359,6 +377,13 @@ export default function App() {
     });
     refreshDocs();
   }, [refreshDocs]);
+
+  const handleDocumentDirtyChange = useCallback((dirty: boolean) => {
+    setDocumentDetailDirty(dirty);
+    if (!dirty) {
+      setPendingDocumentSwitch(null);
+    }
+  }, []);
 
   const handleMessageOpen = useCallback(async (projectId: string, messageId: number) => {
     try {
@@ -761,9 +786,17 @@ export default function App() {
       {selectedDoc && (
         <DocumentDetail
           summary={selectedDoc}
-          onClose={() => setSelectedDoc(null)}
+          onClose={() => {
+            setSelectedDoc(null);
+            setDocumentDetailDirty(false);
+            setPendingDocumentSwitch(null);
+          }}
           onSaved={handleDocumentSaved}
           onOpenDocument={handleDocumentSelect}
+          onDirtyChange={handleDocumentDirtyChange}
+          pendingSwitch={pendingDocumentSwitch}
+          onCancelSwitch={() => setPendingDocumentSwitch(null)}
+          onConfirmSwitch={applyDocumentSelection}
         />
       )}
     </div>
