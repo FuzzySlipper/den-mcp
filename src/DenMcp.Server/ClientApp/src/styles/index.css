@@ -552,6 +552,22 @@ html, body, #root {
   color: var(--text);
 }
 
+.document-ref-link {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--cyan);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.document-ref-link:hover {
+  color: var(--accent);
+}
+
 .detail-pre {
   margin: 0;
   padding: 8px 10px;

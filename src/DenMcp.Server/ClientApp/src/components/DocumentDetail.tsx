@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { DocumentSummary, Document } from '../api/types';
 import { getDocument, saveDocument } from '../api/client';
+import { documentSummaryFromReference, splitDocumentReferenceText } from '../documentRefs';
 
 interface Props {
   summary: DocumentSummary;
   onClose: () => void;
   onSaved?: (doc: Document) => void;
+  onOpenDocument?: (doc: DocumentSummary) => void;
 }
 
-export function DocumentDetail({ summary, onClose, onSaved }: Props) {
+export function DocumentDetail({ summary, onClose, onSaved, onOpenDocument }: Props) {
   const [doc, setDoc] = useState<Document | null>(null);
   const [draft, setDraft] = useState('');
   const [isEditing, setIsEditing] = useState(false);
@@ -179,14 +181,47 @@ export function DocumentDetail({ summary, onClose, onSaved }: Props) {
               aria-label={`Markdown content for ${doc.title}`}
             />
           ) : doc ? (
-            <div className="detail-description">
-              {doc.content || <span className="empty-inline">Document is empty.</span>}
-            </div>
+            <DocumentMarkdownContent content={doc.content} onOpenDocument={onOpenDocument} />
           ) : (
             <div className="empty">No document content available.</div>
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+interface DocumentMarkdownContentProps {
+  content: string;
+  onOpenDocument?: (doc: DocumentSummary) => void;
+}
+
+function DocumentMarkdownContent({ content, onOpenDocument }: DocumentMarkdownContentProps) {
+  if (!content) {
+    return <div className="detail-description"><span className="empty-inline">Document is empty.</span></div>;
+  }
+
+  const parts = splitDocumentReferenceText(content);
+
+  return (
+    <div className="detail-description document-markdown-content">
+      {parts.map((part, index) => {
+        if (part.kind === 'text') {
+          return <span key={`text:${index}`}>{part.text}</span>;
+        }
+
+        return (
+          <button
+            key={`doc-ref:${part.projectId}:${part.slug}:${index}`}
+            type="button"
+            className="document-ref-link"
+            title={`Open ${part.ref}`}
+            onClick={() => onOpenDocument?.(documentSummaryFromReference(part))}
+          >
+            {part.ref}
+          </button>
+        );
+      })}
     </div>
   );
 }

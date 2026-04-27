@@ -734,6 +734,7 @@ export default function App() {
           summary={selectedDoc}
           onClose={() => setSelectedDoc(null)}
           onSaved={handleDocumentSaved}
+          onOpenDocument={handleDocumentSelect}
         />
       )}
     </div>
