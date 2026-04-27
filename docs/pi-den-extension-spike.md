@@ -115,12 +115,12 @@ Sub-agent session policy is explicit:
 It supports a single bounded run only; parallel fanout, worktree isolation,
 review packet helpers, and richer run records are still follow-up slices.
 
-`/den-config` opens a Pi TUI configuration menu. The initial menu supports
+`/den-config` opens a Pi TUI configuration menu. The menu supports
 project-local and global sub-agent role defaults for `coder`, `reviewer`, and
-`planner`, plus a shared fallback model for failed sub-agent runs. It lists
-models from Pi's model registry and saves provider-qualified model IDs such as
-`openai-codex/gpt-5.5` or `anthropic/claude-sonnet-4-6`, avoiding ambiguous
-unqualified model resolution.
+`planner`, a shared fallback model for failed sub-agent runs, and reasoning
+capture controls. It lists models from Pi's model registry and saves
+provider-qualified model IDs such as `openai-codex/gpt-5.5` or
+`anthropic/claude-sonnet-4-6`, avoiding ambiguous unqualified model resolution.
 
 `den_run_coder` and `den_run_reviewer` load prompt templates from Den documents
 before launching the sub-agent:
@@ -160,8 +160,8 @@ DEN_PI_ROLE             default conductor
 DEN_PI_INSTANCE_ID      optional stable instance id
 ```
 
-Sub-agent role defaults are read from JSON config with project-local values
-overriding global values:
+Sub-agent role defaults and reasoning capture controls are read from JSON config
+with project-local values overriding global values:
 
 ```text
 .pi/den-config.json
@@ -174,6 +174,11 @@ Example:
 {
   "version": 1,
   "fallback_model": "zai/glm-5.1",
+  "reasoning": {
+    "capture_provider_summaries": true,
+    "capture_raw_local_previews": false,
+    "preview_chars": 240
+  },
   "subagents": {
     "coder": { "model": "openai-codex/gpt-5.5" },
     "reviewer": { "model": "anthropic/claude-sonnet-4-6" }
@@ -185,8 +190,27 @@ Explicit `model` arguments on `den_run_subagent`, `den_run_coder`, or
 `den_run_reviewer` still take precedence over config defaults and suppress
 automatic fallback retry. If a configured/default model run exits non-zero and a
 `fallback_model` is configured, the extension records `subagent_fallback_started`
-and retries once with that provider-qualified fallback model. The project-local
-file is gitignored because model choices are user/machine-specific.
+and retries once with that provider-qualified fallback model.
+
+Reasoning capture config keeps provider-visible summaries and raw local previews
+separate:
+
+- `capture_provider_summaries` defaults to `true` and allows bounded
+  provider/CLI-visible reasoning summaries to appear as `reasoning_summary_*`
+  operator breadcrumbs.
+- `capture_raw_local_previews` defaults to `false`; when enabled in a trusted
+  local setup, bounded raw reasoning previews may appear in `text_preview` with
+  `reasoning_redacted: false`.
+- `preview_chars` defaults to `240` and is clamped to a bounded local preview
+  range.
+- `DEN_PI_SUBAGENT_RAW_REASONING=1|true|yes|on` and
+  `DEN_PI_SUBAGENT_RAW_REASONING=0|false|no|off` remain temporary process-level
+  compatibility overrides for raw local previews. When set to one of those
+  recognized values, the env var overrides `capture_raw_local_previews`; unknown
+  values are ignored.
+
+The project-local file is gitignored because model choices and reasoning capture
+policy are user/machine-specific.
 
 Historical note: during the dispatch migration, Pi could be launched with
 `DEN_PI_AGENT=codex` to drain old Codex-targeted dispatch rows. New workflow

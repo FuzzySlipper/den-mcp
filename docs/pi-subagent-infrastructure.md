@@ -307,11 +307,17 @@ reasoning cards, counts, redaction flags, and content type flags rather than raw
 full reasoning text. When Pi/provider output includes an explicit, already
 provider-visible reasoning summary (for example an OpenAI Responses reasoning
 summary), Den may store it separately as a bounded `reasoning_summary_preview`
-operator breadcrumb while keeping `reasoning_redacted: true`. Set
-`DEN_PI_SUBAGENT_RAW_REASONING=1` only in trusted local debugging contexts if Den
-web/API should include bounded raw reasoning previews from local artifacts;
-task-thread result messages never include raw reasoning. The session JSONL
-remains a local artifact for forensic inspection.
+operator breadcrumb while keeping `reasoning_redacted: true`. Raw local
+previews are controlled by Den Pi extension config rather than hidden process
+environment alone: set `reasoning.capture_raw_local_previews` in
+`.pi/den-config.json` or `~/.pi/agent/den-config.json` only in trusted local
+contexts if Den web/API should include bounded raw reasoning previews from local
+artifacts. `reasoning.preview_chars` controls the bounded preview length, and
+`DEN_PI_SUBAGENT_RAW_REASONING=1|true|yes|on` or
+`DEN_PI_SUBAGENT_RAW_REASONING=0|false|no|off` remains a temporary process-level
+compatibility override for raw local previews. Task-thread result messages never
+include raw reasoning. The session JSONL remains a local artifact for forensic
+inspection.
 
 ## Parent Pi Agent Work Mirror
 
@@ -343,9 +349,11 @@ Reasoning/thinking content follows the same local policy as sub-agent reasoning:
 raw previews are redacted by default and represented by event kind, provider,
 model, char counts, and `reasoning_redacted`. Provider-visible summaries are
 stored separately as bounded `reasoning_summary_preview` breadcrumbs and do not
-make a raw preview available. Set `DEN_PI_SUBAGENT_RAW_REASONING=1` only in
-trusted local debugging contexts to allow bounded raw reasoning previews in Den
-stream metadata. Task-thread messages still never include raw reasoning.
+make a raw preview available. Set `reasoning.capture_raw_local_previews` in Den
+Pi extension config only in trusted local contexts to allow bounded raw reasoning
+previews in Den stream metadata; the temporary `DEN_PI_SUBAGENT_RAW_REASONING`
+compatibility override uses the same precedence described above. Task-thread
+messages still never include raw reasoning.
 
 This parent mirror is best-effort observability, not a durable run transcript.
 It avoids raw terminal streaming as a signal, throttles high-frequency assistant

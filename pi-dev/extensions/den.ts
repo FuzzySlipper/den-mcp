@@ -7,7 +7,11 @@ import {
   formatDenContextStatusLines,
   summarizeDenContextStatusForMetadata,
 } from "../lib/den-context-status.ts";
-import { normalizePiWorkEvent } from "../lib/den-subagent-pipeline.ts";
+import { normalizePiWorkEvent, type ReasoningCaptureOptions } from "../lib/den-subagent-pipeline.ts";
+import {
+  loadMergedDenExtensionConfig,
+  reasoningCaptureOptionsFromConfig,
+} from "../lib/den-extension-config.ts";
 
 type JsonObject = Record<string, unknown>;
 
@@ -31,6 +35,7 @@ export type ParentAgentWorkIdentity = {
   sessionFile?: string;
   piSessionId?: string;
   model?: string;
+  reasoningCapture?: ReasoningCaptureOptions;
 };
 
 let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
@@ -41,6 +46,8 @@ let lastInboxLines: string[] = [];
 let currentTaskId: number | undefined;
 let resolvedAgentGuidance: any | undefined;
 const parentWorkMirrorLastAt = new Map<string, number>();
+let parentReasoningCaptureCache: { cwd: string; loadedAt: number; options?: ReasoningCaptureOptions } | undefined;
+const PARENT_REASONING_CONFIG_CACHE_MS = 5_000;
 
 const DEFAULT_BASE_URL = "http://192.168.1.10:5199";
 const HEARTBEAT_SECONDS = 60;
@@ -485,15 +492,18 @@ function scheduleParentAgentWorkMirror(sourceEvent: any, ctx: any) {
   const cfg = config;
   if (!cfg) return;
 
-  const workEvent = normalizeParentAgentWorkEvent(sourceEvent, buildParentWorkIdentity(cfg, ctx));
-  if (!workEvent || !shouldMirrorParentAgentWorkEvent(workEvent)) return;
-
-  void appendParentAgentWorkOps(cfg, workEvent).catch(() => {
+  void mirrorParentAgentWork(cfg, sourceEvent, ctx).catch(() => {
     // Parent-agent observability should never interrupt the active Pi turn.
   });
 }
 
-function buildParentWorkIdentity(cfg: DenConfig, ctx: any): ParentAgentWorkIdentity {
+async function mirrorParentAgentWork(cfg: DenConfig, sourceEvent: any, ctx: any) {
+  const workEvent = normalizeParentAgentWorkEvent(sourceEvent, await buildParentWorkIdentity(cfg, ctx));
+  if (!workEvent || !shouldMirrorParentAgentWorkEvent(workEvent)) return;
+  await appendParentAgentWorkOps(cfg, workEvent);
+}
+
+async function buildParentWorkIdentity(cfg: DenConfig, ctx: any): Promise<ParentAgentWorkIdentity> {
   return {
     projectId: cfg.projectId,
     agent: cfg.agent,
@@ -505,7 +515,24 @@ function buildParentWorkIdentity(cfg: DenConfig, ctx: any): ParentAgentWorkIdent
     sessionFile: ctx.sessionManager?.getSessionFile?.() ?? undefined,
     piSessionId: ctx.sessionManager?.getSessionId?.() ?? undefined,
     model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined,
+    reasoningCapture: await loadParentReasoningCapture(ctx.cwd),
   };
+}
+
+async function loadParentReasoningCapture(cwd: string): Promise<ReasoningCaptureOptions | undefined> {
+  const now = Date.now();
+  if (parentReasoningCaptureCache?.cwd === cwd && now - parentReasoningCaptureCache.loadedAt < PARENT_REASONING_CONFIG_CACHE_MS) {
+    return parentReasoningCaptureCache.options;
+  }
+  try {
+    const denConfig = await loadMergedDenExtensionConfig(cwd);
+    const options = reasoningCaptureOptionsFromConfig(denConfig);
+    parentReasoningCaptureCache = { cwd, loadedAt: now, options };
+    return options;
+  } catch {
+    parentReasoningCaptureCache = { cwd, loadedAt: now, options: undefined };
+    return undefined;
+  }
 }
 
 export function normalizeParentAgentWorkEvent(sourceEvent: any, identity: ParentAgentWorkIdentity, now = Date.now()): JsonObject | undefined {
@@ -516,6 +543,7 @@ export function normalizeParentAgentWorkEvent(sourceEvent: any, identity: Parent
     subagentRole: identity.role,
     backend: "pi-extension",
     requestedModel: identity.model,
+    reasoningCapture: identity.reasoningCapture,
   });
   if (!normalized || typeof normalized.type !== "string") return undefined;
 

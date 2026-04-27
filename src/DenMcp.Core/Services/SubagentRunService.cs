@@ -298,7 +298,8 @@ public sealed class SubagentRunService : ISubagentRunService
         SubagentRunArtifactSnapshot? artifacts,
         SubagentRunSummary summary)
     {
-        var sessionEvents = ParseSessionWorkEvents(artifacts?.SessionTail);
+        var reasoningPolicy = ReasoningCapturePolicy.FromStatusJson(artifacts?.StatusJson);
+        var sessionEvents = ParseSessionWorkEvents(artifacts?.SessionTail, reasoningPolicy);
         if (sessionEvents.Count > 0)
             return EnrichWorkEvents(sessionEvents, summary);
 
@@ -341,7 +342,7 @@ public sealed class SubagentRunService : ISubagentRunService
         payload[key] = JsonSerializer.SerializeToElement(value);
     }
 
-    private static List<JsonElement> ParseSessionWorkEvents(string? sessionJsonl)
+    private static List<JsonElement> ParseSessionWorkEvents(string? sessionJsonl, ReasoningCapturePolicy reasoningPolicy)
     {
         if (string.IsNullOrWhiteSpace(sessionJsonl))
             return [];
@@ -356,7 +357,7 @@ public sealed class SubagentRunService : ISubagentRunService
             try
             {
                 using var doc = JsonDocument.Parse(trimmed);
-                events.AddRange(NormalizeSessionEntry(doc.RootElement));
+                events.AddRange(NormalizeSessionEntry(doc.RootElement, reasoningPolicy));
             }
             catch (JsonException)
             {
@@ -367,7 +368,7 @@ public sealed class SubagentRunService : ISubagentRunService
         return events.TakeLast(80).ToList();
     }
 
-    private static IReadOnlyList<JsonElement> NormalizeSessionEntry(JsonElement entry)
+    private static IReadOnlyList<JsonElement> NormalizeSessionEntry(JsonElement entry, ReasoningCapturePolicy reasoningPolicy)
     {
         if (entry.ValueKind != JsonValueKind.Object || !TryGetString(entry, "type", out var type))
             return [];
@@ -383,7 +384,7 @@ public sealed class SubagentRunService : ISubagentRunService
                 ["cwd"] = StringOrNull(entry, "cwd"),
                 ["version"] = NumberOrNull(entry, "version")
             })],
-            "message" => NormalizeSessionMessageEntry(entry),
+            "message" => NormalizeSessionMessageEntry(entry, reasoningPolicy),
             "compaction" => [WorkEvent(new Dictionary<string, object?>
             {
                 ["type"] = "subagent.work_compaction",
@@ -430,7 +431,7 @@ public sealed class SubagentRunService : ISubagentRunService
         };
     }
 
-    private static IReadOnlyList<JsonElement> NormalizeSessionMessageEntry(JsonElement entry)
+    private static IReadOnlyList<JsonElement> NormalizeSessionMessageEntry(JsonElement entry, ReasoningCapturePolicy reasoningPolicy)
     {
         if (!entry.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object)
             return [];
@@ -450,7 +451,7 @@ public sealed class SubagentRunService : ISubagentRunService
         switch (role)
         {
             case "assistant":
-                return NormalizeSessionAssistantMessage(common, message);
+                return NormalizeSessionAssistantMessage(common, message, reasoningPolicy);
             case "toolResult":
                 common["type"] = "subagent.work_tool_end";
                 common["source_type"] = "session_tree_tool_result";
@@ -494,12 +495,15 @@ public sealed class SubagentRunService : ISubagentRunService
         }
     }
 
-    private static IReadOnlyList<JsonElement> NormalizeSessionAssistantMessage(Dictionary<string, object?> common, JsonElement message)
+    private static IReadOnlyList<JsonElement> NormalizeSessionAssistantMessage(Dictionary<string, object?> common, JsonElement message, ReasoningCapturePolicy reasoningPolicy)
     {
         var content = message.TryGetProperty("content", out var value) ? value : default;
         var text = ContentText(content, includeThinking: false);
         var thinkingText = ContentText(content, includeThinking: true, thinkingOnly: true);
-        var thinkingChars = thinkingText?.Length;
+        var providerVisibleSummaryText = ReasoningSummaryText(content);
+        var summaryText = reasoningPolicy.CaptureProviderSummaries ? providerVisibleSummaryText : null;
+        var rawThinkingText = !string.IsNullOrWhiteSpace(providerVisibleSummaryText) && thinkingText == providerVisibleSummaryText ? null : thinkingText;
+        var thinkingChars = rawThinkingText?.Length ?? providerVisibleSummaryText?.Length;
         var contentTypes = ContentTypes(content);
         var toolCalls = ToolCalls(content);
         var provider = StringOrNull(message, "provider");
@@ -509,7 +513,7 @@ public sealed class SubagentRunService : ISubagentRunService
 
         if (thinkingChars is > 0 || ContentTypesIncludeThinking(contentTypes))
         {
-            var exposeRaw = RawReasoningCaptureEnabled() && !ContentHasRedactedThinking(content);
+            var exposeRaw = reasoningPolicy.CaptureRawLocalPreviews && !ContentHasRedactedThinking(content) && !string.IsNullOrWhiteSpace(rawThinkingText);
             var reasoning = new Dictionary<string, object?>(common)
             {
                 ["type"] = "subagent.work_reasoning_end",
@@ -519,7 +523,10 @@ public sealed class SubagentRunService : ISubagentRunService
                 ["reasoning_kind"] = "thinking",
                 ["reasoning_chars"] = thinkingChars,
                 ["reasoning_redacted"] = !exposeRaw,
-                ["text_preview"] = exposeRaw ? Preview(thinkingText) : null,
+                ["text_preview"] = exposeRaw ? Preview(rawThinkingText, reasoningPolicy.PreviewChars) : null,
+                ["reasoning_summary_preview"] = Preview(summaryText, reasoningPolicy.PreviewChars),
+                ["reasoning_summary_chars"] = summaryText?.Length,
+                ["reasoning_summary_source"] = string.IsNullOrWhiteSpace(summaryText) ? null : "provider_visible",
                 ["content_types"] = contentTypes,
                 ["stop_reason"] = stopReason
             };
@@ -539,6 +546,9 @@ public sealed class SubagentRunService : ISubagentRunService
                 ["thinking_chars"] = thinkingChars,
                 ["reasoning_chars"] = thinkingChars,
                 ["reasoning_redacted"] = thinkingChars is > 0,
+                ["reasoning_summary_preview"] = Preview(summaryText, reasoningPolicy.PreviewChars),
+                ["reasoning_summary_chars"] = summaryText?.Length,
+                ["reasoning_summary_source"] = string.IsNullOrWhiteSpace(summaryText) ? null : "provider_visible",
                 ["content_types"] = contentTypes,
                 ["tool_calls"] = toolCalls,
                 ["stop_reason"] = stopReason
@@ -605,13 +615,134 @@ public sealed class SubagentRunService : ISubagentRunService
             BoolOrNull(part, "redacted") == true);
     }
 
-    private static bool RawReasoningCaptureEnabled()
+    private sealed record ReasoningCapturePolicy(bool CaptureProviderSummaries, bool CaptureRawLocalPreviews, int PreviewChars)
     {
-        var value = Environment.GetEnvironmentVariable("DEN_PI_SUBAGENT_RAW_REASONING");
-        return value is not null && (value.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+        public static ReasoningCapturePolicy FromStatusJson(string? statusJson)
+        {
+            var captureProviderSummaries = true;
+            var captureRawLocalPreviews = RawReasoningCaptureEnvValue() ?? false;
+            var previewChars = 240;
+
+            if (!string.IsNullOrWhiteSpace(statusJson))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(statusJson);
+                    if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                        doc.RootElement.TryGetProperty("reasoning_capture", out var reasoning) &&
+                        reasoning.ValueKind == JsonValueKind.Object)
+                    {
+                        captureProviderSummaries = BoolOrNull(reasoning, "capture_provider_summaries") ?? captureProviderSummaries;
+                        captureRawLocalPreviews = BoolOrNull(reasoning, "capture_raw_local_previews") ?? captureRawLocalPreviews;
+                        if (NumberOrNull(reasoning, "preview_chars") is { } configuredPreviewChars)
+                            previewChars = (int)configuredPreviewChars;
+                    }
+                }
+                catch (JsonException)
+                {
+                    // Fall back to defaults for older or partially written status artifacts.
+                }
+            }
+
+            return new ReasoningCapturePolicy(
+                captureProviderSummaries,
+                captureRawLocalPreviews,
+                Math.Clamp(previewChars, 1, 2_000));
+        }
+    }
+
+    private static bool? RawReasoningCaptureEnvValue()
+    {
+        var value = Environment.GetEnvironmentVariable("DEN_PI_SUBAGENT_RAW_REASONING")?.Trim();
+        if (string.IsNullOrEmpty(value))
+            return null;
+        if (value.Equals("1", StringComparison.OrdinalIgnoreCase) ||
             value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
             value.Equals("yes", StringComparison.OrdinalIgnoreCase) ||
-            value.Equals("on", StringComparison.OrdinalIgnoreCase));
+            value.Equals("on", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (value.Equals("0", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("false", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("no", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("off", StringComparison.OrdinalIgnoreCase))
+            return false;
+        return null;
+    }
+
+    private static string? ReasoningSummaryText(JsonElement content)
+    {
+        if (content.ValueKind != JsonValueKind.Array)
+            return null;
+
+        foreach (var part in content.EnumerateArray())
+        {
+            if (StringOrNull(part, "type") is not ("thinking" or "reasoning"))
+                continue;
+
+            var direct = SummaryText(part, "summary") ??
+                SummaryText(part, "summaryText") ??
+                SummaryText(part, "summary_text") ??
+                SummaryText(part, "reasoningSummary") ??
+                SummaryText(part, "reasoning_summary") ??
+                SummaryText(part, "thinkingSummary") ??
+                SummaryText(part, "thinking_summary");
+            if (!string.IsNullOrWhiteSpace(direct))
+                return direct;
+
+            var signatureSummary = ReasoningSummaryFromSignature(StringOrNull(part, "thinkingSignature") ??
+                StringOrNull(part, "reasoningSignature") ??
+                StringOrNull(part, "signature"));
+            if (!string.IsNullOrWhiteSpace(signatureSummary))
+                return signatureSummary;
+        }
+
+        return null;
+    }
+
+    private static string? ReasoningSummaryFromSignature(string? signature)
+    {
+        if (string.IsNullOrWhiteSpace(signature) || !signature.TrimStart().StartsWith("{", StringComparison.Ordinal))
+            return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(signature);
+            return SummaryText(doc.RootElement, "summary") ??
+                SummaryText(doc.RootElement, "reasoning_summary") ??
+                SummaryText(doc.RootElement, "thinking_summary");
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? SummaryText(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var property))
+            return null;
+        return SummaryText(property);
+    }
+
+    private static string? SummaryText(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.String)
+            return string.IsNullOrWhiteSpace(element.GetString()) ? null : element.GetString();
+        if (element.ValueKind == JsonValueKind.Array)
+        {
+            var parts = element.EnumerateArray()
+                .Select(SummaryText)
+                .Where(part => !string.IsNullOrWhiteSpace(part))
+                .ToList();
+            return parts.Count == 0 ? null : string.Join("\n\n", parts);
+        }
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            return SummaryText(element, "text") ??
+                SummaryText(element, "summary") ??
+                SummaryText(element, "content");
+        }
+        return null;
     }
 
     private static string? ContentText(JsonElement content, bool includeThinking = true, bool thinkingOnly = false)

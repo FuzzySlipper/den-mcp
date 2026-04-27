@@ -1,6 +1,4 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
@@ -20,32 +18,31 @@ import {
   type SubagentResult,
 } from "../lib/den-subagent-runner.ts";
 import {
+  DEFAULT_REASONING_PREVIEW_CHARS,
   SUBAGENT_RUN_SCHEMA,
   SUBAGENT_RUN_SCHEMA_VERSION,
   buildSubagentRunMetadata,
   isSubagentInfrastructureFailure,
   normalizeSubagentRunPurpose,
+  resolveReasoningCaptureOptions,
   subagentOpsEventTypeForEvent,
-  type SubagentArtifacts,
   type JsonObject,
+  type SubagentArtifacts,
 } from "../lib/den-subagent-pipeline.ts";
-
-type DenExtensionConfig = {
-  version?: number;
-  fallback_model?: string;
-  subagents?: Record<string, {
-    model?: string;
-    tools?: string;
-  }>;
-};
-
-type ConfigScope = "project" | "global";
+import {
+  denConfigPath,
+  loadDenExtensionConfig,
+  loadMergedDenExtensionConfig,
+  reasoningCaptureOptionsFromConfig,
+  saveDenExtensionConfig,
+  type ConfigScope,
+  type DenExtensionConfig,
+} from "../lib/den-extension-config.ts";
 
 const DEFAULT_BASE_URL = "http://192.168.1.10:5199";
 const CODER_PROMPT_SLUG = "pi-coder-subagent-prompt";
 const REVIEWER_PROMPT_SLUG = "pi-reviewer-subagent-prompt";
 const GLOBAL_SUFFIX = "-default";
-const DEN_CONFIG_FILENAME = "den-config.json";
 const RERUN_POLL_MS = 3_000;
 const MAX_RERUN_SNAPSHOTS = 50;
 
@@ -283,6 +280,8 @@ async function runDenConfigCommand(ctx: any) {
       `Sub-agent defaults (global: ${globalPath})`,
       `Fallback model (project-local: ${projectPath})`,
       `Fallback model (global: ${globalPath})`,
+      `Reasoning capture (project-local: ${projectPath})`,
+      `Reasoning capture (global: ${globalPath})`,
       "View current config",
       "Done",
     ]);
@@ -296,6 +295,10 @@ async function runDenConfigCommand(ctx: any) {
     const scope: ConfigScope = choice.includes("project-local") ? "project" : "global";
     if (choice.startsWith("Fallback model")) {
       await configureFallbackModel(ctx, scope);
+      continue;
+    }
+    if (choice.startsWith("Reasoning capture")) {
+      await configureReasoningCapture(ctx, scope);
       continue;
     }
     await configureSubagentDefaults(ctx, scope);
@@ -356,6 +359,94 @@ async function configureSubagentDefaults(ctx: any, scope: ConfigScope) {
   );
 }
 
+async function configureReasoningCapture(ctx: any, scope: ConfigScope) {
+  while (true) {
+    const config = await loadDenExtensionConfig(scope, ctx.cwd);
+    const reasoning = config.reasoning ?? {};
+    const choice = await ctx.ui.select(`Configure ${scope} reasoning capture`, [
+      `Provider-visible summaries: ${optionalBooleanLabel(reasoning.capture_provider_summaries, "default on")}`,
+      `Raw local previews: ${optionalBooleanLabel(reasoning.capture_raw_local_previews, "default off")}`,
+      `Preview length: ${typeof reasoning.preview_chars === "number" ? `${reasoning.preview_chars} chars` : `${DEFAULT_REASONING_PREVIEW_CHARS} chars (default)`}`,
+      "Done",
+    ]);
+    if (!choice || choice === "Done") return;
+
+    if (choice.startsWith("Provider-visible summaries")) {
+      await configureReasoningBoolean(ctx, scope, "capture_provider_summaries", "provider-visible summaries", true);
+      continue;
+    }
+    if (choice.startsWith("Raw local previews")) {
+      await configureReasoningBoolean(ctx, scope, "capture_raw_local_previews", "raw local previews", false);
+      continue;
+    }
+    if (choice.startsWith("Preview length")) {
+      await configureReasoningPreviewLength(ctx, scope);
+    }
+  }
+}
+
+async function configureReasoningBoolean(
+  ctx: any,
+  scope: ConfigScope,
+  key: "capture_provider_summaries" | "capture_raw_local_previews",
+  label: string,
+  defaultValue: boolean,
+) {
+  const choice = await ctx.ui.select(`Set ${scope} ${label}`, [
+    "Enable",
+    "Disable",
+    `Use default (${defaultValue ? "enabled" : "disabled"})`,
+    "Cancel",
+  ]);
+  if (!choice || choice === "Cancel") return;
+
+  const config = await loadDenExtensionConfig(scope, ctx.cwd);
+  const reasoning = { ...(config.reasoning ?? {}) };
+  if (choice === "Enable") reasoning[key] = true;
+  else if (choice === "Disable") reasoning[key] = false;
+  else delete reasoning[key];
+  await saveDenExtensionConfig(scope, ctx.cwd, withReasoningConfig(config, reasoning));
+  ctx.ui.notify(`Saved ${scope} reasoning ${label}: ${optionalBooleanLabel(reasoning[key], defaultValue ? "default on" : "default off")}`, "info");
+}
+
+async function configureReasoningPreviewLength(ctx: any, scope: ConfigScope) {
+  const choices = [
+    "120 chars",
+    `${DEFAULT_REASONING_PREVIEW_CHARS} chars`,
+    "500 chars",
+    "1000 chars",
+    "2000 chars",
+    `Use default (${DEFAULT_REASONING_PREVIEW_CHARS} chars)`,
+    "Cancel",
+  ];
+  const choice = await ctx.ui.select(`Set ${scope} reasoning preview length`, choices);
+  if (!choice || choice === "Cancel") return;
+
+  const config = await loadDenExtensionConfig(scope, ctx.cwd);
+  const reasoning = { ...(config.reasoning ?? {}) };
+  if (choice.startsWith("Use default")) delete reasoning.preview_chars;
+  else reasoning.preview_chars = Number(choice.split(" ")[0]);
+  await saveDenExtensionConfig(scope, ctx.cwd, withReasoningConfig(config, reasoning));
+  ctx.ui.notify(
+    reasoning.preview_chars
+      ? `Saved ${scope} reasoning preview length: ${reasoning.preview_chars} chars`
+      : `Cleared ${scope} reasoning preview length`,
+    "info",
+  );
+}
+
+function withReasoningConfig(config: DenExtensionConfig, reasoning: NonNullable<DenExtensionConfig["reasoning"]>): DenExtensionConfig {
+  return {
+    ...config,
+    version: 1,
+    reasoning: Object.keys(reasoning).length > 0 ? reasoning : undefined,
+  };
+}
+
+function optionalBooleanLabel(value: unknown, defaultLabel: string): string {
+  return typeof value === "boolean" ? (value ? "enabled" : "disabled") : defaultLabel;
+}
+
 async function selectModel(ctx: any, label: string): Promise<string | null | undefined> {
   const models = await availableModels(ctx);
   const modelChoices = models.map((model) => ({
@@ -393,12 +484,18 @@ function providerQualifiedModelId(model: any): string {
 }
 
 function formatConfigPreview(config: DenExtensionConfig, projectPath: string, globalPath: string): string[] {
+  const reasoning = resolveReasoningCaptureOptions(reasoningCaptureOptionsFromConfig(config));
   const lines = [
     "Den config",
     `Project config: ${projectPath}`,
     `Global config: ${globalPath}`,
     "",
     `Fallback model: ${config.fallback_model ?? "(not configured)"}`,
+    "",
+    "Reasoning capture:",
+    `- provider-visible summaries: ${reasoning.captureProviderSummaries ? "enabled" : "disabled"}`,
+    `- raw local previews: ${reasoning.captureRawLocalPreviews ? "enabled" : "disabled"}${reasoning.rawEnvOverride ? " (DEN_PI_SUBAGENT_RAW_REASONING override)" : ""}`,
+    `- preview length: ${reasoning.previewChars} chars`,
     "",
     "Sub-agent defaults:",
   ];
@@ -820,52 +917,9 @@ async function applyConfiguredDefaults(options: RunOptions, cwd: string): Promis
     model: options.model ?? normalizeString(roleConfig?.model),
     fallbackModel: options.fallbackModel ?? normalizeString(config.fallback_model),
     tools: options.tools ?? normalizeString(roleConfig?.tools),
+    reasoningCapture: options.reasoningCapture ?? reasoningCaptureOptionsFromConfig(config),
     purpose: normalizeSubagentRunPurpose(options.purpose) ?? defaultPurposeForRole(options.role),
   };
-}
-
-async function loadMergedDenExtensionConfig(cwd: string): Promise<DenExtensionConfig> {
-  const globalConfig = await loadDenExtensionConfig("global", cwd);
-  const projectConfig = await loadDenExtensionConfig("project", cwd);
-  const roles = new Set([
-    ...Object.keys(globalConfig.subagents ?? {}),
-    ...Object.keys(projectConfig.subagents ?? {}),
-  ]);
-  const subagents: NonNullable<DenExtensionConfig["subagents"]> = {};
-  for (const role of roles) {
-    subagents[role] = {
-      ...(globalConfig.subagents?.[role] ?? {}),
-      ...(projectConfig.subagents?.[role] ?? {}),
-    };
-  }
-  return {
-    version: 1,
-    ...globalConfig,
-    ...projectConfig,
-    subagents,
-  };
-}
-
-async function loadDenExtensionConfig(scope: ConfigScope, cwd: string): Promise<DenExtensionConfig> {
-  try {
-    const text = await readFile(denConfigPath(scope, cwd), "utf8");
-    const parsed = JSON.parse(text);
-    if (parsed && typeof parsed === "object") return parsed;
-  } catch (error: any) {
-    if (error?.code !== "ENOENT") throw error;
-  }
-  return { version: 1, subagents: {} };
-}
-
-async function saveDenExtensionConfig(scope: ConfigScope, cwd: string, config: DenExtensionConfig) {
-  const file = denConfigPath(scope, cwd);
-  await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, `${JSON.stringify(config, null, 2)}\n`, "utf8");
-}
-
-function denConfigPath(scope: ConfigScope, cwd: string): string {
-  if (scope === "global") return path.join(os.homedir(), ".pi", "agent", DEN_CONFIG_FILENAME);
-  return path.join(cwd, ".pi", DEN_CONFIG_FILENAME);
 }
 
 function parseSessionMode(value: string | undefined): "fresh" | "continue" | "fork" | "session" | undefined {

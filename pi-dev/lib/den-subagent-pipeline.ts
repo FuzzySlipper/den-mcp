@@ -2,6 +2,23 @@ export type JsonObject = Record<string, unknown>;
 
 export const SUBAGENT_RUN_SCHEMA = "den_subagent_run";
 export const SUBAGENT_RUN_SCHEMA_VERSION = 1;
+export const DEFAULT_REASONING_PREVIEW_CHARS = 240;
+export const MIN_REASONING_PREVIEW_CHARS = 1;
+export const MAX_REASONING_PREVIEW_CHARS = 2_000;
+
+export type ReasoningCaptureOptions = {
+  captureProviderSummaries?: boolean;
+  captureRawLocalPreviews?: boolean;
+  previewChars?: number;
+};
+
+export type ResolvedReasoningCaptureOptions = {
+  captureProviderSummaries: boolean;
+  captureRawLocalPreviews: boolean;
+  previewChars: number;
+  rawEnvOverride: boolean;
+  rawEnvValue?: boolean;
+};
 
 export type SubagentArtifacts = {
   dir: string;
@@ -215,6 +232,7 @@ export type PiWorkEventContext = {
   subagentRole?: string;
   backend?: string;
   requestedModel?: string;
+  reasoningCapture?: ReasoningCaptureOptions;
 };
 
 export type SubagentOutputSnapshot = {
@@ -262,6 +280,29 @@ export function parsePiStdoutLine(line: string): PiStdoutParseResult | undefined
   } catch {
     return { kind: "raw_stdout", line };
   }
+}
+
+export function resolveReasoningCaptureOptions(options: ReasoningCaptureOptions = {}): ResolvedReasoningCaptureOptions {
+  const rawEnvValue = rawReasoningCaptureEnvValue();
+  const captureRawLocalPreviews = rawEnvValue ?? options.captureRawLocalPreviews === true;
+  return {
+    captureProviderSummaries: options.captureProviderSummaries !== false,
+    captureRawLocalPreviews,
+    previewChars: normalizeReasoningPreviewChars(options.previewChars),
+    rawEnvOverride: rawEnvValue !== undefined,
+    rawEnvValue,
+  };
+}
+
+export function buildReasoningCaptureMetadata(options: ReasoningCaptureOptions = {}): JsonObject {
+  const resolved = resolveReasoningCaptureOptions(options);
+  return omitUndefined({
+    capture_provider_summaries: resolved.captureProviderSummaries,
+    capture_raw_local_previews: resolved.captureRawLocalPreviews,
+    preview_chars: resolved.previewChars,
+    raw_env_override: resolved.rawEnvOverride,
+    raw_env_value: resolved.rawEnvValue,
+  });
 }
 
 export function normalizePiWorkEvent(event: any, now = Date.now(), context: PiWorkEventContext = {}): JsonObject | undefined {
@@ -324,7 +365,7 @@ function normalizePiMessageWorkEvent(event: any, phase: "start" | "update" | "en
 
   const messageSummary = summarizeAssistantMessage(message);
   const updateKind = normalizeString(event.assistantMessageEvent?.type);
-  const reasoningSummary = summarizeReasoningActivity(event, message);
+  const reasoningSummary = summarizeReasoningActivity(event, message, context.reasoningCapture);
   const hasAssistantNarrative = Boolean(messageSummary.text_preview || messageSummary.tool_calls);
   if (reasoningSummary && (isReasoningUpdateKind(updateKind) || !hasAssistantNarrative)) {
     return omitUndefined({
@@ -504,10 +545,12 @@ function summarizeAssistantMessage(message: any): JsonObject {
   });
 }
 
-function summarizeReasoningActivity(event: any, message: any): JsonObject | undefined {
+function summarizeReasoningActivity(event: any, message: any, options?: ReasoningCaptureOptions): JsonObject | undefined {
+  const capture = resolveReasoningCaptureOptions(options);
   const eventKind = normalizeString(event?.assistantMessageEvent?.type);
   const reasoningText = extractReasoningText(event, message);
   const providerVisibleSummaryText = extractProviderVisibleReasoningSummaryText(event, message);
+  const emittedProviderSummaryText = capture.captureProviderSummaries ? providerVisibleSummaryText : undefined;
   const rawReasoningText = providerVisibleSummaryText && reasoningText === providerVisibleSummaryText
     ? undefined
     : reasoningText;
@@ -523,15 +566,15 @@ function summarizeReasoningActivity(event: any, message: any): JsonObject | unde
       ? providerVisibleSummaryText.length
       : finiteNumber(event?.assistantMessageEvent?.chars ?? event?.assistantMessageEvent?.length);
   const sourceRedacted = hasRedactedReasoning(message);
-  const exposeRaw = rawReasoningCaptureEnabled() && !sourceRedacted && Boolean(rawReasoningText);
+  const exposeRaw = capture.captureRawLocalPreviews && !sourceRedacted && Boolean(rawReasoningText);
   return omitUndefined({
     reasoning_kind: eventKind ?? "thinking",
     reasoning_chars: chars,
     reasoning_redacted: !exposeRaw,
-    text_preview: exposeRaw ? boundedPreview(rawReasoningText, 240) : undefined,
-    reasoning_summary_preview: boundedPreview(providerVisibleSummaryText, 240),
-    reasoning_summary_chars: typeof providerVisibleSummaryText === "string" ? providerVisibleSummaryText.length : undefined,
-    reasoning_summary_source: providerVisibleSummaryText ? "provider_visible" : undefined,
+    text_preview: exposeRaw ? boundedPreview(rawReasoningText, capture.previewChars) : undefined,
+    reasoning_summary_preview: boundedPreview(emittedProviderSummaryText, capture.previewChars),
+    reasoning_summary_chars: typeof emittedProviderSummaryText === "string" ? emittedProviderSummaryText.length : undefined,
+    reasoning_summary_source: emittedProviderSummaryText ? "provider_visible" : undefined,
     content_types: contentTypes.length > 0 ? contentTypes : undefined,
     stop_reason: normalizeString(message?.stopReason ?? message?.stop_reason),
   });
@@ -664,9 +707,18 @@ function hasRedactedReasoning(message: any): boolean {
   );
 }
 
-function rawReasoningCaptureEnabled(): boolean {
+function rawReasoningCaptureEnvValue(): boolean | undefined {
   const value = process.env.DEN_PI_SUBAGENT_RAW_REASONING;
-  return typeof value === "string" && ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return undefined;
+}
+
+function normalizeReasoningPreviewChars(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_REASONING_PREVIEW_CHARS;
+  return Math.min(MAX_REASONING_PREVIEW_CHARS, Math.max(MIN_REASONING_PREVIEW_CHARS, Math.floor(value)));
 }
 
 function extractContentTypes(message: any): string[] | undefined {

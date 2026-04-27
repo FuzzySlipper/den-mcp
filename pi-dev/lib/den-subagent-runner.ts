@@ -12,6 +12,8 @@ import {
   normalizePiWorkEvent,
   parsePiStdoutLine,
   type JsonObject,
+  buildReasoningCaptureMetadata,
+  type ReasoningCaptureOptions,
   type SubagentArtifacts,
 } from "./den-subagent-pipeline.ts";
 import type { SubagentRunRecorder } from "./den-subagent-recorder.ts";
@@ -33,6 +35,7 @@ export type RunOptions = {
   model?: string;
   fallbackModel?: string;
   tools?: string;
+  reasoningCapture?: ReasoningCaptureOptions;
   cwd?: string;
   postResult?: boolean;
   rerunOfRunId?: string;
@@ -149,6 +152,7 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
   const prompt = buildSubagentPrompt(cfg, options);
   args.push(prompt);
   const contextMetadata = buildSubagentRunContextMetadata(options);
+  const reasoningCaptureMetadata = buildReasoningCaptureMetadata(options.reasoningCapture);
   let piSessionId: string | undefined;
   let piSessionFilePath: string | undefined;
   const sessionMetadata = () => ({
@@ -298,6 +302,7 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
       command,
       model: options.model ?? null,
       tools: tools ?? null,
+      reasoning_capture: reasoningCaptureMetadata,
       session_mode: sessionMode,
       session: options.session ?? null,
       ...contextMetadata,
@@ -496,6 +501,7 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
     message_count: result.message_count,
     assistant_message_count: result.assistant_message_count,
     model: result.model ?? null,
+    reasoning_capture: reasoningCaptureMetadata,
     child_error_message: result.child_error_message ?? null,
     infrastructure_failure_reason: result.infrastructure_failure_reason ?? null,
     infrastructure_warning_reason: result.infrastructure_warning_reason ?? null,
@@ -531,6 +537,7 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
         subagentRole: options.role,
         backend: piCliSubagentBackend.name,
         requestedModel: options.model,
+        reasoningCapture: options.reasoningCapture,
       });
       if (workEvent) void recorder.appendEvent(workEvent);
       return parsed.event;

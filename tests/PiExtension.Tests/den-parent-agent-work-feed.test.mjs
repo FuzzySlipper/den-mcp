@@ -69,7 +69,7 @@ test('parent agent work normalization preserves assistant narrative without prom
   }, identity, 1236), undefined);
 });
 
-test('parent agent reasoning normalization is redacted by default and raw only by local opt-in', () => {
+test('parent agent reasoning normalization is redacted by default and raw can be enabled by config', () => {
   const previous = process.env.DEN_PI_SUBAGENT_RAW_REASONING;
   delete process.env.DEN_PI_SUBAGENT_RAW_REASONING;
   try {
@@ -107,7 +107,6 @@ test('parent agent reasoning normalization is redacted by default and raw only b
       cwd: '/repo',
     });
 
-    process.env.DEN_PI_SUBAGENT_RAW_REASONING = '1';
     const raw = normalizeParentAgentWorkEvent({
       type: 'message_update',
       assistantMessageEvent: { type: 'thinking_delta', delta: 'private planning' },
@@ -117,9 +116,23 @@ test('parent agent reasoning normalization is redacted by default and raw only b
         model: 'gpt-test',
         content: [{ type: 'thinking', thinking: 'private planning' }],
       },
-    }, identity, 1237);
+    }, { ...identity, reasoningCapture: { captureRawLocalPreviews: true } }, 1237);
     assert.equal(raw?.reasoning_redacted, false);
     assert.equal(raw?.text_preview, 'private planning');
+
+    process.env.DEN_PI_SUBAGENT_RAW_REASONING = 'off';
+    const envDisabled = normalizeParentAgentWorkEvent({
+      type: 'message_update',
+      assistantMessageEvent: { type: 'thinking_delta', delta: 'private planning' },
+      message: {
+        role: 'assistant',
+        provider: 'openai',
+        model: 'gpt-test',
+        content: [{ type: 'thinking', thinking: 'private planning' }],
+      },
+    }, { ...identity, reasoningCapture: { captureRawLocalPreviews: true } }, 1238);
+    assert.equal(envDisabled?.reasoning_redacted, true);
+    assert.equal(envDisabled?.text_preview, undefined);
   } finally {
     restoreEnv('DEN_PI_SUBAGENT_RAW_REASONING', previous);
   }

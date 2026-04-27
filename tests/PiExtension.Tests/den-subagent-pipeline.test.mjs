@@ -13,6 +13,7 @@ import {
 import {
   SUBAGENT_RUN_SCHEMA,
   SUBAGENT_RUN_SCHEMA_VERSION,
+  buildReasoningCaptureMetadata,
   buildSubagentRunMetadata,
   classifySubagentInfrastructureFailure,
   classifySubagentStderrIssue,
@@ -22,6 +23,7 @@ import {
   normalizePiWorkEvent,
   normalizeSubagentRunEvent,
   parsePiStdoutLine,
+  resolveReasoningCaptureOptions,
   subagentOpsEventTypeForEvent,
   subagentRunStateFromOpsEventType,
 } from '../../pi-dev/lib/den-subagent-pipeline.ts';
@@ -211,15 +213,15 @@ test('subagent work event normalizer summarizes child Pi events without prompts'
   });
 });
 
-test('subagent reasoning normalization can include raw local preview when enabled', () => {
+test('subagent reasoning normalization can include raw local preview when config enables it', () => {
   const previous = process.env.DEN_PI_SUBAGENT_RAW_REASONING;
-  process.env.DEN_PI_SUBAGENT_RAW_REASONING = '1';
+  delete process.env.DEN_PI_SUBAGENT_RAW_REASONING;
   try {
     assert.deepEqual(normalizePiWorkEvent({
       type: 'message_update',
       assistantMessageEvent: { type: 'reasoning_delta', delta: 'checking Den access' },
       message: { role: 'assistant', provider: 'openai', model: 'gpt-test', content: [{ type: 'reasoning', reasoning: 'checking Den access' }] },
-    }, 1238), {
+    }, 1238, { reasoningCapture: { captureRawLocalPreviews: true, previewChars: 12 } }), {
       type: 'subagent.work_reasoning_update',
       ts: 1238,
       source_type: 'message_update',
@@ -230,9 +232,39 @@ test('subagent reasoning normalization can include raw local preview when enable
       reasoning_kind: 'reasoning_delta',
       reasoning_chars: 19,
       reasoning_redacted: false,
-      text_preview: 'checking Den access',
+      text_preview: 'checking De…',
       content_types: ['reasoning'],
     });
+  } finally {
+    restoreEnv('DEN_PI_SUBAGENT_RAW_REASONING', previous);
+  }
+});
+
+
+test('reasoning capture config preserves env compatibility override semantics', () => {
+  const previous = process.env.DEN_PI_SUBAGENT_RAW_REASONING;
+  try {
+    delete process.env.DEN_PI_SUBAGENT_RAW_REASONING;
+    assert.deepEqual(resolveReasoningCaptureOptions({ captureRawLocalPreviews: true, previewChars: 5000 }), {
+      captureProviderSummaries: true,
+      captureRawLocalPreviews: true,
+      previewChars: 2000,
+      rawEnvOverride: false,
+      rawEnvValue: undefined,
+    });
+
+    process.env.DEN_PI_SUBAGENT_RAW_REASONING = '1';
+    assert.equal(resolveReasoningCaptureOptions({ captureRawLocalPreviews: false }).captureRawLocalPreviews, true);
+    assert.deepEqual(buildReasoningCaptureMetadata({ captureRawLocalPreviews: false }), {
+      capture_provider_summaries: true,
+      capture_raw_local_previews: true,
+      preview_chars: 240,
+      raw_env_override: true,
+      raw_env_value: true,
+    });
+
+    process.env.DEN_PI_SUBAGENT_RAW_REASONING = 'off';
+    assert.equal(resolveReasoningCaptureOptions({ captureRawLocalPreviews: true }).captureRawLocalPreviews, false);
   } finally {
     restoreEnv('DEN_PI_SUBAGENT_RAW_REASONING', previous);
   }
@@ -264,6 +296,24 @@ test('subagent reasoning normalization preserves provider-visible summaries with
     assert.equal(event?.reasoning_summary_preview, summary);
     assert.equal(event?.reasoning_summary_chars, summary.length);
     assert.equal(event?.reasoning_summary_source, 'provider_visible');
+
+    const disabled = normalizePiWorkEvent({
+      type: 'message_end',
+      assistantMessageEvent: { type: 'thinking_end' },
+      message: {
+        role: 'assistant',
+        provider: 'openai',
+        model: 'gpt-test',
+        content: [{
+          type: 'thinking',
+          thinking: summary,
+          thinkingSignature: JSON.stringify({ summary }),
+        }],
+      },
+    }, 1240, { reasoningCapture: { captureProviderSummaries: false } });
+    assert.equal(disabled?.reasoning_summary_preview, undefined);
+    assert.equal(disabled?.text_preview, undefined);
+    assert.equal(disabled?.reasoning_redacted, true);
   } finally {
     restoreEnv('DEN_PI_SUBAGENT_RAW_REASONING', previous);
   }
@@ -740,6 +790,42 @@ test('pi cli runner records normalized work events from child Pi stream', async 
   assert.ok(events.some((event) => event.type === 'subagent.work_message_end' && event.text_preview === 'final answer'));
   assert.ok(events.some((event) => event.type === 'subagent.assistant_output'));
 });
+
+test('pi cli runner applies configured reasoning capture to status and work events', async (t) => {
+  const previous = process.env.DEN_PI_SUBAGENT_RAW_REASONING;
+  delete process.env.DEN_PI_SUBAGENT_RAW_REASONING;
+  t.after(() => restoreEnv('DEN_PI_SUBAGENT_RAW_REASONING', previous));
+
+  const { recorder } = await runFakePiSubagent(t, {
+    prefix: 'den-subagent-reasoning-config-oit-',
+    runId: 'run-reasoning-config',
+    scriptLines: [
+      '#!/usr/bin/env node',
+      'console.log(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "reasoning_delta", delta: "checking Den config controls" }, message: { role: "assistant", provider: "openai", model: "gpt-test", content: [{ type: "reasoning", reasoning: "checking Den config controls" }] } }));',
+      'console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", model: "gpt-test", stopReason: "stop", content: [{ type: "text", text: "done" }] } }));',
+      'process.exit(0);',
+    ],
+    options: {
+      role: 'coder',
+      prompt: 'Check reasoning config.',
+      reasoningCapture: { captureRawLocalPreviews: true, previewChars: 13 },
+    },
+  });
+
+  const status = await readJson(recorder.artifacts.status_json_path);
+  assert.deepEqual(status.reasoning_capture, {
+    capture_provider_summaries: true,
+    capture_raw_local_previews: true,
+    preview_chars: 13,
+    raw_env_override: false,
+  });
+
+  const events = await readJsonLines(recorder.artifacts.events_jsonl_path);
+  const reasoning = events.find((event) => event.type === 'subagent.work_reasoning_update');
+  assert.equal(reasoning?.reasoning_redacted, false);
+  assert.equal(reasoning?.text_preview, 'checking Den…');
+});
+
 
 test('pi cli runner does not terminal-drain partial assistant tool-use turns', async (t) => {
   const updates = [];
