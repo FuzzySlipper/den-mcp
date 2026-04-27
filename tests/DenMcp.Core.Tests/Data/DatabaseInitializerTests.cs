@@ -48,6 +48,7 @@ public class DatabaseInitializerTests : IDisposable
         Assert.Contains("documents_fts", tables);
         Assert.Contains("agent_stream_entries", tables);
         Assert.Contains("agent_runs", tables);
+        Assert.Contains("agent_workspaces", tables);
         Assert.Contains("agent_instance_bindings", tables);
     }
 

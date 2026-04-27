@@ -500,12 +500,59 @@ public sealed class DatabaseInitializer
             WHERE task_id IS NOT NULL;
         CREATE INDEX IF NOT EXISTS idx_agent_runs_state_updated
             ON agent_runs(state, updated_at DESC, latest_stream_entry_id DESC);
+
+        ------------------------------------------------------------
+        -- AGENT WORKSPACES
+        ------------------------------------------------------------
+        CREATE TABLE IF NOT EXISTS agent_workspaces (
+            id                    TEXT PRIMARY KEY,
+            project_id            TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            task_id               INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            branch                TEXT NOT NULL,
+            worktree_path         TEXT NOT NULL,
+            base_branch           TEXT NOT NULL,
+            base_commit           TEXT,
+            head_commit           TEXT,
+            state                 TEXT NOT NULL DEFAULT 'active'
+                                  CHECK (state IN (
+                                      'planned',
+                                      'active',
+                                      'review',
+                                      'complete',
+                                      'failed',
+                                      'archived'
+                                  )),
+            created_by_run_id     TEXT REFERENCES agent_runs(run_id) ON DELETE SET NULL,
+            dev_server_url        TEXT,
+            preview_url           TEXT,
+            cleanup_policy        TEXT NOT NULL DEFAULT 'keep'
+                                  CHECK (cleanup_policy IN (
+                                      'keep',
+                                      'delete_worktree',
+                                      'archive'
+                                  )),
+            changed_file_summary  TEXT,
+            created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at            TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(project_id, task_id, branch)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_agent_workspaces_project_updated
+            ON agent_workspaces(project_id, updated_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_agent_workspaces_task_updated
+            ON agent_workspaces(task_id, updated_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_agent_workspaces_state_updated
+            ON agent_workspaces(state, updated_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_agent_workspaces_created_by_run
+            ON agent_workspaces(created_by_run_id)
+            WHERE created_by_run_id IS NOT NULL;
         """;
 
     private async Task RunMigrationsAsync(SqliteConnection connection)
     {
         await EnsureAgentGuidanceSchemaAsync(connection);
         await EnsureAgentRunSchemaAsync(connection);
+        await EnsureAgentWorkspaceSchemaAsync(connection);
 
         // Add session_id column to agent_sessions if it doesn't exist.
         // SQLite has no ALTER TABLE ... ADD COLUMN IF NOT EXISTS,
@@ -700,6 +747,59 @@ public sealed class DatabaseInitializer
             """);
         await EnsureIndexAsync(connection, "idx_agent_runs_state_updated",
             "CREATE INDEX IF NOT EXISTS idx_agent_runs_state_updated ON agent_runs(state, updated_at DESC, latest_stream_entry_id DESC)");
+    }
+
+    private static async Task EnsureAgentWorkspaceSchemaAsync(SqliteConnection connection)
+    {
+        await using var tableCmd = connection.CreateCommand();
+        tableCmd.CommandText = """
+            CREATE TABLE IF NOT EXISTS agent_workspaces (
+                id                    TEXT PRIMARY KEY,
+                project_id            TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                task_id               INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+                branch                TEXT NOT NULL,
+                worktree_path         TEXT NOT NULL,
+                base_branch           TEXT NOT NULL,
+                base_commit           TEXT,
+                head_commit           TEXT,
+                state                 TEXT NOT NULL DEFAULT 'active'
+                                      CHECK (state IN (
+                                          'planned',
+                                          'active',
+                                          'review',
+                                          'complete',
+                                          'failed',
+                                          'archived'
+                                      )),
+                created_by_run_id     TEXT REFERENCES agent_runs(run_id) ON DELETE SET NULL,
+                dev_server_url        TEXT,
+                preview_url           TEXT,
+                cleanup_policy        TEXT NOT NULL DEFAULT 'keep'
+                                      CHECK (cleanup_policy IN (
+                                          'keep',
+                                          'delete_worktree',
+                                          'archive'
+                                      )),
+                changed_file_summary  TEXT,
+                created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at            TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(project_id, task_id, branch)
+            )
+            """;
+        await tableCmd.ExecuteNonQueryAsync();
+
+        await EnsureIndexAsync(connection, "idx_agent_workspaces_project_updated",
+            "CREATE INDEX IF NOT EXISTS idx_agent_workspaces_project_updated ON agent_workspaces(project_id, updated_at DESC, id DESC)");
+        await EnsureIndexAsync(connection, "idx_agent_workspaces_task_updated",
+            "CREATE INDEX IF NOT EXISTS idx_agent_workspaces_task_updated ON agent_workspaces(task_id, updated_at DESC, id DESC)");
+        await EnsureIndexAsync(connection, "idx_agent_workspaces_state_updated",
+            "CREATE INDEX IF NOT EXISTS idx_agent_workspaces_state_updated ON agent_workspaces(state, updated_at DESC, id DESC)");
+        await EnsureIndexAsync(connection, "idx_agent_workspaces_created_by_run",
+            """
+            CREATE INDEX IF NOT EXISTS idx_agent_workspaces_created_by_run
+            ON agent_workspaces(created_by_run_id)
+            WHERE created_by_run_id IS NOT NULL
+            """);
     }
 
     private static async Task TryAddColumnAsync(SqliteConnection connection, string table, string column, string columnDefinition)

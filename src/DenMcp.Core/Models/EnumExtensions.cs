@@ -152,6 +152,44 @@ public static class EnumExtensions
         _ => throw new ArgumentException($"Unknown agent session status: {value}", nameof(value))
     };
 
+    public static string ToDbValue(this AgentWorkspaceState state) => state switch
+    {
+        AgentWorkspaceState.Planned => "planned",
+        AgentWorkspaceState.Active => "active",
+        AgentWorkspaceState.Review => "review",
+        AgentWorkspaceState.Complete => "complete",
+        AgentWorkspaceState.Failed => "failed",
+        AgentWorkspaceState.Archived => "archived",
+        _ => throw new ArgumentOutOfRangeException(nameof(state), state, null)
+    };
+
+    public static AgentWorkspaceState ParseAgentWorkspaceState(string value) => value switch
+    {
+        "planned" => AgentWorkspaceState.Planned,
+        "active" => AgentWorkspaceState.Active,
+        "review" => AgentWorkspaceState.Review,
+        "complete" => AgentWorkspaceState.Complete,
+        "failed" => AgentWorkspaceState.Failed,
+        "archived" => AgentWorkspaceState.Archived,
+        _ => throw new ArgumentException($"Unknown agent workspace state: {value}", nameof(value))
+    };
+
+    public static string ToDbValue(this AgentWorkspaceCleanupPolicy policy) => policy switch
+    {
+        AgentWorkspaceCleanupPolicy.Keep => "keep",
+        AgentWorkspaceCleanupPolicy.DeleteWorktree => "delete_worktree",
+        AgentWorkspaceCleanupPolicy.Archive => "archive",
+        _ => throw new ArgumentOutOfRangeException(nameof(policy), policy, null)
+    };
+
+    public static AgentWorkspaceCleanupPolicy ParseAgentWorkspaceCleanupPolicy(string value) => value switch
+    {
+        "keep" => AgentWorkspaceCleanupPolicy.Keep,
+        "delete_worktree" => AgentWorkspaceCleanupPolicy.DeleteWorktree,
+        "archive" => AgentWorkspaceCleanupPolicy.Archive,
+        _ => throw new ArgumentException($"Unknown agent workspace cleanup policy: {value}", nameof(value))
+    };
+
     public static string ToDbValue(this DispatchStatus status) => status switch
     {
         DispatchStatus.Pending => "pending",

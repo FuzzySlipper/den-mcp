@@ -61,6 +61,23 @@ public enum AgentInstanceBindingStatus
     Degraded
 }
 
+public enum AgentWorkspaceState
+{
+    Planned,
+    Active,
+    Review,
+    Complete,
+    Failed,
+    Archived
+}
+
+public enum AgentWorkspaceCleanupPolicy
+{
+    Keep,
+    DeleteWorktree,
+    Archive
+}
+
 public enum AgentSessionStatus
 {
     Active,

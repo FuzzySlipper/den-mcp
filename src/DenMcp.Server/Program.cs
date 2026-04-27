@@ -72,6 +72,7 @@ builder.Services.AddSingleton<IAgentInstanceBindingRepository, AgentInstanceBind
 builder.Services.AddSingleton<DispatchRepository>();
 builder.Services.AddSingleton<IAgentStreamRepository, AgentStreamRepository>();
 builder.Services.AddSingleton<IAgentRunRepository, AgentRunRepository>();
+builder.Services.AddSingleton<IAgentWorkspaceRepository, AgentWorkspaceRepository>();
 builder.Services.AddSingleton<AgentStreamRealtimeHub>();
 builder.Services.AddSingleton<INotificationChannel, NoOpNotificationChannel>();
 builder.Services.AddSingleton<IAgentStreamOpsService, AgentStreamOpsService>();
@@ -128,6 +129,7 @@ app.MapAgentRoutes();
 app.MapDispatchRoutes();
 app.MapAgentStreamRoutes();
 app.MapSubagentRunRoutes();
+app.MapAgentWorkspaceRoutes();
 app.MapAttentionRoutes();
 app.MapLibrarianRoutes();
 
