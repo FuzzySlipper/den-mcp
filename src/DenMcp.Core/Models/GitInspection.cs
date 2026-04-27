@@ -3,6 +3,12 @@ namespace DenMcp.Core.Models;
 public sealed class GitStatusResponse
 {
     public required string ProjectId { get; set; }
+    public string? WorkspaceId { get; set; }
+    public int? TaskId { get; set; }
+    public string? WorkspaceBranch { get; set; }
+    public string? WorkspaceBaseBranch { get; set; }
+    public string? WorkspaceBaseCommit { get; set; }
+    public string? WorkspaceHeadCommit { get; set; }
     public required string RootPath { get; set; }
     public bool IsGitRepository { get; set; }
     public string? Branch { get; set; }
@@ -21,6 +27,12 @@ public sealed class GitStatusResponse
 public sealed class GitFilesResponse
 {
     public required string ProjectId { get; set; }
+    public string? WorkspaceId { get; set; }
+    public int? TaskId { get; set; }
+    public string? WorkspaceBranch { get; set; }
+    public string? WorkspaceBaseBranch { get; set; }
+    public string? WorkspaceBaseCommit { get; set; }
+    public string? WorkspaceHeadCommit { get; set; }
     public required string RootPath { get; set; }
     public string? BaseRef { get; set; }
     public string? HeadRef { get; set; }
@@ -33,6 +45,12 @@ public sealed class GitFilesResponse
 public sealed class GitDiffResponse
 {
     public required string ProjectId { get; set; }
+    public string? WorkspaceId { get; set; }
+    public int? TaskId { get; set; }
+    public string? WorkspaceBranch { get; set; }
+    public string? WorkspaceBaseBranch { get; set; }
+    public string? WorkspaceBaseCommit { get; set; }
+    public string? WorkspaceHeadCommit { get; set; }
     public required string RootPath { get; set; }
     public string? Path { get; set; }
     public string? BaseRef { get; set; }

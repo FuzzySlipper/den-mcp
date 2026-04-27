@@ -1,6 +1,7 @@
 using System.Text.Json;
 using DenMcp.Core.Data;
 using DenMcp.Core.Models;
+using DenMcp.Core.Services;
 
 namespace DenMcp.Server.Routes;
 
@@ -72,6 +73,71 @@ public static class AgentWorkspaceRoutes
                 : Results.Ok(workspace);
         });
 
+        app.MapGet("/api/projects/{projectId}/agent-workspaces/{workspaceId}/git/status", async (
+            IAgentWorkspaceRepository repo,
+            ITaskRepository tasks,
+            IGitInspectionService git,
+            string projectId,
+            string workspaceId,
+            CancellationToken cancellationToken) =>
+        {
+            var loaded = await LoadWorkspaceForGitAsync(repo, tasks, projectId, workspaceId);
+            if (loaded.Error is not null)
+                return loaded.Error;
+            var workspace = loaded.Workspace!;
+
+            var status = await git.GetStatusAsync(projectId, workspace.WorktreePath, cancellationToken);
+            ApplyWorkspaceMetadata(status, workspace);
+            AddAlignmentWarnings(status, workspace, status);
+            return Results.Ok(status);
+        });
+
+        app.MapGet("/api/projects/{projectId}/agent-workspaces/{workspaceId}/git/files", async (
+            IAgentWorkspaceRepository repo,
+            ITaskRepository tasks,
+            IGitInspectionService git,
+            string projectId,
+            string workspaceId,
+            string? baseRef,
+            string? headRef,
+            bool? includeUntracked,
+            CancellationToken cancellationToken) =>
+        {
+            var loaded = await LoadWorkspaceForGitAsync(repo, tasks, projectId, workspaceId);
+            if (loaded.Error is not null)
+                return loaded.Error;
+            var workspace = loaded.Workspace!;
+
+            var files = await git.GetFilesAsync(projectId, workspace.WorktreePath, baseRef, headRef, includeUntracked ?? true, cancellationToken);
+            ApplyWorkspaceMetadata(files, workspace);
+            await AddAlignmentWarningsAsync(git, files.Warnings, workspace, projectId, cancellationToken);
+            return Results.Ok(files);
+        });
+
+        app.MapGet("/api/projects/{projectId}/agent-workspaces/{workspaceId}/git/diff", async (
+            IAgentWorkspaceRepository repo,
+            ITaskRepository tasks,
+            IGitInspectionService git,
+            string projectId,
+            string workspaceId,
+            string? path,
+            string? baseRef,
+            string? headRef,
+            int? maxBytes,
+            bool? staged,
+            CancellationToken cancellationToken) =>
+        {
+            var loaded = await LoadWorkspaceForGitAsync(repo, tasks, projectId, workspaceId);
+            if (loaded.Error is not null)
+                return loaded.Error;
+            var workspace = loaded.Workspace!;
+
+            var diff = await git.GetDiffAsync(projectId, workspace.WorktreePath, path, baseRef, headRef, maxBytes, staged ?? false, cancellationToken);
+            ApplyWorkspaceMetadata(diff, workspace);
+            await AddAlignmentWarningsAsync(git, diff.Warnings, workspace, projectId, cancellationToken);
+            return Results.Ok(diff);
+        });
+
         app.MapPost("/api/projects/{projectId}/agent-workspaces", async (
             IAgentWorkspaceRepository repo,
             string projectId,
@@ -99,6 +165,94 @@ public static class AgentWorkspaceRoutes
             return await SaveWorkspaceAsync(repo, workspace);
         });
     }
+
+    private static async Task<(AgentWorkspace? Workspace, IResult? Error)> LoadWorkspaceForGitAsync(
+        IAgentWorkspaceRepository repo,
+        ITaskRepository tasks,
+        string projectId,
+        string workspaceId)
+    {
+        var workspace = await repo.GetAsync(workspaceId, projectId);
+        if (workspace is null)
+            return (null, Results.NotFound(new { error = $"Agent workspace {workspaceId} not found" }));
+
+        var task = await tasks.GetByIdAsync(workspace.TaskId);
+        if (task is null || !string.Equals(task.ProjectId, projectId, StringComparison.Ordinal))
+            return (null, Results.Conflict(new { error = $"Agent workspace {workspaceId} references task {workspace.TaskId}, which does not belong to project '{projectId}'." }));
+
+        return (workspace, null);
+    }
+
+    private static void ApplyWorkspaceMetadata(GitStatusResponse response, AgentWorkspace workspace)
+    {
+        response.WorkspaceId = workspace.Id;
+        response.TaskId = workspace.TaskId;
+        response.WorkspaceBranch = workspace.Branch;
+        response.WorkspaceBaseBranch = workspace.BaseBranch;
+        response.WorkspaceBaseCommit = workspace.BaseCommit;
+        response.WorkspaceHeadCommit = workspace.HeadCommit;
+    }
+
+    private static void ApplyWorkspaceMetadata(GitFilesResponse response, AgentWorkspace workspace)
+    {
+        response.WorkspaceId = workspace.Id;
+        response.TaskId = workspace.TaskId;
+        response.WorkspaceBranch = workspace.Branch;
+        response.WorkspaceBaseBranch = workspace.BaseBranch;
+        response.WorkspaceBaseCommit = workspace.BaseCommit;
+        response.WorkspaceHeadCommit = workspace.HeadCommit;
+    }
+
+    private static void ApplyWorkspaceMetadata(GitDiffResponse response, AgentWorkspace workspace)
+    {
+        response.WorkspaceId = workspace.Id;
+        response.TaskId = workspace.TaskId;
+        response.WorkspaceBranch = workspace.Branch;
+        response.WorkspaceBaseBranch = workspace.BaseBranch;
+        response.WorkspaceBaseCommit = workspace.BaseCommit;
+        response.WorkspaceHeadCommit = workspace.HeadCommit;
+    }
+
+    private static async Task AddAlignmentWarningsAsync(
+        IGitInspectionService git,
+        List<string> warnings,
+        AgentWorkspace workspace,
+        string projectId,
+        CancellationToken cancellationToken)
+    {
+        var status = await git.GetStatusAsync(projectId, workspace.WorktreePath, cancellationToken);
+        if (status.Errors.Count > 0)
+            return;
+        AddAlignmentWarnings(warnings, workspace, status);
+    }
+
+    private static void AddAlignmentWarnings(GitStatusResponse response, AgentWorkspace workspace, GitStatusResponse liveStatus) =>
+        AddAlignmentWarnings(response.Warnings, workspace, liveStatus);
+
+    private static void AddAlignmentWarnings(List<string> warnings, AgentWorkspace workspace, GitStatusResponse liveStatus)
+    {
+        if (liveStatus.IsDetached && !string.IsNullOrWhiteSpace(workspace.Branch))
+        {
+            warnings.Add($"Workspace git checkout is detached; stored workspace branch is '{workspace.Branch}'.");
+        }
+        else if (!string.IsNullOrWhiteSpace(workspace.Branch)
+                 && !string.IsNullOrWhiteSpace(liveStatus.Branch)
+                 && !string.Equals(workspace.Branch, liveStatus.Branch, StringComparison.Ordinal))
+        {
+            warnings.Add($"Workspace branch metadata '{workspace.Branch}' differs from live git branch '{liveStatus.Branch}'.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(workspace.HeadCommit)
+            && !string.IsNullOrWhiteSpace(liveStatus.HeadSha)
+            && !SameCommit(workspace.HeadCommit, liveStatus.HeadSha))
+        {
+            warnings.Add($"Workspace head metadata '{workspace.HeadCommit}' differs from live git HEAD '{liveStatus.HeadSha}'.");
+        }
+    }
+
+    private static bool SameCommit(string left, string right) =>
+        left.StartsWith(right, StringComparison.OrdinalIgnoreCase)
+        || right.StartsWith(left, StringComparison.OrdinalIgnoreCase);
 
     private static async Task<IResult> SaveWorkspaceAsync(IAgentWorkspaceRepository repo, AgentWorkspace workspace)
     {
