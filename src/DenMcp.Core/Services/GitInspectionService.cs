@@ -219,8 +219,8 @@ public sealed class GitInspectionService : IGitInspectionService
 
     private static async Task<GitCommandResult> RunGitAsync(string rootPath, IReadOnlyList<string> args, int maxBytes, TimeSpan timeout, CancellationToken cancellationToken)
     {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        cts.CancelAfter(timeout);
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(timeout);
 
         var psi = new ProcessStartInfo
         {
@@ -238,22 +238,26 @@ public sealed class GitInspectionService : IGitInspectionService
         try
         {
             using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start git process.");
-            var stdoutTask = process.StandardOutput.ReadToEndAsync(cts.Token);
-            var stderrTask = process.StandardError.ReadToEndAsync(cts.Token);
+            var killedForOutputCap = false;
+            var stdoutTask = ReadCappedAsync(process.StandardOutput.BaseStream, maxBytes, timeoutCts.Token, () =>
+            {
+                killedForOutputCap = true;
+                TryKill(process);
+            });
+            var stderrTask = ReadCappedAsync(process.StandardError.BaseStream, 8192, timeoutCts.Token);
+
             try
             {
-                await process.WaitForExitAsync(cts.Token);
+                await process.WaitForExitAsync(timeoutCts.Token);
                 var stdout = await stdoutTask;
                 var stderr = await stderrTask;
                 var warnings = new List<string>();
-                var truncated = false;
-                if (Encoding.UTF8.GetByteCount(stdout) > maxBytes)
-                {
-                    stdout = TruncateUtf8(stdout, maxBytes);
-                    truncated = true;
+                if (stdout.Truncated)
                     warnings.Add($"Git output truncated to {maxBytes} bytes.");
-                }
-                return new GitCommandResult(process.ExitCode, stdout, stderr, truncated, warnings);
+                if (stderr.Truncated)
+                    warnings.Add("Git stderr truncated to 8192 bytes.");
+
+                return new GitCommandResult(killedForOutputCap ? 0 : process.ExitCode, stdout.Text, stderr.Text, stdout.Truncated, warnings);
             }
             catch (OperationCanceledException)
             {
@@ -265,6 +269,41 @@ public sealed class GitInspectionService : IGitInspectionService
         {
             return new GitCommandResult(-1, string.Empty, ex.Message, false, [$"Failed to start git: {ex.Message}"]);
         }
+    }
+
+    private static async Task<CappedText> ReadCappedAsync(Stream stream, int maxBytes, CancellationToken cancellationToken, Action? onCapReached = null)
+    {
+        var buffer = new byte[8192];
+        await using var output = new MemoryStream(capacity: Math.Min(maxBytes, buffer.Length));
+        var truncated = false;
+
+        while (true)
+        {
+            var read = await stream.ReadAsync(buffer.AsMemory(0, Math.Min(buffer.Length, Math.Max(1, maxBytes - (int)output.Length))), cancellationToken);
+            if (read == 0) break;
+
+            var remaining = maxBytes - (int)output.Length;
+            if (read <= remaining)
+            {
+                output.Write(buffer, 0, read);
+            }
+            else
+            {
+                output.Write(buffer, 0, remaining);
+                truncated = true;
+                onCapReached?.Invoke();
+                break;
+            }
+
+            if (output.Length >= maxBytes)
+            {
+                truncated = true;
+                onCapReached?.Invoke();
+                break;
+            }
+        }
+
+        return new CappedText(Encoding.UTF8.GetString(output.ToArray()).TrimEnd('\uFFFD'), truncated);
     }
 
     private static void TryKill(Process process)
@@ -280,13 +319,6 @@ public sealed class GitInspectionService : IGitInspectionService
         }
     }
 
-    private static string TruncateUtf8(string value, int maxBytes)
-    {
-        var bytes = Encoding.UTF8.GetBytes(value);
-        if (bytes.Length <= maxBytes) return value;
-        return Encoding.UTF8.GetString(bytes.AsSpan(0, maxBytes)).TrimEnd('\uFFFD');
-    }
-
     private static string GitError(string command, GitCommandResult result)
     {
         var stderr = string.IsNullOrWhiteSpace(result.Stderr) ? "no stderr" : result.Stderr.Trim();
@@ -295,6 +327,7 @@ public sealed class GitInspectionService : IGitInspectionService
 
     private sealed record RootResolution(string? RootPath, List<string> Errors);
     internal sealed record PathValidationResult(string? RelativePath, string? Error);
+    private sealed record CappedText(string Text, bool Truncated);
     private sealed record GitCommandResult(int ExitCode, string Stdout, string Stderr, bool Truncated, List<string> Warnings);
 }
 
