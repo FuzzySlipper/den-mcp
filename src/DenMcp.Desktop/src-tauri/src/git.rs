@@ -166,6 +166,14 @@ pub fn build_git_scopes(projects: &[Project], workspaces: &[AgentWorkspace]) -> 
 }
 
 pub fn inspect_scope(scope: &GitScope, settings: &OperatorSettings) -> LocalGitSnapshot {
+    inspect_scope_with_runner(scope, settings, &SystemGitRunner)
+}
+
+fn inspect_scope_with_runner(
+    scope: &GitScope,
+    settings: &OperatorSettings,
+    runner: &dyn GitRunner,
+) -> LocalGitSnapshot {
     let mut warnings = Vec::new();
     let observed_at = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
@@ -187,6 +195,7 @@ pub fn inspect_scope(scope: &GitScope, settings: &OperatorSettings) -> LocalGitS
             settings,
             observed_at.clone(),
             settings.max_changed_files,
+            runner,
         ) {
             Ok(snapshot) => snapshot,
             Err(error) => {
@@ -216,8 +225,9 @@ fn inspect_visible_git_scope(
     settings: &OperatorSettings,
     observed_at: String,
     max_changed_files: usize,
+    runner: &dyn GitRunner,
 ) -> Result<DesktopGitSnapshotRequest, String> {
-    let status = run_git(
+    let status = runner.run_git(
         &scope.root_path,
         &[
             "status",
@@ -648,23 +658,36 @@ struct GitCommandResult {
     warnings: Vec<String>,
 }
 
-fn run_git(root_path: &str, args: &[&str]) -> Result<GitCommandResult, String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(root_path)
-        .args(args)
-        .output()
-        .map_err(|error| format!("Failed to start git: {error}"))?;
+trait GitRunner {
+    fn run_git(&self, root_path: &str, args: &[&str]) -> Result<GitCommandResult, String>;
+}
 
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    Ok(GitCommandResult {
-        exit_code: output.status.code().unwrap_or(-1),
-        stdout,
-        stderr,
-        truncated: false,
-        warnings: Vec::new(),
-    })
+struct SystemGitRunner;
+
+impl GitRunner for SystemGitRunner {
+    fn run_git(&self, root_path: &str, args: &[&str]) -> Result<GitCommandResult, String> {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(root_path)
+            .args(args)
+            .output()
+            .map_err(|error| format!("Failed to start git: {error}"))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        Ok(GitCommandResult {
+            exit_code: output.status.code().unwrap_or(-1),
+            stdout,
+            stderr,
+            truncated: false,
+            warnings: Vec::new(),
+        })
+    }
+}
+
+fn run_git(root_path: &str, args: &[&str]) -> Result<GitCommandResult, String> {
+    let runner = SystemGitRunner;
+    runner.run_git(root_path, args)
 }
 
 fn format_git_error(command: &str, result: &GitCommandResult) -> String {
@@ -800,6 +823,34 @@ mod tests {
             .warnings
             .iter()
             .any(|warning| warning.contains("git status failed")));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn inspect_scope_maps_git_launch_failure_to_git_error() {
+        struct FailingGitRunner;
+
+        impl GitRunner for FailingGitRunner {
+            fn run_git(
+                &self,
+                _root_path: &str,
+                _args: &[&str],
+            ) -> Result<GitCommandResult, String> {
+                Err("Failed to start git: test launcher unavailable".to_string())
+            }
+        }
+
+        let root = temp_dir("den-git-launch-failure");
+        let mut visible_scope = scope();
+        visible_scope.root_path = root.display().to_string();
+
+        let snapshot = inspect_scope_with_runner(&visible_scope, &settings(), &FailingGitRunner);
+
+        assert_eq!(snapshot.request.state, DesktopSnapshotState::GitError);
+        assert_eq!(snapshot.request.dirty_counts.total, 0);
+        assert!(snapshot.request.warnings.iter().any(|warning| {
+            warning.contains("Failed to start git") && warning.contains("test launcher unavailable")
+        }));
         let _ = std::fs::remove_dir_all(root);
     }
 
