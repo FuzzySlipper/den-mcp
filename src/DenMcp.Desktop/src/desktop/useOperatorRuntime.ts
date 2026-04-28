@@ -113,6 +113,10 @@ export function useOperatorRuntime(): RuntimeState {
   }, [updateIpcHealth]);
 
   const load = useCallback(async () => {
+    if (!mountedRef.current) {
+      return;
+    }
+
     const [statusResult, settingsResult, snapshotResult, sessionSnapshotResult] = await Promise.allSettled([
       callIpc('status load', getOperatorStatus),
       callIpc('settings load', getSettings),
