@@ -226,6 +226,28 @@ separate:
 The project-local file is gitignored because model choices and reasoning capture
 policy are user/machine-specific.
 
+### Worktree config inheritance
+
+When Pi runs in an isolated git worktree (created via `git worktree add`), the
+project-local `.pi/den-config.json` may not exist in the worktree directory.
+Without inheritance, `loadMergedDenExtensionConfig` would fall back to global
+config only, potentially using an unintended model for delegated sub-agents.
+
+The config loader now detects linked worktrees by inspecting
+`git rev-parse --path-format=absolute --git-common-dir`:
+
+- **Primary checkout**: the git common dir's parent matches `cwd`. Only the
+  local `cwd/.pi/den-config.json` is tried.
+- **Linked worktree**: the git common dir's parent is the primary checkout's
+  root. If `cwd/.pi/den-config.json` is absent, the loader falls back to
+  `<primary-checkout>/.pi/den-config.json`.
+- **Non-git directory**: only the local path is tried; no worktree detection.
+
+This ensures delegated coder/reviewer runs in isolated worktrees inherit the
+project's model routing and cost-control settings from the primary checkout
+without manual copying or symlinking. If the worktree has its own
+`.pi/den-config.json`, it takes precedence over the inherited config.
+
 Historical note: during the dispatch migration, Pi could be launched with
 `DEN_PI_AGENT=codex` to drain old Codex-targeted dispatch rows. New workflow
 should leave Pi identified as `pi` (or another explicit Pi instance identity)

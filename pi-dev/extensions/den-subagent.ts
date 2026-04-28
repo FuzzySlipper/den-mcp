@@ -31,6 +31,7 @@ import {
 } from "../lib/den-subagent-pipeline.ts";
 import {
   denConfigPath,
+  denConfigPaths,
   loadDenExtensionConfig,
   loadMergedDenExtensionConfig,
   reasoningCaptureOptionsFromConfig,
@@ -280,12 +281,17 @@ async function runDenConfigCommand(ctx: any) {
     const current = await loadMergedDenExtensionConfig(ctx.cwd);
     const projectPath = denConfigPath("project", ctx.cwd);
     const globalPath = denConfigPath("global", ctx.cwd);
+    const projectPaths = await denConfigPaths(ctx.cwd);
+    const inheritedPath = projectPaths.length > 1 ? projectPaths[1] : undefined;
+    const projectLabel = inheritedPath
+      ? `project-local: ${projectPath} (inherits from ${inheritedPath})`
+      : `project-local: ${projectPath}`;
     const choice = await ctx.ui.select("Den config", [
-      `Sub-agent defaults (project-local: ${projectPath})`,
+      `Sub-agent defaults (${projectLabel})`,
       `Sub-agent defaults (global: ${globalPath})`,
-      `Fallback model (project-local: ${projectPath})`,
+      `Fallback model (${projectLabel})`,
       `Fallback model (global: ${globalPath})`,
-      `Reasoning capture (project-local: ${projectPath})`,
+      `Reasoning capture (${projectLabel})`,
       `Reasoning capture (global: ${globalPath})`,
       "View current config",
       "Done",
@@ -293,7 +299,7 @@ async function runDenConfigCommand(ctx: any) {
 
     if (!choice || choice === "Done") return;
     if (choice === "View current config") {
-      ctx.ui.setWidget("den-config", formatConfigPreview(current, projectPath, globalPath));
+      ctx.ui.setWidget("den-config", formatConfigPreview(current, projectPath, globalPath, inheritedPath));
       continue;
     }
 
@@ -488,11 +494,16 @@ function providerQualifiedModelId(model: any): string {
   return provider && id ? `${provider}/${id}` : id || provider;
 }
 
-function formatConfigPreview(config: DenExtensionConfig, projectPath: string, globalPath: string): string[] {
+function formatConfigPreview(config: DenExtensionConfig, projectPath: string, globalPath: string, inheritedPath?: string): string[] {
   const reasoning = resolveReasoningCaptureOptions(reasoningCaptureOptionsFromConfig(config));
   const lines = [
     "Den config",
     `Project config: ${projectPath}`,
+  ];
+  if (inheritedPath) {
+    lines.push(`Inherited config (from worktree primary checkout): ${inheritedPath}`);
+  }
+  lines.push(
     `Global config: ${globalPath}`,
     "",
     `Fallback model: ${config.fallback_model ?? "(not configured)"}`,
@@ -503,7 +514,7 @@ function formatConfigPreview(config: DenExtensionConfig, projectPath: string, gl
     `- preview length: ${reasoning.previewChars} chars`,
     "",
     "Sub-agent defaults:",
-  ];
+  );
   for (const role of ["coder", "reviewer", "planner"]) {
     const roleConfig = config.subagents?.[role];
     lines.push(`- ${role}: ${roleConfig?.model ?? "(not configured)"}`);
