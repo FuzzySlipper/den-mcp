@@ -38,10 +38,15 @@ import {
   type ConfigScope,
   type DenExtensionConfig,
 } from "../lib/den-extension-config.ts";
+import {
+  CODER_PROMPT_SLUG,
+  REVIEWER_PROMPT_SLUG,
+  fallbackPrompt,
+  renderTemplate,
+  summarizeTaskContext,
+} from "../lib/den-prompt-templates.ts";
 
 const DEFAULT_BASE_URL = "http://192.168.1.10:5199";
-const CODER_PROMPT_SLUG = "pi-coder-subagent-prompt";
-const REVIEWER_PROMPT_SLUG = "pi-reviewer-subagent-prompt";
 const GLOBAL_SUFFIX = "-default";
 const RERUN_POLL_MS = 3_000;
 const MAX_RERUN_SNAPSHOTS = 50;
@@ -926,60 +931,6 @@ function parseSessionMode(value: string | undefined): "fresh" | "continue" | "fo
   if (!value) return undefined;
   if (value === "fresh" || value === "continue" || value === "fork" || value === "session") return value;
   throw new Error("session_mode must be fresh, continue, fork, or session.");
-}
-
-function summarizeTaskContext(detail: any): string {
-  const parts: string[] = [];
-  const task = detail?.task ?? detail;
-  if (task?.status) parts.push(`Status: ${task.status}`);
-  if (task?.assigned_to) parts.push(`Assigned to: ${task.assigned_to}`);
-  if (task?.tags?.length) parts.push(`Tags: ${task.tags.join(", ")}`);
-  if (Array.isArray(detail?.dependencies) && detail.dependencies.length > 0) {
-    parts.push(`Dependencies: ${detail.dependencies.map((dep: any) => `#${dep.id} ${dep.title}`).join("; ")}`);
-  }
-  if (Array.isArray(detail?.subtasks) && detail.subtasks.length > 0) {
-    parts.push(`Subtasks: ${detail.subtasks.map((subtask: any) => `#${subtask.id} [${subtask.status}] ${subtask.title}`).join("; ")}`);
-  }
-  if (Array.isArray(detail?.messages) && detail.messages.length > 0) {
-    parts.push("Recent messages:");
-    for (const message of detail.messages.slice(0, 8)) {
-      parts.push(`- #${message.id} ${message.sender} (${message.intent ?? "general"}): ${oneLine(message.content ?? "")}`);
-    }
-  }
-  return parts.join("\n") || "(no additional Den context)";
-}
-
-function renderTemplate(template: string, values: Record<string, string>): string {
-  return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key) => values[key] ?? "");
-}
-
-function fallbackPrompt(slug: string): string {
-  if (slug === CODER_PROMPT_SLUG) {
-    return [
-      "You are a fresh coder sub-agent launched by the Den Pi conductor.",
-      "Project: {{project_id}}",
-      "Task: #{{task_id}} {{task_title}}",
-      "",
-      "{{task_description}}",
-      "",
-      "{{task_context}}",
-      "",
-      "Work only on this bounded task. Report changed files, tests run, and known gaps.",
-    ].join("\n");
-  }
-  return [
-    "You are a fresh reviewer sub-agent launched by the Den Pi conductor.",
-    "Project: {{project_id}}",
-    "Task: #{{task_id}} {{task_title}}",
-    "",
-    "{{task_description}}",
-    "",
-    "{{task_context}}",
-    "",
-    "Review target: {{review_target}}",
-    "",
-    "Prioritize blocking bugs, acceptance gaps, regressions, and missing tests. Finish with a concise verdict.",
-  ].join("\n");
 }
 
 function onUpdateText(onUpdate: any, role: string, taskId: number) {

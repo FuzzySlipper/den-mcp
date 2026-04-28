@@ -11,6 +11,13 @@ import {
   subagentSucceeded,
 } from '../../pi-dev/lib/den-subagent-runner.ts';
 import {
+  CODER_PROMPT_SLUG,
+  REVIEWER_PROMPT_SLUG,
+  fallbackPrompt,
+  renderTemplate,
+  summarizeTaskContext,
+} from '../../pi-dev/lib/den-prompt-templates.ts';
+import {
   SUBAGENT_RUN_SCHEMA,
   SUBAGENT_RUN_SCHEMA_VERSION,
   buildReasoningCaptureMetadata,
@@ -464,6 +471,74 @@ test('subagent run recorder writes normalized artifacts and ordered progress eve
   assert.match(stdoutText, /"type":"message_end"/);
   assert.match(stdoutText, /"type":"raw_stdout"/);
   assert.equal(stderrText, 'stderr line\n');
+});
+
+test('den prompt template fallbacks enforce delegated coder and reviewer guardrails', () => {
+  const coderPrompt = fallbackPrompt(CODER_PROMPT_SLUG);
+  assert.match(coderPrompt, /coder_context_packet/);
+  assert.match(coderPrompt, /implementation_packet/);
+  assert.match(coderPrompt, /Do not merge/i);
+  assert.match(coderPrompt, /do not broaden scope/i);
+  assert.match(coderPrompt, /Do not change test\/scoring harnesses/i);
+  assert.match(coderPrompt, /Do not silently skip failing tests/i);
+  assert.match(coderPrompt, /Acceptance checklist/i);
+
+  const reviewerPrompt = fallbackPrompt(REVIEWER_PROMPT_SLUG);
+  assert.match(reviewerPrompt, /implementation_packet/);
+  assert.match(reviewerPrompt, /drift_check_packet/);
+  assert.match(reviewerPrompt, /acceptance criterion/i);
+  assert.match(reviewerPrompt, /packet accurately describes the actual diff/i);
+  assert.match(reviewerPrompt, /scope drift/i);
+  assert.match(reviewerPrompt, /test\/scoring harness/i);
+  assert.match(reviewerPrompt, /blocking.*follow-up.*informational/s);
+});
+
+test('den task context summary includes structured workflow packets from recent messages', () => {
+  const context = summarizeTaskContext({
+    task: { status: 'in_progress', assigned_to: 'pi', tags: ['prompts'] },
+    dependencies: [{ task_id: 933, title: 'Define packet conventions' }],
+    recent_messages: [
+      {
+        id: 12,
+        sender: 'pi',
+        intent: 'handoff',
+        metadata: { type: 'coder_context_packet' },
+        content: '## Acceptance criteria\n- Use the curated packet\n- Stay bounded',
+      },
+      {
+        id: 11,
+        sender: 'coder',
+        intent: 'handoff',
+        metadata: JSON.stringify({ type: 'implementation_packet' }),
+        content: 'Branch: task/935-delegated-prompts',
+      },
+    ],
+  });
+
+  assert.match(context, /Status: in_progress/);
+  assert.match(context, /#933 Define packet conventions/);
+  assert.match(context, /Latest coder_context_packet/);
+  assert.match(context, /Use the curated packet/);
+  assert.match(context, /Latest implementation_packet/);
+  assert.match(context, /\[coder_context_packet\]/);
+});
+
+test('den prompt templates render curated context placeholders', () => {
+  const prompt = renderTemplate(fallbackPrompt(CODER_PROMPT_SLUG), {
+    project_id: 'den-mcp',
+    task_id: '935',
+    task_title: 'Update prompts',
+    task_description: 'Acceptance criteria:\n- A\n- B',
+    task_context: 'Latest coder_context_packet (#1 from pi):\n---\nPacket body\n---',
+    review_target: '',
+    extra_notes: 'Do not touch unrelated docs.',
+    role: 'coder',
+  });
+
+  assert.match(prompt, /Project: den-mcp/);
+  assert.match(prompt, /Task: #935 Update prompts/);
+  assert.match(prompt, /Packet body/);
+  assert.match(prompt, /Do not touch unrelated docs/);
 });
 
 test('pi cli runner helpers keep prompt, session, and success semantics stable', () => {

@@ -133,7 +133,21 @@ before launching the sub-agent:
 
 Templates use simple `{{placeholder}}` replacement for values such as
 `{{project_id}}`, `{{task_id}}`, `{{task_title}}`, `{{task_description}}`,
-`{{task_context}}`, `{{review_target}}`, and `{{extra_notes}}`.
+`{{task_context}}`, `{{review_target}}`, and `{{extra_notes}}`. The generated
+`{{task_context}}` includes current task status, dependencies/subtasks, recent
+thread messages, and the latest structured workflow packets (`coder_context_packet`,
+`implementation_packet`, `validation_packet`, `drift_check_packet`, review
+request, and review feedback) when present in recent task-thread context.
+
+The default coder prompt is intentionally bounded: it treats the latest
+`coder_context_packet` as authoritative, forbids merges, unrequested scope or
+architecture expansion, unrequested test/scoring harness or dependency/project
+configuration changes, and silent test skipping, then asks for an
+`implementation_packet` with branch, commit, files, tests, acceptance checklist,
+known gaps, and risk notes. The default reviewer prompt checks acceptance
+criteria, packet-vs-diff accuracy, scope drift against the context packet, and
+suspicious harness/CI/package/dependency changes while preserving the existing
+Den review-loop thread metadata and finding severities.
 
 The `den-conductor` Pi skill is the user/agent-invokable entry point for
 conductor mode. It does not duplicate the policy text. It tells Pi to use Den
