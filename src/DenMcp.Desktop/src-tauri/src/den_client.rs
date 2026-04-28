@@ -293,7 +293,6 @@ pub struct DesktopDiffSnapshotLatestResult {
     pub root_path: Option<String>,
     pub path: Option<String>,
     pub source_instance_id: Option<String>,
-    pub source_display_name: Option<String>,
     pub state: DesktopSnapshotState,
     pub is_stale: bool,
     pub freshness_status: String,
