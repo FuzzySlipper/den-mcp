@@ -1,6 +1,44 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
+const DEFAULT_INVOKE_TIMEOUT_MS = 12_000;
+const LISTEN_TIMEOUT_MS = 5_000;
+
+function toErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+async function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs: number): Promise<T> {
+  let timeoutId: number | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = window.setTimeout(() => {
+      reject(new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s`));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } catch (err) {
+    throw new Error(`${label} failed: ${toErrorMessage(err)}`);
+  } finally {
+    if (timeoutId !== undefined) {
+      window.clearTimeout(timeoutId);
+    }
+  }
+}
+
+function invokeCommand<T>(command: string, args?: Record<string, unknown>, timeoutMs = DEFAULT_INVOKE_TIMEOUT_MS): Promise<T> {
+  return withTimeout(invoke<T>(command, args), `desktop IPC ${command}`, timeoutMs);
+}
+
+function listenCommand<T>(eventName: string, callback: (payload: T) => void): Promise<() => void> {
+  return withTimeout(
+    listen<T>(eventName, (event) => callback(event.payload)),
+    `desktop event listener ${eventName}`,
+    LISTEN_TIMEOUT_MS,
+  );
+}
+
 export interface OperatorSettings {
   denBaseUrl: string;
   sourceInstanceId: string;
@@ -201,41 +239,41 @@ export interface DesktopDiffSnapshot {
 }
 
 export async function getOperatorStatus(): Promise<OperatorStatus> {
-  return invoke('get_operator_status');
+  return invokeCommand('get_operator_status');
 }
 
 export async function getSettings(): Promise<OperatorSettings> {
-  return invoke('get_settings');
+  return invokeCommand('get_settings');
 }
 
 export async function saveOperatorSettings(request: SaveOperatorSettingsRequest): Promise<OperatorSettings> {
-  return invoke('save_operator_settings', { request });
+  return invokeCommand('save_operator_settings', { request });
 }
 
 export async function refreshNow(): Promise<void> {
-  return invoke('refresh_now');
+  return invokeCommand('refresh_now');
 }
 
 export async function listLocalSnapshots(): Promise<LocalSnapshotList> {
-  return invoke('list_local_snapshots');
+  return invokeCommand('list_local_snapshots');
 }
 
 export async function listLocalSessionSnapshots(): Promise<LocalSessionSnapshotList> {
-  return invoke('list_local_session_snapshots');
+  return invokeCommand('list_local_session_snapshots');
 }
 
 export async function getLatestDiffSnapshot(request: LatestDiffSnapshotRequest): Promise<DesktopDiffSnapshotLatestResult> {
-  return invoke('get_latest_diff_snapshot', { request });
+  return invokeCommand('get_latest_diff_snapshot', { request });
 }
 
 export function onOperatorStatus(callback: (status: OperatorStatus) => void): Promise<() => void> {
-  return listen<OperatorStatus>('den://operator-status', (event) => callback(event.payload));
+  return listenCommand('den://operator-status', callback);
 }
 
 export function onGitSnapshots(callback: (snapshots: LocalGitSnapshot[]) => void): Promise<() => void> {
-  return listen<LocalGitSnapshot[]>('den://git-snapshot-updated', (event) => callback(event.payload));
+  return listenCommand('den://git-snapshot-updated', callback);
 }
 
 export function onSessionSnapshots(callback: (snapshots: LocalSessionSnapshot[]) => void): Promise<() => void> {
-  return listen<LocalSessionSnapshot[]>('den://session-snapshot-updated', (event) => callback(event.payload));
+  return listenCommand('den://session-snapshot-updated', callback);
 }

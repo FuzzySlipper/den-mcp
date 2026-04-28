@@ -154,6 +154,12 @@ input {
   background: rgba(22, 101, 52, 0.22);
 }
 
+.status-unknown {
+  color: #bfdbfe;
+  border-color: rgba(96, 165, 250, 0.45);
+  background: rgba(30, 64, 175, 0.18);
+}
+
 .status-degraded,
 .status-path_not_visible,
 .status-not_git_repository,
@@ -327,6 +333,54 @@ input {
 .file-details code {
   color: #38bdf8;
   margin-right: 0.4rem;
+}
+
+.ipc-health {
+  display: grid;
+  gap: 0.3rem;
+  margin: 1rem 0;
+  border: 1px solid #1f3347;
+  border-radius: 12px;
+  padding: 0.7rem;
+  background: #0a1520;
+  color: #9fb2c7;
+}
+
+.ipc-health strong {
+  color: #d6e0ef;
+}
+
+.ipc-health span {
+  font-size: 0.82rem;
+}
+
+.ipc-health.ipc-degraded {
+  border-color: rgba(245, 158, 11, 0.45);
+  background: rgba(120, 53, 15, 0.16);
+}
+
+.error-boundary-panel {
+  max-width: 860px;
+  margin: 4rem auto;
+}
+
+.error-boundary-panel h1 {
+  margin: 0 0 0.7rem;
+}
+
+.error-boundary-panel pre {
+  max-height: 18rem;
+  overflow: auto;
+  border: 1px solid #1f3347;
+  border-radius: 12px;
+  padding: 1rem;
+  background: #050b12;
+  color: #9fb2c7;
+  white-space: pre-wrap;
+}
+
+.boundary-actions {
+  margin-top: 1rem;
 }
 
 .observer-list {

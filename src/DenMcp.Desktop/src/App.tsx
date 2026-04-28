@@ -95,6 +95,7 @@ export function App() {
         <DiagnosticsPane
           diagnostics={runtime.status?.diagnostics ?? []}
           observers={runtime.status?.observerStatuses ?? []}
+          ipcHealth={runtime.ipcHealth}
           error={runtime.error}
         />
       </div>

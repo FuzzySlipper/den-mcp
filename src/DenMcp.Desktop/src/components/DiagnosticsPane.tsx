@@ -1,13 +1,16 @@
+import { IpcHealth, ipcHealthState, ipcHealthSummary } from '../desktop/ipcHealth';
 import { DiagnosticEntry, ObserverStatus } from '../desktop/tauriApi';
 
 interface Props {
   diagnostics: DiagnosticEntry[];
   observers: ObserverStatus[];
+  ipcHealth: IpcHealth;
   error: string | null;
 }
 
-export function DiagnosticsPane({ diagnostics, observers, error }: Props) {
+export function DiagnosticsPane({ diagnostics, observers, ipcHealth, error }: Props) {
   const latest = diagnostics.slice(-20).reverse();
+  const healthState = ipcHealthState(ipcHealth);
 
   return (
     <section className="panel diagnostics-panel">
@@ -16,6 +19,15 @@ export function DiagnosticsPane({ diagnostics, observers, error }: Props) {
           <p className="eyebrow">Runtime</p>
           <h2>Observers & diagnostics</h2>
         </div>
+        <span className={`status-pill status-${healthState}`}>IPC {healthState}</span>
+      </div>
+
+      <div className={`ipc-health ipc-${healthState}`}>
+        <strong>{ipcHealthSummary(ipcHealth)}</strong>
+        <span>
+          Last heartbeat: {ipcHealth.lastHeartbeatAt ? new Date(ipcHealth.lastHeartbeatAt).toLocaleTimeString() : 'waiting'} · Last event:{' '}
+          {ipcHealth.lastEventAt ? new Date(ipcHealth.lastEventAt).toLocaleTimeString() : 'waiting'} · Pending invokes: {ipcHealth.pendingInvokes}
+        </span>
       </div>
 
       {error && <p className="error-note">{error}</p>}
