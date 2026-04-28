@@ -116,6 +116,7 @@ public class DesktopSnapshotApiTests : IAsyncLifetime
             max_bytes = 4096,
             diff = "diff --git a/src/Foo.cs b/src/Foo.cs",
             source_instance_id = "desktop-a",
+            source_display_name = "Desktop A",
             observed_at = DateTime.UtcNow
         }, JsonOpts);
         diffResponse.EnsureSuccessStatusCode();
@@ -126,7 +127,9 @@ public class DesktopSnapshotApiTests : IAsyncLifetime
         Assert.Equal("ok", diffJson.RootElement.GetProperty("state").GetString());
         Assert.False(diffJson.RootElement.GetProperty("is_stale").GetBoolean());
         Assert.Equal("fresh", diffJson.RootElement.GetProperty("freshness_status").GetString());
-        Assert.Contains("diff --git", diffJson.RootElement.GetProperty("snapshot").GetProperty("diff").GetString());
+        var diffSnapshot = diffJson.RootElement.GetProperty("snapshot");
+        Assert.Equal("Desktop A", diffSnapshot.GetProperty("source_display_name").GetString());
+        Assert.Contains("diff --git", diffSnapshot.GetProperty("diff").GetString());
 
         var sessionResponse = await _client.PutAsJsonAsync($"/api/projects/{ProjectId}/desktop/session-snapshots", new
         {

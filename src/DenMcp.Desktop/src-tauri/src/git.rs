@@ -71,6 +71,7 @@ pub struct DesktopDiffSnapshotRequest {
     pub binary: bool,
     pub warnings: Vec<String>,
     pub source_instance_id: String,
+    pub source_display_name: Option<String>,
     pub observed_at: String,
 }
 
@@ -585,6 +586,7 @@ fn build_diff_snapshot(
         binary,
         warnings,
         source_instance_id: snapshot.request.source_instance_id.clone(),
+        source_display_name: snapshot.request.source_display_name.clone(),
         observed_at: now_string(),
     })
 }
@@ -609,6 +611,7 @@ fn diff_warning_snapshot(
         binary: false,
         warnings: vec![warning],
         source_instance_id: snapshot.request.source_instance_id.clone(),
+        source_display_name: snapshot.request.source_display_name.clone(),
         observed_at: now_string(),
     }
 }

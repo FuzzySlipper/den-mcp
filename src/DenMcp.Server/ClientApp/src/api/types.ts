@@ -365,6 +365,7 @@ export interface DesktopDiffSnapshot {
   binary: boolean;
   warnings: string[];
   source_instance_id: string;
+  source_display_name: string | null;
   observed_at: string;
   received_at: string;
   updated_at: string;

@@ -246,6 +246,7 @@ public static class DesktopSnapshotRoutes
         Binary = req.Binary ?? false,
         Warnings = req.Warnings ?? [],
         SourceInstanceId = req.SourceInstanceId?.Trim() ?? string.Empty,
+        SourceDisplayName = TrimToNull(req.SourceDisplayName),
         ObservedAt = req.ObservedAt ?? DateTime.UtcNow
     };
 
@@ -323,6 +324,7 @@ public sealed record UpsertDesktopDiffSnapshotRequest
     public bool? Binary { get; init; }
     public List<string>? Warnings { get; init; }
     public string? SourceInstanceId { get; init; }
+    public string? SourceDisplayName { get; init; }
     public DateTime? ObservedAt { get; init; }
 }
 

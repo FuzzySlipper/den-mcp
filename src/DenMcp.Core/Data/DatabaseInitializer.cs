@@ -633,6 +633,7 @@ public sealed class DatabaseInitializer
             binary                INTEGER NOT NULL DEFAULT 0,
             warnings              TEXT NOT NULL,
             source_instance_id    TEXT NOT NULL,
+            source_display_name   TEXT,
             observed_at           TEXT NOT NULL,
             received_at           TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at            TEXT NOT NULL DEFAULT (datetime('now')),
@@ -687,6 +688,7 @@ public sealed class DatabaseInitializer
         // SQLite has no ALTER TABLE ... ADD COLUMN IF NOT EXISTS,
         // so we check via PRAGMA table_info.
         await TryAddColumnAsync(connection, "agent_sessions", "session_id", "TEXT");
+        await TryAddColumnAsync(connection, "desktop_diff_snapshots", "source_display_name", "TEXT");
         await TryAddColumnAsync(connection, "dispatch_entries", "completed_by", "TEXT");
         await TryAddColumnAsync(connection, "dispatch_entries", "context_json", "TEXT");
         await TryAddColumnAsync(connection, "messages", "intent",
@@ -986,6 +988,7 @@ public sealed class DatabaseInitializer
                 binary                INTEGER NOT NULL DEFAULT 0,
                 warnings              TEXT NOT NULL,
                 source_instance_id    TEXT NOT NULL,
+                source_display_name   TEXT,
                 observed_at           TEXT NOT NULL,
                 received_at           TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at            TEXT NOT NULL DEFAULT (datetime('now')),
@@ -1090,7 +1093,14 @@ public sealed class DatabaseInitializer
 
         await using var alterCmd = connection.CreateCommand();
         alterCmd.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {columnDefinition}";
-        await alterCmd.ExecuteNonQueryAsync();
+        try
+        {
+            await alterCmd.ExecuteNonQueryAsync();
+        }
+        catch (SqliteException ex) when (ex.SqliteErrorCode == 1 && ex.Message.Contains("duplicate column name", StringComparison.OrdinalIgnoreCase))
+        {
+            // A parallel initializer may have added the column between the PRAGMA check and ALTER TABLE.
+        }
     }
 
     private static async Task EnsureIndexAsync(SqliteConnection connection, string indexName, string createIndexSql)

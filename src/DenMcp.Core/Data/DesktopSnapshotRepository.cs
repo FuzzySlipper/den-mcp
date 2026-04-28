@@ -27,7 +27,7 @@ public sealed class DesktopSnapshotRepository : IDesktopSnapshotRepository
     private const string DiffColumns = """
         id, project_id, task_id, workspace_id, root_path, path, base_ref, head_ref,
         max_bytes, staged, diff, truncated, binary, warnings, source_instance_id,
-        observed_at, received_at, updated_at
+        source_display_name, observed_at, received_at, updated_at
         """;
 
     private const string SessionColumns = """
@@ -173,11 +173,11 @@ public sealed class DesktopSnapshotRepository : IDesktopSnapshotRepository
             INSERT INTO desktop_diff_snapshots (
                 project_id, task_id, workspace_id, root_path, path, base_ref, head_ref,
                 diff_key, max_bytes, staged, diff, truncated, binary, warnings,
-                source_instance_id, observed_at, received_at, updated_at
+                source_instance_id, source_display_name, observed_at, received_at, updated_at
             ) VALUES (
                 @projectId, @taskId, @workspaceId, @rootPath, @path, @baseRef, @headRef,
                 @diffKey, @maxBytes, @staged, @diff, @truncated, @binary, @warnings,
-                @sourceInstanceId, @observedAt, @receivedAt, @updatedAt
+                @sourceInstanceId, @sourceDisplayName, @observedAt, @receivedAt, @updatedAt
             )
             ON CONFLICT(project_id, diff_key) DO UPDATE SET
                 task_id = excluded.task_id,
@@ -193,6 +193,7 @@ public sealed class DesktopSnapshotRepository : IDesktopSnapshotRepository
                 binary = excluded.binary,
                 warnings = excluded.warnings,
                 source_instance_id = excluded.source_instance_id,
+                source_display_name = excluded.source_display_name,
                 observed_at = excluded.observed_at,
                 received_at = excluded.received_at,
                 updated_at = excluded.updated_at
@@ -392,6 +393,7 @@ public sealed class DesktopSnapshotRepository : IDesktopSnapshotRepository
         cmd.Parameters.AddWithValue("@binary", snapshot.Binary ? 1 : 0);
         cmd.Parameters.AddWithValue("@warnings", JsonSerializer.Serialize(snapshot.Warnings, JsonOptions));
         cmd.Parameters.AddWithValue("@sourceInstanceId", snapshot.SourceInstanceId.Trim());
+        cmd.Parameters.AddWithValue("@sourceDisplayName", NullIfWhiteSpace(snapshot.SourceDisplayName));
         cmd.Parameters.AddWithValue("@observedAt", ToDbTime(snapshot.ObservedAt));
         cmd.Parameters.AddWithValue("@receivedAt", ToDbTime(snapshot.ReceivedAt));
         cmd.Parameters.AddWithValue("@updatedAt", ToDbTime(snapshot.UpdatedAt));
@@ -452,7 +454,7 @@ public sealed class DesktopSnapshotRepository : IDesktopSnapshotRepository
 
     private DesktopDiffSnapshot ReadDiffSnapshot(SqliteDataReader reader, TimeSpan staleAfter)
     {
-        var observedAt = FromDbTime(reader.GetString(15));
+        var observedAt = FromDbTime(reader.GetString(16));
         return new DesktopDiffSnapshot
         {
             Id = reader.GetInt64(0),
@@ -470,9 +472,10 @@ public sealed class DesktopSnapshotRepository : IDesktopSnapshotRepository
             Binary = reader.GetInt32(12) != 0,
             Warnings = JsonSerializer.Deserialize<List<string>>(reader.GetString(13), JsonOptions) ?? [],
             SourceInstanceId = reader.GetString(14),
+            SourceDisplayName = reader.IsDBNull(15) ? null : reader.GetString(15),
             ObservedAt = observedAt,
-            ReceivedAt = FromDbTime(reader.GetString(16)),
-            UpdatedAt = FromDbTime(reader.GetString(17)),
+            ReceivedAt = FromDbTime(reader.GetString(17)),
+            UpdatedAt = FromDbTime(reader.GetString(18)),
             IsStale = IsStale(observedAt, staleAfter),
             FreshnessSeconds = FreshnessSeconds(observedAt)
         };

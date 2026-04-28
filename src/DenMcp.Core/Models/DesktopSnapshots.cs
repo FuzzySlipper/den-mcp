@@ -96,6 +96,7 @@ public sealed class DesktopDiffSnapshot
     public bool Binary { get; set; }
     public List<string> Warnings { get; set; } = [];
     public required string SourceInstanceId { get; set; }
+    public string? SourceDisplayName { get; set; }
     public DateTime ObservedAt { get; set; }
     public DateTime ReceivedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

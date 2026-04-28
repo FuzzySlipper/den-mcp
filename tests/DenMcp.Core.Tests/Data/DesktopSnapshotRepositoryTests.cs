@@ -152,6 +152,7 @@ public class DesktopSnapshotRepositoryTests : IAsyncLifetime
             MaxBytes = 4096,
             Diff = "diff --git a/src/Foo.cs b/src/Foo.cs",
             SourceInstanceId = "desktop-a",
+            SourceDisplayName = "Desktop A",
             ObservedAt = _now.AddSeconds(-4)
         });
 
@@ -171,6 +172,7 @@ public class DesktopSnapshotRepositoryTests : IAsyncLifetime
 
         Assert.NotNull(loaded);
         Assert.Equal(saved.Id, loaded!.Id);
+        Assert.Equal("Desktop A", loaded.SourceDisplayName);
         Assert.False(loaded.IsStale);
         Assert.Contains("diff --git", loaded.Diff);
     }
