@@ -18,6 +18,11 @@ import {
   type SubagentResult,
 } from "../lib/den-subagent-runner.ts";
 import {
+  extractImplementationPacket,
+  buildImplementationPacketMeta,
+  formatImplementationPacketMessage,
+} from "../lib/den-implementation-packet.ts";
+import {
   DEFAULT_REASONING_PREVIEW_CHARS,
   SUBAGENT_RUN_SCHEMA,
   SUBAGENT_RUN_SCHEMA_VERSION,
@@ -812,6 +817,40 @@ async function runDenSubagent(
       fallback_from_model: result.fallback_from_model ?? null,
       fallback_from_exit_code: result.fallback_from_exit_code ?? null,
     });
+  }
+
+  // Post implementation packet for successful coder runs.
+  if (
+    effectiveOptions.taskId !== undefined
+    && subagentSucceeded(result)
+    && effectiveOptions.role.toLowerCase() === "coder"
+    && result.final_output
+  ) {
+    try {
+      const extraction = extractImplementationPacket(result.final_output);
+      const packetContent = formatImplementationPacketMessage(result, extraction);
+      const packetMeta = buildImplementationPacketMeta(result, extraction);
+      await sendTaskMessage(cfg, effectiveOptions.taskId, packetContent, {
+        ...packetMeta,
+        ...buildSubagentRunMetadata({
+          runId,
+          role: effectiveOptions.role,
+          taskId: effectiveOptions.taskId,
+          cwd,
+          backend: result.backend,
+          model: result.model ?? finalRequestedModel,
+          tools: effectiveOptions.tools ?? defaultToolsForRole(effectiveOptions.role),
+          sessionMode: result.session_mode,
+          session: result.session,
+          rerunOfRunId: effectiveOptions.rerunOfRunId,
+          ...contextIdentity,
+          artifacts: result.artifacts,
+        }),
+      });
+    } catch (packetError) {
+      // Packet posting is advisory; failures should not break the sub-agent result flow.
+      // The conductor can detect the missing packet via context-packet preparation.
+    }
   }
 
   return result;
