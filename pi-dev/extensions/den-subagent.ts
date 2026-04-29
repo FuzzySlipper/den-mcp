@@ -85,6 +85,9 @@ import {
   type DriftExpectedScope,
 } from "../lib/den-drift-check.ts";
 import {
+  resolveIntentFromMetadata,
+} from "../lib/den-packet-intent.ts";
+import {
   buildDriftSentinelPacketMeta,
   buildDriftSentinelPrompt,
   formatDriftSentinelPacketMessage,
@@ -2310,13 +2313,14 @@ async function appendPacketLifecycleOps(
 }
 
 async function sendTaskMessage(cfg: DenConfig, taskId: number, content: string, metadata: JsonObject) {
+  const intent = resolveIntentFromMetadata(metadata);
   return denFetch(cfg, `/api/projects/${esc(cfg.projectId)}/messages`, {
     method: "POST",
     body: {
       sender: cfg.agent,
       content,
       task_id: taskId,
-      intent: "status_update",
+      intent,
       metadata: JSON.stringify(metadata),
     },
   });
