@@ -125,8 +125,13 @@ public sealed class AgentRunRepository : IAgentRunRepository
         record.HeartbeatCount = 0;
         record.AssistantOutputCount = 0;
         record.EventCount = events.Count;
+        record.RawWorkEventCount = 0;
+        record.OperatorEventsJson = null;
         record.LastHeartbeatAt = null;
         record.LastAssistantOutputAt = null;
+
+        var operatorEvents = new List<SubagentRunOperatorEvent>();
+        string? role = record.Role;
 
         foreach (var item in events)
         {
@@ -183,9 +188,36 @@ public sealed class AgentRunRepository : IAgentRunRepository
                 record.LastAssistantOutputAt = item.CreatedAt;
             }
 
+            if (SubagentRunLifecycleConventions.IsRawWorkEvent(item.EventType))
+            {
+                record.RawWorkEventCount++;
+            }
+            else
+            {
+                var entryRole = TextMetadata(item.Metadata, "role") ?? role;
+                var eventName = TextMetadata(item.Metadata, "operator_event") ??
+                    SubagentRunLifecycleConventions.OperatorEventForSubagentRun(item.EventType, entryRole);
+                if (eventName is not null)
+                {
+                    operatorEvents.Add(new SubagentRunOperatorEvent
+                    {
+                        EventName = eventName,
+                        Source = "agent_stream",
+                        SourceEventType = item.EventType,
+                        StreamEntryId = item.Id,
+                        OccurredAt = item.CreatedAt,
+                        Visibility = TextMetadata(item.Metadata, "event_visibility") ??
+                            SubagentRunLifecycleConventions.VisibilityForStreamEvent(item.EventType)
+                    });
+                }
+            }
+
             record.LatestStreamEntryId = item.Id;
             record.State = StateFromEvent(item.EventType);
         }
+
+        if (operatorEvents.Count > 0)
+            record.OperatorEventsJson = JsonSerializer.Serialize(operatorEvents);
 
         record.UpdatedAt = now;
         return record;
@@ -226,6 +258,8 @@ public sealed class AgentRunRepository : IAgentRunRepository
         StartedStreamEntryId = source.StartedStreamEntryId,
         HeartbeatCount = source.HeartbeatCount,
         AssistantOutputCount = source.AssistantOutputCount,
+        RawWorkEventCount = source.RawWorkEventCount,
+        OperatorEventsJson = source.OperatorEventsJson,
         EventCount = source.EventCount,
         LastHeartbeatAt = source.LastHeartbeatAt,
         LastAssistantOutputAt = source.LastAssistantOutputAt,
@@ -310,6 +344,8 @@ public sealed class AgentRunRepository : IAgentRunRepository
                 heartbeat_count,
                 assistant_output_count,
                 event_count,
+                raw_work_event_count,
+                operator_events_json,
                 last_heartbeat_at,
                 last_assistant_output_at,
                 created_at,
@@ -350,6 +386,8 @@ public sealed class AgentRunRepository : IAgentRunRepository
                 @heartbeatCount,
                 @assistantOutputCount,
                 @eventCount,
+                @rawWorkEventCount,
+                @operatorEventsJson,
                 @lastHeartbeatAt,
                 @lastAssistantOutputAt,
                 @createdAt,
@@ -389,6 +427,8 @@ public sealed class AgentRunRepository : IAgentRunRepository
                 heartbeat_count = excluded.heartbeat_count,
                 assistant_output_count = excluded.assistant_output_count,
                 event_count = excluded.event_count,
+                raw_work_event_count = excluded.raw_work_event_count,
+                operator_events_json = excluded.operator_events_json,
                 last_heartbeat_at = excluded.last_heartbeat_at,
                 last_assistant_output_at = excluded.last_assistant_output_at,
                 updated_at = excluded.updated_at
@@ -433,6 +473,8 @@ public sealed class AgentRunRepository : IAgentRunRepository
         cmd.Parameters.AddWithValue("@heartbeatCount", record.HeartbeatCount);
         cmd.Parameters.AddWithValue("@assistantOutputCount", record.AssistantOutputCount);
         cmd.Parameters.AddWithValue("@eventCount", record.EventCount);
+        cmd.Parameters.AddWithValue("@rawWorkEventCount", record.RawWorkEventCount);
+        cmd.Parameters.AddWithValue("@operatorEventsJson", (object?)record.OperatorEventsJson ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@lastHeartbeatAt", DateDb(record.LastHeartbeatAt));
         cmd.Parameters.AddWithValue("@lastAssistantOutputAt", DateDb(record.LastAssistantOutputAt));
         cmd.Parameters.AddWithValue("@createdAt", DateDb(record.CreatedAt));
@@ -489,10 +531,12 @@ public sealed class AgentRunRepository : IAgentRunRepository
         HeartbeatCount = reader.GetInt32(31),
         AssistantOutputCount = reader.GetInt32(32),
         EventCount = reader.GetInt32(33),
-        LastHeartbeatAt = reader.IsDBNull(34) ? null : DateTime.Parse(reader.GetString(34)),
-        LastAssistantOutputAt = reader.IsDBNull(35) ? null : DateTime.Parse(reader.GetString(35)),
-        CreatedAt = DateTime.Parse(reader.GetString(36)),
-        UpdatedAt = DateTime.Parse(reader.GetString(37))
+        RawWorkEventCount = reader.IsDBNull(34) ? 0 : reader.GetInt32(34),
+        OperatorEventsJson = reader.IsDBNull(35) ? null : reader.GetString(35),
+        LastHeartbeatAt = reader.IsDBNull(36) ? null : DateTime.Parse(reader.GetString(36)),
+        LastAssistantOutputAt = reader.IsDBNull(37) ? null : DateTime.Parse(reader.GetString(37)),
+        CreatedAt = DateTime.Parse(reader.GetString(38)),
+        UpdatedAt = DateTime.Parse(reader.GetString(39))
     };
 
     private static bool MatchesOptions(AgentRunRecord record, SubagentRunListOptions options)
@@ -661,6 +705,8 @@ public sealed class AgentRunRepository : IAgentRunRepository
         heartbeat_count,
         assistant_output_count,
         event_count,
+        raw_work_event_count,
+        operator_events_json,
         last_heartbeat_at,
         last_assistant_output_at,
         created_at,

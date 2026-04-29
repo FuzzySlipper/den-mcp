@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using DenMcp.Core.Data;
 using DenMcp.Core.Models;
@@ -69,6 +70,291 @@ public sealed class SubagentRunServiceTests : IDisposable
         Assert.False(reasoning.TryGetProperty("reasoning_summary_preview", out _));
     }
 
+    [Fact]
+    public async Task ListAsync_UsesPrecomputedCountersWithoutPerRunEventLoads()
+    {
+        // Simulate 10 runs, each with a started + completed entry in the stream.
+        // The FakeAgentStreamRepository tracks query counts to verify batched loading.
+        var entries = new List<AgentStreamEntry>();
+        var records = new List<AgentRunRecord>();
+        var utcNow = DateTime.UtcNow;
+
+        for (var i = 0; i < 10; i++)
+        {
+            var runId = $"run-list-{i:D3}";
+            var startedId = i * 2 + 1;
+            var completedId = i * 2 + 2;
+
+            entries.Add(new AgentStreamEntry
+            {
+                Id = startedId,
+                StreamKind = AgentStreamKind.Ops,
+                EventType = "subagent_started",
+                ProjectId = "proj",
+                TaskId = 100,
+                Sender = "pi",
+                DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+                CreatedAt = utcNow.AddSeconds(-10 + i),
+                Metadata = JsonSerializer.SerializeToElement(new { run_id = runId, role = "coder", backend = "pi-cli" })
+            });
+            entries.Add(new AgentStreamEntry
+            {
+                Id = completedId,
+                StreamKind = AgentStreamKind.Ops,
+                EventType = "subagent_completed",
+                ProjectId = "proj",
+                TaskId = 100,
+                Sender = "pi",
+                DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+                CreatedAt = utcNow.AddSeconds(i),
+                Metadata = JsonSerializer.SerializeToElement(new
+                {
+                    run_id = runId,
+                    role = "coder",
+                    exit_code = 0,
+                    output_status = "assistant_final"
+                })
+            });
+
+            records.Add(new AgentRunRecord
+            {
+                RunId = runId,
+                ProjectId = "proj",
+                TaskId = 100,
+                Role = "coder",
+                State = "complete",
+                Backend = "pi-cli",
+                StartedAt = utcNow.AddSeconds(-10 + i),
+                EndedAt = utcNow.AddSeconds(i),
+                LatestStreamEntryId = completedId,
+                StartedStreamEntryId = startedId,
+                EventCount = 2,
+                RawWorkEventCount = 0,
+                OperatorEventsJson = JsonSerializer.Serialize(new List<SubagentRunOperatorEvent>
+                {
+                    new() { EventName = "coder_started", Source = "agent_stream", SourceEventType = "subagent_started", StreamEntryId = startedId, OccurredAt = utcNow.AddSeconds(-10 + i), Visibility = "summary" },
+                    new() { EventName = "coder_completed", Source = "agent_stream", SourceEventType = "subagent_completed", StreamEntryId = completedId, OccurredAt = utcNow.AddSeconds(i), Visibility = "summary" }
+                }),
+                HeartbeatCount = 0,
+                AssistantOutputCount = 0,
+                CreatedAt = utcNow.AddSeconds(-10 + i),
+                UpdatedAt = utcNow
+            });
+        }
+
+        var stream = new FakeAgentStreamRepository(entries);
+        var runRepo = new FakeAgentRunRepository(records);
+        var service = new SubagentRunService(stream, runRepo);
+
+        var summaries = await service.ListAsync(new SubagentRunListOptions
+        {
+            ProjectId = "proj",
+            TaskId = 100,
+            Limit = 10,
+            SourceLimit = 0  // Suppress stream summary discovery to test record-only path
+        });
+
+        Assert.Equal(10, summaries.Count);
+
+        // Verify each summary has correct pre-computed counters
+        foreach (var summary in summaries)
+        {
+            Assert.Equal("complete", summary.State);
+            Assert.Equal(2, summary.EventCounts.Total);
+            Assert.Equal(2, summary.EventCounts.Lifecycle); // started + completed (no raw work)
+            Assert.Equal(0, summary.EventCounts.RawWork);
+            Assert.Equal(2, summary.OperatorEvents.Count);
+            Assert.Equal("coder_started", summary.OperatorEvents[0].EventName);
+            Assert.Equal("coder_completed", summary.OperatorEvents[1].EventName);
+        }
+
+        // Verify that ListAsync used batched GetByIdsAsync (1 call) instead of
+        // individual GetByIdAsync calls (would have been 20 for 10 runs × 2 entries).
+        Assert.True(stream.GetByIdsAsyncCallCount <= 2, $"Expected ≤2 GetByIdsAsync calls, got {stream.GetByIdsAsyncCallCount}");
+        Assert.Equal(0, stream.GetByIdAsyncCallCount);
+    }
+
+    [Fact]
+    public async Task ListAsync_WithManyRunsAndEvents_PerformanceRegression()
+    {
+        // Create 50 runs, each with 3 materialized work events.
+        // This tests that the list path avoids O(N) event loading.
+        const int runCount = 50;
+        const int workEventsPerRun = 3;
+        var entries = new List<AgentStreamEntry>();
+        var records = new List<AgentRunRecord>();
+        var utcNow = DateTime.UtcNow;
+
+        for (var i = 0; i < runCount; i++)
+        {
+            var runId = $"run-perf-{i:D3}";
+            var startedId = i * 2 + 1;
+            var completedId = i * 2 + 2;
+
+            entries.Add(new AgentStreamEntry
+            {
+                Id = startedId,
+                StreamKind = AgentStreamKind.Ops,
+                EventType = "subagent_started",
+                ProjectId = "proj",
+                TaskId = 200,
+                Sender = "pi",
+                DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+                CreatedAt = utcNow.AddSeconds(-runCount + i),
+                Metadata = JsonSerializer.SerializeToElement(new { run_id = runId, role = "coder", backend = "pi-cli" })
+            });
+            entries.Add(new AgentStreamEntry
+            {
+                Id = completedId,
+                StreamKind = AgentStreamKind.Ops,
+                EventType = "subagent_completed",
+                ProjectId = "proj",
+                TaskId = 200,
+                Sender = "pi",
+                DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+                CreatedAt = utcNow.AddSeconds(i),
+                Metadata = JsonSerializer.SerializeToElement(new
+                {
+                    run_id = runId,
+                    role = "coder",
+                    exit_code = 0,
+                    output_status = "assistant_final"
+                })
+            });
+
+            var totalEvents = 2 + workEventsPerRun; // started + work events + completed
+            records.Add(new AgentRunRecord
+            {
+                RunId = runId,
+                ProjectId = "proj",
+                TaskId = 200,
+                Role = "coder",
+                State = "complete",
+                Backend = "pi-cli",
+                StartedAt = utcNow.AddSeconds(-runCount + i),
+                EndedAt = utcNow.AddSeconds(i),
+                LatestStreamEntryId = completedId,
+                StartedStreamEntryId = startedId,
+                EventCount = totalEvents,
+                RawWorkEventCount = workEventsPerRun,
+                OperatorEventsJson = JsonSerializer.Serialize(new List<SubagentRunOperatorEvent>
+                {
+                    new() { EventName = "coder_started", Source = "agent_stream", SourceEventType = "subagent_started", StreamEntryId = startedId, OccurredAt = utcNow.AddSeconds(-runCount + i), Visibility = "summary" },
+                    new() { EventName = "coder_completed", Source = "agent_stream", SourceEventType = "subagent_completed", StreamEntryId = completedId, OccurredAt = utcNow.AddSeconds(i), Visibility = "summary" }
+                }),
+                HeartbeatCount = 0,
+                AssistantOutputCount = 0,
+                CreatedAt = utcNow.AddSeconds(-runCount + i),
+                UpdatedAt = utcNow
+            });
+        }
+
+        var stream = new FakeAgentStreamRepository(entries);
+        var runRepo = new FakeAgentRunRepository(records);
+        var service = new SubagentRunService(stream, runRepo);
+
+        var sw = Stopwatch.StartNew();
+        var summaries = await service.ListAsync(new SubagentRunListOptions
+        {
+            ProjectId = "proj",
+            TaskId = 200,
+            Limit = 50,
+            SourceLimit = 0
+        });
+        sw.Stop();
+
+        Assert.Equal(runCount, summaries.Count);
+
+        // Verify event counts reflect materialized data, not event loading
+        foreach (var summary in summaries)
+        {
+            Assert.Equal(2 + workEventsPerRun, summary.EventCounts.Total);
+            Assert.Equal(workEventsPerRun, summary.EventCounts.RawWork);
+            Assert.Equal(workEventsPerRun, summary.EventCounts.Debug);
+            Assert.Equal(2, summary.EventCounts.Lifecycle); // started + completed only
+            Assert.Equal(2, summary.OperatorEvents.Count);
+        }
+
+        // Performance: 50 runs with materialized counters should complete quickly
+        // without per-run event loading (which would need 50 stream queries).
+        Assert.True(sw.ElapsedMilliseconds < 500, $"ListAsync took {sw.ElapsedMilliseconds}ms for {runCount} runs; expected <500ms");
+        Assert.Equal(0, stream.GetByIdAsyncCallCount); // Should use batch load, not individual loads
+    }
+
+    [Fact]
+    public async Task GetAsync_DetailPath_StillLoadsFullEvents()
+    {
+        // Verify that the detail (GetAsync) path still loads full stream events
+        // for raw event/artifact behavior, not using pre-computed shortcuts.
+        const string runId = "run-detail";
+        var utcNow = DateTime.UtcNow;
+
+        var entries = new List<AgentStreamEntry>
+        {
+            new()
+            {
+                Id = 1,
+                StreamKind = AgentStreamKind.Ops,
+                EventType = "subagent_started",
+                ProjectId = "proj",
+                TaskId = 300,
+                Sender = "pi",
+                DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+                CreatedAt = utcNow,
+                Metadata = JsonSerializer.SerializeToElement(new { run_id = runId, role = "coder", backend = "pi-cli" })
+            },
+            new()
+            {
+                Id = 2,
+                StreamKind = AgentStreamKind.Ops,
+                EventType = "subagent_completed",
+                ProjectId = "proj",
+                TaskId = 300,
+                Sender = "pi",
+                DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+                CreatedAt = utcNow.AddSeconds(5),
+                Metadata = JsonSerializer.SerializeToElement(new { run_id = runId, role = "coder", exit_code = 0 })
+            }
+        };
+
+        var record = new AgentRunRecord
+        {
+            RunId = runId,
+            ProjectId = "proj",
+            TaskId = 300,
+            Role = "coder",
+            State = "complete",
+            Backend = "pi-cli",
+            StartedAt = utcNow,
+            EndedAt = utcNow.AddSeconds(5),
+            LatestStreamEntryId = 2,
+            StartedStreamEntryId = 1,
+            EventCount = 2,
+            RawWorkEventCount = 0,
+            HeartbeatCount = 0,
+            AssistantOutputCount = 0,
+            CreatedAt = utcNow,
+            UpdatedAt = utcNow
+        };
+
+        var stream = new FakeAgentStreamRepository(entries);
+        var runRepo = new FakeAgentRunRepository([record]);
+        var service = new SubagentRunService(stream, runRepo);
+
+        var detail = await service.GetAsync(runId, new SubagentRunListOptions
+        {
+            ProjectId = "proj",
+            TaskId = 300
+        });
+
+        Assert.NotNull(detail);
+        Assert.Equal(2, detail.Events.Count);
+        Assert.Equal("subagent_started", detail.Events[0].EventType);
+        Assert.Equal("subagent_completed", detail.Events[1].EventType);
+        Assert.Equal(2, detail.Summary.EventCounts.Total);
+        Assert.Equal(2, detail.Summary.EventCounts.Lifecycle);
+    }
+
     private static Predicate<JsonElement> EventTypeIs(string eventType) => element =>
         element.ValueKind == JsonValueKind.Object &&
         element.TryGetProperty("type", out var type) &&
@@ -97,9 +383,23 @@ public sealed class SubagentRunServiceTests : IDisposable
 
     private sealed class FakeAgentStreamRepository(IReadOnlyList<AgentStreamEntry> entries) : IAgentStreamRepository
     {
+        public int GetByIdAsyncCallCount { get; private set; }
+        public int GetByIdsAsyncCallCount { get; private set; }
+
         public Task<AgentStreamEntry> AppendAsync(AgentStreamEntry entry) => Task.FromResult(entry);
 
-        public Task<AgentStreamEntry?> GetByIdAsync(int id) => Task.FromResult(entries.FirstOrDefault(entry => entry.Id == id));
+        public Task<AgentStreamEntry?> GetByIdAsync(int id)
+        {
+            GetByIdAsyncCallCount++;
+            return Task.FromResult(entries.FirstOrDefault(entry => entry.Id == id));
+        }
+
+        public Task<Dictionary<int, AgentStreamEntry>> GetByIdsAsync(IReadOnlyList<int> ids)
+        {
+            GetByIdsAsyncCallCount++;
+            var result = entries.Where(e => ids.Contains(e.Id)).ToDictionary(e => e.Id);
+            return Task.FromResult(result);
+        }
 
         public Task<List<AgentStreamEntry>> ListAsync(AgentStreamListOptions? options = null) =>
             Task.FromResult(entries
@@ -109,9 +409,14 @@ public sealed class SubagentRunServiceTests : IDisposable
 
     private sealed class FakeAgentRunRepository : IAgentRunRepository
     {
+        private readonly List<AgentRunRecord> _records;
+
+        public FakeAgentRunRepository() : this([]) { }
+        public FakeAgentRunRepository(List<AgentRunRecord> records) => _records = records;
+
         public Task<bool> UpsertFromStreamEntryAsync(AgentStreamEntry entry) => Task.FromResult(false);
         public Task<AgentRunRecord?> RebuildFromStreamAsync(string runId) => Task.FromResult<AgentRunRecord?>(null);
-        public Task<AgentRunRecord?> GetAsync(string runId, SubagentRunListOptions options) => Task.FromResult<AgentRunRecord?>(null);
-        public Task<List<AgentRunRecord>> ListAsync(SubagentRunListOptions options) => Task.FromResult(new List<AgentRunRecord>());
+        public Task<AgentRunRecord?> GetAsync(string runId, SubagentRunListOptions options) => Task.FromResult(_records.FirstOrDefault(r => r.RunId == runId));
+        public Task<List<AgentRunRecord>> ListAsync(SubagentRunListOptions options) => Task.FromResult(_records.ToList());
     }
 }

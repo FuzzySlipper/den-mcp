@@ -720,6 +720,10 @@ public sealed class DatabaseInitializer
             "INTEGER CHECK (inherited_commit_count IS NULL OR inherited_commit_count >= 0)");
         await TryAddColumnAsync(connection, "review_rounds", "task_local_commit_count",
             "INTEGER CHECK (task_local_commit_count IS NULL OR task_local_commit_count >= 0)");
+        await TryAddColumnAsync(connection, "agent_runs", "raw_work_event_count",
+            "INTEGER NOT NULL DEFAULT 0");
+        await TryAddColumnAsync(connection, "agent_runs", "operator_events_json",
+            "TEXT");
         await EnsureIndexAsync(connection, "idx_messages_project_intent",
             "CREATE INDEX IF NOT EXISTS idx_messages_project_intent ON messages(project_id, intent)");
         await EnsureIndexAsync(connection, "idx_agent_bindings_project_status",

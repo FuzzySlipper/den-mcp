@@ -173,6 +173,69 @@ public class AgentRunRepositoryTests : IAsyncLifetime
         Assert.Empty(await _runs.ListAsync(new SubagentRunListOptions { ProjectId = "proj", State = "complete", Limit = 10 }));
     }
 
+    [Fact]
+    public async Task RebuildFromStreamAsync_MaterializesRawWorkCountAndOperatorEvents()
+    {
+        // Start a coder run
+        await AppendAsync("subagent_started", "run-mat", "coder", """{"run_id":"run-mat","role":"coder","backend":"pi-cli"}""");
+        // Add raw work events
+        for (var i = 0; i < 5; i++)
+        {
+            var workMeta = $"{{\"run_id\":\"run-mat\",\"event\":{{\"type\":\"subagent.work_message_end\",\"text_preview\":\"work {i}\"}}}}";
+            await AppendAsync("subagent_work_message_end", "run-mat", "coder", workMeta);
+        }
+        // Complete the run
+        await AppendAsync("subagent_completed", "run-mat", "coder", """{"run_id":"run-mat","role":"coder","exit_code":0}""");
+
+        var record = await _runs.RebuildFromStreamAsync("run-mat");
+
+        Assert.NotNull(record);
+        Assert.Equal(7, record!.EventCount);         // started + 5 work + completed
+        Assert.Equal(5, record.RawWorkEventCount);     // 5 raw work events
+
+        // Operator events JSON should contain coder_started and coder_completed
+        Assert.NotNull(record.OperatorEventsJson);
+        var ops = JsonSerializer.Deserialize<List<SubagentRunOperatorEvent>>(record.OperatorEventsJson!);
+        Assert.NotNull(ops);
+        Assert.Equal(2, ops!.Count); // coder_started + coder_completed
+        Assert.Equal("coder_started", ops[0].EventName);
+        Assert.Equal("coder_completed", ops[1].EventName);
+        Assert.Equal("agent_stream", ops[0].Source);
+        Assert.Equal("summary", ops[0].Visibility);
+    }
+
+    [Fact]
+    public async Task RebuildFromStreamAsync_MaterializesZeroOperatorEventsForUnknownRoles()
+    {
+        await AppendAsync("subagent_started", "run-norole", "planner", """{"run_id":"run-norole","role":"planner","backend":"pi-cli"}""");
+        await AppendAsync("subagent_completed", "run-norole", "planner", """{"run_id":"run-norole","role":"planner","exit_code":0}""");
+
+        var record = await _runs.RebuildFromStreamAsync("run-norole");
+
+        Assert.NotNull(record);
+        Assert.Equal(2, record!.EventCount);
+        Assert.Equal(0, record.RawWorkEventCount);
+        // Planner role has no operator event mapping, so JSON is null
+        Assert.Null(record.OperatorEventsJson);
+    }
+
+    [Fact]
+    public async Task RebuildFromStreamAsync_RecordsExplicitOperatorEventMetadata()
+    {
+        await AppendAsync("subagent_started", "run-explicit", "coder", """{"run_id":"run-explicit","role":"coder","backend":"pi-cli"}""");
+        await AppendAsync("subagent_heartbeat", "run-explicit", "coder", """{"run_id":"run-explicit","operator_event":"coder_heartbeat","event_visibility":"debug"}""");
+        await AppendAsync("subagent_completed", "run-explicit", "coder", """{"run_id":"run-explicit","role":"coder","exit_code":0}""");
+
+        var record = await _runs.RebuildFromStreamAsync("run-explicit");
+
+        Assert.NotNull(record);
+        var ops = JsonSerializer.Deserialize<List<SubagentRunOperatorEvent>>(record!.OperatorEventsJson!);
+        Assert.NotNull(ops);
+        Assert.Equal(3, ops!.Count); // coder_started + explicit coder_heartbeat + coder_completed
+        Assert.Equal("coder_heartbeat", ops[1].EventName);
+        Assert.Equal("debug", ops[1].Visibility);
+    }
+
     private async Task<AgentStreamEntry> AppendAndProjectAsync(string eventType, string metadataJson)
     {
         var entry = await AppendAsync(eventType, "run-complete", "coder", metadataJson);

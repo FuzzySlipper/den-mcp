@@ -36,6 +36,8 @@ public sealed class AgentRunRecord
     public int HeartbeatCount { get; set; }
     public int AssistantOutputCount { get; set; }
     public int EventCount { get; set; }
+    public int RawWorkEventCount { get; set; }
+    public string? OperatorEventsJson { get; set; }
     public DateTime? LastHeartbeatAt { get; set; }
     public DateTime? LastAssistantOutputAt { get; set; }
     public DateTime CreatedAt { get; set; }

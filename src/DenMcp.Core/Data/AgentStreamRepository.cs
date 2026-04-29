@@ -8,6 +8,7 @@ public interface IAgentStreamRepository
 {
     Task<AgentStreamEntry> AppendAsync(AgentStreamEntry entry);
     Task<AgentStreamEntry?> GetByIdAsync(int id);
+    Task<Dictionary<int, AgentStreamEntry>> GetByIdsAsync(IReadOnlyList<int> ids);
     Task<List<AgentStreamEntry>> ListAsync(AgentStreamListOptions? options = null);
 }
 
@@ -123,6 +124,55 @@ public sealed class AgentStreamRepository : IAgentStreamRepository
 
         await using var reader = await cmd.ExecuteReaderAsync();
         return await reader.ReadAsync() ? ReadEntry(reader) : null;
+    }
+
+    public async Task<Dictionary<int, AgentStreamEntry>> GetByIdsAsync(IReadOnlyList<int> ids)
+    {
+        if (ids.Count == 0)
+            return new Dictionary<int, AgentStreamEntry>();
+
+        await using var conn = await _db.CreateConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+
+        var paramNames = new string[ids.Count];
+        for (var i = 0; i < ids.Count; i++)
+        {
+            paramNames[i] = $"@id{i}";
+            cmd.Parameters.AddWithValue(paramNames[i], ids[i]);
+        }
+
+        cmd.CommandText = $"""
+            SELECT
+                id,
+                stream_kind,
+                event_type,
+                project_id,
+                task_id,
+                thread_id,
+                dispatch_id,
+                sender,
+                sender_instance_id,
+                recipient_agent,
+                recipient_role,
+                recipient_instance_id,
+                delivery_mode,
+                body,
+                metadata,
+                dedup_key,
+                created_at
+            FROM agent_stream_entries
+            WHERE id IN ({string.Join(", ", paramNames)})
+            """;
+
+        var result = new Dictionary<int, AgentStreamEntry>();
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            var entry = ReadEntry(reader);
+            result[entry.Id] = entry;
+        }
+
+        return result;
     }
 
     public async Task<List<AgentStreamEntry>> ListAsync(AgentStreamListOptions? options = null)

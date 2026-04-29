@@ -23,13 +23,53 @@ public sealed class SubagentRunService : ISubagentRunService
         _runs = runs;
     }
 
+    /// <summary>
+    /// List sub-agent run summaries for the given project/task.
+    /// </summary>
+    /// <remarks>
+    /// Scale assumptions (as of task #956):
+    /// <list type="bullet">
+    ///   <item>Up to 50 runs per list request (controlled by options.Limit, clamped to [1,50]).</item>
+    ///   <item>Stream summary discovery loads up to options.SourceLimit entries (default 200, max 200).</item>
+    ///   <item>List path uses pre-computed EventCounts and OperatorEvents from the materialized AgentRunRecord
+    ///         (populated during RebuildFromStreamAsync) — zero per-run event loads for list summaries.</item>
+    ///   <item>Latest/started stream entries are batch-loaded in a single GetByIdsAsync call.</item>
+    ///   <item>Detail (GetAsync) still loads full events for raw event/artifact views.</item>
+    ///   <item>Pre-migration records (without raw_work_event_count/operator_events_json columns) will have
+    ///         RawWorkEventCount=0 and OperatorEventsJson=null, yielding conservative counts.
+    ///         A RebuildFromStreamAsync call will backfill these columns.</item>
+    /// </list>
+    /// </remarks>
     public async Task<List<SubagentRunSummary>> ListAsync(SubagentRunListOptions options)
     {
+        var records = await _runs.ListAsync(options);
+
+        // Batch-load all latest/started stream entries in a single query
+        // instead of N individual GetByIdAsync calls.
+        var entryIds = new List<int>(records.Count * 2);
+        foreach (var record in records)
+        {
+            if (record.LatestStreamEntryId.HasValue)
+                entryIds.Add(record.LatestStreamEntryId.Value);
+            if (record.StartedStreamEntryId.HasValue)
+                entryIds.Add(record.StartedStreamEntryId.Value);
+        }
+        var entriesById = await _stream.GetByIdsAsync(entryIds);
+
         var summariesByRunId = new Dictionary<string, SubagentRunSummary>(StringComparer.Ordinal);
 
-        foreach (var record in await _runs.ListAsync(options))
+        foreach (var record in records)
         {
-            var summary = await BuildSummaryAsync(record, options);
+            var latest = record.LatestStreamEntryId.HasValue
+                ? entriesById.GetValueOrDefault(record.LatestStreamEntryId.Value)
+                : null;
+            if (latest is null)
+                continue;
+
+            var started = record.StartedStreamEntryId.HasValue
+                ? entriesById.GetValueOrDefault(record.StartedStreamEntryId.Value)
+                : null;
+            var summary = BuildSummaryFromRecord(record, latest, started);
             if (summary is not null)
                 summariesByRunId[summary.RunId] = summary;
         }
@@ -129,6 +169,92 @@ public sealed class SubagentRunService : ISubagentRunService
         var started = record.StartedStreamEntryId is null ? null : await _stream.GetByIdAsync(record.StartedStreamEntryId.Value);
         var events = knownEvents is { Count: > 0 } ? knownEvents : await LoadStreamEventsAsync(record.RunId, options);
         return BuildSummary(record, latest, started, events);
+    }
+
+    /// <summary>
+    /// Build a list summary from a durable record using pre-computed counters and operator events,
+    /// avoiding per-run event loading. Falls back to single-entry projection if the record
+    /// lacks materialized event data (pre-migration records).
+    /// </summary>
+    private static SubagentRunSummary? BuildSummaryFromRecord(
+        AgentRunRecord record,
+        AgentStreamEntry latest,
+        AgentStreamEntry? started)
+    {
+        // Derive event counts from materialized record fields.
+        var lifecycleCount = record.EventCount - record.RawWorkEventCount;
+        var eventCounts = new SubagentRunEventCounts
+        {
+            Total = record.EventCount,
+            Lifecycle = lifecycleCount,
+            RawWork = record.RawWorkEventCount,
+            Debug = record.RawWorkEventCount,
+            OperatorSummary = DeserializeOperatorEvents(record.OperatorEventsJson)?.Count ?? 0
+        };
+
+        var operatorEvents = DeserializeOperatorEvents(record.OperatorEventsJson) ?? [];
+
+        return new SubagentRunSummary
+        {
+            RunId = record.RunId,
+            State = record.State,
+            Schema = TextMetadata(latest, "schema") ?? TextMetadata(started, "schema"),
+            SchemaVersion = IntMetadata(latest, "schema_version") ?? IntMetadata(started, "schema_version"),
+            Latest = latest,
+            Started = started,
+            Role = record.Role ?? TextMetadata(latest, "role") ?? TextMetadata(started, "role"),
+            TaskId = record.TaskId ?? latest.TaskId ?? started?.TaskId ?? IntMetadata(latest, "task_id") ?? IntMetadata(started, "task_id"),
+            ProjectId = record.ProjectId ?? latest.ProjectId ?? started?.ProjectId,
+            Backend = record.Backend ?? TextMetadata(latest, "backend") ?? TextMetadata(started, "backend"),
+            Model = record.Model ?? TextMetadata(latest, "model") ?? TextMetadata(started, "model"),
+            ReviewRoundId = record.ReviewRoundId ?? IntMetadata(latest, "review_round_id") ?? IntMetadata(started, "review_round_id"),
+            WorkspaceId = record.WorkspaceId ?? TextMetadata(latest, "workspace_id") ?? TextMetadata(started, "workspace_id"),
+            Purpose = TextMetadata(latest, "purpose") ?? TextMetadata(started, "purpose"),
+            WorktreePath = TextMetadata(latest, "worktree_path") ?? TextMetadata(started, "worktree_path"),
+            Branch = TextMetadata(latest, "branch") ?? TextMetadata(started, "branch"),
+            BaseBranch = TextMetadata(latest, "base_branch") ?? TextMetadata(started, "base_branch"),
+            BaseCommit = TextMetadata(latest, "base_commit") ?? TextMetadata(started, "base_commit"),
+            HeadCommit = TextMetadata(latest, "head_commit") ?? TextMetadata(started, "head_commit"),
+            FinalHeadCommit = TextMetadata(latest, "final_head_commit"),
+            FinalHeadStatus = TextMetadata(latest, "final_head_status"),
+            StartedAt = record.StartedAt ?? DateMetadata(latest, "started_at") ?? DateMetadata(started, "started_at") ?? started?.CreatedAt,
+            EndedAt = record.EndedAt ?? DateMetadata(latest, "ended_at"),
+            UsageSummary = UsageSummary(latest) ?? UsageSummary(started),
+            EventCounts = eventCounts,
+            OperatorEvents = operatorEvents,
+            OutputStatus = record.OutputStatus ?? TextMetadata(latest, "output_status"),
+            TimeoutKind = record.TimeoutKind ?? TextMetadata(latest, "timeout_kind"),
+            InfrastructureFailureReason = record.InfrastructureFailureReason ?? TextMetadata(latest, "infrastructure_failure_reason"),
+            InfrastructureWarningReason = record.InfrastructureWarningReason ?? TextMetadata(latest, "infrastructure_warning_reason"),
+            ExitCode = record.ExitCode ?? IntMetadata(latest, "exit_code"),
+            Signal = record.Signal ?? TextMetadata(latest, "signal"),
+            Pid = record.Pid ?? IntMetadata(latest, "pid"),
+            StderrPreview = TextMetadata(latest, "stderr_preview"),
+            FallbackModel = record.FallbackModel ?? TextMetadata(latest, "fallback_model"),
+            FallbackFromModel = record.FallbackFromModel ?? TextMetadata(latest, "fallback_from_model"),
+            FallbackFromExitCode = record.FallbackFromExitCode ?? IntMetadata(latest, "fallback_from_exit_code"),
+            HeartbeatCount = record.HeartbeatCount,
+            AssistantOutputCount = record.AssistantOutputCount,
+            LastHeartbeatAt = record.LastHeartbeatAt,
+            LastAssistantOutputAt = record.LastAssistantOutputAt,
+            DurationMs = record.DurationMs ?? IntMetadata(latest, "duration_ms"),
+            ArtifactDir = record.ArtifactDir ?? ArtifactDir(latest) ?? ArtifactDir(started),
+            EventCount = record.EventCount
+        };
+    }
+
+    private static List<SubagentRunOperatorEvent>? DeserializeOperatorEvents(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return null;
+        try
+        {
+            return JsonSerializer.Deserialize<List<SubagentRunOperatorEvent>>(json);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static SubagentRunSummary BuildSummary(
