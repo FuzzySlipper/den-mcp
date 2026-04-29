@@ -11,6 +11,7 @@ import {
   loadDenExtensionConfig,
   saveDenExtensionConfig,
   denConfigPath,
+  clearProjectDenConfigPathCache,
 } from '../../pi-dev/lib/den-extension-config.ts';
 import { resolveReasoningCaptureOptions } from '../../pi-dev/lib/den-subagent-pipeline.ts';
 
@@ -103,6 +104,43 @@ test('resolveProjectDenConfigPaths returns inherited path for a linked worktree'
       await execGit(mainDir, 'worktree', 'remove', worktreeDir, '--force');
     }
   } finally {
+    await rm(mainDir, { recursive: true, force: true });
+  }
+});
+
+test('resolveProjectDenConfigPaths caches successful linked worktree discovery by resolved cwd', async () => {
+  const mainDir = await makeTmpDir();
+  const previousPath = process.env.PATH;
+  try {
+    await execGit(mainDir, 'init');
+    await writeFile(path.join(mainDir, 'README.md'), 'test');
+    await execGit(mainDir, 'add', 'README.md');
+    await execGit(mainDir, 'commit', '-m', 'init');
+
+    const worktreeDir = path.join(os.tmpdir(), `den-config-test-worktree-cache-${Date.now()}`);
+    await execGit(mainDir, 'worktree', 'add', worktreeDir, '-b', 'test-branch-cache');
+
+    try {
+      clearProjectDenConfigPathCache();
+      const firstPaths = await resolveProjectDenConfigPaths(worktreeDir);
+      assert.equal(firstPaths.length, 2);
+
+      firstPaths.push('/mutated-by-caller');
+      process.env.PATH = '';
+
+      const cachedPaths = await resolveProjectDenConfigPaths(worktreeDir);
+      assert.deepEqual(cachedPaths, [
+        path.join(worktreeDir, '.pi', 'den-config.json'),
+        path.join(mainDir, '.pi', 'den-config.json'),
+      ]);
+    } finally {
+      restoreEnv('PATH', previousPath);
+      clearProjectDenConfigPathCache();
+      await execGit(mainDir, 'worktree', 'remove', worktreeDir, '--force');
+    }
+  } finally {
+    restoreEnv('PATH', previousPath);
+    clearProjectDenConfigPathCache();
     await rm(mainDir, { recursive: true, force: true });
   }
 });

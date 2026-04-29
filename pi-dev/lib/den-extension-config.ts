@@ -7,6 +7,8 @@ import type { ReasoningCaptureOptions } from "./den-subagent-pipeline.ts";
 
 const execFileAsync = promisify(execFile);
 
+const projectDenConfigPathCache = new Map<string, string[]>();
+
 export type DenReasoningCaptureConfig = {
   capture_provider_summaries?: boolean;
   capture_raw_local_previews?: boolean;
@@ -96,9 +98,12 @@ export async function denConfigPaths(cwd: string): Promise<string[]> {
 
 /**
  * Resolve ordered candidate paths for project-scoped Den config.
+ * Successful git discoveries are cached by resolved cwd for the Pi process;
+ * non-git fallbacks are intentionally uncached so newly initialized repos can
+ * be discovered on a later call.
  *
  * Detection strategy:
- * 1. Always include `cwd/.pi/den-config.json`.
+ * 1. Always include `<resolved-cwd>/.pi/den-config.json`.
  * 2. Use `git -C <cwd> rev-parse --path-format=absolute --git-common-dir` to
  *    find the shared `.git` directory. For linked worktrees this points to
  *    `<main-worktree>/.git`.
@@ -106,7 +111,11 @@ export async function denConfigPaths(cwd: string): Promise<string[]> {
  *    `<common-dir-parent>/.pi/den-config.json`.
  */
 export async function resolveProjectDenConfigPaths(cwd: string): Promise<string[]> {
-  const localPath = path.join(cwd, ".pi", DEN_CONFIG_FILENAME);
+  const resolvedCwd = path.resolve(cwd);
+  const cached = projectDenConfigPathCache.get(resolvedCwd);
+  if (cached) return [...cached];
+
+  const localPath = path.join(resolvedCwd, ".pi", DEN_CONFIG_FILENAME);
   const paths: string[] = [localPath];
 
   try {
@@ -120,7 +129,6 @@ export async function resolveProjectDenConfigPaths(cwd: string): Promise<string[
     // For a linked worktree, commonDir is `<main-worktree>/.git` — parent is the main worktree.
     const commonParent = path.dirname(commonDir);
     const resolved = path.resolve(commonParent);
-    const resolvedCwd = path.resolve(cwd);
 
     // Only add the inherited path if it's genuinely different from cwd.
     if (resolved !== resolvedCwd) {
@@ -129,11 +137,18 @@ export async function resolveProjectDenConfigPaths(cwd: string): Promise<string[
         paths.push(inheritedPath);
       }
     }
+
+    projectDenConfigPathCache.set(resolvedCwd, [...paths]);
   } catch {
-    // Not a git repo or git not available — only use local path.
+    // Not a git repo or git not available — only use local path. Do not cache
+    // this fallback because callers may initialize git in the same directory.
   }
 
   return paths;
+}
+
+export function clearProjectDenConfigPathCache() {
+  projectDenConfigPathCache.clear();
 }
 
 export function reasoningCaptureOptionsFromConfig(config: DenExtensionConfig): ReasoningCaptureOptions {
