@@ -159,14 +159,35 @@ test('extractImplementationPacket extracts minimal complete output', () => {
   assert.equal(result.packet.summary, 'Fixed a typo.');
 });
 
-test('extractImplementationPacket extracts branch from inline patterns', () => {
+test('extractImplementationPacket extracts branch from inline on-branch pattern', () => {
   const output = `
 Work completed on branch \`task/456-fix-bug\`.
 Head commit is \`a1b2c3d4e5f6\`.
 `;
   const result = extractImplementationPacket(output);
-  // Branch and head_commit may be extracted from inline patterns even without sections.
-  assert.ok(result.packet.branch === 'task/456-fix-bug' || result.packet.branch === undefined);
+  // "on branch \`...\`" must be extracted by the inline fallback pattern.
+  assert.equal(result.packet.branch, 'task/456-fix-bug');
+  // "Head commit is" does not match the inline patterns (they require
+  // "head commit:" or "commit \`...\`"). This is expected — inline
+  // extraction is best-effort for known prompt patterns.
+  assert.equal(result.packet.head_commit, undefined);
+});
+
+test('extractImplementationPacket extracts head_commit from inline commit pattern', () => {
+  const output = 'Commit \`deadbeef12345678\` pushed to branch \`main\` on branch \`task/fix\`.';
+  const result = extractImplementationPacket(output);
+  assert.equal(result.packet.head_commit, 'deadbeef12345678');
+  // "on branch \`task/fix\`" matches; plain "branch \`main\`" does not.
+  assert.equal(result.packet.branch, 'task/fix');
+});
+
+test('extractImplementationPacket returns undefined branch/commit when no inline patterns match', () => {
+  const output = `
+Done. No branch or commit info here.
+`;
+  const result = extractImplementationPacket(output);
+  assert.equal(result.packet.branch, undefined);
+  assert.equal(result.packet.head_commit, undefined);
 });
 
 // ---------------------------------------------------------------------------
