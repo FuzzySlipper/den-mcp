@@ -1,5 +1,7 @@
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { promisify } from "node:util";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import {
@@ -77,8 +79,17 @@ import {
   extractExpectedScopeFromContextPacket,
   extractTaskIntentFromContextPacket,
   formatDriftCheckPacketMessage,
+  type DriftChangedPath,
   type DriftExpectedScope,
 } from "../lib/den-drift-check.ts";
+import {
+  buildDriftSentinelPacketMeta,
+  buildDriftSentinelPrompt,
+  formatDriftSentinelPacketMessage,
+  parseDriftSentinelOutput,
+} from "../lib/den-drift-sentinel.ts";
+
+const execFileAsync = promisify(execFile);
 
 const DEFAULT_BASE_URL = "http://192.168.1.10:5199";
 const GLOBAL_SUFFIX = "-default";
@@ -413,11 +424,305 @@ export default function denSubagent(pi: ExtensionAPI) {
       };
     },
   });
+
+  pi.registerCommand("den-drift-sentinel", {
+    description: "Run a cheap drift-sentinel sub-agent and post a drift_check_packet. Usage: /den-drift-sentinel <task_id> [--base <ref>] [--no-post]",
+    handler: async (args, ctx) => {
+      const cfg = await resolveConfig(ctx);
+      const parsed = parseDriftSentinelArgs(args);
+      const result = await runAndMaybePostDriftSentinel(cfg, parsed, ctx.cwd, undefined, undefined);
+      const status = subagentSucceeded(result.subagent) ? `sentinel risk: ${result.parsed.risk ?? "unknown"}` : "sentinel failed";
+      ctx.ui.setWidget("den-subagent", [`Drift ${status}`, `Message #${result.message_id ?? (parsed.post_result === false ? "not posted" : "not posted")}`, oneLine(result.content)]);
+      ctx.ui.notify(`Drift sentinel for task #${parsed.task_id}: ${status}.`, result.parsed.risk === "high" ? "error" : "info");
+    },
+  });
+
+  pi.registerTool({
+    name: "den_drift_sentinel",
+    label: "Den Drift Sentinel",
+    description: "Run a bounded cheap drift-sentinel sub-agent over task packets, deterministic drift analysis, changed files, and optional suspicious hunks; optionally post its output as a drift_check_packet.",
+    parameters: Type.Object({
+      task_id: Type.Number({ description: "Den task ID to assess." }),
+      cwd: Type.Optional(Type.String({ description: "Working tree path. Defaults to current Pi cwd." })),
+      base_ref: Type.Optional(Type.String({ description: "Base ref/commit for git diff. Defaults to coder context base_commit or main." })),
+      base_commit: Type.Optional(Type.String({ description: "Base commit from the coder context packet." })),
+      suspicious_hunks: Type.Optional(Type.String({ description: "Optional JSON array or delimiter-separated selected suspicious hunks; bounded before prompting." })),
+      model: Type.Optional(Type.String({ description: "Optional Pi model/provider id for the drift-sentinel sub-agent." })),
+      tools: Type.Optional(Type.String({ description: "Optional comma-separated Pi tool allowlist. Defaults by role/config." })),
+      post_result: Type.Optional(Type.Boolean({ description: "Post drift_check_packet to Den. Defaults true." })),
+    }),
+    async execute(_toolCallId, params, signal, onUpdate, ctx) {
+      const cfg = await resolveConfig(ctx);
+      const result = await runAndMaybePostDriftSentinel(cfg, {
+        task_id: params.task_id,
+        cwd: normalizeString(params.cwd),
+        base_ref: normalizeString(params.base_ref),
+        base_commit: normalizeString(params.base_commit),
+        suspicious_hunks: parseStringList(params.suspicious_hunks),
+        model: normalizeString(params.model),
+        tools: normalizeString(params.tools),
+        post_result: typeof params.post_result === "boolean" ? params.post_result : undefined,
+      }, ctx.cwd, signal, onUpdateText(onUpdate, "drift-sentinel", params.task_id));
+      return {
+        content: [{ type: "text", text: `${result.content.slice(0, 4000)}${result.message_id ? `\n\nPosted message #${result.message_id}.` : ""}` }],
+        details: { risk: result.parsed.risk ?? null, message_id: result.message_id ?? null, subagent_run_id: result.subagent.run_id },
+      };
+    },
+  });
 }
 
 // ---------------------------------------------------------------------------
-// Drift check internals
+// Drift check / sentinel internals
 // ---------------------------------------------------------------------------
+
+function parseDriftSentinelArgs(args: string | undefined) {
+  const tokens = tokenizeArgs(args ?? "");
+  const taskToken = tokens.shift();
+  const taskId = Number(taskToken);
+  if (!Number.isInteger(taskId) || taskId <= 0) {
+    throw new Error("Usage: /den-drift-sentinel <task_id> [--base <ref>] [--base-commit <sha>] [--hunks <json|text>] [--no-post]");
+  }
+
+  const parsed: {
+    task_id: number;
+    cwd?: string;
+    base_ref?: string;
+    base_commit?: string;
+    suspicious_hunks?: string[];
+    model?: string;
+    tools?: string;
+    post_result?: boolean;
+  } = { task_id: taskId };
+
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (token === "--no-post") {
+      parsed.post_result = false;
+      continue;
+    }
+    const value = tokens[++i];
+    if (!value) throw new Error(`${token} requires a value.`);
+    switch (token) {
+      case "--cwd": parsed.cwd = value; break;
+      case "--base": parsed.base_ref = value; break;
+      case "--base-ref": parsed.base_ref = value; break;
+      case "--base-commit": parsed.base_commit = value; break;
+      case "--hunks":
+      case "--suspicious-hunks": parsed.suspicious_hunks = parseStringList(value); break;
+      case "--model": parsed.model = value; break;
+      case "--tools": parsed.tools = value; break;
+      default: throw new Error(`Unknown drift-sentinel flag: ${token}`);
+    }
+  }
+
+  return parsed;
+}
+
+async function runAndMaybePostDriftSentinel(
+  cfg: DenConfig,
+  options: {
+    task_id: number;
+    cwd?: string;
+    base_ref?: string;
+    base_commit?: string;
+    suspicious_hunks?: string[];
+    model?: string;
+    tools?: string;
+    post_result?: boolean;
+  },
+  defaultCwd: string,
+  signal: AbortSignal | undefined,
+  onUpdate: ((partial: string) => void) | undefined,
+): Promise<{
+  subagent: SubagentResult;
+  parsed: ReturnType<typeof parseDriftSentinelOutput>;
+  content: string;
+  prompt: string;
+  message_id?: number;
+}> {
+  const cwd = options.cwd ?? defaultCwd;
+  const detail = await getTask(cfg, options.task_id);
+  const task = detail?.task ?? detail;
+  const messages = await getTaskMessages(cfg, options.task_id);
+  const contextPacket = latestStructuredMessage(messages, "coder_context_packet");
+  const implementationPacket = latestStructuredMessage(messages, "implementation_packet");
+  const deterministicPacket = latestDeterministicDriftMessage(messages);
+  const contextMeta = metadataObject(contextPacket);
+
+  const deterministic = await collectSentinelDeterministicAnalysis(cfg, {
+    task_id: options.task_id,
+    cwd,
+    base_ref: options.base_ref,
+    base_commit: options.base_commit,
+    task,
+    contextPacket,
+    implementationPacket,
+    contextMeta,
+  });
+  const deterministicContent = deterministicPacket?.content ?? formatDriftCheckPacketMessage(deterministic.analysis);
+  const explicitHunks = options.suspicious_hunks ?? [];
+  const suspiciousHunks = explicitHunks.length > 0
+    ? explicitHunks
+    : await collectSuspiciousHunks(cwd, deterministic.analysis.base_ref ?? options.base_ref ?? "main", deterministic.analysis.changed_paths);
+  const prompt = buildDriftSentinelPrompt({
+    task: {
+      id: options.task_id,
+      title: normalizeString(task?.title),
+      status: normalizeString(task?.status),
+      description: normalizeString(task?.description),
+      intent: deterministic.analysis.task_intent,
+    },
+    coder_context_packet: contextPacket?.content,
+    implementation_packet: implementationPacket?.content,
+    deterministic_drift: deterministicContent,
+    diffstat: deterministic.analysis.diffstat_summary,
+    changed_files: deterministic.analysis.changed_paths.map(formatChangedPathForPrompt),
+    suspicious_hunks: suspiciousHunks,
+  });
+
+  const subagent = await runDenSubagent(
+    cfg,
+    {
+      role: "drift-sentinel",
+      prompt,
+      taskId: options.task_id,
+      cwd,
+      branch: deterministic.analysis.branch,
+      baseCommit: deterministic.analysis.base_commit,
+      headCommit: deterministic.analysis.head_commit,
+      purpose: "drift_sentinel",
+      model: options.model,
+      tools: options.tools ?? "read",
+      postResult: false,
+    },
+    defaultCwd,
+    signal,
+    onUpdate,
+  );
+
+  const output = subagent.final_output || formatFailureSummary(subagent);
+  const parsed = subagentSucceeded(subagent) ? parseDriftSentinelOutput(output) : {};
+  const deterministicMeta = metadataObject(deterministicPacket);
+  const deterministicMessageId = optionalNumber(deterministicPacket?.id);
+  const deterministicRisk = parseRiskString(metadataString(deterministicMeta, "risk")) ?? deterministic.analysis.risk;
+  const content = formatDriftSentinelPacketMessage({
+    task_id: options.task_id,
+    branch: deterministic.analysis.branch,
+    base_ref: deterministic.analysis.base_ref,
+    head_commit: deterministic.analysis.head_commit,
+    deterministic_risk: deterministicRisk,
+    deterministic_message_id: deterministicMessageId,
+    sentinel_output: output,
+    parsed,
+  });
+
+  let messageId: number | undefined;
+  if ((options.post_result ?? true) && subagentSucceeded(subagent)) {
+    const postResult = await sendTaskMessage(cfg, options.task_id, content, buildDriftSentinelPacketMeta({
+      task_id: options.task_id,
+      branch: deterministic.analysis.branch,
+      base_ref: deterministic.analysis.base_ref,
+      head_commit: deterministic.analysis.head_commit,
+      deterministic_risk: deterministicRisk,
+      deterministic_message_id: deterministicMessageId,
+      parsed,
+    }));
+    messageId = optionalNumber(postResult?.id);
+    await appendPacketLifecycleOps(cfg, options.task_id, "drift_check_packet", messageId, {
+      prepared_by: "drift_sentinel",
+      risk: parsed.risk ?? null,
+      source_deterministic_risk: deterministicRisk,
+      branch: deterministic.analysis.branch ?? null,
+      head_commit: deterministic.analysis.head_commit ?? null,
+      subagent_run_id: subagent.run_id,
+    });
+  }
+
+  return { subagent, parsed, content, prompt, message_id: messageId };
+}
+
+async function collectSentinelDeterministicAnalysis(
+  _cfg: DenConfig,
+  input: {
+    task_id: number;
+    cwd: string;
+    base_ref?: string;
+    base_commit?: string;
+    task: any;
+    contextPacket: any;
+    implementationPacket: any;
+    contextMeta: any;
+  },
+): Promise<{ analysis: ReturnType<typeof analyzeDriftCheck> }> {
+  const contextScope = input.contextPacket?.content ? extractExpectedScopeFromContextPacket(input.contextPacket.content) : undefined;
+  const declaredTests = input.implementationPacket?.content ? extractDeclaredTestsFromImplementationPacket(input.implementationPacket.content) : [];
+  const collected = await collectGitDriftCheckInput({
+    cwd: input.cwd,
+    task_id: input.task_id,
+    task_title: normalizeString(input.task?.title),
+    task_intent: input.contextPacket?.content ? extractTaskIntentFromContextPacket(input.contextPacket.content) : normalizeString(input.task?.description),
+    base_ref: input.base_ref ?? input.base_commit ?? metadataString(input.contextMeta, "base_commit") ?? "main",
+    base_commit: input.base_commit ?? metadataString(input.contextMeta, "base_commit"),
+    declared_tests: declaredTests,
+    expected_scope: contextScope,
+  });
+  return { analysis: analyzeDriftCheck(collected) };
+}
+
+function latestDeterministicDriftMessage(messages: any[]): any | undefined {
+  return [...messages]
+    .filter((msg) => metadataString(metadataObject(msg), "type") === "drift_check_packet")
+    .filter((msg) => metadataString(metadataObject(msg), "prepared_by") !== "drift_sentinel")
+    .sort((a, b) => (optionalNumber(b?.id) ?? 0) - (optionalNumber(a?.id) ?? 0))[0];
+}
+
+async function collectSuspiciousHunks(cwd: string, baseRef: string, changedPaths: DriftChangedPath[]): Promise<string[]> {
+  const candidatePaths = changedPaths
+    .filter((entry) => isSuspiciousHunkCandidate(entry.path))
+    .slice(0, 3)
+    .map((entry) => entry.path);
+  const hunks: string[] = [];
+  for (const filePath of candidatePaths) {
+    try {
+      const { stdout } = await execFileAsync("git", ["diff", "--unified=3", "--no-ext-diff", `${baseRef}...HEAD`, "--", filePath], { cwd, maxBuffer: 256 * 1024 });
+      const text = String(stdout).trim();
+      if (text) hunks.push(limitHunk(filePath, text));
+    } catch {
+      // Suspicious hunk collection is optional; deterministic changed paths stay in the prompt.
+    }
+  }
+  return hunks;
+}
+
+function isSuspiciousHunkCandidate(pathValue: string): boolean {
+  const p = pathValue.toLowerCase();
+  return p.startsWith("tests/")
+    || p.includes("/tests/")
+    || p.startsWith(".github/")
+    || p.includes("scoring")
+    || p.includes("harness")
+    || p.endsWith("package.json")
+    || p.endsWith("package-lock.json")
+    || p.endsWith(".csproj")
+    || p.endsWith(".slnx")
+    || p.endsWith("agents.md");
+}
+
+function limitHunk(filePath: string, text: string): string {
+  const maxChars = 2_500;
+  const bounded = text.length <= maxChars ? text : `${text.slice(0, maxChars)}\n... (truncated suspicious hunk for ${filePath})`;
+  return `# ${filePath}\n${bounded}`;
+}
+
+function formatChangedPathForPrompt(pathValue: DriftChangedPath): string {
+  const status = pathValue.status ? `${pathValue.status} ` : "";
+  const counts = pathValue.additions !== undefined || pathValue.deletions !== undefined ? ` (+${pathValue.additions ?? 0}/-${pathValue.deletions ?? 0})` : "";
+  return `${status}${pathValue.path}${counts}`;
+}
+
+function parseRiskString(value: string | undefined): "low" | "medium" | "high" | undefined {
+  return value === "low" || value === "medium" || value === "high" ? value : undefined;
+}
 
 function parseDriftCheckArgs(args: string | undefined) {
   const tokens = tokenizeArgs(args ?? "");
@@ -523,7 +828,7 @@ async function runAndMaybePostDriftCheck(
     await appendPacketLifecycleOps(cfg, options.task_id, "drift_check_packet", messageId, {
       branch: analysis.branch ?? null,
       head_commit: analysis.head_commit ?? null,
-      severity: analysis.severity,
+      risk: analysis.risk,
     });
   }
 
@@ -760,7 +1065,7 @@ async function configureFallbackModel(ctx: any, scope: ConfigScope) {
 }
 
 async function configureSubagentDefaults(ctx: any, scope: ConfigScope) {
-  const roleChoices = ["coder", "reviewer", "planner"];
+  const roleChoices = ["coder", "reviewer", "planner", "drift-sentinel"];
   const current = await loadDenExtensionConfig(scope, ctx.cwd);
   const role = await ctx.ui.select(
     `Configure ${scope} sub-agent role`,
@@ -938,7 +1243,7 @@ function formatConfigPreview(config: DenExtensionConfig, projectPath: string, gl
     "",
     "Sub-agent defaults:",
   );
-  for (const role of ["coder", "reviewer", "planner"]) {
+  for (const role of ["coder", "reviewer", "planner", "drift-sentinel"]) {
     const roleConfig = config.subagents?.[role];
     lines.push(`- ${role}: ${roleConfig?.model ?? "(not configured)"}`);
   }
