@@ -8,7 +8,7 @@ namespace DenMcp.Desktop.Sidecar.Tests;
 public class DesktopSidecarBridgeTests
 {
     [Fact]
-    public void SchemaBundle_RegistersOnlySkeletonCommandsAndPlaceholderEvent()
+    public void SchemaBundle_RegistersRuntimeCommandsAndEvents()
     {
         using var provider = DesktopSidecarBridge.CreateServiceProvider(DesktopSidecarFixtures.CreateFixtureOptions());
         var bundle = DesktopSidecarBridge.CreateSchemaBundle(provider);
@@ -16,22 +16,40 @@ public class DesktopSidecarBridgeTests
         Assert.Equal(DesktopSidecarProtocol.SchemaBundleId, bundle.BundleId);
         Assert.Equal(DesktopSidecarProtocol.SchemaVersion, bundle.SchemaVersion);
         Assert.Equal(
-            new[] { DesktopSidecarProtocol.CapabilitiesCommand, DesktopSidecarProtocol.HealthCommand },
+            new[]
+            {
+                DesktopSidecarProtocol.CapabilitiesCommand,
+                DesktopSidecarProtocol.HealthCommand,
+                DesktopSidecarProtocol.GetLatestDiffSnapshotCommand,
+                DesktopSidecarProtocol.GetSettingsCommand,
+                DesktopSidecarProtocol.GetOperatorStatusCommand,
+                DesktopSidecarProtocol.ListLocalGitSnapshotsCommand,
+                DesktopSidecarProtocol.ListLocalSessionSnapshotsCommand,
+                DesktopSidecarProtocol.RefreshNowCommand,
+                DesktopSidecarProtocol.SaveSettingsCommand,
+            },
             bundle.Commands.Select(command => command.Command).ToArray());
-        Assert.Equal(new[] { DesktopSidecarProtocol.PlaceholderRuntimeEvent }, bundle.Events.Select(@event => @event.Event).ToArray());
-        Assert.Contains(DesktopSidecarProtocol.HealthCommand + ".response", bundle.Definitions.Keys);
-        Assert.Contains(DesktopSidecarProtocol.CapabilitiesCommand + ".response", bundle.Definitions.Keys);
-        Assert.Contains(DesktopSidecarProtocol.PlaceholderRuntimeEvent + ".payload", bundle.Definitions.Keys);
+        Assert.Equal(
+            new[]
+            {
+                DesktopSidecarProtocol.GitSnapshotEvent,
+                DesktopSidecarProtocol.OperatorStatusEvent,
+                DesktopSidecarProtocol.SessionSnapshotEvent,
+            },
+            bundle.Events.Select(@event => @event.Event).ToArray());
+        Assert.Contains(DesktopSidecarProtocol.GetOperatorStatusCommand + ".response", bundle.Definitions.Keys);
+        Assert.Contains(DesktopSidecarProtocol.OperatorStatusEvent + ".payload", bundle.Definitions.Keys);
     }
 
     [Fact]
-    public async Task CommandRouter_ReturnsHealthAndCapabilitiesThroughBridgeResponses()
+    public async Task CommandRouter_ReturnsHealthCapabilitiesAndRuntimeStatusThroughBridgeResponses()
     {
         using var provider = DesktopSidecarBridge.CreateServiceProvider(DesktopSidecarFixtures.CreateFixtureOptions());
         var router = provider.GetRequiredService<IBridgeCommandRouter>();
 
         var healthResponse = await router.DispatchAsync(Request("req_health", DesktopSidecarProtocol.HealthCommand));
         var capabilitiesResponse = await router.DispatchAsync(Request("req_capabilities", DesktopSidecarProtocol.CapabilitiesCommand));
+        var statusResponse = await router.DispatchAsync(Request("req_status", DesktopSidecarProtocol.GetOperatorStatusCommand));
 
         Assert.Null(healthResponse.Error);
         Assert.NotNull(healthResponse.Result);
@@ -42,8 +60,16 @@ public class DesktopSidecarBridgeTests
         Assert.Null(capabilitiesResponse.Error);
         Assert.NotNull(capabilitiesResponse.Result);
         Assert.Equal("loopback_websocket", capabilitiesResponse.Result!.Value.GetProperty("supported_transports")[0].GetString());
-        Assert.Equal(DesktopSidecarProtocol.HealthCommand, capabilitiesResponse.Result.Value.GetProperty("commands")[1].GetProperty("command").GetString());
-        Assert.Equal(DesktopSidecarProtocol.PlaceholderRuntimeEvent, capabilitiesResponse.Result.Value.GetProperty("events")[0].GetProperty("event").GetString());
+        Assert.Contains(
+            DesktopSidecarProtocol.GetOperatorStatusCommand,
+            capabilitiesResponse.Result.Value.GetProperty("commands").EnumerateArray().Select(command => command.GetProperty("command").GetString()));
+        Assert.Contains(
+            DesktopSidecarProtocol.OperatorStatusEvent,
+            capabilitiesResponse.Result.Value.GetProperty("events").EnumerateArray().Select(@event => @event.GetProperty("event").GetString()));
+
+        Assert.Null(statusResponse.Error);
+        Assert.Equal("starting", statusResponse.Result!.Value.GetProperty("phase").GetString());
+        Assert.Equal("unknown", statusResponse.Result.Value.GetProperty("denConnection").GetProperty("state").GetString());
     }
 
     [Fact]
@@ -61,7 +87,7 @@ public class DesktopSidecarBridgeTests
     }
 
     [Fact]
-    public void WireFixture_ContainsSchemaVersionedHealthCapabilitiesAndPlaceholderEventFrames()
+    public void WireFixture_ContainsSchemaVersionedHealthCapabilitiesAndRuntimeEventFrames()
     {
         var fixture = DesktopSidecarFixtures.CreateWireFixture(DesktopSidecarFixtures.CreateFixtureOptions());
         var json = BridgeJson.Serialize(fixture);
@@ -69,10 +95,12 @@ public class DesktopSidecarBridgeTests
         Assert.Equal(DesktopSidecarProtocol.SchemaBundleId, fixture.SchemaBundleId);
         Assert.Equal("response", fixture.Frames.HealthResponse.FrameType);
         Assert.Equal("response", fixture.Frames.CapabilitiesResponse.FrameType);
-        Assert.Equal("event", fixture.Frames.PlaceholderEvent.FrameType);
-        Assert.Equal(DesktopSidecarProtocol.PlaceholderRuntimeEvent, fixture.Frames.PlaceholderEvent.Event);
-        Assert.Contains("bridge.get_health", json, StringComparison.Ordinal);
-        Assert.Contains("den_desktop.runtime.placeholder", json, StringComparison.Ordinal);
+        Assert.Equal("event", fixture.Frames.OperatorStatusEvent.FrameType);
+        Assert.Equal(DesktopSidecarProtocol.OperatorStatusEvent, fixture.Frames.OperatorStatusEvent.Event);
+        Assert.Equal(DesktopSidecarProtocol.GitSnapshotEvent, fixture.Frames.GitSnapshotEvent.Event);
+        Assert.Equal(DesktopSidecarProtocol.SessionSnapshotEvent, fixture.Frames.SessionSnapshotEvent.Event);
+        Assert.Contains(DesktopSidecarProtocol.GetOperatorStatusCommand, json, StringComparison.Ordinal);
+        Assert.Contains(DesktopSidecarProtocol.OperatorStatusEvent, json, StringComparison.Ordinal);
     }
 
     private static BridgeRequestFrame Request(string requestId, string command)

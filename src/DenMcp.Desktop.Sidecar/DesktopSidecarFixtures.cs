@@ -22,6 +22,8 @@ public static class DesktopSidecarFixtures
             new BridgeRequestContext("req_capabilities", BridgeCorrelation.Empty, (_, _) => ValueTask.CompletedTask),
             CancellationToken.None).AsTask().GetAwaiter().GetResult();
 
+        var status = OperatorStatus.Starting(OperatorSettings.CreateDefault(() => "den-desktop-fixture"));
+
         return new DesktopSidecarWireFixture
         {
             SchemaBundleId = DesktopSidecarProtocol.SchemaBundleId,
@@ -40,16 +42,9 @@ public static class DesktopSidecarFixtures
                     BridgeCorrelation.Empty,
                     FixtureTimestamp,
                     DesktopSidecarProtocol.SchemaVersion),
-                PlaceholderEvent = new BridgeEventFrame
-                {
-                    SchemaVersion = DesktopSidecarProtocol.SchemaVersion,
-                    EventId = "evt_placeholder_001",
-                    Sequence = state.NextSequence(),
-                    Event = DesktopSidecarProtocol.PlaceholderRuntimeEvent,
-                    Payload = BridgeJson.ToElement(state.CreatePlaceholderEventPayload()),
-                    Correlation = BridgeCorrelation.Empty,
-                    SentAt = FixtureTimestamp,
-                },
+                OperatorStatusEvent = EventFrame(state, "evt_status_001", DesktopSidecarProtocol.OperatorStatusEvent, status),
+                GitSnapshotEvent = EventFrame(state, "evt_git_001", DesktopSidecarProtocol.GitSnapshotEvent, Array.Empty<LocalGitSnapshot>()),
+                SessionSnapshotEvent = EventFrame(state, "evt_session_001", DesktopSidecarProtocol.SessionSnapshotEvent, Array.Empty<LocalSessionSnapshot>()),
             },
         };
     }
@@ -65,6 +60,20 @@ public static class DesktopSidecarFixtures
             AuthToken = "fixture-token",
             Port = 0,
             EndpointPath = DesktopSidecarOptions.DefaultEndpointPath,
+        };
+    }
+
+    private static BridgeEventFrame EventFrame<T>(DesktopSidecarRuntimeState state, string eventId, string eventName, T payload)
+    {
+        return new BridgeEventFrame
+        {
+            SchemaVersion = DesktopSidecarProtocol.SchemaVersion,
+            EventId = eventId,
+            Sequence = state.NextSequence(),
+            Event = eventName,
+            Payload = BridgeJson.ToElement(payload),
+            Correlation = BridgeCorrelation.Empty,
+            SentAt = FixtureTimestamp,
         };
     }
 }

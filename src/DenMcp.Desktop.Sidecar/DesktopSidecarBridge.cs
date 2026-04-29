@@ -16,11 +16,16 @@ public static class DesktopSidecarBridge
 
         var services = new ServiceCollection();
         services.AddSingleton(options);
-        services.AddSingleton(_ => new OperatorSettingsService());
+        services.AddSingleton(_ => new OperatorSettingsService(
+            OperatorSettingsStorage.ForPath(Path.Combine(options.ConfigPath, OperatorSettingsStorage.SettingsFileName))));
+        services.AddSingleton(_ => new DenHttpClient());
         services.AddSingleton<IGitCommandRunner, SystemGitCommandRunner>();
         services.AddSingleton<GitSnapshotBuilder>();
         services.AddSingleton<PiSessionSnapshotBuilder>();
         services.AddSingleton<DesktopSidecarRuntimeState>();
+        services.AddSingleton<OperatorRuntimeBridgeEventSink>();
+        services.AddSingleton<IOperatorRuntimeEventSink>(sp => sp.GetRequiredService<OperatorRuntimeBridgeEventSink>());
+        services.AddSingleton<OperatorRuntimeService>();
         services.AddBridgeHost(
             ConfigureRegistry,
             host =>
@@ -30,7 +35,7 @@ public static class DesktopSidecarBridge
                 host.SchemaVersion = DesktopSidecarProtocol.SchemaVersion;
                 host.SchemaBundleId = DesktopSidecarProtocol.SchemaBundleId;
                 host.SupportedTransports = new[] { WebSocketBridgeTransportNames.LoopbackWebSocket };
-                host.FeatureFlags = new[] { "sidecar_skeleton", "placeholder_runtime_events" };
+                host.FeatureFlags = new[] { "operator_runtime", "typed_runtime_bridge" };
             });
 
         return services.BuildServiceProvider(validateScopes: true);
@@ -45,7 +50,23 @@ public static class DesktopSidecarBridge
                 DesktopSidecarProtocol.HealthCommand)
             .RegisterCommand<DesktopSidecarEmptyRequest, DesktopSidecarCapabilitiesResponse, GetCapabilitiesHandler>(
                 DesktopSidecarProtocol.CapabilitiesCommand)
-            .RegisterEvent<DesktopPlaceholderRuntimeEvent>(DesktopSidecarProtocol.PlaceholderRuntimeEvent);
+            .RegisterCommand<DesktopSidecarEmptyRequest, OperatorStatus, GetOperatorStatusHandler>(
+                DesktopSidecarProtocol.GetOperatorStatusCommand)
+            .RegisterCommand<DesktopSidecarEmptyRequest, OperatorSettings, GetOperatorSettingsHandler>(
+                DesktopSidecarProtocol.GetSettingsCommand)
+            .RegisterCommand<SaveOperatorSettingsRequest, OperatorSettings, SaveOperatorSettingsHandler>(
+                DesktopSidecarProtocol.SaveSettingsCommand)
+            .RegisterCommand<DesktopSidecarEmptyRequest, DesktopSidecarEmptyResponse, RefreshNowHandler>(
+                DesktopSidecarProtocol.RefreshNowCommand)
+            .RegisterCommand<DesktopSidecarEmptyRequest, LocalSnapshotList, ListLocalGitSnapshotsHandler>(
+                DesktopSidecarProtocol.ListLocalGitSnapshotsCommand)
+            .RegisterCommand<DesktopSidecarEmptyRequest, LocalSessionSnapshotList, ListLocalSessionSnapshotsHandler>(
+                DesktopSidecarProtocol.ListLocalSessionSnapshotsCommand)
+            .RegisterCommand<LatestDiffSnapshotRequest, DesktopDiffSnapshotLatestResult, GetLatestDiffSnapshotHandler>(
+                DesktopSidecarProtocol.GetLatestDiffSnapshotCommand)
+            .RegisterEvent<OperatorStatus>(DesktopSidecarProtocol.OperatorStatusEvent)
+            .RegisterEvent<IReadOnlyList<LocalGitSnapshot>>(DesktopSidecarProtocol.GitSnapshotEvent)
+            .RegisterEvent<IReadOnlyList<LocalSessionSnapshot>>(DesktopSidecarProtocol.SessionSnapshotEvent);
     }
 
     public static BridgeSchemaBundle CreateSchemaBundle(IServiceProvider serviceProvider)
@@ -63,32 +84,71 @@ public static class DesktopSidecarBridge
     {
         return new[]
         {
-            new BridgeNamedSchema(
-                DesktopSidecarProtocol.HealthCommand + ".request",
-                BridgeSchemaBundleFactory.Schema("""
-                    {"type":"object","additionalProperties":false}
-                    """)),
-            new BridgeNamedSchema(
-                DesktopSidecarProtocol.HealthCommand + ".response",
-                BridgeSchemaBundleFactory.Schema("""
-                    {"type":"object","additionalProperties":false,"required":["process_id","uptime_ms","ready_state","app_id","app_version","config_path","protocol_version","schema_version","schema_bundle_id","active_request_count","degraded_subsystems"],"properties":{"process_id":{"type":"integer"},"uptime_ms":{"type":"integer"},"ready_state":{"type":"string"},"app_id":{"type":"string"},"app_version":{"type":"string"},"config_path":{"type":"string"},"log_path":{"type":"string"},"protocol_version":{"const":"1.0"},"schema_version":{"type":"string"},"schema_bundle_id":{"type":"string"},"active_request_count":{"type":"integer"},"degraded_subsystems":{"type":"array","items":{"type":"string"}},"last_error":{"$ref":"bridge.error"}}}
-                    """)),
-            new BridgeNamedSchema(
-                DesktopSidecarProtocol.CapabilitiesCommand + ".request",
-                BridgeSchemaBundleFactory.Schema("""
-                    {"type":"object","additionalProperties":false}
-                    """)),
-            new BridgeNamedSchema(
-                DesktopSidecarProtocol.CapabilitiesCommand + ".response",
-                BridgeSchemaBundleFactory.Schema("""
-                    {"type":"object","additionalProperties":false,"required":["app_id","app_version","protocol_version","schema_version","schema_bundle_id","supported_transports","commands","events","feature_flags"],"properties":{"app_id":{"type":"string"},"app_version":{"type":"string"},"protocol_version":{"const":"1.0"},"schema_version":{"type":"string"},"schema_bundle_id":{"type":"string"},"supported_transports":{"type":"array","items":{"type":"string"}},"commands":{"type":"array","items":{"$ref":"bridge.command_capability"}},"events":{"type":"array","items":{"$ref":"bridge.event_capability"}},"feature_flags":{"type":"array","items":{"type":"string"}}}}
-                    """)),
-            new BridgeNamedSchema(
-                DesktopSidecarProtocol.PlaceholderRuntimeEvent + ".payload",
-                BridgeSchemaBundleFactory.Schema("""
-                    {"type":"object","additionalProperties":false,"required":["status","message","config_path","schema_version"],"properties":{"status":{"type":"string"},"message":{"type":"string"},"config_path":{"type":"string"},"schema_version":{"type":"string"}}}
-                    """)),
+            Schema(DesktopSidecarProtocol.HealthCommand + ".request", """
+                {"type":"object","additionalProperties":false}
+                """),
+            Schema(DesktopSidecarProtocol.HealthCommand + ".response", """
+                {"type":"object","additionalProperties":false,"required":["process_id","uptime_ms","ready_state","app_id","app_version","config_path","protocol_version","schema_version","schema_bundle_id","active_request_count","degraded_subsystems"],"properties":{"process_id":{"type":"integer"},"uptime_ms":{"type":"integer"},"ready_state":{"type":"string"},"app_id":{"type":"string"},"app_version":{"type":"string"},"config_path":{"type":"string"},"log_path":{"type":"string"},"protocol_version":{"const":"1.0"},"schema_version":{"type":"string"},"schema_bundle_id":{"type":"string"},"active_request_count":{"type":"integer"},"degraded_subsystems":{"type":"array","items":{"type":"string"}},"last_error":{"$ref":"bridge.error"}}}
+                """),
+            Schema(DesktopSidecarProtocol.CapabilitiesCommand + ".request", """
+                {"type":"object","additionalProperties":false}
+                """),
+            Schema(DesktopSidecarProtocol.CapabilitiesCommand + ".response", """
+                {"type":"object","additionalProperties":false,"required":["app_id","app_version","protocol_version","schema_version","schema_bundle_id","supported_transports","commands","events","feature_flags"],"properties":{"app_id":{"type":"string"},"app_version":{"type":"string"},"protocol_version":{"const":"1.0"},"schema_version":{"type":"string"},"schema_bundle_id":{"type":"string"},"supported_transports":{"type":"array","items":{"type":"string"}},"commands":{"type":"array","items":{"$ref":"bridge.command_capability"}},"events":{"type":"array","items":{"$ref":"bridge.event_capability"}},"feature_flags":{"type":"array","items":{"type":"string"}}}}
+                """),
+            Schema(DesktopSidecarProtocol.GetOperatorStatusCommand + ".request", EmptyObjectSchema),
+            Schema(DesktopSidecarProtocol.GetOperatorStatusCommand + ".response", OperatorStatusSchema),
+            Schema(DesktopSidecarProtocol.GetSettingsCommand + ".request", EmptyObjectSchema),
+            Schema(DesktopSidecarProtocol.GetSettingsCommand + ".response", OperatorSettingsSchema),
+            Schema(DesktopSidecarProtocol.SaveSettingsCommand + ".request", SaveOperatorSettingsSchema),
+            Schema(DesktopSidecarProtocol.SaveSettingsCommand + ".response", OperatorSettingsSchema),
+            Schema(DesktopSidecarProtocol.RefreshNowCommand + ".request", EmptyObjectSchema),
+            Schema(DesktopSidecarProtocol.RefreshNowCommand + ".response", EmptyObjectSchema),
+            Schema(DesktopSidecarProtocol.ListLocalGitSnapshotsCommand + ".request", EmptyObjectSchema),
+            Schema(DesktopSidecarProtocol.ListLocalGitSnapshotsCommand + ".response", """
+                {"type":"object","additionalProperties":true,"required":["scopes","snapshots"],"properties":{"scopes":{"type":"array","items":{"type":"object","additionalProperties":true}},"snapshots":{"type":"array","items":{"type":"object","additionalProperties":true}}}}
+                """),
+            Schema(DesktopSidecarProtocol.ListLocalSessionSnapshotsCommand + ".request", EmptyObjectSchema),
+            Schema(DesktopSidecarProtocol.ListLocalSessionSnapshotsCommand + ".response", """
+                {"type":"object","additionalProperties":true,"required":["snapshots"],"properties":{"snapshots":{"type":"array","items":{"type":"object","additionalProperties":true}}}}
+                """),
+            Schema(DesktopSidecarProtocol.GetLatestDiffSnapshotCommand + ".request", LatestDiffSnapshotRequestSchema),
+            Schema(DesktopSidecarProtocol.GetLatestDiffSnapshotCommand + ".response", """
+                {"type":"object","additionalProperties":true}
+                """),
+            Schema(DesktopSidecarProtocol.OperatorStatusEvent + ".payload", OperatorStatusSchema),
+            Schema(DesktopSidecarProtocol.GitSnapshotEvent + ".payload", """
+                {"type":"array","items":{"type":"object","additionalProperties":true}}
+                """),
+            Schema(DesktopSidecarProtocol.SessionSnapshotEvent + ".payload", """
+                {"type":"array","items":{"type":"object","additionalProperties":true}}
+                """),
         };
+    }
+
+    private const string EmptyObjectSchema = """
+        {"type":"object","additionalProperties":false}
+        """;
+
+    private const string OperatorSettingsSchema = """
+        {"type":"object","additionalProperties":false,"required":["denBaseUrl","sourceInstanceId","pollIntervalSeconds","maxChangedFiles"],"properties":{"denBaseUrl":{"type":"string"},"sourceInstanceId":{"type":"string"},"sourceDisplayName":{"type":["string","null"]},"pollIntervalSeconds":{"type":"integer"},"maxChangedFiles":{"type":"integer"}}}
+        """;
+
+    private const string SaveOperatorSettingsSchema = """
+        {"type":"object","additionalProperties":false,"required":["denBaseUrl"],"properties":{"denBaseUrl":{"type":"string"},"sourceDisplayName":{"type":["string","null"]},"pollIntervalSeconds":{"type":"integer"},"maxChangedFiles":{"type":"integer"}}}
+        """;
+
+    private const string LatestDiffSnapshotRequestSchema = """
+        {"type":"object","additionalProperties":false,"required":["projectId","rootPath","sourceInstanceId"],"properties":{"projectId":{"type":"string"},"taskId":{"type":["integer","null"]},"workspaceId":{"type":["string","null"]},"rootPath":{"type":"string"},"path":{"type":["string","null"]},"sourceInstanceId":{"type":"string"}}}
+        """;
+
+    private const string OperatorStatusSchema = """
+        {"type":"object","additionalProperties":false,"required":["phase","denConnection","sourceInstanceId","denBaseUrl","observerStatuses","diagnostics","projectCount","workspaceCount","localSnapshotCount","localSessionSnapshotCount"],"properties":{"phase":{"type":"string"},"denConnection":{"type":"object","additionalProperties":false,"required":["state"],"properties":{"state":{"type":"string"},"message":{"type":["string","null"]},"lastSuccessAt":{"type":["string","null"]},"lastFailureAt":{"type":["string","null"]},"nextRetryAt":{"type":["string","null"]}}},"sourceInstanceId":{"type":"string"},"denBaseUrl":{"type":"string"},"lastSyncAt":{"type":["string","null"]},"lastPublishAt":{"type":["string","null"]},"observerStatuses":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["kind","state","scopesScanned","warningCount"],"properties":{"kind":{"type":"string"},"state":{"type":"string"},"scopesScanned":{"type":"integer"},"warningCount":{"type":"integer"},"lastRunAt":{"type":["string","null"]},"nextRunAt":{"type":["string","null"]}}}},"diagnostics":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["level","source","message","observedAt"],"properties":{"level":{"type":"string"},"source":{"type":"string"},"message":{"type":"string"},"observedAt":{"type":"string"}}}},"projectCount":{"type":"integer"},"workspaceCount":{"type":"integer"},"localSnapshotCount":{"type":"integer"},"localSessionSnapshotCount":{"type":"integer"}}}
+        """;
+
+    private static BridgeNamedSchema Schema(string name, string schema)
+    {
+        return new BridgeNamedSchema(name, BridgeSchemaBundleFactory.Schema(schema));
     }
 }
 
@@ -141,5 +201,90 @@ public sealed class GetCapabilitiesHandler : IBridgeCommandHandler<DesktopSideca
         };
 
         return ValueTask.FromResult<DesktopSidecarCapabilitiesResponse?>(response);
+    }
+}
+
+public sealed class GetOperatorStatusHandler : IBridgeCommandHandler<DesktopSidecarEmptyRequest, OperatorStatus>
+{
+    private readonly OperatorRuntimeService _runtime;
+
+    public GetOperatorStatusHandler(OperatorRuntimeService runtime) => _runtime = runtime;
+
+    public async ValueTask<OperatorStatus?> HandleAsync(DesktopSidecarEmptyRequest request, BridgeRequestContext context, CancellationToken cancellationToken)
+    {
+        return await _runtime.GetStatusAsync(cancellationToken).ConfigureAwait(false);
+    }
+}
+
+public sealed class GetOperatorSettingsHandler : IBridgeCommandHandler<DesktopSidecarEmptyRequest, OperatorSettings>
+{
+    private readonly OperatorRuntimeService _runtime;
+
+    public GetOperatorSettingsHandler(OperatorRuntimeService runtime) => _runtime = runtime;
+
+    public async ValueTask<OperatorSettings?> HandleAsync(DesktopSidecarEmptyRequest request, BridgeRequestContext context, CancellationToken cancellationToken)
+    {
+        return await _runtime.GetSettingsAsync(cancellationToken).ConfigureAwait(false);
+    }
+}
+
+public sealed class SaveOperatorSettingsHandler : IBridgeCommandHandler<SaveOperatorSettingsRequest, OperatorSettings>
+{
+    private readonly OperatorRuntimeService _runtime;
+
+    public SaveOperatorSettingsHandler(OperatorRuntimeService runtime) => _runtime = runtime;
+
+    public async ValueTask<OperatorSettings?> HandleAsync(SaveOperatorSettingsRequest request, BridgeRequestContext context, CancellationToken cancellationToken)
+    {
+        return await _runtime.SaveSettingsAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+}
+
+public sealed class RefreshNowHandler : IBridgeCommandHandler<DesktopSidecarEmptyRequest, DesktopSidecarEmptyResponse>
+{
+    private readonly OperatorRuntimeService _runtime;
+
+    public RefreshNowHandler(OperatorRuntimeService runtime) => _runtime = runtime;
+
+    public async ValueTask<DesktopSidecarEmptyResponse?> HandleAsync(DesktopSidecarEmptyRequest request, BridgeRequestContext context, CancellationToken cancellationToken)
+    {
+        await _runtime.RefreshAsync(cancellationToken).ConfigureAwait(false);
+        return new DesktopSidecarEmptyResponse();
+    }
+}
+
+public sealed class ListLocalGitSnapshotsHandler : IBridgeCommandHandler<DesktopSidecarEmptyRequest, LocalSnapshotList>
+{
+    private readonly OperatorRuntimeService _runtime;
+
+    public ListLocalGitSnapshotsHandler(OperatorRuntimeService runtime) => _runtime = runtime;
+
+    public async ValueTask<LocalSnapshotList?> HandleAsync(DesktopSidecarEmptyRequest request, BridgeRequestContext context, CancellationToken cancellationToken)
+    {
+        return await _runtime.ListLocalSnapshotsAsync(cancellationToken).ConfigureAwait(false);
+    }
+}
+
+public sealed class ListLocalSessionSnapshotsHandler : IBridgeCommandHandler<DesktopSidecarEmptyRequest, LocalSessionSnapshotList>
+{
+    private readonly OperatorRuntimeService _runtime;
+
+    public ListLocalSessionSnapshotsHandler(OperatorRuntimeService runtime) => _runtime = runtime;
+
+    public async ValueTask<LocalSessionSnapshotList?> HandleAsync(DesktopSidecarEmptyRequest request, BridgeRequestContext context, CancellationToken cancellationToken)
+    {
+        return await _runtime.ListLocalSessionSnapshotsAsync(cancellationToken).ConfigureAwait(false);
+    }
+}
+
+public sealed class GetLatestDiffSnapshotHandler : IBridgeCommandHandler<LatestDiffSnapshotRequest, DesktopDiffSnapshotLatestResult>
+{
+    private readonly OperatorRuntimeService _runtime;
+
+    public GetLatestDiffSnapshotHandler(OperatorRuntimeService runtime) => _runtime = runtime;
+
+    public async ValueTask<DesktopDiffSnapshotLatestResult?> HandleAsync(LatestDiffSnapshotRequest request, BridgeRequestContext context, CancellationToken cancellationToken)
+    {
+        return await _runtime.GetLatestDiffSnapshotAsync(request, cancellationToken).ConfigureAwait(false);
     }
 }

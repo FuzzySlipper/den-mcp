@@ -1,6 +1,3 @@
-import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
-
 const DEFAULT_INVOKE_TIMEOUT_MS = 12_000;
 const LISTEN_TIMEOUT_MS = 5_000;
 
@@ -27,16 +24,40 @@ async function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs: num
   }
 }
 
-function invokeCommand<T>(command: string, args?: Record<string, unknown>, timeoutMs = DEFAULT_INVOKE_TIMEOUT_MS): Promise<T> {
-  return withTimeout(invoke<T>(command, args), `desktop IPC ${command}`, timeoutMs);
+interface DenDesktopSidecarRuntimeApi {
+  getOperatorStatus(): Promise<OperatorStatus>;
+  getSettings(): Promise<OperatorSettings>;
+  saveOperatorSettings(request: SaveOperatorSettingsRequest): Promise<OperatorSettings>;
+  refreshNow(): Promise<void>;
+  listLocalSnapshots(): Promise<LocalSnapshotList>;
+  listLocalSessionSnapshots(): Promise<LocalSessionSnapshotList>;
+  getLatestDiffSnapshot(request: LatestDiffSnapshotRequest): Promise<DesktopDiffSnapshotLatestResult>;
+  onOperatorStatus(listener: (status: OperatorStatus) => void): () => void;
+  onGitSnapshots(listener: (snapshots: LocalGitSnapshot[]) => void): () => void;
+  onSessionSnapshots(listener: (snapshots: LocalSessionSnapshot[]) => void): () => void;
 }
 
-function listenCommand<T>(eventName: string, callback: (payload: T) => void): Promise<() => void> {
-  return withTimeout(
-    listen<T>(eventName, (event) => callback(event.payload)),
-    `desktop event listener ${eventName}`,
-    LISTEN_TIMEOUT_MS,
-  );
+declare global {
+  interface Window {
+    denDesktopSidecar?: DenDesktopSidecarRuntimeApi;
+  }
+}
+
+function sidecarApi(): DenDesktopSidecarRuntimeApi {
+  const api = window.denDesktopSidecar;
+  if (!api) {
+    throw new Error('Den Desktop sidecar preload API is unavailable.');
+  }
+
+  return api;
+}
+
+function callSidecar<T>(label: string, operation: () => Promise<T>, timeoutMs = DEFAULT_INVOKE_TIMEOUT_MS): Promise<T> {
+  return withTimeout(operation(), `desktop bridge ${label}`, timeoutMs);
+}
+
+function listenSidecar(label: string, subscribe: () => () => void): Promise<() => void> {
+  return withTimeout(Promise.resolve().then(subscribe), `desktop bridge listener ${label}`, LISTEN_TIMEOUT_MS);
 }
 
 export interface OperatorSettings {
@@ -240,41 +261,41 @@ export interface DesktopDiffSnapshot {
 }
 
 export async function getOperatorStatus(): Promise<OperatorStatus> {
-  return invokeCommand('get_operator_status');
+  return callSidecar('getOperatorStatus', () => sidecarApi().getOperatorStatus());
 }
 
 export async function getSettings(): Promise<OperatorSettings> {
-  return invokeCommand('get_settings');
+  return callSidecar('getSettings', () => sidecarApi().getSettings());
 }
 
 export async function saveOperatorSettings(request: SaveOperatorSettingsRequest): Promise<OperatorSettings> {
-  return invokeCommand('save_operator_settings', { request });
+  return callSidecar('saveOperatorSettings', () => sidecarApi().saveOperatorSettings(request));
 }
 
 export async function refreshNow(): Promise<void> {
-  return invokeCommand('refresh_now');
+  return callSidecar('refreshNow', () => sidecarApi().refreshNow());
 }
 
 export async function listLocalSnapshots(): Promise<LocalSnapshotList> {
-  return invokeCommand('list_local_snapshots');
+  return callSidecar('listLocalSnapshots', () => sidecarApi().listLocalSnapshots());
 }
 
 export async function listLocalSessionSnapshots(): Promise<LocalSessionSnapshotList> {
-  return invokeCommand('list_local_session_snapshots');
+  return callSidecar('listLocalSessionSnapshots', () => sidecarApi().listLocalSessionSnapshots());
 }
 
 export async function getLatestDiffSnapshot(request: LatestDiffSnapshotRequest): Promise<DesktopDiffSnapshotLatestResult> {
-  return invokeCommand('get_latest_diff_snapshot', { request });
+  return callSidecar('getLatestDiffSnapshot', () => sidecarApi().getLatestDiffSnapshot(request));
 }
 
 export function onOperatorStatus(callback: (status: OperatorStatus) => void): Promise<() => void> {
-  return listenCommand('den://operator-status', callback);
+  return listenSidecar('operator status', () => sidecarApi().onOperatorStatus(callback));
 }
 
 export function onGitSnapshots(callback: (snapshots: LocalGitSnapshot[]) => void): Promise<() => void> {
-  return listenCommand('den://git-snapshot-updated', callback);
+  return listenSidecar('git snapshots', () => sidecarApi().onGitSnapshots(callback));
 }
 
 export function onSessionSnapshots(callback: (snapshots: LocalSessionSnapshot[]) => void): Promise<() => void> {
-  return listenCommand('den://session-snapshot-updated', callback);
+  return listenSidecar('session snapshots', () => sidecarApi().onSessionSnapshots(callback));
 }

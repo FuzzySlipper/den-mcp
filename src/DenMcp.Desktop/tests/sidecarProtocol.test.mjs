@@ -33,12 +33,28 @@ test('sidecar schema bundle and representative frames are compatible with the ch
 
   assertBridgeSchemaBundle(bundle);
   assert.equal(bundle.bundle_id, 'den-desktop.sidecar@2026-04-29');
-  assert.deepEqual(bundle.commands.map((command) => command.command), ['bridge.get_capabilities', 'bridge.get_health']);
-  assert.deepEqual(bundle.events.map((event) => event.event), ['den_desktop.runtime.placeholder']);
+  assert.deepEqual(bundle.commands.map((command) => command.command), [
+    'bridge.get_capabilities',
+    'bridge.get_health',
+    'den_desktop.operator.get_latest_diff_snapshot',
+    'den_desktop.operator.get_settings',
+    'den_desktop.operator.get_status',
+    'den_desktop.operator.list_local_git_snapshots',
+    'den_desktop.operator.list_local_session_snapshots',
+    'den_desktop.operator.refresh_now',
+    'den_desktop.operator.save_settings',
+  ]);
+  assert.deepEqual(bundle.events.map((event) => event.event), [
+    'den://git-snapshot-updated',
+    'den://operator-status',
+    'den://session-snapshot-updated',
+  ]);
 
   assertBridgeFrameMatchesBundle(frames.health_response, bundle, { resultSchema: 'bridge.get_health.response' });
   assertBridgeFrameMatchesBundle(frames.capabilities_response, bundle, { resultSchema: 'bridge.get_capabilities.response' });
-  assertBridgeFrameMatchesBundle(frames.placeholder_event, bundle);
+  assertBridgeFrameMatchesBundle(frames.operator_status_event, bundle);
+  assertBridgeFrameMatchesBundle(frames.git_snapshot_event, bundle);
+  assertBridgeFrameMatchesBundle(frames.session_snapshot_event, bundle);
 });
 
 test('ready sentinel parsing enforces protocol, schema, and bundle compatibility without exposing secrets', async () => {
@@ -66,7 +82,7 @@ test('ready sentinel parsing enforces protocol, schema, and bundle compatibility
   );
 });
 
-test('sidecar checked facade allow-lists health/capabilities and placeholder events only', async () => {
+test('sidecar checked facade allow-lists health/capabilities/runtime commands and events only', async () => {
   const fixture = await readFixture();
   const sent = [];
   const client = createCheckedBridgeClient({
@@ -78,9 +94,19 @@ test('sidecar checked facade allow-lists health/capabilities and placeholder eve
     transport: {
       async send(frame) {
         sent.push(frame);
-        return frame.command === 'bridge.get_health'
-          ? fixture.frames.health_response
-          : fixture.frames.capabilities_response;
+        if (frame.command === 'bridge.get_health') return fixture.frames.health_response;
+        if (frame.command === 'bridge.get_capabilities') return fixture.frames.capabilities_response;
+        return {
+          protocol_version: fixture.schema_bundle.protocol_version,
+          schema_version: fixture.schema_bundle.schema_version,
+          frame_type: 'response',
+          request_id: frame.request_id,
+          result: frame.command === 'den_desktop.operator.get_status'
+            ? fixture.frames.operator_status_event.payload
+            : {},
+          correlation: {},
+          sent_at: '2026-04-29T12:34:56.000Z',
+        };
       },
     },
   });
@@ -88,12 +114,33 @@ test('sidecar checked facade allow-lists health/capabilities and placeholder eve
 
   const health = await facade.getHealth();
   const capabilities = await facade.getCapabilities();
-  facade.assertPlaceholderRuntimeEvent(fixture.frames.placeholder_event);
+  const status = await facade.getOperatorStatus();
+  facade.assertOperatorStatusEvent(fixture.frames.operator_status_event);
+  facade.assertGitSnapshotsEvent(fixture.frames.git_snapshot_event);
+  facade.assertSessionSnapshotsEvent(fixture.frames.session_snapshot_event);
 
   assert.equal(health.schema_bundle_id, fixture.schema_bundle.bundle_id);
   assert.ok(capabilities.supported_transports.includes('loopback_websocket'));
-  assert.deepEqual(sent.map((frame) => frame.command), ['bridge.get_health', 'bridge.get_capabilities']);
-  assert.deepEqual(Object.keys(facade).sort(), ['assertPlaceholderRuntimeEvent', 'getCapabilities', 'getHealth'].sort());
+  assert.equal(status.phase, 'starting');
+  assert.deepEqual(sent.map((frame) => frame.command), [
+    'bridge.get_health',
+    'bridge.get_capabilities',
+    'den_desktop.operator.get_status',
+  ]);
+  assert.deepEqual(Object.keys(facade).sort(), [
+    'assertGitSnapshotsEvent',
+    'assertOperatorStatusEvent',
+    'assertSessionSnapshotsEvent',
+    'getCapabilities',
+    'getHealth',
+    'getLatestDiffSnapshot',
+    'getOperatorStatus',
+    'getSettings',
+    'listLocalSessionSnapshots',
+    'listLocalSnapshots',
+    'refreshNow',
+    'saveOperatorSettings',
+  ].sort());
 });
 
 test('preload sidecar API exposes no generic dispatch, token, endpoint, or node escape hatch', async () => {
@@ -104,28 +151,51 @@ test('preload sidecar API exposes no generic dispatch, token, endpoint, or node 
     events: sidecarEvents,
     transport: {
       async send(frame) {
-        return frame.command === 'bridge.get_health'
-          ? fixture.frames.health_response
-          : fixture.frames.capabilities_response;
+        if (frame.command === 'bridge.get_health') return fixture.frames.health_response;
+        if (frame.command === 'bridge.get_capabilities') return fixture.frames.capabilities_response;
+        return {
+          protocol_version: fixture.schema_bundle.protocol_version,
+          schema_version: fixture.schema_bundle.schema_version,
+          frame_type: 'response',
+          request_id: frame.request_id,
+          result: {},
+          correlation: {},
+          sent_at: '2026-04-29T12:34:56.000Z',
+        };
       },
     },
   });
   const api = createDenDesktopSidecarApi(client, {
     subscribe(listener) {
-      listener(fixture.frames.placeholder_event);
+      listener(fixture.frames.operator_status_event);
+      listener(fixture.frames.git_snapshot_event);
+      listener(fixture.frames.session_snapshot_event);
       return () => undefined;
     },
   });
   const events = [];
-  api.onPlaceholderRuntimeEvent((event) => events.push(event));
+  api.onOperatorStatus((event) => events.push(event));
 
-  assert.deepEqual(Object.keys(api).sort(), ['getCapabilities', 'getHealth', 'onPlaceholderRuntimeEvent'].sort());
+  assert.deepEqual(Object.keys(api).sort(), [
+    'getCapabilities',
+    'getHealth',
+    'getLatestDiffSnapshot',
+    'getOperatorStatus',
+    'getSettings',
+    'listLocalSessionSnapshots',
+    'listLocalSnapshots',
+    'onGitSnapshots',
+    'onOperatorStatus',
+    'onSessionSnapshots',
+    'refreshNow',
+    'saveOperatorSettings',
+  ].sort());
   assert.equal(api.dispatch, undefined);
   assert.equal(api.ipcRenderer, undefined);
   assert.equal(api.token, undefined);
   assert.equal(api.endpoint, undefined);
   assert.equal(api.fs, undefined);
-  assert.equal(events[0].schema_version, fixture.schema_bundle.schema_version);
+  assert.equal(events[0].phase, 'starting');
 });
 
 test('sidecar supervisor starts, observes readiness, reconnects, stops, and can restart after crash', async () => {

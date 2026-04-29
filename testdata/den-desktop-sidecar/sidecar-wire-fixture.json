@@ -607,27 +607,513 @@
                     }
                 }
             },
-            "den_desktop.runtime.placeholder.payload": {
+            "den://git-snapshot-updated.payload": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                }
+            },
+            "den://operator-status.payload": {
                 "type": "object",
                 "additionalProperties": false,
                 "required": [
-                    "status",
-                    "message",
-                    "config_path",
-                    "schema_version"
+                    "phase",
+                    "denConnection",
+                    "sourceInstanceId",
+                    "denBaseUrl",
+                    "observerStatuses",
+                    "diagnostics",
+                    "projectCount",
+                    "workspaceCount",
+                    "localSnapshotCount",
+                    "localSessionSnapshotCount"
                 ],
                 "properties": {
-                    "status": {
+                    "phase": {
                         "type": "string"
                     },
-                    "message": {
+                    "denConnection": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                            "state"
+                        ],
+                        "properties": {
+                            "state": {
+                                "type": "string"
+                            },
+                            "message": {
+                                "type": [
+                                    "string",
+                                    "null"
+                                ]
+                            },
+                            "lastSuccessAt": {
+                                "type": [
+                                    "string",
+                                    "null"
+                                ]
+                            },
+                            "lastFailureAt": {
+                                "type": [
+                                    "string",
+                                    "null"
+                                ]
+                            },
+                            "nextRetryAt": {
+                                "type": [
+                                    "string",
+                                    "null"
+                                ]
+                            }
+                        }
+                    },
+                    "sourceInstanceId": {
                         "type": "string"
                     },
-                    "config_path": {
+                    "denBaseUrl": {
                         "type": "string"
                     },
-                    "schema_version": {
+                    "lastSyncAt": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
+                    "lastPublishAt": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
+                    "observerStatuses": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                                "kind",
+                                "state",
+                                "scopesScanned",
+                                "warningCount"
+                            ],
+                            "properties": {
+                                "kind": {
+                                    "type": "string"
+                                },
+                                "state": {
+                                    "type": "string"
+                                },
+                                "scopesScanned": {
+                                    "type": "integer"
+                                },
+                                "warningCount": {
+                                    "type": "integer"
+                                },
+                                "lastRunAt": {
+                                    "type": [
+                                        "string",
+                                        "null"
+                                    ]
+                                },
+                                "nextRunAt": {
+                                    "type": [
+                                        "string",
+                                        "null"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "diagnostics": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                                "level",
+                                "source",
+                                "message",
+                                "observedAt"
+                            ],
+                            "properties": {
+                                "level": {
+                                    "type": "string"
+                                },
+                                "source": {
+                                    "type": "string"
+                                },
+                                "message": {
+                                    "type": "string"
+                                },
+                                "observedAt": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "projectCount": {
+                        "type": "integer"
+                    },
+                    "workspaceCount": {
+                        "type": "integer"
+                    },
+                    "localSnapshotCount": {
+                        "type": "integer"
+                    },
+                    "localSessionSnapshotCount": {
+                        "type": "integer"
+                    }
+                }
+            },
+            "den://session-snapshot-updated.payload": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                }
+            },
+            "den_desktop.operator.get_latest_diff_snapshot.request": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "projectId",
+                    "rootPath",
+                    "sourceInstanceId"
+                ],
+                "properties": {
+                    "projectId": {
                         "type": "string"
+                    },
+                    "taskId": {
+                        "type": [
+                            "integer",
+                            "null"
+                        ]
+                    },
+                    "workspaceId": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
+                    "rootPath": {
+                        "type": "string"
+                    },
+                    "path": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
+                    "sourceInstanceId": {
+                        "type": "string"
+                    }
+                }
+            },
+            "den_desktop.operator.get_latest_diff_snapshot.response": {
+                "type": "object",
+                "additionalProperties": true
+            },
+            "den_desktop.operator.get_settings.request": {
+                "type": "object",
+                "additionalProperties": false
+            },
+            "den_desktop.operator.get_settings.response": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "denBaseUrl",
+                    "sourceInstanceId",
+                    "pollIntervalSeconds",
+                    "maxChangedFiles"
+                ],
+                "properties": {
+                    "denBaseUrl": {
+                        "type": "string"
+                    },
+                    "sourceInstanceId": {
+                        "type": "string"
+                    },
+                    "sourceDisplayName": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
+                    "pollIntervalSeconds": {
+                        "type": "integer"
+                    },
+                    "maxChangedFiles": {
+                        "type": "integer"
+                    }
+                }
+            },
+            "den_desktop.operator.get_status.request": {
+                "type": "object",
+                "additionalProperties": false
+            },
+            "den_desktop.operator.get_status.response": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "phase",
+                    "denConnection",
+                    "sourceInstanceId",
+                    "denBaseUrl",
+                    "observerStatuses",
+                    "diagnostics",
+                    "projectCount",
+                    "workspaceCount",
+                    "localSnapshotCount",
+                    "localSessionSnapshotCount"
+                ],
+                "properties": {
+                    "phase": {
+                        "type": "string"
+                    },
+                    "denConnection": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                            "state"
+                        ],
+                        "properties": {
+                            "state": {
+                                "type": "string"
+                            },
+                            "message": {
+                                "type": [
+                                    "string",
+                                    "null"
+                                ]
+                            },
+                            "lastSuccessAt": {
+                                "type": [
+                                    "string",
+                                    "null"
+                                ]
+                            },
+                            "lastFailureAt": {
+                                "type": [
+                                    "string",
+                                    "null"
+                                ]
+                            },
+                            "nextRetryAt": {
+                                "type": [
+                                    "string",
+                                    "null"
+                                ]
+                            }
+                        }
+                    },
+                    "sourceInstanceId": {
+                        "type": "string"
+                    },
+                    "denBaseUrl": {
+                        "type": "string"
+                    },
+                    "lastSyncAt": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
+                    "lastPublishAt": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
+                    "observerStatuses": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                                "kind",
+                                "state",
+                                "scopesScanned",
+                                "warningCount"
+                            ],
+                            "properties": {
+                                "kind": {
+                                    "type": "string"
+                                },
+                                "state": {
+                                    "type": "string"
+                                },
+                                "scopesScanned": {
+                                    "type": "integer"
+                                },
+                                "warningCount": {
+                                    "type": "integer"
+                                },
+                                "lastRunAt": {
+                                    "type": [
+                                        "string",
+                                        "null"
+                                    ]
+                                },
+                                "nextRunAt": {
+                                    "type": [
+                                        "string",
+                                        "null"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "diagnostics": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                                "level",
+                                "source",
+                                "message",
+                                "observedAt"
+                            ],
+                            "properties": {
+                                "level": {
+                                    "type": "string"
+                                },
+                                "source": {
+                                    "type": "string"
+                                },
+                                "message": {
+                                    "type": "string"
+                                },
+                                "observedAt": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "projectCount": {
+                        "type": "integer"
+                    },
+                    "workspaceCount": {
+                        "type": "integer"
+                    },
+                    "localSnapshotCount": {
+                        "type": "integer"
+                    },
+                    "localSessionSnapshotCount": {
+                        "type": "integer"
+                    }
+                }
+            },
+            "den_desktop.operator.list_local_git_snapshots.request": {
+                "type": "object",
+                "additionalProperties": false
+            },
+            "den_desktop.operator.list_local_git_snapshots.response": {
+                "type": "object",
+                "additionalProperties": true,
+                "required": [
+                    "scopes",
+                    "snapshots"
+                ],
+                "properties": {
+                    "scopes": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "snapshots": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "den_desktop.operator.list_local_session_snapshots.request": {
+                "type": "object",
+                "additionalProperties": false
+            },
+            "den_desktop.operator.list_local_session_snapshots.response": {
+                "type": "object",
+                "additionalProperties": true,
+                "required": [
+                    "snapshots"
+                ],
+                "properties": {
+                    "snapshots": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "den_desktop.operator.refresh_now.request": {
+                "type": "object",
+                "additionalProperties": false
+            },
+            "den_desktop.operator.refresh_now.response": {
+                "type": "object",
+                "additionalProperties": false
+            },
+            "den_desktop.operator.save_settings.request": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "denBaseUrl"
+                ],
+                "properties": {
+                    "denBaseUrl": {
+                        "type": "string"
+                    },
+                    "sourceDisplayName": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
+                    "pollIntervalSeconds": {
+                        "type": "integer"
+                    },
+                    "maxChangedFiles": {
+                        "type": "integer"
+                    }
+                }
+            },
+            "den_desktop.operator.save_settings.response": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "denBaseUrl",
+                    "sourceInstanceId",
+                    "pollIntervalSeconds",
+                    "maxChangedFiles"
+                ],
+                "properties": {
+                    "denBaseUrl": {
+                        "type": "string"
+                    },
+                    "sourceInstanceId": {
+                        "type": "string"
+                    },
+                    "sourceDisplayName": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
+                    "pollIntervalSeconds": {
+                        "type": "integer"
+                    },
+                    "maxChangedFiles": {
+                        "type": "integer"
                     }
                 }
             }
@@ -648,12 +1134,78 @@
                 "supports_cancellation": false,
                 "supports_progress": false,
                 "required_capabilities": []
+            },
+            {
+                "command": "den_desktop.operator.get_latest_diff_snapshot",
+                "request_schema": "den_desktop.operator.get_latest_diff_snapshot.request",
+                "response_schema": "den_desktop.operator.get_latest_diff_snapshot.response",
+                "supports_cancellation": false,
+                "supports_progress": false,
+                "required_capabilities": []
+            },
+            {
+                "command": "den_desktop.operator.get_settings",
+                "request_schema": "den_desktop.operator.get_settings.request",
+                "response_schema": "den_desktop.operator.get_settings.response",
+                "supports_cancellation": false,
+                "supports_progress": false,
+                "required_capabilities": []
+            },
+            {
+                "command": "den_desktop.operator.get_status",
+                "request_schema": "den_desktop.operator.get_status.request",
+                "response_schema": "den_desktop.operator.get_status.response",
+                "supports_cancellation": false,
+                "supports_progress": false,
+                "required_capabilities": []
+            },
+            {
+                "command": "den_desktop.operator.list_local_git_snapshots",
+                "request_schema": "den_desktop.operator.list_local_git_snapshots.request",
+                "response_schema": "den_desktop.operator.list_local_git_snapshots.response",
+                "supports_cancellation": false,
+                "supports_progress": false,
+                "required_capabilities": []
+            },
+            {
+                "command": "den_desktop.operator.list_local_session_snapshots",
+                "request_schema": "den_desktop.operator.list_local_session_snapshots.request",
+                "response_schema": "den_desktop.operator.list_local_session_snapshots.response",
+                "supports_cancellation": false,
+                "supports_progress": false,
+                "required_capabilities": []
+            },
+            {
+                "command": "den_desktop.operator.refresh_now",
+                "request_schema": "den_desktop.operator.refresh_now.request",
+                "response_schema": "den_desktop.operator.refresh_now.response",
+                "supports_cancellation": false,
+                "supports_progress": false,
+                "required_capabilities": []
+            },
+            {
+                "command": "den_desktop.operator.save_settings",
+                "request_schema": "den_desktop.operator.save_settings.request",
+                "response_schema": "den_desktop.operator.save_settings.response",
+                "supports_cancellation": false,
+                "supports_progress": false,
+                "required_capabilities": []
             }
         ],
         "events": [
             {
-                "event": "den_desktop.runtime.placeholder",
-                "payload_schema": "den_desktop.runtime.placeholder.payload",
+                "event": "den://git-snapshot-updated",
+                "payload_schema": "den://git-snapshot-updated.payload",
+                "required_capabilities": []
+            },
+            {
+                "event": "den://operator-status",
+                "payload_schema": "den://operator-status.payload",
+                "required_capabilities": []
+            },
+            {
+                "event": "den://session-snapshot-updated",
+                "payload_schema": "den://session-snapshot-updated.payload",
                 "required_capabilities": []
             }
         ]
@@ -665,12 +1217,13 @@
             "frame_type": "response",
             "request_id": "req_health",
             "result": {
-                "process_id": 2724630,
+                "process_id": 2821525,
                 "uptime_ms": 0,
                 "ready_state": "ready",
                 "app_id": "den-desktop",
-                "app_version": "0.1.0+40f54706b8acecd51964b7f8560aa907c7320cd3",
+                "app_version": "0.1.0-test",
                 "config_path": "/home/patch/.den-mcp/desktop",
+                "log_path": "/home/patch/.den-mcp/desktop/logs",
                 "protocol_version": "1.0",
                 "schema_version": "den-desktop@2026-04-29",
                 "schema_bundle_id": "den-desktop.sidecar@2026-04-29",
@@ -687,7 +1240,7 @@
             "request_id": "req_capabilities",
             "result": {
                 "app_id": "den-desktop",
-                "app_version": "0.1.0+40f54706b8acecd51964b7f8560aa907c7320cd3",
+                "app_version": "0.1.0-test",
                 "protocol_version": "1.0",
                 "schema_version": "den-desktop@2026-04-29",
                 "schema_bundle_id": "den-desktop.sidecar@2026-04-29",
@@ -710,35 +1263,143 @@
                         "supports_cancellation": false,
                         "supports_progress": false,
                         "required_capabilities": []
+                    },
+                    {
+                        "command": "den_desktop.operator.get_latest_diff_snapshot",
+                        "request_schema": "den_desktop.operator.get_latest_diff_snapshot.request",
+                        "response_schema": "den_desktop.operator.get_latest_diff_snapshot.response",
+                        "supports_cancellation": false,
+                        "supports_progress": false,
+                        "required_capabilities": []
+                    },
+                    {
+                        "command": "den_desktop.operator.get_settings",
+                        "request_schema": "den_desktop.operator.get_settings.request",
+                        "response_schema": "den_desktop.operator.get_settings.response",
+                        "supports_cancellation": false,
+                        "supports_progress": false,
+                        "required_capabilities": []
+                    },
+                    {
+                        "command": "den_desktop.operator.get_status",
+                        "request_schema": "den_desktop.operator.get_status.request",
+                        "response_schema": "den_desktop.operator.get_status.response",
+                        "supports_cancellation": false,
+                        "supports_progress": false,
+                        "required_capabilities": []
+                    },
+                    {
+                        "command": "den_desktop.operator.list_local_git_snapshots",
+                        "request_schema": "den_desktop.operator.list_local_git_snapshots.request",
+                        "response_schema": "den_desktop.operator.list_local_git_snapshots.response",
+                        "supports_cancellation": false,
+                        "supports_progress": false,
+                        "required_capabilities": []
+                    },
+                    {
+                        "command": "den_desktop.operator.list_local_session_snapshots",
+                        "request_schema": "den_desktop.operator.list_local_session_snapshots.request",
+                        "response_schema": "den_desktop.operator.list_local_session_snapshots.response",
+                        "supports_cancellation": false,
+                        "supports_progress": false,
+                        "required_capabilities": []
+                    },
+                    {
+                        "command": "den_desktop.operator.refresh_now",
+                        "request_schema": "den_desktop.operator.refresh_now.request",
+                        "response_schema": "den_desktop.operator.refresh_now.response",
+                        "supports_cancellation": false,
+                        "supports_progress": false,
+                        "required_capabilities": []
+                    },
+                    {
+                        "command": "den_desktop.operator.save_settings",
+                        "request_schema": "den_desktop.operator.save_settings.request",
+                        "response_schema": "den_desktop.operator.save_settings.response",
+                        "supports_cancellation": false,
+                        "supports_progress": false,
+                        "required_capabilities": []
                     }
                 ],
                 "events": [
                     {
-                        "event": "den_desktop.runtime.placeholder",
-                        "payload_schema": "den_desktop.runtime.placeholder.payload"
+                        "event": "den://git-snapshot-updated",
+                        "payload_schema": "den://git-snapshot-updated.payload"
+                    },
+                    {
+                        "event": "den://operator-status",
+                        "payload_schema": "den://operator-status.payload"
+                    },
+                    {
+                        "event": "den://session-snapshot-updated",
+                        "payload_schema": "den://session-snapshot-updated.payload"
                     }
                 ],
                 "feature_flags": [
-                    "sidecar_skeleton",
-                    "placeholder_runtime_events"
+                    "operator_runtime",
+                    "typed_runtime_bridge"
                 ]
             },
             "correlation": {},
             "sent_at": "2026-04-29T12:34:56+00:00"
         },
-        "placeholder_event": {
+        "operator_status_event": {
             "protocol_version": "1.0",
             "schema_version": "den-desktop@2026-04-29",
             "frame_type": "event",
-            "event_id": "evt_placeholder_001",
+            "event_id": "evt_status_001",
             "sequence": 1,
-            "event": "den_desktop.runtime.placeholder",
+            "event": "den://operator-status",
             "payload": {
-                "status": "ready",
-                "message": "Den Desktop sidecar skeleton is running; domain runtime events are not registered in this slice.",
-                "config_path": "/home/patch/.den-mcp/desktop",
-                "schema_version": "den-desktop@2026-04-29"
+                "phase": "starting",
+                "denConnection": {
+                    "state": "unknown",
+                    "message": "Preparing Den operator runtime."
+                },
+                "sourceInstanceId": "den-desktop-fixture",
+                "denBaseUrl": "http://localhost:5199",
+                "observerStatuses": [
+                    {
+                        "kind": "git",
+                        "state": "stopped",
+                        "scopesScanned": 0,
+                        "warningCount": 0
+                    },
+                    {
+                        "kind": "session",
+                        "state": "stopped",
+                        "scopesScanned": 0,
+                        "warningCount": 0
+                    }
+                ],
+                "diagnostics": [],
+                "projectCount": 0,
+                "workspaceCount": 0,
+                "localSnapshotCount": 0,
+                "localSessionSnapshotCount": 0
             },
+            "correlation": {},
+            "sent_at": "2026-04-29T12:34:56+00:00"
+        },
+        "git_snapshot_event": {
+            "protocol_version": "1.0",
+            "schema_version": "den-desktop@2026-04-29",
+            "frame_type": "event",
+            "event_id": "evt_git_001",
+            "sequence": 2,
+            "event": "den://git-snapshot-updated",
+            "payload": [],
+            "correlation": {},
+            "sent_at": "2026-04-29T12:34:56+00:00"
+        },
+        "session_snapshot_event": {
+            "protocol_version": "1.0",
+            "schema_version": "den-desktop@2026-04-29",
+            "frame_type": "event",
+            "event_id": "evt_session_001",
+            "sequence": 3,
+            "event": "den://session-snapshot-updated",
+            "payload": [],
             "correlation": {},
             "sent_at": "2026-04-29T12:34:56+00:00"
         }

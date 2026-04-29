@@ -1,29 +1,73 @@
 import type { BridgeEventFrame } from '../bridge/contract.ts';
-import type { PlaceholderRuntimeEvent, SidecarBridgeClient } from './sidecarProtocol.ts';
+import type {
+  DesktopDiffSnapshotLatestResult,
+  LatestDiffSnapshotRequest,
+  LocalGitSnapshot,
+  LocalSessionSnapshot,
+  LocalSessionSnapshotList,
+  LocalSnapshotList,
+  OperatorSettings,
+  OperatorStatus,
+  SaveOperatorSettingsRequest,
+} from '../desktop/tauriApi.ts';
+import type { SidecarBridgeClient } from './sidecarProtocol.ts';
 import { createSidecarBridgeFacade, type SidecarHealthResponse, type SidecarCapabilitiesResponse } from './sidecarProtocol.ts';
 
 export interface DenDesktopSidecarApi {
   getHealth(): Promise<SidecarHealthResponse>;
   getCapabilities(): Promise<SidecarCapabilitiesResponse>;
-  onPlaceholderRuntimeEvent(listener: (event: PlaceholderRuntimeEvent) => void): () => void;
+  getOperatorStatus(): Promise<OperatorStatus>;
+  getSettings(): Promise<OperatorSettings>;
+  saveOperatorSettings(request: SaveOperatorSettingsRequest): Promise<OperatorSettings>;
+  refreshNow(): Promise<void>;
+  listLocalSnapshots(): Promise<LocalSnapshotList>;
+  listLocalSessionSnapshots(): Promise<LocalSessionSnapshotList>;
+  getLatestDiffSnapshot(request: LatestDiffSnapshotRequest): Promise<DesktopDiffSnapshotLatestResult>;
+  onOperatorStatus(listener: (status: OperatorStatus) => void): () => void;
+  onGitSnapshots(listener: (snapshots: LocalGitSnapshot[]) => void): () => void;
+  onSessionSnapshots(listener: (snapshots: LocalSessionSnapshot[]) => void): () => void;
 }
 
-export interface PlaceholderEventSource {
+export interface BridgeEventSource {
   subscribe(listener: (frame: BridgeEventFrame) => void): () => void;
 }
 
 export function createDenDesktopSidecarApi(
   client: SidecarBridgeClient,
-  placeholderEvents: PlaceholderEventSource,
+  events: BridgeEventSource,
 ): DenDesktopSidecarApi {
   const facade: ReturnType<typeof createSidecarBridgeFacade> = createSidecarBridgeFacade(client);
   return Object.freeze({
     getHealth: facade.getHealth,
     getCapabilities: facade.getCapabilities,
-    onPlaceholderRuntimeEvent(listener: (event: PlaceholderRuntimeEvent) => void) {
-      return placeholderEvents.subscribe((frame) => {
-        facade.assertPlaceholderRuntimeEvent(frame);
-        listener(frame.payload);
+    getOperatorStatus: () => facade.getOperatorStatus<OperatorStatus>(),
+    getSettings: () => facade.getSettings<OperatorSettings>(),
+    saveOperatorSettings: (request: SaveOperatorSettingsRequest) =>
+      facade.saveOperatorSettings<SaveOperatorSettingsRequest, OperatorSettings>(request),
+    refreshNow: facade.refreshNow,
+    listLocalSnapshots: () => facade.listLocalSnapshots<LocalSnapshotList>(),
+    listLocalSessionSnapshots: () => facade.listLocalSessionSnapshots<LocalSessionSnapshotList>(),
+    getLatestDiffSnapshot: (request: LatestDiffSnapshotRequest) =>
+      facade.getLatestDiffSnapshot<LatestDiffSnapshotRequest, DesktopDiffSnapshotLatestResult>(request),
+    onOperatorStatus(listener: (status: OperatorStatus) => void) {
+      return events.subscribe((frame) => {
+        if (frame.event !== 'den://operator-status') return;
+        facade.assertOperatorStatusEvent(frame);
+        listener(frame.payload as unknown as OperatorStatus);
+      });
+    },
+    onGitSnapshots(listener: (snapshots: LocalGitSnapshot[]) => void) {
+      return events.subscribe((frame) => {
+        if (frame.event !== 'den://git-snapshot-updated') return;
+        facade.assertGitSnapshotsEvent(frame);
+        listener(frame.payload as unknown as LocalGitSnapshot[]);
+      });
+    },
+    onSessionSnapshots(listener: (snapshots: LocalSessionSnapshot[]) => void) {
+      return events.subscribe((frame) => {
+        if (frame.event !== 'den://session-snapshot-updated') return;
+        facade.assertSessionSnapshotsEvent(frame);
+        listener(frame.payload as unknown as LocalSessionSnapshot[]);
       });
     },
   });

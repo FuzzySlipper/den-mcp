@@ -10,11 +10,22 @@ public static class DesktopSidecarProtocol
     public const string SchemaBundleId = "den-desktop.sidecar@2026-04-29";
     public const string HealthCommand = "bridge.get_health";
     public const string CapabilitiesCommand = "bridge.get_capabilities";
-    public const string PlaceholderRuntimeEvent = "den_desktop.runtime.placeholder";
+    public const string GetOperatorStatusCommand = "den_desktop.operator.get_status";
+    public const string GetSettingsCommand = "den_desktop.operator.get_settings";
+    public const string SaveSettingsCommand = "den_desktop.operator.save_settings";
+    public const string RefreshNowCommand = "den_desktop.operator.refresh_now";
+    public const string ListLocalGitSnapshotsCommand = "den_desktop.operator.list_local_git_snapshots";
+    public const string ListLocalSessionSnapshotsCommand = "den_desktop.operator.list_local_session_snapshots";
+    public const string GetLatestDiffSnapshotCommand = "den_desktop.operator.get_latest_diff_snapshot";
+    public const string OperatorStatusEvent = "den://operator-status";
+    public const string GitSnapshotEvent = "den://git-snapshot-updated";
+    public const string SessionSnapshotEvent = "den://session-snapshot-updated";
     public const string ReadySentinelPrefix = "DEN_DESKTOP_BRIDGE_READY ";
 }
 
 public sealed record DesktopSidecarEmptyRequest;
+
+public sealed record DesktopSidecarEmptyResponse;
 
 public sealed record DesktopSidecarHealthResponse
 {
@@ -66,17 +77,6 @@ public sealed record DesktopSidecarCapabilitiesResponse
     public IReadOnlyList<string> FeatureFlags { get; init; } = Array.Empty<string>();
 }
 
-public sealed record DesktopPlaceholderRuntimeEvent
-{
-    public required string Status { get; init; }
-
-    public required string Message { get; init; }
-
-    public required string ConfigPath { get; init; }
-
-    public required string SchemaVersion { get; init; }
-}
-
 public sealed record DesktopSidecarReadySentinel
 {
     public required int Port { get; init; }
@@ -114,6 +114,12 @@ public sealed record DesktopSidecarWireFrames
     [JsonPropertyName("capabilities_response")]
     public required BridgeResponseFrame CapabilitiesResponse { get; init; }
 
-    [JsonPropertyName("placeholder_event")]
-    public required BridgeEventFrame PlaceholderEvent { get; init; }
+    [JsonPropertyName("operator_status_event")]
+    public required BridgeEventFrame OperatorStatusEvent { get; init; }
+
+    [JsonPropertyName("git_snapshot_event")]
+    public required BridgeEventFrame GitSnapshotEvent { get; init; }
+
+    [JsonPropertyName("session_snapshot_event")]
+    public required BridgeEventFrame SessionSnapshotEvent { get; init; }
 }

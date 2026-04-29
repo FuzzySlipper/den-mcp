@@ -70,15 +70,4 @@ public sealed class DesktopSidecarRuntimeState
             SentAt = sentAt ?? DateTimeOffset.UtcNow,
         };
     }
-
-    public DesktopPlaceholderRuntimeEvent CreatePlaceholderEventPayload()
-    {
-        return new DesktopPlaceholderRuntimeEvent
-        {
-            Status = "ready",
-            Message = "Den Desktop sidecar skeleton is running; domain runtime events are not registered in this slice.",
-            ConfigPath = Options.ConfigPath,
-            SchemaVersion = DesktopSidecarProtocol.SchemaVersion,
-        };
-    }
 }

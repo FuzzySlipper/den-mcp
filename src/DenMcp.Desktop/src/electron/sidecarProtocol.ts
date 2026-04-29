@@ -51,17 +51,7 @@ export interface SidecarCapabilitiesResponse {
   feature_flags: string[];
 }
 
-export interface PlaceholderRuntimeEvent extends Record<string, JsonValue> {
-  status: string;
-  message: string;
-  config_path: string;
-  schema_version: string;
-}
-
-export const sidecarCommands: {
-  getHealth: BridgeCommandSpec<Record<string, never>, JsonValue>;
-  getCapabilities: BridgeCommandSpec<Record<string, never>, JsonValue>;
-} = {
+export const sidecarCommands: Record<string, BridgeCommandSpec<JsonValue, JsonValue>> = {
   getHealth: {
     command: 'bridge.get_health',
     requestSchema: 'bridge.get_health.request',
@@ -72,14 +62,55 @@ export const sidecarCommands: {
     requestSchema: 'bridge.get_capabilities.request',
     responseSchema: 'bridge.get_capabilities.response',
   },
+  getOperatorStatus: {
+    command: 'den_desktop.operator.get_status',
+    requestSchema: 'den_desktop.operator.get_status.request',
+    responseSchema: 'den_desktop.operator.get_status.response',
+  },
+  getSettings: {
+    command: 'den_desktop.operator.get_settings',
+    requestSchema: 'den_desktop.operator.get_settings.request',
+    responseSchema: 'den_desktop.operator.get_settings.response',
+  },
+  saveOperatorSettings: {
+    command: 'den_desktop.operator.save_settings',
+    requestSchema: 'den_desktop.operator.save_settings.request',
+    responseSchema: 'den_desktop.operator.save_settings.response',
+  },
+  refreshNow: {
+    command: 'den_desktop.operator.refresh_now',
+    requestSchema: 'den_desktop.operator.refresh_now.request',
+    responseSchema: 'den_desktop.operator.refresh_now.response',
+  },
+  listLocalSnapshots: {
+    command: 'den_desktop.operator.list_local_git_snapshots',
+    requestSchema: 'den_desktop.operator.list_local_git_snapshots.request',
+    responseSchema: 'den_desktop.operator.list_local_git_snapshots.response',
+  },
+  listLocalSessionSnapshots: {
+    command: 'den_desktop.operator.list_local_session_snapshots',
+    requestSchema: 'den_desktop.operator.list_local_session_snapshots.request',
+    responseSchema: 'den_desktop.operator.list_local_session_snapshots.response',
+  },
+  getLatestDiffSnapshot: {
+    command: 'den_desktop.operator.get_latest_diff_snapshot',
+    requestSchema: 'den_desktop.operator.get_latest_diff_snapshot.request',
+    responseSchema: 'den_desktop.operator.get_latest_diff_snapshot.response',
+  },
 };
 
-export const sidecarEvents: {
-  placeholderRuntime: BridgeEventSpec<PlaceholderRuntimeEvent>;
-} = {
-  placeholderRuntime: {
-    event: 'den_desktop.runtime.placeholder',
-    payloadSchema: 'den_desktop.runtime.placeholder.payload',
+export const sidecarEvents: Record<string, BridgeEventSpec<JsonValue>> = {
+  operatorStatus: {
+    event: 'den://operator-status',
+    payloadSchema: 'den://operator-status.payload',
+  },
+  gitSnapshots: {
+    event: 'den://git-snapshot-updated',
+    payloadSchema: 'den://git-snapshot-updated.payload',
+  },
+  sessionSnapshots: {
+    event: 'den://session-snapshot-updated',
+    payloadSchema: 'den://session-snapshot-updated.payload',
   },
 };
 
@@ -90,8 +121,23 @@ export function createSidecarBridgeFacade(client: SidecarBridgeClient) {
   return {
     getHealth: async (): Promise<SidecarHealthResponse> => facade.getHealth({}) as unknown as SidecarHealthResponse,
     getCapabilities: async (): Promise<SidecarCapabilitiesResponse> => facade.getCapabilities({}) as unknown as SidecarCapabilitiesResponse,
-    assertPlaceholderRuntimeEvent(frame: BridgeEventFrame): asserts frame is BridgeEventFrame<PlaceholderRuntimeEvent> {
-      client.assertEvent('placeholderRuntime', frame);
+    getOperatorStatus: async <T>(): Promise<T> => facade.getOperatorStatus({}) as Promise<T>,
+    getSettings: async <T>(): Promise<T> => facade.getSettings({}) as Promise<T>,
+    saveOperatorSettings: async <TRequest, TResponse>(request: TRequest): Promise<TResponse> =>
+      facade.saveOperatorSettings(request as JsonValue) as Promise<TResponse>,
+    refreshNow: async (): Promise<void> => { await facade.refreshNow({}); },
+    listLocalSnapshots: async <T>(): Promise<T> => facade.listLocalSnapshots({}) as Promise<T>,
+    listLocalSessionSnapshots: async <T>(): Promise<T> => facade.listLocalSessionSnapshots({}) as Promise<T>,
+    getLatestDiffSnapshot: async <TRequest, TResponse>(request: TRequest): Promise<TResponse> =>
+      facade.getLatestDiffSnapshot(request as JsonValue) as Promise<TResponse>,
+    assertOperatorStatusEvent(frame: BridgeEventFrame): void {
+      client.assertEvent('operatorStatus', frame);
+    },
+    assertGitSnapshotsEvent(frame: BridgeEventFrame): void {
+      client.assertEvent('gitSnapshots', frame);
+    },
+    assertSessionSnapshotsEvent(frame: BridgeEventFrame): void {
+      client.assertEvent('sessionSnapshots', frame);
     },
   };
 }

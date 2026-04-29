@@ -36,7 +36,7 @@ static async Task<int> RunAsync(string[] args)
         Directory.CreateDirectory(options.LogPath);
     }
 
-    using var provider = DesktopSidecarBridge.CreateServiceProvider(options);
+    await using var provider = DesktopSidecarBridge.CreateServiceProvider(options);
     var router = provider.GetRequiredService<IBridgeCommandRouter>();
     await using var server = new WebSocketBridgeServer(
         new WebSocketBridgeServerOptions
@@ -55,12 +55,13 @@ static async Task<int> RunAsync(string[] args)
     };
 
     await server.StartAsync(shutdown.Token).ConfigureAwait(false);
+    provider.GetRequiredService<OperatorRuntimeBridgeEventSink>().SetPublisher(server);
     Console.WriteLine(DesktopSidecarStartup.FormatReadySentinel(
         DesktopSidecarStartup.CreateReadySentinel(options, server.Port)));
     Console.Out.Flush();
 
-    var state = provider.GetRequiredService<DesktopSidecarRuntimeState>();
-    await PublishPlaceholderEventAsync(server, state, shutdown.Token).ConfigureAwait(false);
+    var runtime = provider.GetRequiredService<OperatorRuntimeService>();
+    await runtime.StartAsync(runInitialRefresh: true, startBackgroundLoop: true, shutdown.Token).ConfigureAwait(false);
 
     try
     {
@@ -69,26 +70,12 @@ static async Task<int> RunAsync(string[] args)
     catch (OperationCanceledException) when (shutdown.IsCancellationRequested)
     {
     }
+    finally
+    {
+        await runtime.StopAsync().ConfigureAwait(false);
+    }
 
     return 0;
-}
-
-static ValueTask PublishPlaceholderEventAsync(
-    IBridgeEventPublisher publisher,
-    DesktopSidecarRuntimeState state,
-    CancellationToken cancellationToken)
-{
-    var frame = new BridgeEventFrame
-    {
-        SchemaVersion = DesktopSidecarProtocol.SchemaVersion,
-        EventId = $"evt_placeholder_{Guid.NewGuid():N}",
-        Sequence = state.NextSequence(),
-        Event = DesktopSidecarProtocol.PlaceholderRuntimeEvent,
-        Payload = BridgeJson.ToElement(state.CreatePlaceholderEventPayload()),
-        SentAt = DateTimeOffset.UtcNow,
-    };
-
-    return publisher.PublishAsync(frame, cancellationToken);
 }
 
 return await RunAsync(args).ConfigureAwait(false);
