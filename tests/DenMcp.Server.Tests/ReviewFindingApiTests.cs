@@ -170,6 +170,40 @@ public class ReviewFindingApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SetReviewFindingStatus_Returns400_WhenStatusIsInvalid()
+    {
+        var (task, round) = await CreateRoundAsync();
+        var finding = await CreateFindingAsync(task.Id, round.Id);
+
+        var response = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/tasks/{task.Id}/review-findings/{finding.Id}/status", new
+        {
+            status = "not_a_status",
+            updated_by = "codex"
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Unknown review finding status", error);
+    }
+
+    [Fact]
+    public async Task RespondToReviewFinding_Returns400_WhenStatusIsInvalid()
+    {
+        var (task, round) = await CreateRoundAsync();
+        var finding = await CreateFindingAsync(task.Id, round.Id);
+
+        var response = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/tasks/{task.Id}/review-findings/{finding.Id}/response", new
+        {
+            responded_by = "claude-code",
+            status = "not_a_status"
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Unknown review finding status", error);
+    }
+
+    [Fact]
     public async Task RespondToReviewFinding_Returns400_WhenFollowUpTaskIsInDifferentProject()
     {
         var (task, round) = await CreateRoundAsync();

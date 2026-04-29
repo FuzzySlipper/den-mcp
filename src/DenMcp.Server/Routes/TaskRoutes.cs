@@ -263,19 +263,19 @@ public static class TaskRoutes
             if (finding is null || finding.TaskId != taskId)
                 return Results.NotFound(new { error = $"Review finding {findingId} not found" });
 
-            var parsedRespondStatus = req.Status is not null ? EnumExtensions.ParseReviewFindingStatus(req.Status) : (ReviewFindingStatus?)null;
-            if (req.FollowUpTaskId is not null && parsedRespondStatus != ReviewFindingStatus.SplitToFollowUp)
-                return Results.BadRequest(new { error = "follow_up_task_id can only be supplied when status is split_to_follow_up." });
-
-            if (req.FollowUpTaskId is not null)
-            {
-                var followUp = await taskRepo.GetByIdAsync(req.FollowUpTaskId.Value);
-                if (followUp is null || followUp.ProjectId != projectId)
-                    return Results.BadRequest(new { error = $"Follow-up task {req.FollowUpTaskId.Value} not found in project {projectId}." });
-            }
-
             try
             {
+                var parsedRespondStatus = req.Status is not null ? EnumExtensions.ParseReviewFindingStatus(req.Status) : (ReviewFindingStatus?)null;
+                if (req.FollowUpTaskId is not null && parsedRespondStatus != ReviewFindingStatus.SplitToFollowUp)
+                    return Results.BadRequest(new { error = "follow_up_task_id can only be supplied when status is split_to_follow_up." });
+
+                if (req.FollowUpTaskId is not null)
+                {
+                    var followUp = await taskRepo.GetByIdAsync(req.FollowUpTaskId.Value);
+                    if (followUp is null || followUp.ProjectId != projectId)
+                        return Results.BadRequest(new { error = $"Follow-up task {req.FollowUpTaskId.Value} not found in project {projectId}." });
+                }
+
                 var updated = await findingRepo.RespondAsync(findingId, new RespondToReviewFindingInput
                 {
                     RespondedBy = req.RespondedBy,
@@ -308,19 +308,19 @@ public static class TaskRoutes
             if (finding is null || finding.TaskId != taskId)
                 return Results.NotFound(new { error = $"Review finding {findingId} not found" });
 
-            var parsedSetStatus = EnumExtensions.ParseReviewFindingStatus(req.Status);
-            if (req.FollowUpTaskId is not null && parsedSetStatus != ReviewFindingStatus.SplitToFollowUp)
-                return Results.BadRequest(new { error = "follow_up_task_id can only be supplied when status is split_to_follow_up." });
-
-            if (req.FollowUpTaskId is not null)
-            {
-                var followUp = await taskRepo.GetByIdAsync(req.FollowUpTaskId.Value);
-                if (followUp is null || followUp.ProjectId != projectId)
-                    return Results.BadRequest(new { error = $"Follow-up task {req.FollowUpTaskId.Value} not found in project {projectId}." });
-            }
-
             try
             {
+                var parsedSetStatus = EnumExtensions.ParseReviewFindingStatus(req.Status);
+                if (req.FollowUpTaskId is not null && parsedSetStatus != ReviewFindingStatus.SplitToFollowUp)
+                    return Results.BadRequest(new { error = "follow_up_task_id can only be supplied when status is split_to_follow_up." });
+
+                if (req.FollowUpTaskId is not null)
+                {
+                    var followUp = await taskRepo.GetByIdAsync(req.FollowUpTaskId.Value);
+                    if (followUp is null || followUp.ProjectId != projectId)
+                        return Results.BadRequest(new { error = $"Follow-up task {req.FollowUpTaskId.Value} not found in project {projectId}." });
+                }
+
                 var updated = await findingRepo.SetStatusAsync(findingId, new UpdateReviewFindingStatusInput
                 {
                     Status = parsedSetStatus,
