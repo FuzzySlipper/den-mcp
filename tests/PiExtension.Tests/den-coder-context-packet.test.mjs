@@ -6,6 +6,8 @@ import {
   summarizeDependencies,
   summarizeRecentPackets,
   resolveEffectiveCoderConfig,
+  defaultPacketConventions,
+  defaultExpectedOutput,
 } from '../../pi-dev/lib/den-coder-context-packet.ts';
 
 // ---------------------------------------------------------------------------
@@ -103,6 +105,10 @@ test('formatCoderContextPacket produces markdown with all sections from full inp
   // Packet content
   assert.ok(md.includes('implementation_packet'));
 
+  // Packet conventions and expected output are always present
+  assert.ok(md.includes('## Packet conventions'));
+  assert.ok(md.includes('## Expected output'));
+
   // File pointers
   assert.ok(md.includes('den-prompt-templates.ts'));
 
@@ -127,6 +133,82 @@ test('formatCoderContextPacket handles minimal input with just task_id', () => {
   assert.ok(!md.includes('## Suggested file pointers'));
   assert.ok(!md.includes('## Validation commands'));
   assert.ok(!md.includes('## Extra conductor notes'));
+});
+
+test('formatCoderContextPacket always renders Packet conventions and Expected output sections', () => {
+  const md = formatCoderContextPacket(MINIMAL_INPUT);
+  assert.ok(md.includes('## Packet conventions'));
+  assert.ok(md.includes('## Expected output'));
+});
+
+test('formatCoderContextPacket renders default Packet conventions content', () => {
+  const md = formatCoderContextPacket(MINIMAL_INPUT);
+  assert.ok(md.includes('`coder_context_packet`'));
+  assert.ok(md.includes('`implementation_packet`'));
+  assert.ok(md.includes('`validation_packet`'));
+  assert.ok(md.includes('`drift_check_packet`'));
+  assert.ok(md.includes('review_feedback'));
+});
+
+test('formatCoderContextPacket renders default Expected output content', () => {
+  const md = formatCoderContextPacket(MINIMAL_INPUT);
+  assert.ok(md.includes('Branch and head commit'));
+  assert.ok(md.includes('Summary of what changed'));
+  assert.ok(md.includes('Files changed'));
+  assert.ok(md.includes('Tests run'));
+  assert.ok(md.includes('Acceptance checklist'));
+  assert.ok(md.includes('Known gaps'));
+  assert.ok(md.includes('Risk notes'));
+});
+
+test('formatCoderContextPacket uses custom packet_conventions override', () => {
+  const md = formatCoderContextPacket({
+    task_id: 42,
+    packet_conventions: 'Use only implementation_packet for this task.',
+  });
+  assert.ok(md.includes('## Packet conventions'));
+  assert.ok(md.includes('Use only implementation_packet for this task.'));
+  // Should NOT contain the default content
+  assert.ok(!md.includes('coder_context_packet` — read this at the start'));
+});
+
+test('formatCoderContextPacket uses custom expected_output override', () => {
+  const md = formatCoderContextPacket({
+    task_id: 42,
+    expected_output: 'Just push the commit and post a one-liner.',
+  });
+  assert.ok(md.includes('## Expected output'));
+  assert.ok(md.includes('Just push the commit and post a one-liner.'));
+  // Should NOT contain default content
+  assert.ok(!md.includes('Branch and head commit'));
+});
+
+test('formatCoderContextPacket truncates long packet_conventions override', () => {
+  const longConv = 'c'.repeat(10000);
+  const md = formatCoderContextPacket({ task_id: 1, packet_conventions: longConv });
+  assert.ok(md.includes('truncated at 8000 chars'));
+});
+
+test('formatCoderContextPacket truncates long expected_output override', () => {
+  const longOutput = 'o'.repeat(10000);
+  const md = formatCoderContextPacket({ task_id: 1, expected_output: longOutput });
+  assert.ok(md.includes('truncated at 8000 chars'));
+});
+
+test('defaultPacketConventions returns a non-empty string', () => {
+  const conv = defaultPacketConventions();
+  assert.ok(typeof conv === 'string');
+  assert.ok(conv.length > 0);
+  assert.ok(conv.includes('coder_context_packet'));
+  assert.ok(conv.includes('implementation_packet'));
+});
+
+test('defaultExpectedOutput returns a non-empty string', () => {
+  const out = defaultExpectedOutput();
+  assert.ok(typeof out === 'string');
+  assert.ok(out.length > 0);
+  assert.ok(out.includes('implementation_packet'));
+  assert.ok(out.includes('Tests run'));
 });
 
 test('formatCoderContextPacket renders task description when present', () => {

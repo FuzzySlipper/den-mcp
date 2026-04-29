@@ -68,6 +68,20 @@ export interface CoderContextPacketInput {
 
   /** Extra conductor notes. */
   extra_notes?: string;
+
+  /**
+   * Override the "Packet conventions" section body.
+   * Defaults to a policy-compliant description of metadata packet types
+   * the coder should produce and read.
+   */
+  packet_conventions?: string;
+
+  /**
+   * Override the "Expected output" section body.
+   * Defaults to a policy-compliant description of what the coder's
+   * final report / implementation_packet should contain.
+   */
+  expected_output?: string;
 }
 
 export interface DependencySummary {
@@ -250,6 +264,18 @@ export function formatCoderContextPacket(input: CoderContextPacketInput): string
     lines.push(boundedText(input.extra_notes), "");
   }
 
+  // Packet conventions
+  lines.push("## Packet conventions", "");
+  lines.push(boundedText(
+    input.packet_conventions ?? defaultPacketConventions(),
+  ), "");
+
+  // Expected output
+  lines.push("## Expected output", "");
+  lines.push(boundedText(
+    input.expected_output ?? defaultExpectedOutput(),
+  ), "");
+
   return lines.join("\n");
 }
 
@@ -385,6 +411,44 @@ async function defaultFileReadable(filePath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Default section bodies
+// ---------------------------------------------------------------------------
+
+/**
+ * Default "Packet conventions" body — describes which metadata packet types
+ * the coder should produce and read.
+ */
+export function defaultPacketConventions(): string {
+  return [
+    "Use the following Den message metadata types when reporting back:",
+    "",
+    "- `coder_context_packet` — read this at the start (the current packet).",
+    "- `implementation_packet` — post when done with `{ type: 'implementation_packet', prepared_by: 'coder_run', version: 1, branch, head_commit, ... }`.",
+    "- `validation_packet` — post after running validation commands with pass/fail results.",
+    "- `drift_check_packet` — read if present; may flag issues requiring a fix before review.",
+    "- Review packets (`review_request`, `review_feedback`, `review_findings_packet`) — read and address findings as directed.",
+  ].join("\n");
+}
+
+/**
+ * Default "Expected output" body — describes what the coder's final report /
+ * implementation_packet should contain.
+ */
+export function defaultExpectedOutput(): string {
+  return [
+    "Your `implementation_packet` and final report must include:",
+    "",
+    "- **Branch and head commit** — the branch you worked on and the final SHA.",
+    "- **Summary of what changed** — concise description of changes made.",
+    "- **Files changed** — list of files modified, added, or deleted.",
+    "- **Tests run** — commands executed with pass/fail/skip counts; explain any skips.",
+    "- **Acceptance checklist** — evidence for each criterion from the packet.",
+    "- **Known gaps / open questions** — anything you could not complete or verify.",
+    "- **Risk notes** — anything the reviewer should watch closely.",
+  ].join("\n");
 }
 
 // ---------------------------------------------------------------------------
