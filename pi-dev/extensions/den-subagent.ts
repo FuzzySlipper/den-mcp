@@ -22,6 +22,7 @@ import {
 import {
   extractImplementationPacket,
   buildImplementationPacketMeta,
+  findDuplicateImplementationPacketMessage,
   formatImplementationPacketMessage,
 } from "../lib/den-implementation-packet.ts";
 import {
@@ -1576,7 +1577,14 @@ async function runDenSubagent(
       const extraction = extractImplementationPacket(result.final_output);
       const packetContent = formatImplementationPacketMessage(result, extraction);
       const packetMeta = buildImplementationPacketMeta(result, extraction);
-      const packetMessage = await sendTaskMessage(cfg, effectiveOptions.taskId, packetContent, {
+      let duplicatePacket: any | undefined;
+      try {
+        const existingPackets = await getTaskMessages(cfg, effectiveOptions.taskId);
+        duplicatePacket = findDuplicateImplementationPacketMessage(existingPackets, packetMeta);
+      } catch {
+        // Duplicate detection is best-effort; still try to post the auto packet.
+      }
+      const packetMessage = duplicatePacket ?? await sendTaskMessage(cfg, effectiveOptions.taskId, packetContent, {
         ...buildSubagentRunMetadata({
           runId,
           role: effectiveOptions.role,
@@ -1600,6 +1608,7 @@ async function runDenSubagent(
         role: result.role,
         branch: result.branch ?? null,
         head_commit: result.final_head_commit ?? result.head_commit ?? null,
+        duplicate_skipped: duplicatePacket !== undefined,
       });
     } catch (packetError) {
       // Packet posting is advisory; failures should not break the sub-agent result flow.

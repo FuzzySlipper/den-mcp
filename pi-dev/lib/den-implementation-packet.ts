@@ -62,6 +62,11 @@ export interface ImplementationPacketMeta {
   purpose: string | null;
 }
 
+export type ImplementationPacketDuplicateCandidate = Pick<
+  ImplementationPacketMeta,
+  "run_id" | "task_id" | "branch" | "head_commit"
+>;
+
 /** Result of extracting and validating a packet. */
 export interface ExtractionResult {
   packet: ImplementationPacket;
@@ -311,7 +316,7 @@ export function formatImplementationPacketMessage(
  * Build the stable metadata object for a posted implementation packet.
  */
 export function buildImplementationPacketMeta(
-  result: { run_id: string; role: string; task_id?: number; branch?: string; head_commit?: string; purpose?: string },
+  result: { run_id: string; role: string; task_id?: number; branch?: string; head_commit?: string; final_head_commit?: string; purpose?: string },
   extraction: ExtractionResult,
 ): ImplementationPacketMeta {
   return {
@@ -325,9 +330,43 @@ export function buildImplementationPacketMeta(
     role: result.role,
     task_id: result.task_id ?? null,
     branch: extraction.packet.branch ?? result.branch ?? null,
-    head_commit: extraction.packet.head_commit ?? result.head_commit ?? null,
+    head_commit: extraction.packet.head_commit ?? result.final_head_commit ?? result.head_commit ?? null,
     purpose: result.purpose ?? null,
   };
+}
+
+/**
+ * Find an existing task-thread implementation packet that would duplicate the
+ * auto-posted packet for a completed coder run. Prefer an exact run-id match;
+ * otherwise match the same task/head/branch so manually posted coder packets
+ * can remain the latest durable implementation packet.
+ */
+export function findDuplicateImplementationPacketMessage<T extends { metadata?: unknown; task_id?: number | null }>(
+  messages: T[],
+  candidate: ImplementationPacketDuplicateCandidate,
+): T | undefined {
+  const candidates = messages
+    .filter((message) => {
+      const meta = metadataObject(message.metadata);
+      if (meta.type !== "implementation_packet") return false;
+      const messageTaskId = optionalNumber((message as any).task_id) ?? optionalNumber(meta.task_id);
+      if (candidate.task_id !== null && candidate.task_id !== undefined && messageTaskId !== candidate.task_id) return false;
+      return true;
+    })
+    .sort((a, b) => (optionalNumber((b as any).id) ?? 0) - (optionalNumber((a as any).id) ?? 0));
+
+  if (candidate.run_id) {
+    const sameRun = candidates.find((message) => metadataObject(message.metadata).run_id === candidate.run_id);
+    if (sameRun) return sameRun;
+  }
+
+  if (!candidate.head_commit) return undefined;
+  return candidates.find((message) => {
+    const meta = metadataObject(message.metadata);
+    if (meta.head_commit !== candidate.head_commit) return false;
+    if (candidate.branch && meta.branch && meta.branch !== candidate.branch) return false;
+    return true;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -338,6 +377,22 @@ export function buildImplementationPacketMeta(
  * Find a section by matching one of several heading regexps, then return the
  * content between that heading and the next heading (or end of text).
  */
+function metadataObject(value: unknown): Record<string, any> {
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" ? parsed as Record<string, any> : {};
+    } catch {
+      return {};
+    }
+  }
+  return value && typeof value === "object" ? value as Record<string, any> : {};
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 function extractSection(text: string, headingPatterns: RegExp[]): string | undefined {
   for (const pattern of headingPatterns) {
     const match = pattern.exec(text);

@@ -5,6 +5,7 @@ import {
   validatePacket,
   formatImplementationPacketMessage,
   buildImplementationPacketMeta,
+  findDuplicateImplementationPacketMessage,
   REQUIRED_FIELDS,
 } from '../../pi-dev/lib/den-implementation-packet.ts';
 import { buildSubagentRunMetadata } from '../../pi-dev/lib/den-subagent-pipeline.ts';
@@ -375,6 +376,68 @@ test('buildImplementationPacketMeta handles null task_id', () => {
     extraction,
   );
   assert.equal(meta.task_id, null);
+});
+
+test('buildImplementationPacketMeta prefers final head commit over launch head fallback', () => {
+  const extraction = extractImplementationPacket('no structured output');
+  const meta = buildImplementationPacketMeta(
+    { run_id: 'run5', role: 'coder', head_commit: 'launch123', final_head_commit: 'final456' },
+    extraction,
+  );
+  assert.equal(meta.head_commit, 'final456');
+});
+
+// ---------------------------------------------------------------------------
+// findDuplicateImplementationPacketMessage
+// ---------------------------------------------------------------------------
+
+test('findDuplicateImplementationPacketMessage prefers exact run id matches', () => {
+  const messages = [
+    { id: 1, task_id: 940, metadata: { type: 'implementation_packet', run_id: 'older-run', branch: 'task/a', head_commit: 'abc1234' } },
+    { id: 2, task_id: 940, metadata: { type: 'implementation_packet', run_id: 'manual-run', branch: 'task/b', head_commit: 'def5678' } },
+  ];
+
+  const duplicate = findDuplicateImplementationPacketMessage(messages, {
+    run_id: 'manual-run',
+    task_id: 940,
+    branch: 'task/c',
+    head_commit: '9999999',
+  });
+
+  assert.equal(duplicate?.id, 2);
+});
+
+test('findDuplicateImplementationPacketMessage matches same task head and branch for manual packets', () => {
+  const messages = [
+    { id: 9, task_id: 940, metadata: JSON.stringify({ type: 'implementation_packet', prepared_by: 'coder', branch: 'task/940', head_commit: 'abc1234' }) },
+    { id: 10, task_id: 941, metadata: { type: 'implementation_packet', branch: 'task/940', head_commit: 'abc1234' } },
+    { id: 11, task_id: 940, metadata: { type: 'review_request_packet', branch: 'task/940', head_commit: 'abc1234' } },
+    { id: 12, task_id: 940, metadata: { type: 'implementation_packet', prepared_by: 'coder', branch: 'task/940', head_commit: 'abc1234' } },
+  ];
+
+  const duplicate = findDuplicateImplementationPacketMessage(messages, {
+    run_id: 'auto-run',
+    task_id: 940,
+    branch: 'task/940',
+    head_commit: 'abc1234',
+  });
+
+  assert.equal(duplicate?.id, 12);
+});
+
+test('findDuplicateImplementationPacketMessage does not match different branch for same head', () => {
+  const messages = [
+    { id: 1, task_id: 940, metadata: { type: 'implementation_packet', branch: 'task/other', head_commit: 'abc1234' } },
+  ];
+
+  const duplicate = findDuplicateImplementationPacketMessage(messages, {
+    run_id: 'auto-run',
+    task_id: 940,
+    branch: 'task/940',
+    head_commit: 'abc1234',
+  });
+
+  assert.equal(duplicate, undefined);
 });
 
 // ---------------------------------------------------------------------------
