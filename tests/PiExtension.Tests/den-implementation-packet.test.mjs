@@ -220,6 +220,9 @@ test('extractImplementationPacket ignores unsafe heading-line branch and commit 
   const result = extractImplementationPacket(output);
   assert.equal(result.packet.branch, undefined);
   assert.equal(result.packet.head_commit, undefined);
+
+  const sentinelResult = extractImplementationPacket('## Branch: not');
+  assert.equal(sentinelResult.packet.branch, undefined);
 });
 
 test('extractImplementationPacket returns undefined branch/commit when no inline patterns match', () => {

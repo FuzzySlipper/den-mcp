@@ -408,7 +408,7 @@ function extractHeadingLineValue(text: string, labelPattern: string): string | u
 }
 
 function isSafeBranchValue(value: string): boolean {
-  return /^[A-Za-z0-9._/-]+$/.test(value) && !/^(?:none|unknown|n\/a)$/i.test(value);
+  return /^[A-Za-z0-9._/-]+$/.test(value) && !/^(?:none|not|unknown|n\/a)$/i.test(value);
 }
 
 function isSafeCommitValue(value: string): boolean {
