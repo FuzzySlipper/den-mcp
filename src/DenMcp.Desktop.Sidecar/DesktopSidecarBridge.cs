@@ -16,6 +16,7 @@ public static class DesktopSidecarBridge
 
         var services = new ServiceCollection();
         services.AddSingleton(options);
+        services.AddSingleton(_ => new OperatorSettingsService());
         services.AddSingleton<DesktopSidecarRuntimeState>();
         services.AddBridgeHost(
             ConfigureRegistry,
