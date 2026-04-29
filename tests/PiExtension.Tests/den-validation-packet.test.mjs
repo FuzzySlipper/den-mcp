@@ -10,6 +10,8 @@ import {
   deriveValidationStatus,
   executeValidationCommand,
   formatValidationPacketMessage,
+  normalizeDeclaredValidationCommand,
+  normalizeDeclaredValidationCommands,
   parseValidationArgs,
   runValidation,
 } from '../../pi-dev/lib/den-validation-packet.ts';
@@ -89,6 +91,11 @@ test('buildValidationPacketMeta produces stable metadata with correct counts', (
   assert.equal(meta.pass_count, 2);
   assert.equal(meta.fail_count, 0);
   assert.equal(meta.blocked_count, 0);
+  assert.deepEqual(meta.test_commands, ['node --test a.test.mjs', 'git diff --check']);
+  assert.deepEqual(meta.command_statuses, [
+    { command: 'node --test a.test.mjs', status: 'pass', exit_code: 0 },
+    { command: 'git diff --check', status: 'pass', exit_code: 0 },
+  ]);
 });
 
 test('buildValidationPacketMeta handles mixed pass/fail/blocked results', () => {
@@ -329,6 +336,43 @@ test('runValidation handles no commands gracefully', async () => {
   } finally {
     await import('node:fs/promises').then((fs) => fs.rm(tmp, { recursive: true }));
   }
+});
+
+// ---------------------------------------------------------------------------
+// parseValidationArgs
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// normalizeDeclaredValidationCommand(s)
+// ---------------------------------------------------------------------------
+
+test('normalizeDeclaredValidationCommand extracts backticked commands from packet test lines', () => {
+  assert.equal(
+    normalizeDeclaredValidationCommand('`node --test tests/PiExtension.Tests/foo.test.mjs` — pass'),
+    'node --test tests/PiExtension.Tests/foo.test.mjs',
+  );
+  assert.equal(
+    normalizeDeclaredValidationCommand('- `git diff --check main...HEAD` — 0 errors'),
+    'git diff --check main...HEAD',
+  );
+});
+
+test('normalizeDeclaredValidationCommand strips common result suffixes without backticks', () => {
+  assert.equal(
+    normalizeDeclaredValidationCommand('node --test tests/PiExtension.Tests/foo.test.mjs — 28 pass'),
+    'node --test tests/PiExtension.Tests/foo.test.mjs',
+  );
+  assert.equal(
+    normalizeDeclaredValidationCommand('git diff --check main...HEAD – passed'),
+    'git diff --check main...HEAD',
+  );
+});
+
+test('normalizeDeclaredValidationCommands filters non-command sentinels', () => {
+  assert.deepEqual(
+    normalizeDeclaredValidationCommands(['not run', '', 'n/a', '`npm test` — failed']),
+    ['npm test'],
+  );
 });
 
 // ---------------------------------------------------------------------------

@@ -105,6 +105,7 @@ import {
 import {
   buildValidationPacketMeta,
   formatValidationPacketMessage,
+  normalizeDeclaredValidationCommands,
   parseValidationArgs as parseValidationArgsImpl,
   runValidation,
 } from "../lib/den-validation-packet.ts";
@@ -842,13 +843,17 @@ async function runAndMaybePostValidation(
 
     // Try declared tests from implementation packet.
     if (implementationPacket?.content) {
-      const declaredTests = extractDeclaredTestsFromImplementationPacket(implementationPacket.content);
+      const declaredTests = normalizeDeclaredValidationCommands(
+        extractDeclaredTestsFromImplementationPacket(implementationPacket.content),
+      );
       if (declaredTests.length > 0) commands = declaredTests;
     }
 
     // Try validation_commands from context packet.
     if ((!commands || commands.length === 0) && contextPacket?.content) {
-      commands = extractValidationCommandsFromContextPacket(contextPacket.content);
+      commands = normalizeDeclaredValidationCommands(
+        extractValidationCommandsFromContextPacket(contextPacket.content),
+      );
     }
   }
 

@@ -96,6 +96,12 @@ export interface ValidationPacketMeta {
   pass_count: number;
   fail_count: number;
   blocked_count: number;
+  test_commands: string[];
+  command_statuses: Array<{
+    command: string;
+    status: "pass" | "fail" | "blocked" | "skipped";
+    exit_code: number | null;
+  }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -387,6 +393,12 @@ export function buildValidationPacketMeta(result: ValidationRunResult): Validati
     pass_count: passCount,
     fail_count: failCount,
     blocked_count: blockedCount,
+    test_commands: result.command_results.map((commandResult) => commandResult.command),
+    command_statuses: result.command_results.map((commandResult) => ({
+      command: commandResult.command,
+      status: commandResult.status,
+      exit_code: commandResult.exit_code,
+    })),
   };
 }
 
@@ -442,6 +454,37 @@ export function parseValidationArgs(args: string | undefined): ParsedValidationA
   }
 
   return parsed;
+}
+
+// ---------------------------------------------------------------------------
+// Declared command normalization
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize test lines copied from implementation/context packets into shell
+ * commands that can safely be executed. Packet test sections commonly use
+ * Markdown like `cmd` — pass; executing that whole line would turn the backticks
+ * into shell command substitution and then try to execute the status suffix.
+ */
+export function normalizeDeclaredValidationCommand(line: string): string | undefined {
+  const trimmed = line.trim();
+  if (!trimmed) return undefined;
+  if (/^(?:none|n\/a|not run|not-run)$/i.test(trimmed)) return undefined;
+
+  const backtickMatch = trimmed.match(/`([^`]+)`/);
+  const candidate = backtickMatch?.[1]?.trim() ?? trimmed;
+  const withoutStatusSuffix = candidate
+    .replace(/\s+(?:—|–)\s*(?:pass(?:ed)?|fail(?:ed)?|skip(?:ped)?|blocked|partial|\d+\s+(?:pass(?:ed)?|fail(?:ed)?|error(?:s)?|skip(?:ped)?)\b.*)$/i, "")
+    .trim();
+
+  return withoutStatusSuffix.length > 0 ? withoutStatusSuffix : undefined;
+}
+
+/** Normalize and filter declared test command lines from packets. */
+export function normalizeDeclaredValidationCommands(lines: string[] | undefined): string[] {
+  return (lines ?? [])
+    .map((line) => normalizeDeclaredValidationCommand(line))
+    .filter((line): line is string => Boolean(line));
 }
 
 // ---------------------------------------------------------------------------
