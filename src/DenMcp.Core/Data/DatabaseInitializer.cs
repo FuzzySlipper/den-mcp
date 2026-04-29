@@ -682,6 +682,7 @@ public sealed class DatabaseInitializer
     {
         await EnsureAgentGuidanceSchemaAsync(connection);
         await EnsureAgentRunSchemaAsync(connection);
+        await EnsureCollaborationSchemaAsync(connection);
         await EnsureAgentWorkspaceSchemaAsync(connection);
         await EnsureDesktopSnapshotSchemaAsync(connection);
         await EnsureBlackboardSchemaAsync(connection);
@@ -886,6 +887,144 @@ public sealed class DatabaseInitializer
             """);
         await EnsureIndexAsync(connection, "idx_agent_runs_state_updated",
             "CREATE INDEX IF NOT EXISTS idx_agent_runs_state_updated ON agent_runs(state, updated_at DESC, latest_stream_entry_id DESC)");
+    }
+
+    private static async Task EnsureCollaborationSchemaAsync(SqliteConnection connection)
+    {
+        await using var tableCmd = connection.CreateCommand();
+        tableCmd.CommandText = """
+            CREATE TABLE IF NOT EXISTS collaboration_sessions (
+                id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id                  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                task_id                     INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+                message_id                  INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+                agent_stream_entry_id       INTEGER REFERENCES agent_stream_entries(id) ON DELETE SET NULL,
+                pi_run_id                   TEXT,
+                pi_session_id               TEXT,
+                desktop_operator_session_id TEXT,
+                title                       TEXT,
+                status                      TEXT NOT NULL DEFAULT 'active'
+                                            CHECK (status IN ('active', 'resolved', 'archived')),
+                created_by                  TEXT,
+                created_at                  TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at                  TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS collaboration_turns (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id          INTEGER NOT NULL REFERENCES collaboration_sessions(id) ON DELETE CASCADE,
+                turn_order          INTEGER NOT NULL,
+                role                TEXT,
+                source_kind         TEXT,
+                source_ref          TEXT,
+                source_label        TEXT,
+                source_uri          TEXT,
+                source_context      TEXT,
+                raw_markdown        TEXT NOT NULL,
+                source_content_hash TEXT NOT NULL,
+                segmenter_version   TEXT NOT NULL,
+                created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(session_id, turn_order)
+            );
+
+            CREATE TABLE IF NOT EXISTS collaboration_segments (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                turn_id         INTEGER NOT NULL REFERENCES collaboration_turns(id) ON DELETE CASCADE,
+                sequence_number INTEGER NOT NULL,
+                segment_hash    TEXT NOT NULL,
+                segment_type    TEXT NOT NULL CHECK (segment_type IN (
+                                    'heading',
+                                    'paragraph',
+                                    'code_block',
+                                    'list',
+                                    'block_quote'
+                                )),
+                raw_markdown    TEXT NOT NULL,
+                text            TEXT,
+                heading_level   INTEGER CHECK (heading_level IS NULL OR heading_level BETWEEN 1 AND 6),
+                code_language   TEXT,
+                created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(turn_id, sequence_number),
+                UNIQUE(turn_id, segment_hash)
+            );
+
+            CREATE TABLE IF NOT EXISTS collaboration_annotations (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id      INTEGER NOT NULL REFERENCES collaboration_sessions(id) ON DELETE CASCADE,
+                turn_id         INTEGER NOT NULL REFERENCES collaboration_turns(id) ON DELETE CASCADE,
+                segment_id      INTEGER NOT NULL REFERENCES collaboration_segments(id) ON DELETE CASCADE,
+                segment_hash    TEXT NOT NULL,
+                annotation_type TEXT NOT NULL CHECK (annotation_type IN ('note', 'skip', 'done', 'flag')),
+                body            TEXT,
+                created_by      TEXT,
+                updated_by      TEXT,
+                revision        INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+                created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS collaboration_response_drafts (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id  INTEGER NOT NULL REFERENCES collaboration_sessions(id) ON DELETE CASCADE,
+                turn_id     INTEGER REFERENCES collaboration_turns(id) ON DELETE SET NULL,
+                content     TEXT NOT NULL,
+                created_by  TEXT,
+                updated_by  TEXT,
+                revision    INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+                created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            """;
+        await tableCmd.ExecuteNonQueryAsync();
+
+        await EnsureIndexAsync(connection, "idx_collaboration_sessions_project_updated",
+            "CREATE INDEX IF NOT EXISTS idx_collaboration_sessions_project_updated ON collaboration_sessions(project_id, updated_at DESC, id DESC)");
+        await EnsureIndexAsync(connection, "idx_collaboration_sessions_task_updated",
+            """
+            CREATE INDEX IF NOT EXISTS idx_collaboration_sessions_task_updated
+            ON collaboration_sessions(task_id, updated_at DESC, id DESC)
+            WHERE task_id IS NOT NULL
+            """);
+        await EnsureIndexAsync(connection, "idx_collaboration_sessions_message",
+            """
+            CREATE INDEX IF NOT EXISTS idx_collaboration_sessions_message
+            ON collaboration_sessions(message_id)
+            WHERE message_id IS NOT NULL
+            """);
+        await EnsureIndexAsync(connection, "idx_collaboration_sessions_stream",
+            """
+            CREATE INDEX IF NOT EXISTS idx_collaboration_sessions_stream
+            ON collaboration_sessions(agent_stream_entry_id)
+            WHERE agent_stream_entry_id IS NOT NULL
+            """);
+        await EnsureIndexAsync(connection, "idx_collaboration_sessions_pi_run",
+            """
+            CREATE INDEX IF NOT EXISTS idx_collaboration_sessions_pi_run
+            ON collaboration_sessions(pi_run_id)
+            WHERE pi_run_id IS NOT NULL
+            """);
+        await EnsureIndexAsync(connection, "idx_collaboration_sessions_pi_session",
+            """
+            CREATE INDEX IF NOT EXISTS idx_collaboration_sessions_pi_session
+            ON collaboration_sessions(pi_session_id)
+            WHERE pi_session_id IS NOT NULL
+            """);
+        await EnsureIndexAsync(connection, "idx_collaboration_sessions_desktop_operator",
+            """
+            CREATE INDEX IF NOT EXISTS idx_collaboration_sessions_desktop_operator
+            ON collaboration_sessions(desktop_operator_session_id)
+            WHERE desktop_operator_session_id IS NOT NULL
+            """);
+        await EnsureIndexAsync(connection, "idx_collaboration_turns_session_order",
+            "CREATE INDEX IF NOT EXISTS idx_collaboration_turns_session_order ON collaboration_turns(session_id, turn_order)");
+        await EnsureIndexAsync(connection, "idx_collaboration_segments_turn_order",
+            "CREATE INDEX IF NOT EXISTS idx_collaboration_segments_turn_order ON collaboration_segments(turn_id, sequence_number)");
+        await EnsureIndexAsync(connection, "idx_collaboration_annotations_session_updated",
+            "CREATE INDEX IF NOT EXISTS idx_collaboration_annotations_session_updated ON collaboration_annotations(session_id, updated_at DESC, id DESC)");
+        await EnsureIndexAsync(connection, "idx_collaboration_annotations_segment",
+            "CREATE INDEX IF NOT EXISTS idx_collaboration_annotations_segment ON collaboration_annotations(segment_id, updated_at DESC, id DESC)");
+        await EnsureIndexAsync(connection, "idx_collaboration_drafts_session_updated",
+            "CREATE INDEX IF NOT EXISTS idx_collaboration_drafts_session_updated ON collaboration_response_drafts(session_id, updated_at DESC, id DESC)");
     }
 
     private static async Task EnsureAgentWorkspaceSchemaAsync(SqliteConnection connection)

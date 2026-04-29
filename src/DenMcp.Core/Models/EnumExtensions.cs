@@ -212,6 +212,60 @@ public static class EnumExtensions
         _ => throw new ArgumentException($"Unknown desktop snapshot state: {value}", nameof(value))
     };
 
+    public static string ToDbValue(this CollaborationSessionStatus status) => status switch
+    {
+        CollaborationSessionStatus.Active => "active",
+        CollaborationSessionStatus.Resolved => "resolved",
+        CollaborationSessionStatus.Archived => "archived",
+        _ => throw new ArgumentOutOfRangeException(nameof(status), status, null)
+    };
+
+    public static CollaborationSessionStatus ParseCollaborationSessionStatus(string value) => value switch
+    {
+        "active" => CollaborationSessionStatus.Active,
+        "resolved" => CollaborationSessionStatus.Resolved,
+        "archived" => CollaborationSessionStatus.Archived,
+        _ => throw new ArgumentException($"Unknown collaboration session status: {value}", nameof(value))
+    };
+
+    public static string ToDbValue(this CollaborationSegmentType type) => type switch
+    {
+        CollaborationSegmentType.Heading => "heading",
+        CollaborationSegmentType.Paragraph => "paragraph",
+        CollaborationSegmentType.CodeBlock => "code_block",
+        CollaborationSegmentType.List => "list",
+        CollaborationSegmentType.BlockQuote => "block_quote",
+        _ => throw new ArgumentOutOfRangeException(nameof(type), type, null)
+    };
+
+    public static CollaborationSegmentType ParseCollaborationSegmentType(string value) => value switch
+    {
+        "heading" => CollaborationSegmentType.Heading,
+        "paragraph" => CollaborationSegmentType.Paragraph,
+        "code_block" => CollaborationSegmentType.CodeBlock,
+        "list" => CollaborationSegmentType.List,
+        "block_quote" => CollaborationSegmentType.BlockQuote,
+        _ => throw new ArgumentException($"Unknown collaboration segment type: {value}", nameof(value))
+    };
+
+    public static string ToDbValue(this CollaborationAnnotationType type) => type switch
+    {
+        CollaborationAnnotationType.Note => "note",
+        CollaborationAnnotationType.Skip => "skip",
+        CollaborationAnnotationType.Done => "done",
+        CollaborationAnnotationType.Flag => "flag",
+        _ => throw new ArgumentOutOfRangeException(nameof(type), type, null)
+    };
+
+    public static CollaborationAnnotationType ParseCollaborationAnnotationType(string value) => value switch
+    {
+        "note" => CollaborationAnnotationType.Note,
+        "skip" => CollaborationAnnotationType.Skip,
+        "done" => CollaborationAnnotationType.Done,
+        "flag" => CollaborationAnnotationType.Flag,
+        _ => throw new ArgumentException($"Unknown collaboration annotation type: {value}", nameof(value))
+    };
+
     public static string ToDbValue(this DispatchStatus status) => status switch
     {
         DispatchStatus.Pending => "pending",
