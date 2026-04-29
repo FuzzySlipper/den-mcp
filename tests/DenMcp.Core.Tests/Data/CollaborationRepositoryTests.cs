@@ -165,6 +165,211 @@ public sealed class CollaborationRepositoryTests : IAsyncLifetime
         Assert.Equal("compiled response v2", Assert.Single(reloaded.Drafts).Content);
     }
 
+    [Fact]
+    public async Task UpdateSessionStatus_WithExpectedStatus_UpdatesSuccessfully()
+    {
+        var session = await NewSessionAsync();
+        Assert.Equal(CollaborationSessionStatus.Active, session.Status);
+
+        var resolved = await _repo.UpdateSessionStatusAsync("proj", session.Id, CollaborationSessionStatus.Active, CollaborationSessionStatus.Resolved);
+        Assert.Equal(CollaborationSessionStatus.Resolved, resolved.Status);
+        Assert.True(resolved.UpdatedAt >= session.UpdatedAt);
+
+        var archived = await _repo.UpdateSessionStatusAsync("proj", session.Id, CollaborationSessionStatus.Resolved, CollaborationSessionStatus.Archived);
+        Assert.Equal(CollaborationSessionStatus.Archived, archived.Status);
+    }
+
+    [Fact]
+    public async Task UpdateSessionStatus_WithStaleExpectedStatus_ThrowsConflict()
+    {
+        var session = await NewSessionAsync();
+        Assert.Equal(CollaborationSessionStatus.Active, session.Status);
+
+        // Resolve once
+        await _repo.UpdateSessionStatusAsync("proj", session.Id, CollaborationSessionStatus.Active, CollaborationSessionStatus.Resolved);
+
+        // Try to resolve again with Active as expected — stale
+        var ex = await Assert.ThrowsAsync<CollaborationConflictException>(() =>
+            _repo.UpdateSessionStatusAsync("proj", session.Id, CollaborationSessionStatus.Active, CollaborationSessionStatus.Archived));
+        Assert.Contains("expected 'active'", ex.Message.ToLowerInvariant());
+    }
+
+    [Fact]
+    public async Task UpdateSessionStatus_ForMissingSession_ThrowsNotFound()
+    {
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            _repo.UpdateSessionStatusAsync("proj", 99999, CollaborationSessionStatus.Active, CollaborationSessionStatus.Resolved));
+    }
+
+    [Fact]
+    public async Task ListAnnotations_BySession_ReturnsAll()
+    {
+        var session = await NewSessionAsync();
+        var turn = Assert.Single(session.Turns);
+        var segment = turn.Segments[0];
+
+        var a1 = await _repo.CreateAnnotationAsync("proj", session.Id, turn.Id, segment.Id, CollaborationAnnotationType.Note, "first", "tester");
+        var a2 = await _repo.CreateAnnotationAsync("proj", session.Id, turn.Id, segment.Id, CollaborationAnnotationType.Flag, "second", "tester");
+
+        var all = await _repo.ListAnnotationsAsync("proj", session.Id, new CollaborationAnnotationListOptions());
+        Assert.Equal(2, all.Count);
+        Assert.Contains(all, a => a.Id == a1.Id);
+        Assert.Contains(all, a => a.Id == a2.Id);
+    }
+
+    [Fact]
+    public async Task ListAnnotations_ByTurnId_FiltersCorrectly()
+    {
+        var session = await NewSessionAsync();
+        var turn = Assert.Single(session.Turns);
+        var segment = turn.Segments[0];
+
+        var a1 = await _repo.CreateAnnotationAsync("proj", session.Id, turn.Id, segment.Id, CollaborationAnnotationType.Note, "on turn", "tester");
+
+        var filtered = await _repo.ListAnnotationsAsync("proj", session.Id, new CollaborationAnnotationListOptions
+        {
+            TurnId = turn.Id
+        });
+        Assert.Single(filtered);
+        Assert.Equal(a1.Id, filtered[0].Id);
+
+        var noMatch = await _repo.ListAnnotationsAsync("proj", session.Id, new CollaborationAnnotationListOptions
+        {
+            TurnId = 99999
+        });
+        Assert.Empty(noMatch);
+    }
+
+    [Fact]
+    public async Task ListAnnotations_BySegmentId_FiltersCorrectly()
+    {
+        var session = await NewSessionAsync();
+        var turn = Assert.Single(session.Turns);
+        var segment1 = turn.Segments[0];
+        var segment2 = turn.Segments[1];
+
+        var a1 = await _repo.CreateAnnotationAsync("proj", session.Id, turn.Id, segment1.Id, CollaborationAnnotationType.Note, "on seg1", "tester");
+        var a2 = await _repo.CreateAnnotationAsync("proj", session.Id, turn.Id, segment2.Id, CollaborationAnnotationType.Done, "on seg2", "tester");
+
+        var seg1Annotations = await _repo.ListAnnotationsAsync("proj", session.Id, new CollaborationAnnotationListOptions
+        {
+            SegmentId = segment1.Id
+        });
+        Assert.Single(seg1Annotations);
+        Assert.Equal(a1.Id, seg1Annotations[0].Id);
+
+        var seg2Annotations = await _repo.ListAnnotationsAsync("proj", session.Id, new CollaborationAnnotationListOptions
+        {
+            SegmentId = segment2.Id
+        });
+        Assert.Single(seg2Annotations);
+        Assert.Equal(a2.Id, seg2Annotations[0].Id);
+    }
+
+    [Fact]
+    public async Task ListAnnotations_WithTurnAndSegment_FiltersByBoth()
+    {
+        var session = await NewSessionAsync();
+        var turn = Assert.Single(session.Turns);
+        var segment = turn.Segments[0];
+
+        var a1 = await _repo.CreateAnnotationAsync("proj", session.Id, turn.Id, segment.Id, CollaborationAnnotationType.Note, "combined", "tester");
+
+        var result = await _repo.ListAnnotationsAsync("proj", session.Id, new CollaborationAnnotationListOptions
+        {
+            TurnId = turn.Id,
+            SegmentId = segment.Id
+        });
+        Assert.Single(result);
+        Assert.Equal(a1.Id, result[0].Id);
+
+        var noMatch = await _repo.ListAnnotationsAsync("proj", session.Id, new CollaborationAnnotationListOptions
+        {
+            TurnId = turn.Id,
+            SegmentId = 99999
+        });
+        Assert.Empty(noMatch);
+    }
+
+    [Fact]
+    public async Task ListAnnotations_ForMissingSession_ThrowsNotFound()
+    {
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            _repo.ListAnnotationsAsync("proj", 99999, new CollaborationAnnotationListOptions()));
+    }
+
+    [Fact]
+    public async Task DeleteAnnotation_WithCorrectRevision_Deletes()
+    {
+        var session = await NewSessionAsync();
+        var turn = Assert.Single(session.Turns);
+        var segment = turn.Segments[0];
+
+        var annotation = await _repo.CreateAnnotationAsync("proj", session.Id, turn.Id, segment.Id, CollaborationAnnotationType.Note, "delete me", "tester");
+        Assert.Equal(1, annotation.Revision);
+
+        var deleted = await _repo.DeleteAnnotationAsync("proj", session.Id, annotation.Id, expectedRevision: 1);
+        Assert.Equal(annotation.Id, deleted.Id);
+        Assert.Equal(1, deleted.Revision);
+
+        // Verify it's gone
+        var all = await _repo.ListAnnotationsAsync("proj", session.Id, new CollaborationAnnotationListOptions());
+        Assert.DoesNotContain(all, a => a.Id == annotation.Id);
+    }
+
+    [Fact]
+    public async Task DeleteAnnotation_WithStaleRevision_ThrowsConflict()
+    {
+        var session = await NewSessionAsync();
+        var turn = Assert.Single(session.Turns);
+        var segment = turn.Segments[0];
+
+        var annotation = await _repo.CreateAnnotationAsync("proj", session.Id, turn.Id, segment.Id, CollaborationAnnotationType.Note, "stale test", "tester");
+        Assert.Equal(1, annotation.Revision);
+
+        // Update to bump revision
+        await _repo.UpdateAnnotationAsync("proj", session.Id, annotation.Id, 1, CollaborationAnnotationType.Flag, "updated", "tester");
+
+        // Try to delete with stale revision 1
+        var ex = await Assert.ThrowsAsync<CollaborationConflictException>(() =>
+            _repo.DeleteAnnotationAsync("proj", session.Id, annotation.Id, expectedRevision: 1));
+        Assert.Contains("changed since revision 1", ex.Message);
+
+        // Delete with current revision 2 should work
+        var deleted = await _repo.DeleteAnnotationAsync("proj", session.Id, annotation.Id, expectedRevision: 2);
+        Assert.Equal(annotation.Id, deleted.Id);
+    }
+
+    [Fact]
+    public async Task DeleteAnnotation_ForMissingAnnotation_ThrowsNotFound()
+    {
+        var session = await NewSessionAsync();
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            _repo.DeleteAnnotationAsync("proj", session.Id, 99999, expectedRevision: 1));
+    }
+
+    [Fact]
+    public async Task DeleteAnnotation_WithInvalidRevision_ThrowsArgument()
+    {
+        var session = await NewSessionAsync();
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            _repo.DeleteAnnotationAsync("proj", session.Id, 1, expectedRevision: 0));
+    }
+
+    [Fact]
+    public async Task InsertTurn_WithWhitespaceOnly_ThrowsValidation()
+    {
+        var session = await NewSessionAsync();
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+            _repo.AddTurnAsync("proj", session.Id, new CreateCollaborationTurnRequestModel
+            {
+                Role = "assistant",
+                RawMarkdown = "   \n\n  \n "
+            }));
+        Assert.Contains("raw markdown", ex.Message.ToLowerInvariant());
+    }
+
     private Task<CollaborationSession> NewSessionAsync() => _repo.CreateSessionAsync(new CreateCollaborationSessionRequestModel
     {
         ProjectId = "proj",

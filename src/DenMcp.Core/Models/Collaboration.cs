@@ -139,3 +139,16 @@ public sealed class CreateCollaborationTurnRequestModel
     public JsonElement? SourceContext { get; set; }
     public required string RawMarkdown { get; set; }
 }
+
+public sealed class UpdateSessionStatusRequestModel
+{
+    public CollaborationSessionStatus ExpectedStatus { get; set; }
+    public CollaborationSessionStatus Status { get; set; }
+}
+
+public sealed class CollaborationAnnotationListOptions
+{
+    public long? TurnId { get; set; }
+    public long? SegmentId { get; set; }
+    public int Limit { get; set; } = 50;
+}

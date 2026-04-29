@@ -203,6 +203,92 @@ public static class CollaborationRoutes
                 return Results.NotFound(new { error = ex.Message });
             }
         });
+
+        group.MapPatch("/{sessionId:long}/status", async (
+            ICollaborationRepository repo,
+            string projectId,
+            long sessionId,
+            UpdateSessionStatusRequest req) =>
+        {
+            try
+            {
+                var parsedExpected = ParseSessionStatus(req.ExpectedStatus);
+                if (parsedExpected.Invalid)
+                    return Results.BadRequest(new { error = $"Unknown expected collaboration session status: {req.ExpectedStatus}" });
+
+                var parsedNew = ParseSessionStatus(req.Status);
+                if (parsedNew.Invalid)
+                    return Results.BadRequest(new { error = $"Unknown collaboration session status: {req.Status}" });
+
+                var updated = await repo.UpdateSessionStatusAsync(
+                    projectId, sessionId,
+                    parsedExpected.Status!.Value,
+                    parsedNew.Status!.Value);
+                return Results.Ok(updated);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+            catch (CollaborationConflictException ex)
+            {
+                return Results.Conflict(new { error = ex.Message });
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { error = ex.Message });
+            }
+        });
+
+        group.MapGet("/{sessionId:long}/annotations", async (
+            ICollaborationRepository repo,
+            string projectId,
+            long sessionId,
+            long? turnId,
+            long? segmentId,
+            int? limit) =>
+        {
+            try
+            {
+                var annotations = await repo.ListAnnotationsAsync(projectId, sessionId, new CollaborationAnnotationListOptions
+                {
+                    TurnId = turnId,
+                    SegmentId = segmentId,
+                    Limit = limit ?? 50
+                });
+                return Results.Ok(annotations);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { error = ex.Message });
+            }
+        });
+
+        group.MapDelete("/{sessionId:long}/annotations/{annotationId:long}", async (
+            ICollaborationRepository repo,
+            string projectId,
+            long sessionId,
+            long annotationId,
+            int expectedRevision) =>
+        {
+            try
+            {
+                var deleted = await repo.DeleteAnnotationAsync(projectId, sessionId, annotationId, expectedRevision);
+                return Results.Ok(deleted);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+            catch (CollaborationConflictException ex)
+            {
+                return Results.Conflict(new { error = ex.Message });
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { error = ex.Message });
+            }
+        });
     }
 
     private static CreateCollaborationTurnRequestModel BuildTurn(CreateCollaborationTurnRequest req) => new()
@@ -286,4 +372,10 @@ public sealed record UpdateCollaborationDraftRequest
     public int ExpectedRevision { get; init; }
     public string? Content { get; init; }
     public string? UpdatedBy { get; init; }
+}
+
+public sealed record UpdateSessionStatusRequest
+{
+    public string? ExpectedStatus { get; init; }
+    public string? Status { get; init; }
 }

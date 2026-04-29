@@ -199,6 +199,157 @@ public sealed class CollaborationApiTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Conflict, staleDraftUpdate.StatusCode);
     }
 
+    [Fact]
+    public async Task SessionStatusUpdate_TransitionsAndConflicts()
+    {
+        var session = await CreateSessionAsync();
+
+        // Resolve via PATCH
+        var resolveResponse = await _client.PatchAsJsonAsync($"/api/projects/{ProjectId}/collaboration/sessions/{session.Id}/status", new
+        {
+            expected_status = "active",
+            status = "resolved"
+        }, JsonOpts);
+        resolveResponse.EnsureSuccessStatusCode();
+        var resolved = await resolveResponse.Content.ReadFromJsonAsync<CollaborationSession>(JsonOpts);
+        Assert.Equal(CollaborationSessionStatus.Resolved, resolved!.Status);
+
+        // Stale expected_status -> 409
+        var staleResponse = await _client.PatchAsJsonAsync($"/api/projects/{ProjectId}/collaboration/sessions/{session.Id}/status", new
+        {
+            expected_status = "active",
+            status = "archived"
+        }, JsonOpts);
+        Assert.Equal(HttpStatusCode.Conflict, staleResponse.StatusCode);
+
+        // Archive with correct expected_status
+        var archiveResponse = await _client.PatchAsJsonAsync($"/api/projects/{ProjectId}/collaboration/sessions/{session.Id}/status", new
+        {
+            expected_status = "resolved",
+            status = "archived"
+        }, JsonOpts);
+        archiveResponse.EnsureSuccessStatusCode();
+        var archived = await archiveResponse.Content.ReadFromJsonAsync<CollaborationSession>(JsonOpts);
+        Assert.Equal(CollaborationSessionStatus.Archived, archived!.Status);
+
+        // Invalid status string -> 400
+        var badStatusResponse = await _client.PatchAsJsonAsync($"/api/projects/{ProjectId}/collaboration/sessions/{session.Id}/status", new
+        {
+            expected_status = "active",
+            status = "bogus"
+        }, JsonOpts);
+        Assert.Equal(HttpStatusCode.BadRequest, badStatusResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task SessionStatusUpdate_ForMissingSession_Returns404()
+    {
+        var response = await _client.PatchAsJsonAsync($"/api/projects/{ProjectId}/collaboration/sessions/99999/status", new
+        {
+            expected_status = "active",
+            status = "resolved"
+        }, JsonOpts);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task AnnotationListAndDelete_Routes()
+    {
+        var session = await CreateSessionAsync();
+        var turn = Assert.Single(session.Turns);
+        var segment = Assert.Single(turn.Segments);
+
+        // Create two annotations
+        var create1 = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/collaboration/sessions/{session.Id}/turns/{turn.Id}/annotations", new
+        {
+            segment_id = segment.Id,
+            annotation_type = "note",
+            body = "first annotation",
+            created_by = "operator"
+        }, JsonOpts);
+        create1.EnsureSuccessStatusCode();
+        var ann1 = await create1.Content.ReadFromJsonAsync<CollaborationAnnotation>(JsonOpts);
+
+        var create2 = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/collaboration/sessions/{session.Id}/turns/{turn.Id}/annotations", new
+        {
+            segment_id = segment.Id,
+            annotation_type = "flag",
+            body = "second annotation",
+            created_by = "operator"
+        }, JsonOpts);
+        create2.EnsureSuccessStatusCode();
+        var ann2 = await create2.Content.ReadFromJsonAsync<CollaborationAnnotation>(JsonOpts);
+
+        // List all annotations for session
+        var listResponse = await _client.GetAsync($"/api/projects/{ProjectId}/collaboration/sessions/{session.Id}/annotations");
+        listResponse.EnsureSuccessStatusCode();
+        var all = await listResponse.Content.ReadFromJsonAsync<List<CollaborationAnnotation>>(JsonOpts);
+        Assert.Equal(2, all!.Count);
+
+        // List filtered by turnId
+        var filteredResponse = await _client.GetAsync($"/api/projects/{ProjectId}/collaboration/sessions/{session.Id}/annotations?turnId={turn.Id}");
+        filteredResponse.EnsureSuccessStatusCode();
+        var filtered = await filteredResponse.Content.ReadFromJsonAsync<List<CollaborationAnnotation>>(JsonOpts);
+        Assert.Equal(2, filtered!.Count);
+
+        // List filtered by segmentId
+        var segFiltered = await _client.GetAsync($"/api/projects/{ProjectId}/collaboration/sessions/{session.Id}/annotations?segmentId={segment.Id}");
+        segFiltered.EnsureSuccessStatusCode();
+        var segAnnotations = await segFiltered.Content.ReadFromJsonAsync<List<CollaborationAnnotation>>(JsonOpts);
+        Assert.Equal(2, segAnnotations!.Count);
+
+        // Delete annotation 1 with correct revision
+        var deleteResponse = await _client.DeleteAsync($"/api/projects/{ProjectId}/collaboration/sessions/{session.Id}/annotations/{ann1!.Id}?expectedRevision={ann1.Revision}");
+        deleteResponse.EnsureSuccessStatusCode();
+        var deleted = await deleteResponse.Content.ReadFromJsonAsync<CollaborationAnnotation>(JsonOpts);
+        Assert.Equal(ann1.Id, deleted!.Id);
+
+        // Verify only 1 remains
+        var afterDelete = await _client.GetAsync($"/api/projects/{ProjectId}/collaboration/sessions/{session.Id}/annotations");
+        afterDelete.EnsureSuccessStatusCode();
+        var remaining = await afterDelete.Content.ReadFromJsonAsync<List<CollaborationAnnotation>>(JsonOpts);
+        var single = Assert.Single(remaining!);
+        Assert.Equal(ann2!.Id, single.Id);
+
+        // Delete already-deleted -> 404
+        var reDelete = await _client.DeleteAsync($"/api/projects/{ProjectId}/collaboration/sessions/{session.Id}/annotations/{ann1.Id}?expectedRevision={ann1.Revision}");
+        Assert.Equal(HttpStatusCode.NotFound, reDelete.StatusCode);
+
+        // Delete with stale revision -> 409
+        // First update ann2 to bump revision
+        var updateResponse = await _client.PutAsJsonAsync($"/api/projects/{ProjectId}/collaboration/sessions/{session.Id}/annotations/{ann2.Id}", new
+        {
+            expected_revision = 1,
+            annotation_type = "done",
+            body = "updated",
+            updated_by = "operator"
+        }, JsonOpts);
+        updateResponse.EnsureSuccessStatusCode();
+
+        var staleDelete = await _client.DeleteAsync($"/api/projects/{ProjectId}/collaboration/sessions/{session.Id}/annotations/{ann2.Id}?expectedRevision=1");
+        Assert.Equal(HttpStatusCode.Conflict, staleDelete.StatusCode);
+
+        // Delete with current revision works
+        var goodDelete = await _client.DeleteAsync($"/api/projects/{ProjectId}/collaboration/sessions/{session.Id}/annotations/{ann2.Id}?expectedRevision=2");
+        goodDelete.EnsureSuccessStatusCode();
+    }
+
+    [Fact]
+    public async Task ZeroSegmentMarkdown_Returns400()
+    {
+        // Whitespace-only markdown should be rejected with 400
+        var response = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/collaboration/sessions", new
+        {
+            task_id = _task.Id,
+            title = "Zero segment test",
+            initial_turn = new
+            {
+                raw_markdown = "   \n\n  \n "
+            }
+        }, JsonOpts);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
     private async Task<CollaborationSession> CreateSessionAsync()
     {
         var response = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/collaboration/sessions", new

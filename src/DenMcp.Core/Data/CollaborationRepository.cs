@@ -13,6 +13,9 @@ public interface ICollaborationRepository
     Task<CollaborationTurn> AddTurnAsync(string projectId, long sessionId, CreateCollaborationTurnRequestModel request);
     Task<CollaborationAnnotation> CreateAnnotationAsync(string projectId, long sessionId, long turnId, long segmentId, CollaborationAnnotationType annotationType, string? body, string? createdBy);
     Task<CollaborationAnnotation> UpdateAnnotationAsync(string projectId, long sessionId, long annotationId, int expectedRevision, CollaborationAnnotationType annotationType, string? body, string? updatedBy);
+    Task<CollaborationSession> UpdateSessionStatusAsync(string projectId, long sessionId, CollaborationSessionStatus expectedStatus, CollaborationSessionStatus status);
+    Task<List<CollaborationAnnotation>> ListAnnotationsAsync(string projectId, long sessionId, CollaborationAnnotationListOptions options);
+    Task<CollaborationAnnotation> DeleteAnnotationAsync(string projectId, long sessionId, long annotationId, int expectedRevision);
     Task<CollaborationResponseDraft> CreateDraftAsync(string projectId, long sessionId, long? turnId, string content, string? createdBy);
     Task<CollaborationResponseDraft> UpdateDraftAsync(string projectId, long sessionId, long draftId, int expectedRevision, string content, string? updatedBy);
 }
@@ -296,11 +299,124 @@ public sealed class CollaborationRepository : ICollaborationRepository
         throw new CollaborationConflictException($"Response draft {draftId} has changed since revision {expectedRevision}.");
     }
 
+    public async Task<CollaborationSession> UpdateSessionStatusAsync(string projectId, long sessionId, CollaborationSessionStatus expectedStatus, CollaborationSessionStatus status)
+    {
+        if (string.IsNullOrWhiteSpace(projectId))
+            throw new ArgumentException("Project id is required.", nameof(projectId));
+
+        await using var conn = await _db.CreateConnectionAsync();
+        await using var tx = await conn.BeginTransactionAsync();
+
+        var session = await GetSessionHeaderAsync(conn, projectId, sessionId);
+        if (session is null)
+            throw new KeyNotFoundException($"Collaboration session {sessionId} was not found in project '{projectId}'.");
+
+        if (session.Status != expectedStatus)
+            throw new CollaborationConflictException($"Collaboration session {sessionId} has status '{session.Status.ToDbValue()}' but expected '{expectedStatus.ToDbValue()}'.");
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"""
+            UPDATE collaboration_sessions SET
+                status = @status,
+                updated_at = datetime('now')
+            WHERE id = @sessionId
+              AND project_id = @projectId
+            RETURNING {SessionColumns}
+            """;
+        cmd.Parameters.AddWithValue("@sessionId", sessionId);
+        cmd.Parameters.AddWithValue("@projectId", projectId.Trim());
+        cmd.Parameters.AddWithValue("@status", status.ToDbValue());
+
+        await using var reader = await cmd.ExecuteReaderAsync();
+        await reader.ReadAsync();
+        var updated = ReadSession(reader);
+        await reader.DisposeAsync();
+        await tx.CommitAsync();
+        return updated;
+    }
+
+    public async Task<List<CollaborationAnnotation>> ListAnnotationsAsync(string projectId, long sessionId, CollaborationAnnotationListOptions options)
+    {
+        await using var conn = await _db.CreateConnectionAsync();
+        await EnsureSessionExistsAsync(conn, projectId, sessionId);
+
+        await using var cmd = conn.CreateCommand();
+        var where = new List<string> { "session_id = @sessionId" };
+        cmd.Parameters.AddWithValue("@sessionId", sessionId);
+
+        if (options.TurnId is not null)
+        {
+            where.Add("turn_id = @turnId");
+            cmd.Parameters.AddWithValue("@turnId", options.TurnId.Value);
+        }
+        if (options.SegmentId is not null)
+        {
+            where.Add("segment_id = @segmentId");
+            cmd.Parameters.AddWithValue("@segmentId", options.SegmentId.Value);
+        }
+
+        var whereClause = string.Join(" AND ", where);
+        cmd.CommandText = $"""
+            SELECT {AnnotationColumns}
+            FROM collaboration_annotations
+            WHERE {whereClause}
+            ORDER BY updated_at DESC, id DESC
+            LIMIT @limit
+            """;
+        cmd.Parameters.AddWithValue("@limit", Math.Clamp(options.Limit, 1, 200));
+
+        var annotations = new List<CollaborationAnnotation>();
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            annotations.Add(ReadAnnotation(reader));
+        return annotations;
+    }
+
+    public async Task<CollaborationAnnotation> DeleteAnnotationAsync(string projectId, long sessionId, long annotationId, int expectedRevision)
+    {
+        if (expectedRevision <= 0)
+            throw new ArgumentException("Expected revision must be positive.", nameof(expectedRevision));
+
+        await using var conn = await _db.CreateConnectionAsync();
+        await using var tx = await conn.BeginTransactionAsync();
+        await EnsureSessionExistsAsync(conn, projectId, sessionId);
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"""
+            DELETE FROM collaboration_annotations
+            WHERE id = @annotationId
+              AND session_id = @sessionId
+              AND revision = @expectedRevision
+            RETURNING {AnnotationColumns}
+            """;
+        cmd.Parameters.AddWithValue("@annotationId", annotationId);
+        cmd.Parameters.AddWithValue("@sessionId", sessionId);
+        cmd.Parameters.AddWithValue("@expectedRevision", expectedRevision);
+
+        await using var reader = await cmd.ExecuteReaderAsync();
+        if (await reader.ReadAsync())
+        {
+            var deleted = ReadAnnotation(reader);
+            await reader.DisposeAsync();
+            await TouchSessionAsync(conn, sessionId);
+            await tx.CommitAsync();
+            return deleted;
+        }
+
+        await reader.DisposeAsync();
+        if (!await AnnotationExistsAsync(conn, sessionId, annotationId))
+            throw new KeyNotFoundException($"Annotation {annotationId} was not found in collaboration session {sessionId}.");
+        throw new CollaborationConflictException($"Annotation {annotationId} has changed since revision {expectedRevision}.");
+    }
+
     private static async Task<CollaborationTurn> InsertTurnAsync(SqliteConnection conn, long sessionId, CreateCollaborationTurnRequestModel request)
     {
         ValidateTurnRequest(request);
         var sourceContentHash = HashText(request.RawMarkdown);
         var segments = MarkdownBlockSegmenter.Segment(request.RawMarkdown, SegmenterVersion);
+
+        if (segments.Count == 0)
+            throw new ArgumentException("The provided markdown does not produce any annotatable segments.");
 
         await using var orderCmd = conn.CreateCommand();
         orderCmd.CommandText = "SELECT COALESCE(MAX(turn_order), 0) + 1 FROM collaboration_turns WHERE session_id = @sessionId";
