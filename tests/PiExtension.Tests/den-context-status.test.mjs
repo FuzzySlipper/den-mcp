@@ -221,10 +221,12 @@ test('den_compact_context requests Pi compaction with conductor instructions', a
 
 test('den_compact_context tool execute triggers compact through extension context', async () => {
   const tools = [];
+  const resumeMessages = [];
   denExtension({
     on() {},
     registerCommand() {},
     registerTool(definition) { tools.push(definition); },
+    sendUserMessage(message, options) { resumeMessages.push({ message, options }); },
   });
   const tool = tools.find((entry) => entry.name === 'den_compact_context');
   const calls = [];
@@ -242,6 +244,9 @@ test('den_compact_context tool execute triggers compact through extension contex
   assert.equal(result.details.resume_configured, true); // sendResumeMessage is wired up via extension closure
   assert.equal(calls.length, 1);
   assert.equal(calls[0].customInstructions, 'Keep Den handoffs');
+  calls[0].onComplete({ summary: 'test', firstKeptEntryId: 'abc', tokensBefore: 1000, details: {} });
+  assert.equal(resumeMessages.length, 1);
+  assert.deepEqual(resumeMessages[0].options, { deliverAs: 'followUp' });
 });
 
 test('context status tool result and binding metadata stay compact', () => {
@@ -365,6 +370,27 @@ test('den_compact_context handles resume callback error gracefully', () => {
   compactCalls[0].onComplete({ summary: 'test', firstKeptEntryId: 'abc', tokensBefore: 1000, details: {} });
   const errorNotification = notifications.find((n) => n.level === 'error');
   assert.ok(errorNotification, 'should notify on resume failure');
+  assert.match(errorNotification.message, /resume failed/);
+});
+
+test('den_compact_context handles async resume callback rejection gracefully', async () => {
+  const compactCalls = [];
+  const notifications = [];
+  const result = requestDenContextCompaction({
+    compact(options) { compactCalls.push(options); },
+    ui: { notify(message, level) { notifications.push({ message, level }); } },
+  }, {
+    durableContextPosted: true,
+    resumeAfterCompaction: true,
+  }, {
+    sendResumeMessage: async () => { throw new Error('agent still streaming'); },
+  });
+
+  assert.equal(result.resume_configured, true);
+  compactCalls[0].onComplete({ summary: 'test', firstKeptEntryId: 'abc', tokensBefore: 1000, details: {} });
+  await new Promise((resolve) => setImmediate(resolve));
+  const errorNotification = notifications.find((n) => n.level === 'error');
+  assert.ok(errorNotification, 'should notify on async resume failure');
   assert.match(errorNotification.message, /resume failed/);
 });
 

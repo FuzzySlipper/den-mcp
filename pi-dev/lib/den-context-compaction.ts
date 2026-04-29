@@ -9,7 +9,7 @@ export type DenContextCompactionRequest = {
 };
 
 export type DenContextCompactionOptions = {
-  sendResumeMessage?: (message: string) => void;
+  sendResumeMessage?: (message: string) => void | Promise<void>;
 };
 
 export const DEFAULT_RESUME_PROMPT =
@@ -89,7 +89,9 @@ export function requestDenContextCompaction(
         ctx?.ui?.notify?.("Den conductor context compaction completed.", "info");
         if (sendResume) {
           try {
-            options!.sendResumeMessage!(DEFAULT_RESUME_PROMPT);
+            Promise.resolve(options!.sendResumeMessage!(DEFAULT_RESUME_PROMPT)).catch((resumeError) => {
+              ctx?.ui?.notify?.(`Post-compaction resume failed: ${errorMessage(resumeError)}`, "error");
+            });
           } catch (resumeError) {
             ctx?.ui?.notify?.(`Post-compaction resume failed: ${errorMessage(resumeError)}`, "error");
           }
@@ -108,7 +110,7 @@ export function requestDenContextCompaction(
       custom_instructions: customInstructions,
       safe_point_notes: safePointNotes,
       resume_configured: sendResume,
-      resume_note: sendResume ? resumeNote : resumeNote,
+      resume_note: resumeNote,
       guardrails,
     };
   } catch (error) {

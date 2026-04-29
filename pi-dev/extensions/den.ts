@@ -395,7 +395,7 @@ export default function denExtension(pi: ExtensionAPI) {
         safePointNotes: "Manual /den-compact-context command invoked; command invocation asserts durable Den state is already recorded.",
         resumeAfterCompaction: true,
       }, {
-        sendResumeMessage: (message) => pi.sendUserMessage(message),
+        sendResumeMessage: (message) => pi.sendUserMessage(message, { deliverAs: "followUp" }),
       });
       ctx.ui.setWidget("den-context-compaction", formatDenContextCompactionResult(result).split("\n"));
       ctx.ui.notify(
@@ -431,7 +431,7 @@ export default function denExtension(pi: ExtensionAPI) {
         safePointNotes: normalizeOptionalString(params?.safe_point_notes),
         resumeAfterCompaction: params?.resume_after_compaction !== false,
       }, {
-        sendResumeMessage: (message) => pi.sendUserMessage(message),
+        sendResumeMessage: (message) => pi.sendUserMessage(message, { deliverAs: "followUp" }),
       });
       return buildDenContextCompactionToolResult(result);
     },
