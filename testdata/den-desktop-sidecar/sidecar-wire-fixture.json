@@ -1,0 +1,746 @@
+{
+    "schema_bundle_id": "den-desktop.sidecar@2026-04-29",
+    "schema_bundle": {
+        "bundle_kind": "den.bridge.schema_bundle",
+        "version": 1,
+        "bundle_id": "den-desktop.sidecar@2026-04-29",
+        "protocol_version": "1.0",
+        "schema_version": "den-desktop@2026-04-29",
+        "definitions": {
+            "bridge.cancel_frame": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "protocol_version",
+                    "schema_version",
+                    "frame_type",
+                    "request_id"
+                ],
+                "properties": {
+                    "protocol_version": {
+                        "const": "1.0"
+                    },
+                    "schema_version": {
+                        "type": "string"
+                    },
+                    "frame_type": {
+                        "const": "cancel"
+                    },
+                    "request_id": {
+                        "type": "string"
+                    },
+                    "reason": {
+                        "type": "string"
+                    },
+                    "correlation": {
+                        "$ref": "bridge.correlation"
+                    },
+                    "sent_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                }
+            },
+            "bridge.capabilities_frame": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "protocol_version",
+                    "schema_version",
+                    "frame_type",
+                    "app_id",
+                    "app_version",
+                    "supported_transports",
+                    "commands",
+                    "events",
+                    "feature_flags",
+                    "schema_bundle_id"
+                ],
+                "properties": {
+                    "protocol_version": {
+                        "const": "1.0"
+                    },
+                    "schema_version": {
+                        "type": "string"
+                    },
+                    "frame_type": {
+                        "const": "capabilities"
+                    },
+                    "app_id": {
+                        "type": "string"
+                    },
+                    "app_version": {
+                        "type": "string"
+                    },
+                    "supported_transports": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "commands": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "bridge.command_capability"
+                        }
+                    },
+                    "events": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "bridge.event_capability"
+                        }
+                    },
+                    "feature_flags": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "schema_bundle_id": {
+                        "type": "string"
+                    },
+                    "correlation": {
+                        "$ref": "bridge.correlation"
+                    },
+                    "sent_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                }
+            },
+            "bridge.command_capability": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "command",
+                    "supports_cancellation",
+                    "supports_progress"
+                ],
+                "properties": {
+                    "command": {
+                        "type": "string"
+                    },
+                    "request_schema": {
+                        "type": "string"
+                    },
+                    "response_schema": {
+                        "type": "string"
+                    },
+                    "supports_cancellation": {
+                        "type": "boolean"
+                    },
+                    "supports_progress": {
+                        "type": "boolean"
+                    },
+                    "required_capabilities": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "bridge.correlation": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "trace_id": {
+                        "type": "string"
+                    },
+                    "causation_id": {
+                        "type": "string"
+                    },
+                    "parent_request_id": {
+                        "type": "string"
+                    },
+                    "task_id": {
+                        "type": "integer"
+                    },
+                    "operator_session_id": {
+                        "type": "string"
+                    },
+                    "metadata": {
+                        "type": "object",
+                        "additionalProperties": true
+                    }
+                }
+            },
+            "bridge.error": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "code",
+                    "message",
+                    "category"
+                ],
+                "properties": {
+                    "code": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "category": {
+                        "enum": [
+                            "validation",
+                            "not_found",
+                            "conflict",
+                            "unauthorized",
+                            "transient",
+                            "cancelled",
+                            "internal",
+                            "unavailable",
+                            "unsupported_capability"
+                        ]
+                    },
+                    "details": {
+                        "$ref": "bridge.json_value"
+                    },
+                    "retryable": {
+                        "type": "boolean"
+                    },
+                    "caused_by": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "bridge.error"
+                        }
+                    }
+                }
+            },
+            "bridge.event_capability": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "event"
+                ],
+                "properties": {
+                    "event": {
+                        "type": "string"
+                    },
+                    "payload_schema": {
+                        "type": "string"
+                    },
+                    "required_capabilities": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "bridge.event_frame": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "protocol_version",
+                    "schema_version",
+                    "frame_type",
+                    "event_id",
+                    "sequence",
+                    "event",
+                    "payload"
+                ],
+                "properties": {
+                    "protocol_version": {
+                        "const": "1.0"
+                    },
+                    "schema_version": {
+                        "type": "string"
+                    },
+                    "frame_type": {
+                        "const": "event"
+                    },
+                    "event_id": {
+                        "type": "string"
+                    },
+                    "sequence": {
+                        "type": "integer"
+                    },
+                    "event": {
+                        "type": "string"
+                    },
+                    "payload": {
+                        "$ref": "bridge.json_value"
+                    },
+                    "correlation": {
+                        "$ref": "bridge.correlation"
+                    },
+                    "sent_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                }
+            },
+            "bridge.get_capabilities.request": {
+                "type": "object",
+                "additionalProperties": false
+            },
+            "bridge.get_capabilities.response": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "app_id",
+                    "app_version",
+                    "protocol_version",
+                    "schema_version",
+                    "schema_bundle_id",
+                    "supported_transports",
+                    "commands",
+                    "events",
+                    "feature_flags"
+                ],
+                "properties": {
+                    "app_id": {
+                        "type": "string"
+                    },
+                    "app_version": {
+                        "type": "string"
+                    },
+                    "protocol_version": {
+                        "const": "1.0"
+                    },
+                    "schema_version": {
+                        "type": "string"
+                    },
+                    "schema_bundle_id": {
+                        "type": "string"
+                    },
+                    "supported_transports": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "commands": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "bridge.command_capability"
+                        }
+                    },
+                    "events": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "bridge.event_capability"
+                        }
+                    },
+                    "feature_flags": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "bridge.get_health.request": {
+                "type": "object",
+                "additionalProperties": false
+            },
+            "bridge.get_health.response": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "process_id",
+                    "uptime_ms",
+                    "ready_state",
+                    "app_id",
+                    "app_version",
+                    "config_path",
+                    "protocol_version",
+                    "schema_version",
+                    "schema_bundle_id",
+                    "active_request_count",
+                    "degraded_subsystems"
+                ],
+                "properties": {
+                    "process_id": {
+                        "type": "integer"
+                    },
+                    "uptime_ms": {
+                        "type": "integer"
+                    },
+                    "ready_state": {
+                        "type": "string"
+                    },
+                    "app_id": {
+                        "type": "string"
+                    },
+                    "app_version": {
+                        "type": "string"
+                    },
+                    "config_path": {
+                        "type": "string"
+                    },
+                    "log_path": {
+                        "type": "string"
+                    },
+                    "protocol_version": {
+                        "const": "1.0"
+                    },
+                    "schema_version": {
+                        "type": "string"
+                    },
+                    "schema_bundle_id": {
+                        "type": "string"
+                    },
+                    "active_request_count": {
+                        "type": "integer"
+                    },
+                    "degraded_subsystems": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "last_error": {
+                        "$ref": "bridge.error"
+                    }
+                }
+            },
+            "bridge.health_frame": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "protocol_version",
+                    "schema_version",
+                    "frame_type",
+                    "process_id",
+                    "uptime_ms",
+                    "ready_state",
+                    "app_id",
+                    "app_version",
+                    "active_request_count",
+                    "degraded_subsystems"
+                ],
+                "properties": {
+                    "protocol_version": {
+                        "const": "1.0"
+                    },
+                    "schema_version": {
+                        "type": "string"
+                    },
+                    "frame_type": {
+                        "const": "health"
+                    },
+                    "process_id": {
+                        "type": "integer"
+                    },
+                    "uptime_ms": {
+                        "type": "integer"
+                    },
+                    "ready_state": {
+                        "type": "string"
+                    },
+                    "app_id": {
+                        "type": "string"
+                    },
+                    "app_version": {
+                        "type": "string"
+                    },
+                    "active_request_count": {
+                        "type": "integer"
+                    },
+                    "degraded_subsystems": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "last_error": {
+                        "$ref": "bridge.error"
+                    },
+                    "correlation": {
+                        "$ref": "bridge.correlation"
+                    },
+                    "sent_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                }
+            },
+            "bridge.json_value": {
+                "type": [
+                    "object",
+                    "array",
+                    "string",
+                    "number",
+                    "integer",
+                    "boolean",
+                    "null"
+                ]
+            },
+            "bridge.progress_frame": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "protocol_version",
+                    "schema_version",
+                    "frame_type",
+                    "request_id",
+                    "stage",
+                    "payload"
+                ],
+                "properties": {
+                    "protocol_version": {
+                        "const": "1.0"
+                    },
+                    "schema_version": {
+                        "type": "string"
+                    },
+                    "frame_type": {
+                        "const": "progress"
+                    },
+                    "request_id": {
+                        "type": "string"
+                    },
+                    "stage": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "percent": {
+                        "type": "number"
+                    },
+                    "payload": {
+                        "$ref": "bridge.json_value"
+                    },
+                    "correlation": {
+                        "$ref": "bridge.correlation"
+                    },
+                    "sent_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                }
+            },
+            "bridge.request_frame": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "protocol_version",
+                    "schema_version",
+                    "frame_type",
+                    "request_id",
+                    "command",
+                    "payload"
+                ],
+                "properties": {
+                    "protocol_version": {
+                        "const": "1.0"
+                    },
+                    "schema_version": {
+                        "type": "string"
+                    },
+                    "frame_type": {
+                        "const": "request"
+                    },
+                    "request_id": {
+                        "type": "string"
+                    },
+                    "command": {
+                        "type": "string"
+                    },
+                    "payload": {
+                        "$ref": "bridge.json_value"
+                    },
+                    "deadline_ms": {
+                        "type": "integer"
+                    },
+                    "expects_progress": {
+                        "type": "boolean"
+                    },
+                    "correlation": {
+                        "$ref": "bridge.correlation"
+                    },
+                    "sent_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                }
+            },
+            "bridge.response_frame": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "protocol_version",
+                    "schema_version",
+                    "frame_type",
+                    "request_id"
+                ],
+                "oneOf": [
+                    {
+                        "required": [
+                            "result"
+                        ]
+                    },
+                    {
+                        "required": [
+                            "error"
+                        ]
+                    }
+                ],
+                "properties": {
+                    "protocol_version": {
+                        "const": "1.0"
+                    },
+                    "schema_version": {
+                        "type": "string"
+                    },
+                    "frame_type": {
+                        "const": "response"
+                    },
+                    "request_id": {
+                        "type": "string"
+                    },
+                    "result": {
+                        "$ref": "bridge.json_value"
+                    },
+                    "error": {
+                        "$ref": "bridge.error"
+                    },
+                    "correlation": {
+                        "$ref": "bridge.correlation"
+                    },
+                    "sent_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                }
+            },
+            "den_desktop.runtime.placeholder.payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "status",
+                    "message",
+                    "config_path",
+                    "schema_version"
+                ],
+                "properties": {
+                    "status": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "config_path": {
+                        "type": "string"
+                    },
+                    "schema_version": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "commands": [
+            {
+                "command": "bridge.get_capabilities",
+                "request_schema": "bridge.get_capabilities.request",
+                "response_schema": "bridge.get_capabilities.response",
+                "supports_cancellation": false,
+                "supports_progress": false,
+                "required_capabilities": []
+            },
+            {
+                "command": "bridge.get_health",
+                "request_schema": "bridge.get_health.request",
+                "response_schema": "bridge.get_health.response",
+                "supports_cancellation": false,
+                "supports_progress": false,
+                "required_capabilities": []
+            }
+        ],
+        "events": [
+            {
+                "event": "den_desktop.runtime.placeholder",
+                "payload_schema": "den_desktop.runtime.placeholder.payload",
+                "required_capabilities": []
+            }
+        ]
+    },
+    "frames": {
+        "health_response": {
+            "protocol_version": "1.0",
+            "schema_version": "den-desktop@2026-04-29",
+            "frame_type": "response",
+            "request_id": "req_health",
+            "result": {
+                "process_id": 2724630,
+                "uptime_ms": 0,
+                "ready_state": "ready",
+                "app_id": "den-desktop",
+                "app_version": "0.1.0+40f54706b8acecd51964b7f8560aa907c7320cd3",
+                "config_path": "/home/patch/.den-mcp/desktop",
+                "protocol_version": "1.0",
+                "schema_version": "den-desktop@2026-04-29",
+                "schema_bundle_id": "den-desktop.sidecar@2026-04-29",
+                "active_request_count": 0,
+                "degraded_subsystems": []
+            },
+            "correlation": {},
+            "sent_at": "2026-04-29T12:34:56+00:00"
+        },
+        "capabilities_response": {
+            "protocol_version": "1.0",
+            "schema_version": "den-desktop@2026-04-29",
+            "frame_type": "response",
+            "request_id": "req_capabilities",
+            "result": {
+                "app_id": "den-desktop",
+                "app_version": "0.1.0+40f54706b8acecd51964b7f8560aa907c7320cd3",
+                "protocol_version": "1.0",
+                "schema_version": "den-desktop@2026-04-29",
+                "schema_bundle_id": "den-desktop.sidecar@2026-04-29",
+                "supported_transports": [
+                    "loopback_websocket"
+                ],
+                "commands": [
+                    {
+                        "command": "bridge.get_capabilities",
+                        "request_schema": "bridge.get_capabilities.request",
+                        "response_schema": "bridge.get_capabilities.response",
+                        "supports_cancellation": false,
+                        "supports_progress": false,
+                        "required_capabilities": []
+                    },
+                    {
+                        "command": "bridge.get_health",
+                        "request_schema": "bridge.get_health.request",
+                        "response_schema": "bridge.get_health.response",
+                        "supports_cancellation": false,
+                        "supports_progress": false,
+                        "required_capabilities": []
+                    }
+                ],
+                "events": [
+                    {
+                        "event": "den_desktop.runtime.placeholder",
+                        "payload_schema": "den_desktop.runtime.placeholder.payload"
+                    }
+                ],
+                "feature_flags": [
+                    "sidecar_skeleton",
+                    "placeholder_runtime_events"
+                ]
+            },
+            "correlation": {},
+            "sent_at": "2026-04-29T12:34:56+00:00"
+        },
+        "placeholder_event": {
+            "protocol_version": "1.0",
+            "schema_version": "den-desktop@2026-04-29",
+            "frame_type": "event",
+            "event_id": "evt_placeholder_001",
+            "sequence": 1,
+            "event": "den_desktop.runtime.placeholder",
+            "payload": {
+                "status": "ready",
+                "message": "Den Desktop sidecar skeleton is running; domain runtime events are not registered in this slice.",
+                "config_path": "/home/patch/.den-mcp/desktop",
+                "schema_version": "den-desktop@2026-04-29"
+            },
+            "correlation": {},
+            "sent_at": "2026-04-29T12:34:56+00:00"
+        }
+    }
+}

@@ -513,8 +513,11 @@ export function createCheckedBridgeClient<
   };
 }
 
-export function createBridgeCommandFacade<TCommands extends Record<string, BridgeCommandSpec<JsonValue, JsonValue>>>(
-  client: CheckedBridgeClient<TCommands>,
+export function createBridgeCommandFacade<
+  TCommands extends Record<string, BridgeCommandSpec<JsonValue, JsonValue>>,
+  TEvents extends Record<string, BridgeEventSpec<JsonValue>> = Record<string, never>,
+>(
+  client: CheckedBridgeClient<TCommands, TEvents>,
 ): BridgeCommandFacade<TCommands> {
   const facade = {} as BridgeCommandFacade<TCommands>;
   for (const key of Object.keys(client.commands) as Array<keyof TCommands>) {
