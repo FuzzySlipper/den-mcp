@@ -46,6 +46,8 @@ export interface ParsedDriftSentinelArgs {
   model?: string;
   tools?: string;
   post_result?: boolean;
+  sessionMode?: "fresh" | "continue" | "fork" | "session";
+  session?: string;
 }
 
 /** Parse /den-drift-sentinel CLI arguments into a structured object. */
@@ -54,7 +56,7 @@ export function parseDriftSentinelArgs(args: string | undefined): ParsedDriftSen
   const taskToken = tokens.shift();
   const taskId = Number(taskToken);
   if (!Number.isInteger(taskId) || taskId <= 0) {
-    throw new Error("Usage: /den-drift-sentinel <task_id> [--base <ref>] [--base-commit <sha>] [--hunks <json|text>] [--no-post]");
+    throw new Error("Usage: /den-drift-sentinel <task_id> [--base <ref>] [--base-commit <sha>] [--hunks <json|text>] [--no-post|--post-result] [--fresh|--continue|--fork <session>|--session <session>]");
   }
 
   const parsed: ParsedDriftSentinelArgs = { task_id: taskId };
@@ -63,6 +65,25 @@ export function parseDriftSentinelArgs(args: string | undefined): ParsedDriftSen
     const token = tokens[i];
     if (token === "--no-post") {
       parsed.post_result = false;
+      continue;
+    }
+    if (token === "--post-result") {
+      parsed.post_result = true;
+      continue;
+    }
+    if (token === "--fresh") {
+      parsed.sessionMode = "fresh";
+      continue;
+    }
+    if (token === "--continue") {
+      parsed.sessionMode = "continue";
+      continue;
+    }
+    if (token === "--fork" || token === "--session") {
+      const session = tokens[++i];
+      if (!session) throw new Error(`${token} requires a session id or path.`);
+      parsed.sessionMode = token === "--fork" ? "fork" : "session";
+      parsed.session = session;
       continue;
     }
     const value = tokens[++i];

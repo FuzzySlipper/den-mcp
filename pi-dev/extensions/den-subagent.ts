@@ -440,7 +440,7 @@ export default function denSubagent(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("den-drift-sentinel", {
-    description: "Run a cheap drift-sentinel sub-agent and post a drift_check_packet. Usage: /den-drift-sentinel <task_id> [--base <ref>] [--no-post]",
+    description: "Run a cheap drift-sentinel sub-agent and post a drift_check_packet. Usage: /den-drift-sentinel <task_id> [--base <ref>] [--no-post|--post-result] [--fresh|--continue|--fork <session>|--session <session>]",
     handler: async (args, ctx) => {
       const cfg = await resolveConfig(ctx);
       const parsed = parseDriftSentinelArgs(args);
@@ -504,6 +504,8 @@ async function runAndMaybePostDriftSentinel(
     model?: string;
     tools?: string;
     post_result?: boolean;
+    sessionMode?: "fresh" | "continue" | "fork" | "session";
+    session?: string;
   },
   defaultCwd: string,
   signal: AbortSignal | undefined,
@@ -569,6 +571,8 @@ async function runAndMaybePostDriftSentinel(
       model: options.model,
       tools: options.tools ?? "read",
       postResult: false,
+      sessionMode: options.sessionMode,
+      session: options.session,
     },
     defaultCwd,
     signal,

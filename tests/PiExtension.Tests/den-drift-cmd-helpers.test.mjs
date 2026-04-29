@@ -113,6 +113,24 @@ test('parseDriftSentinelArgs parses --no-post flag', () => {
   assert.equal(result.post_result, false);
 });
 
+test('parseDriftSentinelArgs parses --post-result flag', () => {
+  const result = parseDriftSentinelArgs('936 --post-result');
+  assert.equal(result.post_result, true);
+});
+
+test('parseDriftSentinelArgs parses session flags', () => {
+  assert.equal(parseDriftSentinelArgs('936 --fresh').sessionMode, 'fresh');
+  assert.equal(parseDriftSentinelArgs('936 --continue').sessionMode, 'continue');
+
+  const forked = parseDriftSentinelArgs('936 --fork session-1');
+  assert.equal(forked.sessionMode, 'fork');
+  assert.equal(forked.session, 'session-1');
+
+  const session = parseDriftSentinelArgs('936 --session /tmp/pi-session.jsonl');
+  assert.equal(session.sessionMode, 'session');
+  assert.equal(session.session, '/tmp/pi-session.jsonl');
+});
+
 test('parseDriftSentinelArgs parses --model', () => {
   const result = parseDriftSentinelArgs('936 --model zai/glm-5.1');
   assert.equal(result.model, 'zai/glm-5.1');
@@ -148,7 +166,7 @@ test('parseDriftSentinelArgs parses --suspicious-hunks alias with text list', ()
 
 test('parseDriftSentinelArgs parses all flags together', () => {
   const result = parseDriftSentinelArgs(
-    '936 --base main --base-commit abc123 --model zai/glm-5.1 --tools read --cwd /tmp --no-post',
+    '936 --base main --base-commit abc123 --model zai/glm-5.1 --tools read --cwd /tmp --post-result --session session-1',
   );
   assert.equal(result.task_id, 936);
   assert.equal(result.base_ref, 'main');
@@ -156,7 +174,9 @@ test('parseDriftSentinelArgs parses all flags together', () => {
   assert.equal(result.model, 'zai/glm-5.1');
   assert.equal(result.tools, 'read');
   assert.equal(result.cwd, '/tmp');
-  assert.equal(result.post_result, false);
+  assert.equal(result.post_result, true);
+  assert.equal(result.sessionMode, 'session');
+  assert.equal(result.session, 'session-1');
 });
 
 // ---------------------------------------------------------------------------
@@ -193,6 +213,10 @@ test('parseDriftSentinelArgs throws on flag without value', () => {
 
 test('parseDriftSentinelArgs throws on --model without value', () => {
   assert.throws(() => parseDriftSentinelArgs('936 --model'), /requires a value/);
+});
+
+test('parseDriftSentinelArgs throws on --fork without session', () => {
+  assert.throws(() => parseDriftSentinelArgs('936 --fork'), /requires a session id or path/);
 });
 
 // ---------------------------------------------------------------------------
