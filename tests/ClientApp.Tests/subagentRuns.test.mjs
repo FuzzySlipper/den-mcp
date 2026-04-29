@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  agentStreamEntryVisibility,
   formatInfrastructureFailureReason,
   formatSubagentDuration,
+  formatSubagentOperatorEventName,
+  formatSubagentUsageSummary,
   formatSubagentWorkEventType,
   formatSubagentWorkTimestamp,
   groupSubagentWorkEvents,
+  isRawSubagentWorkEventType,
   stateFromSubagentEvent,
   subagentRunMatchesFilter,
   summarizeSubagentRunEntry,
@@ -67,6 +71,14 @@ test('subagent run helpers format labels and summaries', () => {
   assert.equal(summarizeSubagentRunEntry(entry({
     event_type: 'subagent_failed',
   })), 'subagent failed');
+  assert.equal(isRawSubagentWorkEventType('subagent_work_tool_start'), true);
+  assert.equal(agentStreamEntryVisibility(entry({ event_type: 'subagent_work_tool_start' })), 'debug');
+  assert.equal(agentStreamEntryVisibility(entry({ event_type: 'subagent_completed' })), 'summary');
+  assert.equal(agentStreamEntryVisibility(entry({ event_type: 'subagent_work_tool_start', metadata: { event_visibility: 'summary' } })), 'summary');
+  assert.equal(formatSubagentOperatorEventName('implementation_packet_posted'), 'implementation packet posted');
+  assert.equal(formatSubagentUsageSummary({
+    usage_summary: { total_tokens: 1250, input_tokens: null, output_tokens: null, cache_read_tokens: null, cache_write_tokens: null, total_cost: 0.01234, currency: 'USD', source: 'test', message_count: 1, latest_usage_at: null },
+  }), '1.3k tokens · $0.0123');
 });
 
 test('subagent work event helpers render bounded live-feed summaries', () => {

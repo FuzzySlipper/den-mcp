@@ -32,11 +32,15 @@ import {
   DEFAULT_REASONING_PREVIEW_CHARS,
   SUBAGENT_RUN_SCHEMA,
   SUBAGENT_RUN_SCHEMA_VERSION,
+  buildSubagentLifecycleMetadata,
   buildSubagentRunContextMetadata,
   buildSubagentRunMetadata,
   isSubagentInfrastructureFailure,
   normalizeSubagentRunPurpose,
   resolveReasoningCaptureOptions,
+  subagentEventVisibility,
+  subagentOperatorEventForOpsEvent,
+  taskThreadPacketOperatorEvent,
   subagentOpsEventTypeForEvent,
   type JsonObject,
   type SubagentArtifacts,
@@ -516,6 +520,11 @@ async function runAndMaybePostDriftCheck(
   if (options.post_result ?? true) {
     const postResult = await sendTaskMessage(cfg, options.task_id, content, buildDriftCheckPacketMeta(analysis));
     messageId = optionalNumber(postResult?.id);
+    await appendPacketLifecycleOps(cfg, options.task_id, "drift_check_packet", messageId, {
+      branch: analysis.branch ?? null,
+      head_commit: analysis.head_commit ?? null,
+      severity: analysis.severity,
+    });
   }
 
   return { analysis, content, message_id: messageId };
@@ -656,6 +665,11 @@ async function prepareAndPostCoderContext(
   const postResult = await sendTaskMessage(cfg, options.task_id, content, {
     ...metadata,
     prepared_by: "conductor",
+  });
+  await appendPacketLifecycleOps(cfg, options.task_id, "coder_context_packet", optionalNumber(postResult?.id), {
+    branch: options.branch ?? null,
+    base_commit: options.base_commit ?? null,
+    worktree_path: options.worktree_path ?? null,
   });
 
   return {
@@ -1064,7 +1078,11 @@ async function runDenSubagent(
       rerunOfRunId: effectiveOptions.rerunOfRunId,
       ...contextIdentity,
       artifacts,
-    }, { started_at: startedAt }),
+    }, {
+      started_at: startedAt,
+      operator_event: subagentOperatorEventForOpsEvent("subagent_started", effectiveOptions.role) ?? null,
+      event_visibility: subagentEventVisibility("subagent_started"),
+    }),
   });
 
   let result = await backend.run({
@@ -1194,9 +1212,12 @@ async function runDenSubagent(
       message_count: result.message_count,
       assistant_message_count: result.assistant_message_count,
       child_error_message: result.child_error_message ?? null,
+      usage_summary: result.usage_summary ?? null,
       infrastructure_failure_reason: result.infrastructure_failure_reason ?? null,
       infrastructure_warning_reason: result.infrastructure_warning_reason ?? null,
       stderr_preview: result.stderr_tail,
+      operator_event: subagentOperatorEventForOpsEvent(completionEventType, result.role) ?? null,
+      event_visibility: subagentEventVisibility(completionEventType),
       ...finalHeadMetadata,
     }),
   });
@@ -1231,6 +1252,7 @@ async function runDenSubagent(
       output_status: result.output_status,
       infrastructure_failure_reason: result.infrastructure_failure_reason ?? null,
       infrastructure_warning_reason: result.infrastructure_warning_reason ?? null,
+      usage_summary: result.usage_summary ?? null,
       fallback_from_model: result.fallback_from_model ?? null,
       fallback_from_exit_code: result.fallback_from_exit_code ?? null,
       ...finalHeadMetadata,
@@ -1248,7 +1270,7 @@ async function runDenSubagent(
       const extraction = extractImplementationPacket(result.final_output);
       const packetContent = formatImplementationPacketMessage(result, extraction);
       const packetMeta = buildImplementationPacketMeta(result, extraction);
-      await sendTaskMessage(cfg, effectiveOptions.taskId, packetContent, {
+      const packetMessage = await sendTaskMessage(cfg, effectiveOptions.taskId, packetContent, {
         ...buildSubagentRunMetadata({
           runId,
           role: effectiveOptions.role,
@@ -1264,7 +1286,14 @@ async function runDenSubagent(
           artifacts: result.artifacts,
         }),
         ...packetMeta,
+        usage_summary: result.usage_summary ?? null,
         ...finalHeadMetadata,
+      });
+      await appendPacketLifecycleOps(cfg, effectiveOptions.taskId, "implementation_packet", optionalNumber(packetMessage?.id), {
+        run_id: result.run_id,
+        role: result.role,
+        branch: result.branch ?? null,
+        head_commit: result.final_head_commit ?? result.head_commit ?? null,
       });
     } catch (packetError) {
       // Packet posting is advisory; failures should not break the sub-agent result flow.
@@ -1667,7 +1696,10 @@ function createSubagentProgressPublisher(
           rerunOfRunId: context.options.rerunOfRunId,
           ...subagentContextIdentity(context.options),
           artifacts: context.artifacts,
-        }, { event }),
+        }, {
+          event,
+          event_visibility: subagentEventVisibility(eventType),
+        }),
       });
     } catch {
       // Progress mirroring should not break the sub-agent run or artifact writes.
@@ -1932,6 +1964,34 @@ async function appendOps(
       dedup_key: options.dedupKey,
     },
   });
+}
+
+async function appendPacketLifecycleOps(
+  cfg: DenConfig,
+  taskId: number,
+  packetType: string,
+  messageId: number | undefined,
+  extra: JsonObject = {},
+) {
+  const operatorEvent = taskThreadPacketOperatorEvent(packetType);
+  if (!operatorEvent) return;
+  try {
+    await appendOps(cfg, operatorEvent, {
+      taskId,
+      body: `${packetType.replace(/_/g, " ")} posted for task #${taskId}.`,
+      metadata: buildSubagentLifecycleMetadata(operatorEvent, {
+        source: "task_thread_packet",
+        packet_type: packetType,
+        message_id: messageId ?? null,
+        task_id: taskId,
+        ...extra,
+      }),
+      dedupKey: messageId ? `${operatorEvent}:${messageId}` : undefined,
+    });
+  } catch {
+    // Lifecycle ops are an operator-facing projection over the task-thread packet;
+    // the packet itself remains the durable source of truth if projection fails.
+  }
 }
 
 async function sendTaskMessage(cfg: DenConfig, taskId: number, content: string, metadata: JsonObject) {

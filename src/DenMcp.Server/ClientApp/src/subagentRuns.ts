@@ -3,6 +3,38 @@ import type { AgentStreamEntry, SubagentRunState, SubagentRunSummary, SubagentRu
 export type SubagentRunFilter = 'all' | 'active' | 'problem' | 'complete';
 
 export type SubagentWorkCardKind = 'assistant' | 'reasoning' | 'tool' | 'lifecycle';
+
+export function isRawSubagentWorkEventType(eventType: string): boolean {
+  return eventType.startsWith('subagent_work_');
+}
+
+export function agentStreamEntryVisibility(entry: AgentStreamEntry): 'summary' | 'debug' {
+  const visibility = typeof entry.metadata?.event_visibility === 'string' ? entry.metadata.event_visibility : null;
+  if (visibility === 'debug' || visibility === 'summary') return visibility;
+  return isRawSubagentWorkEventType(entry.event_type) ? 'debug' : 'summary';
+}
+
+export function formatSubagentOperatorEventName(eventName: string): string {
+  return eventName.replace(/_/g, ' ');
+}
+
+export function formatSubagentUsageSummary(run: SubagentRunSummary): string | null {
+  const usage = run.usage_summary;
+  if (!usage) return null;
+  const totalTokens = usage.total_tokens
+    ?? [usage.input_tokens, usage.output_tokens, usage.cache_read_tokens, usage.cache_write_tokens]
+      .reduce<number>((sum, value) => sum + (typeof value === 'number' ? value : 0), 0);
+  const parts: string[] = [];
+  if (totalTokens > 0) parts.push(`${formatTokenCount(totalTokens)} tokens`);
+  if (typeof usage.total_cost === 'number') parts.push(`$${usage.total_cost.toFixed(4)}`);
+  return parts.length ? parts.join(' · ') : null;
+}
+
+function formatTokenCount(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
+  return String(value);
+}
 export type SubagentWorkCardStatus = 'requested' | 'running' | 'complete' | 'error' | 'info';
 
 export interface SubagentWorkCard {

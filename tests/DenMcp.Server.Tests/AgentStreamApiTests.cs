@@ -418,6 +418,128 @@ public class AgentStreamApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RestSubagentRuns_ExposesOperatorProjectionContextAndUsage()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IAgentStreamRepository>();
+        var tasks = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+        var task = await tasks.CreateAsync(new ProjectTask
+        {
+            ProjectId = ProjectId,
+            Title = "Operator projection task"
+        });
+        var reviews = scope.ServiceProvider.GetRequiredService<IReviewRoundRepository>();
+        var reviewRound = await reviews.CreateAsync(new CreateReviewRoundInput
+        {
+            TaskId = task.Id,
+            RequestedBy = "pi",
+            Branch = "task/939-subagent-run-summary",
+            BaseBranch = "main",
+            BaseCommit = "base-sha",
+            HeadCommit = "launch-sha"
+        });
+
+        await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_started",
+            ProjectId = ProjectId,
+            TaskId = task.Id,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+            Metadata = Metadata($$"""
+                {
+                  "run_id":"run-operator",
+                  "role":"coder",
+                  "backend":"pi-cli",
+                  "model":"gpt-test",
+                  "review_round_id":{{reviewRound.Id}},
+                  "workspace_id":"ws-939",
+                  "purpose":"implementation",
+                  "worktree_path":"/repo/worktree",
+                  "branch":"task/939-subagent-run-summary",
+                  "base_branch":"main",
+                  "base_commit":"base-sha",
+                  "head_commit":"launch-sha",
+                  "operator_event":"coder_started",
+                  "event_visibility":"summary"
+                }
+                """)
+        });
+
+        await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_work_tool_start",
+            ProjectId = ProjectId,
+            TaskId = task.Id,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+            Metadata = Metadata("""{"run_id":"run-operator","role":"coder","event_visibility":"debug","event":{"type":"subagent.work_tool_start","tool_name":"bash"}}""")
+        });
+
+        await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_completed",
+            ProjectId = ProjectId,
+            TaskId = task.Id,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+            Metadata = Metadata("""
+                {
+                  "run_id":"run-operator",
+                  "role":"coder",
+                  "backend":"pi-cli",
+                  "model":"gpt-test-final",
+                  "final_head_commit":"final-sha",
+                  "final_head_status":"clean",
+                  "operator_event":"coder_completed",
+                  "event_visibility":"summary",
+                  "usage_summary":{
+                    "input_tokens":1000,
+                    "output_tokens":250,
+                    "cache_read_tokens":50,
+                    "cache_write_tokens":0,
+                    "total_tokens":1300,
+                    "total_cost":0.0123,
+                    "currency":"USD",
+                    "source":"pi_session_assistant_usage",
+                    "message_count":2,
+                    "latest_usage_at":"2026-04-26T08:00:09Z"
+                  }
+                }
+                """)
+        });
+
+        var detailResponse = await _client.GetAsync($"/api/projects/{ProjectId}/subagent-runs/run-operator?taskId={task.Id}");
+        detailResponse.EnsureSuccessStatusCode();
+
+        var detail = await detailResponse.Content.ReadFromJsonAsync<SubagentRunDetail>(JsonOpts);
+        Assert.NotNull(detail);
+        var summary = detail!.Summary;
+        Assert.Equal("coder", summary.Role);
+        Assert.Equal(reviewRound.Id, summary.ReviewRoundId);
+        Assert.Equal("ws-939", summary.WorkspaceId);
+        Assert.Equal("implementation", summary.Purpose);
+        Assert.Equal("/repo/worktree", summary.WorktreePath);
+        Assert.Equal("task/939-subagent-run-summary", summary.Branch);
+        Assert.Equal("main", summary.BaseBranch);
+        Assert.Equal("base-sha", summary.BaseCommit);
+        Assert.Equal("launch-sha", summary.HeadCommit);
+        Assert.Equal("final-sha", summary.FinalHeadCommit);
+        Assert.Equal("clean", summary.FinalHeadStatus);
+        Assert.NotNull(summary.UsageSummary);
+        Assert.Equal(1300, summary.UsageSummary!.TotalTokens);
+        Assert.Equal(0.0123, summary.UsageSummary.TotalCost);
+        Assert.Equal("pi_session_assistant_usage", summary.UsageSummary.Source);
+        Assert.Equal(3, summary.EventCounts.Total);
+        Assert.Equal(1, summary.EventCounts.RawWork);
+        Assert.Equal(2, summary.EventCounts.OperatorSummary);
+        Assert.Equal(new[] { "coder_started", "coder_completed" }, summary.OperatorEvents.Select(evt => evt.EventName).ToArray());
+    }
+
+    [Fact]
     public async Task RestSubagentRunControl_PostsAbortRequestForActiveRun()
     {
         using var scope = _factory.Services.CreateScope();

@@ -24,9 +24,12 @@ import {
   summarizeTaskContext,
 } from '../../pi-dev/lib/den-prompt-templates.ts';
 import {
+  SUBAGENT_LIFECYCLE_SCHEMA,
+  SUBAGENT_LIFECYCLE_SCHEMA_VERSION,
   SUBAGENT_RUN_SCHEMA,
   SUBAGENT_RUN_SCHEMA_VERSION,
   buildReasoningCaptureMetadata,
+  buildSubagentLifecycleMetadata,
   buildSubagentRunMetadata,
   classifySubagentInfrastructureFailure,
   classifySubagentStderrIssue,
@@ -37,8 +40,12 @@ import {
   normalizeSubagentRunEvent,
   parsePiStdoutLine,
   resolveReasoningCaptureOptions,
+  subagentEventVisibility,
+  subagentOperatorEventForOpsEvent,
   subagentOpsEventTypeForEvent,
   subagentRunStateFromOpsEventType,
+  summarizeSubagentUsageFromSessionJsonl,
+  taskThreadPacketOperatorEvent,
 } from '../../pi-dev/lib/den-subagent-pipeline.ts';
 
 const execFileAsync = promisify(execFile);
@@ -459,6 +466,44 @@ test('subagent run schema helpers emit canonical metadata and event mapping', ()
   assert.equal(subagentRunStateFromOpsEventType('subagent_completed'), 'complete');
   assert.equal(subagentRunStateFromOpsEventType('subagent_failed'), 'failed');
   assert.equal(subagentRunStateFromOpsEventType('something_else'), 'unknown');
+  assert.equal(subagentOperatorEventForOpsEvent('subagent_started', 'coder'), 'coder_started');
+  assert.equal(subagentOperatorEventForOpsEvent('subagent_completed', 'reviewer'), 'reviewer_completed');
+  assert.equal(subagentOperatorEventForOpsEvent('subagent_work_tool_start', 'coder'), undefined);
+  assert.equal(taskThreadPacketOperatorEvent('coder_context_packet'), 'coder_context_prepared');
+  assert.equal(taskThreadPacketOperatorEvent('implementation_packet'), 'implementation_packet_posted');
+  assert.equal(taskThreadPacketOperatorEvent('validation_packet'), 'validation_completed');
+  assert.equal(taskThreadPacketOperatorEvent('drift_check_packet'), 'drift_check_completed');
+  assert.equal(subagentEventVisibility('subagent_work_tool_start'), 'debug');
+  assert.equal(subagentEventVisibility('subagent_completed'), 'summary');
+  assert.deepEqual(buildSubagentLifecycleMetadata('implementation_packet_posted', { message_id: 42 }), {
+    schema: SUBAGENT_LIFECYCLE_SCHEMA,
+    schema_version: SUBAGENT_LIFECYCLE_SCHEMA_VERSION,
+    operator_event: 'implementation_packet_posted',
+    event_visibility: 'summary',
+    message_id: 42,
+  });
+});
+
+test('subagent usage summary aggregates assistant usage from Pi session jsonl', () => {
+  const summary = summarizeSubagentUsageFromSessionJsonl([
+    JSON.stringify({ type: 'message', timestamp: '2026-04-26T00:00:00.000Z', message: { role: 'user', usage: { input: 1 } } }),
+    JSON.stringify({ type: 'message', timestamp: '2026-04-26T00:01:00.000Z', message: { role: 'assistant', usage: { input: 100, output: 25, cacheRead: 10, cacheWrite: 5, cost: { total: 0.01, currency: 'USD' } } } }),
+    JSON.stringify({ type: 'message', timestamp: '2026-04-26T00:02:00.000Z', message: { role: 'assistant', usage: { input: 200, output: 50, totalTokens: 250, cost: { total: 0.02, currency: 'USD' } } } }),
+    '',
+  ].join('\n'));
+
+  assert.deepEqual(summary, {
+    input_tokens: 300,
+    output_tokens: 75,
+    cache_read_tokens: 10,
+    cache_write_tokens: 5,
+    total_tokens: 390,
+    total_cost: 0.03,
+    currency: 'USD',
+    source: 'pi_session_assistant_usage',
+    message_count: 2,
+    latest_usage_at: '2026-04-26T00:02:00.000Z',
+  });
 });
 
 test('final branch head metadata preserves launch head while recording resolved final head', async (t) => {

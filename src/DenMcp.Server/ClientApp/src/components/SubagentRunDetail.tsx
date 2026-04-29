@@ -5,6 +5,8 @@ import { usePolling } from '../hooks/usePolling';
 import {
   formatInfrastructureFailureReason,
   formatSubagentDuration,
+  formatSubagentOperatorEventName,
+  formatSubagentUsageSummary,
   formatSubagentWorkTimestamp,
   groupSubagentWorkEvents,
   summarizeSubagentRunEntry,
@@ -119,6 +121,36 @@ export function SubagentRunDetail({ run, onClose, onOpenTask, onOpenEntry }: Pro
                 <dd>{summary.model}</dd>
               </>
             )}
+            {summary.purpose && (
+              <>
+                <dt>Purpose</dt>
+                <dd>{summary.purpose}</dd>
+              </>
+            )}
+            {summary.review_round_id != null && (
+              <>
+                <dt>Review round</dt>
+                <dd>{summary.review_round_id}</dd>
+              </>
+            )}
+            {summary.workspace_id && (
+              <>
+                <dt>Workspace</dt>
+                <dd>{summary.workspace_id}</dd>
+              </>
+            )}
+            {summary.branch && (
+              <>
+                <dt>Branch</dt>
+                <dd>{summary.branch}</dd>
+              </>
+            )}
+            {summary.final_head_commit && (
+              <>
+                <dt>Final head</dt>
+                <dd className="mono-value">{summary.final_head_commit}{summary.final_head_status ? ` (${summary.final_head_status})` : ''}</dd>
+              </>
+            )}
             {summary.pid != null && (
               <>
                 <dt>PID</dt>
@@ -173,6 +205,12 @@ export function SubagentRunDetail({ run, onClose, onOpenTask, onOpenEntry }: Pro
                 <dd>{formatSubagentDuration(summary.duration_ms)}</dd>
               </>
             )}
+            {formatSubagentUsageSummary(summary) && (
+              <>
+                <dt>Usage</dt>
+                <dd>{formatSubagentUsageSummary(summary)}</dd>
+              </>
+            )}
             {summary.project_id && (
               <>
                 <dt>Project</dt>
@@ -180,7 +218,7 @@ export function SubagentRunDetail({ run, onClose, onOpenTask, onOpenEntry }: Pro
               </>
             )}
             <dt>Events</dt>
-            <dd>{summary.event_count}</dd>
+            <dd>{summary.event_count} total, {summary.event_counts.raw_work} raw work/debug</dd>
           </dl>
         </div>
 
@@ -243,6 +281,25 @@ export function SubagentRunDetail({ run, onClose, onOpenTask, onOpenEntry }: Pro
           <div className="detail-section">
             <h3>Run Detail</h3>
             <div className="detail-description">Could not refresh run detail: {error.message}</div>
+          </div>
+        )}
+
+        {summary.operator_events.length > 0 && (
+          <div className="detail-section">
+            <h3>Operator lifecycle</h3>
+            <div className="subagent-work-card-list">
+              {summary.operator_events.map((event, index) => (
+                <div key={`${event.event_name}:${event.stream_entry_id ?? index}`} className="subagent-work-card subagent-work-card-lifecycle">
+                  <div className="subagent-work-card-topline">
+                    <span className="subagent-work-card-title">{formatSubagentOperatorEventName(event.event_name)}</span>
+                    <span className="subagent-work-card-time">{event.occurred_at ? new Date(event.occurred_at).toLocaleString() : ''}</span>
+                  </div>
+                  <div className="subagent-work-card-preview">
+                    {event.source}{event.source_event_type ? ` · ${event.source_event_type}` : ''}{event.visibility === 'debug' ? ' · debug' : ''}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

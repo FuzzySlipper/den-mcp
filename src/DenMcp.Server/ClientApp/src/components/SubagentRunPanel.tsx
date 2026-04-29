@@ -2,6 +2,8 @@ import type { SubagentRunSummary } from '../api/types';
 import {
   formatInfrastructureFailureReason,
   formatSubagentDuration,
+  formatSubagentOperatorEventName,
+  formatSubagentUsageSummary,
   summarizeSubagentRunEntry,
   type SubagentRunFilter,
 } from '../subagentRuns';
@@ -96,6 +98,8 @@ export function SubagentRunPanel({
                 {isGlobal && run.project_id && <span>{truncate(run.project_id, 16)}</span>}
                 {run.backend && <span>{run.backend}</span>}
                 {run.model && <span>{truncate(run.model, 24)}</span>}
+                {run.purpose && <span>{truncate(run.purpose, 18)}</span>}
+                {run.branch && <span>{truncate(run.branch, 28)}</span>}
                 {run.output_status && <span>{run.output_status}</span>}
                 {run.timeout_kind && <span>{run.timeout_kind}</span>}
                 {run.infrastructure_failure_reason && <span>{formatInfrastructureFailureReason(run.infrastructure_failure_reason)}</span>}
@@ -105,6 +109,9 @@ export function SubagentRunPanel({
                 {run.heartbeat_count > 0 && <span>{run.heartbeat_count} beats</span>}
                 {run.assistant_output_count > 0 && <span>{run.assistant_output_count} outputs</span>}
                 {run.duration_ms != null && <span>{formatSubagentDuration(run.duration_ms)}</span>}
+                {formatSubagentUsageSummary(run) && <span>{formatSubagentUsageSummary(run)}</span>}
+                {run.operator_events.length > 0 && <span>{formatSubagentOperatorEventName(run.operator_events.at(-1)!.event_name)}</span>}
+                {run.event_counts.raw_work > 0 && <span>{run.event_counts.raw_work} raw work hidden</span>}
                 <span>{run.event_count} events</span>
               </div>
 
@@ -122,6 +129,7 @@ export function SubagentRunPanel({
                       Task #{run.task_id}
                     </button>
                   )}
+                  {run.final_head_commit && <span className="subagent-artifact-path">head {run.final_head_commit.slice(0, 12)}{run.final_head_status ? ` (${run.final_head_status})` : ''}</span>}
                   {run.artifact_dir && <span className="subagent-artifact-path">{truncate(run.artifact_dir, 68)}</span>}
                 </div>
               )}

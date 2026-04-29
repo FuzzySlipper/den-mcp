@@ -34,6 +34,7 @@ import { GitView } from './components/GitView';
 import { AgentBar } from './components/AgentBar';
 import { DispatchDetail } from './components/DispatchDetail';
 import { MESSAGE_INTENT_OPTIONS, messageIntentLabel } from './messageIntents';
+import { agentStreamEntryVisibility } from './subagentRuns';
 import type { SubagentRunFilter } from './subagentRuns';
 import { documentSelectionAction } from './documentEditor';
 import type { GitFocus } from './git';
@@ -67,6 +68,7 @@ export default function App() {
   const [streamSenderFilter, setStreamSenderFilter] = useState('');
   const [streamRecipientFilter, setStreamRecipientFilter] = useState('');
   const [streamTaskFilter, setStreamTaskFilter] = useState('');
+  const [showRawSubagentWorkEvents, setShowRawSubagentWorkEvents] = useState(false);
   const [thoughtProjectFilter, setThoughtProjectFilter] = useState('');
   const [thoughtTaskFilter, setThoughtTaskFilter] = useState('');
   const [thoughtAgentFilter, setThoughtAgentFilter] = useState('');
@@ -248,11 +250,13 @@ export default function App() {
   );
   const filteredAgentStream = useMemo(() => {
     const recipientFilter = streamRecipientFilter.trim().toLowerCase();
-    if (!recipientFilter) {
-      return agentStream ?? [];
-    }
-
     return (agentStream ?? []).filter(entry => {
+      if (!showRawSubagentWorkEvents && !streamEventFilter && agentStreamEntryVisibility(entry) === 'debug') {
+        return false;
+      }
+      if (!recipientFilter) {
+        return true;
+      }
       const recipients = [
         entry.recipient_agent,
         entry.recipient_role,
@@ -262,7 +266,7 @@ export default function App() {
         .map(value => value.toLowerCase());
       return recipients.some(value => value.includes(recipientFilter));
     });
-  }, [agentStream, streamRecipientFilter]);
+  }, [agentStream, showRawSubagentWorkEvents, streamEventFilter, streamRecipientFilter]);
   const streamEventOptions = useMemo(() => {
     const options = new Set((agentStream ?? []).map(entry => entry.event_type));
     if (streamEventFilter) {
@@ -535,6 +539,18 @@ export default function App() {
                 onChange={e => setStreamTaskFilter(e.target.value)}
                 placeholder="Task #"
               />
+
+              <label
+                className="thought-raw-toggle"
+                title="Show verbose subagent_work_* audit events in the normal stream feed"
+              >
+                <input
+                  type="checkbox"
+                  checked={showRawSubagentWorkEvents}
+                  onChange={e => setShowRawSubagentWorkEvents(e.target.checked)}
+                />
+                Raw sub-agent work
+              </label>
             </>
           ) : feedMode === 'messages' ? (
             <>

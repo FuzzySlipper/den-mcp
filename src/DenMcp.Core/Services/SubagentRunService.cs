@@ -29,7 +29,7 @@ public sealed class SubagentRunService : ISubagentRunService
 
         foreach (var record in await _runs.ListAsync(options))
         {
-            var summary = await BuildSummaryAsync(record);
+            var summary = await BuildSummaryAsync(record, options);
             if (summary is not null)
                 summariesByRunId[summary.RunId] = summary;
         }
@@ -63,7 +63,7 @@ public sealed class SubagentRunService : ISubagentRunService
 
         SubagentRunSummary? summary = null;
         if (record is not null && MatchesStateFilter(record.State, options.State))
-            summary = await BuildSummaryAsync(record);
+            summary = await BuildSummaryAsync(record, options, events);
 
         summary ??= events.Count > 0 ? BuildSummary(runId, events) : null;
         if (summary is null || !MatchesStateFilter(summary.State, options.State))
@@ -117,18 +117,27 @@ public sealed class SubagentRunService : ISubagentRunService
             .ToList();
     }
 
-    private async Task<SubagentRunSummary?> BuildSummaryAsync(AgentRunRecord record)
+    private async Task<SubagentRunSummary?> BuildSummaryAsync(
+        AgentRunRecord record,
+        SubagentRunListOptions options,
+        IReadOnlyList<AgentStreamEntry>? knownEvents = null)
     {
         var latest = record.LatestStreamEntryId is null ? null : await _stream.GetByIdAsync(record.LatestStreamEntryId.Value);
         if (latest is null)
             return null;
 
         var started = record.StartedStreamEntryId is null ? null : await _stream.GetByIdAsync(record.StartedStreamEntryId.Value);
-        return BuildSummary(record, latest, started);
+        var events = knownEvents is { Count: > 0 } ? knownEvents : await LoadStreamEventsAsync(record.RunId, options);
+        return BuildSummary(record, latest, started, events);
     }
 
-    private static SubagentRunSummary BuildSummary(AgentRunRecord record, AgentStreamEntry latest, AgentStreamEntry? started)
+    private static SubagentRunSummary BuildSummary(
+        AgentRunRecord record,
+        AgentStreamEntry latest,
+        AgentStreamEntry? started,
+        IReadOnlyList<AgentStreamEntry>? events = null)
     {
+        var eventProjection = BuildEventProjection(events ?? [latest], record.Role ?? TextMetadata(latest, "role") ?? TextMetadata(started, "role"));
         return new SubagentRunSummary
         {
             RunId = record.RunId,
@@ -142,6 +151,21 @@ public sealed class SubagentRunService : ISubagentRunService
             ProjectId = record.ProjectId ?? latest.ProjectId ?? started?.ProjectId,
             Backend = record.Backend ?? TextMetadata(latest, "backend") ?? TextMetadata(started, "backend"),
             Model = record.Model ?? TextMetadata(latest, "model") ?? TextMetadata(started, "model"),
+            ReviewRoundId = record.ReviewRoundId ?? IntMetadata(latest, "review_round_id") ?? IntMetadata(started, "review_round_id"),
+            WorkspaceId = record.WorkspaceId ?? TextMetadata(latest, "workspace_id") ?? TextMetadata(started, "workspace_id"),
+            Purpose = TextMetadata(latest, "purpose") ?? TextMetadata(started, "purpose"),
+            WorktreePath = TextMetadata(latest, "worktree_path") ?? TextMetadata(started, "worktree_path"),
+            Branch = TextMetadata(latest, "branch") ?? TextMetadata(started, "branch"),
+            BaseBranch = TextMetadata(latest, "base_branch") ?? TextMetadata(started, "base_branch"),
+            BaseCommit = TextMetadata(latest, "base_commit") ?? TextMetadata(started, "base_commit"),
+            HeadCommit = TextMetadata(latest, "head_commit") ?? TextMetadata(started, "head_commit"),
+            FinalHeadCommit = TextMetadata(latest, "final_head_commit"),
+            FinalHeadStatus = TextMetadata(latest, "final_head_status"),
+            StartedAt = record.StartedAt ?? DateMetadata(latest, "started_at") ?? DateMetadata(started, "started_at") ?? started?.CreatedAt,
+            EndedAt = record.EndedAt ?? DateMetadata(latest, "ended_at"),
+            UsageSummary = UsageSummary(latest) ?? UsageSummary(started),
+            EventCounts = eventProjection.Counts,
+            OperatorEvents = eventProjection.OperatorEvents,
             OutputStatus = record.OutputStatus ?? TextMetadata(latest, "output_status"),
             TimeoutKind = record.TimeoutKind ?? TextMetadata(latest, "timeout_kind"),
             InfrastructureFailureReason = record.InfrastructureFailureReason ?? TextMetadata(latest, "infrastructure_failure_reason"),
@@ -177,6 +201,8 @@ public sealed class SubagentRunService : ISubagentRunService
         var assistantOutputs = sorted.Where(entry => entry.EventType == "subagent_assistant_output").ToList();
         var lastHeartbeat = heartbeats.LastOrDefault();
         var lastAssistantOutput = assistantOutputs.LastOrDefault();
+        var role = TextMetadata(latest, "role") ?? TextMetadata(started, "role");
+        var eventProjection = BuildEventProjection(sorted, role);
 
         return new SubagentRunSummary
         {
@@ -186,11 +212,26 @@ public sealed class SubagentRunService : ISubagentRunService
             SchemaVersion = IntMetadata(latest, "schema_version") ?? IntMetadata(started, "schema_version"),
             Latest = latest,
             Started = started,
-            Role = TextMetadata(latest, "role") ?? TextMetadata(started, "role"),
+            Role = role,
             TaskId = latest.TaskId ?? started?.TaskId ?? IntMetadata(latest, "task_id") ?? IntMetadata(started, "task_id"),
             ProjectId = latest.ProjectId ?? started?.ProjectId,
             Backend = TextMetadata(latest, "backend") ?? TextMetadata(started, "backend"),
             Model = TextMetadata(latest, "model") ?? TextMetadata(started, "model"),
+            ReviewRoundId = IntMetadata(latest, "review_round_id") ?? IntMetadata(started, "review_round_id"),
+            WorkspaceId = TextMetadata(latest, "workspace_id") ?? TextMetadata(started, "workspace_id"),
+            Purpose = TextMetadata(latest, "purpose") ?? TextMetadata(started, "purpose"),
+            WorktreePath = TextMetadata(latest, "worktree_path") ?? TextMetadata(started, "worktree_path"),
+            Branch = TextMetadata(latest, "branch") ?? TextMetadata(started, "branch"),
+            BaseBranch = TextMetadata(latest, "base_branch") ?? TextMetadata(started, "base_branch"),
+            BaseCommit = TextMetadata(latest, "base_commit") ?? TextMetadata(started, "base_commit"),
+            HeadCommit = TextMetadata(latest, "head_commit") ?? TextMetadata(started, "head_commit"),
+            FinalHeadCommit = TextMetadata(latest, "final_head_commit"),
+            FinalHeadStatus = TextMetadata(latest, "final_head_status"),
+            StartedAt = DateMetadata(latest, "started_at") ?? DateMetadata(started, "started_at") ?? started?.CreatedAt,
+            EndedAt = DateMetadata(latest, "ended_at"),
+            UsageSummary = UsageSummary(latest) ?? UsageSummary(started),
+            EventCounts = eventProjection.Counts,
+            OperatorEvents = eventProjection.OperatorEvents,
             OutputStatus = TextMetadata(latest, "output_status"),
             TimeoutKind = TextMetadata(latest, "timeout_kind"),
             InfrastructureFailureReason = TextMetadata(latest, "infrastructure_failure_reason"),
@@ -278,6 +319,79 @@ public sealed class SubagentRunService : ISubagentRunService
         return property.ValueKind == JsonValueKind.Number && property.TryGetInt32(out var value)
             ? value
             : null;
+    }
+
+    private static DateTime? DateMetadata(AgentStreamEntry? entry, string propertyName)
+    {
+        var text = TextMetadata(entry, propertyName);
+        return text is not null && DateTime.TryParse(text, out var value) ? value : null;
+    }
+
+    private static SubagentRunUsageSummary? UsageSummary(AgentStreamEntry? entry)
+    {
+        if (!TryGetMetadataProperty(entry, "usage_summary", out var usage) || usage.ValueKind != JsonValueKind.Object)
+            return null;
+
+        var summary = new SubagentRunUsageSummary
+        {
+            InputTokens = IntProperty(usage, "input_tokens"),
+            OutputTokens = IntProperty(usage, "output_tokens"),
+            CacheReadTokens = IntProperty(usage, "cache_read_tokens"),
+            CacheWriteTokens = IntProperty(usage, "cache_write_tokens"),
+            TotalTokens = IntProperty(usage, "total_tokens"),
+            TotalCost = DoubleProperty(usage, "total_cost"),
+            Currency = TextProperty(usage, "currency"),
+            Source = TextProperty(usage, "source"),
+            MessageCount = IntProperty(usage, "message_count"),
+            LatestUsageAt = DateProperty(usage, "latest_usage_at")
+        };
+
+        return summary.InputTokens is null &&
+            summary.OutputTokens is null &&
+            summary.CacheReadTokens is null &&
+            summary.CacheWriteTokens is null &&
+            summary.TotalTokens is null &&
+            summary.TotalCost is null
+                ? null
+                : summary;
+    }
+
+    private static (SubagentRunEventCounts Counts, List<SubagentRunOperatorEvent> OperatorEvents) BuildEventProjection(
+        IReadOnlyList<AgentStreamEntry> events,
+        string? role)
+    {
+        var counts = new SubagentRunEventCounts { Total = events.Count };
+        var operatorEvents = new List<SubagentRunOperatorEvent>();
+
+        foreach (var entry in events)
+        {
+            if (SubagentRunLifecycleConventions.IsRawWorkEvent(entry.EventType))
+            {
+                counts.RawWork++;
+                counts.Debug++;
+                continue;
+            }
+
+            counts.Lifecycle++;
+            var entryRole = TextMetadata(entry, "role") ?? role;
+            var eventName = TextMetadata(entry, "operator_event") ??
+                SubagentRunLifecycleConventions.OperatorEventForSubagentRun(entry.EventType, entryRole);
+            if (eventName is null)
+                continue;
+
+            operatorEvents.Add(new SubagentRunOperatorEvent
+            {
+                EventName = eventName,
+                Source = "agent_stream",
+                SourceEventType = entry.EventType,
+                StreamEntryId = entry.Id,
+                OccurredAt = entry.CreatedAt,
+                Visibility = TextMetadata(entry, "event_visibility") ?? SubagentRunLifecycleConventions.VisibilityForStreamEvent(entry.EventType)
+            });
+        }
+
+        counts.OperatorSummary = operatorEvents.Count;
+        return (counts, operatorEvents);
     }
 
     private static string? ArtifactDir(AgentStreamEntry? entry)
@@ -831,6 +945,36 @@ public sealed class SubagentRunService : ISubagentRunService
             JsonValueKind.False => false,
             _ => null
         };
+    }
+
+    private static int? IntProperty(JsonElement element, string propertyName) =>
+        element.ValueKind == JsonValueKind.Object &&
+        element.TryGetProperty(propertyName, out var property) &&
+        property.ValueKind == JsonValueKind.Number &&
+        property.TryGetInt32(out var value)
+            ? value
+            : null;
+
+    private static double? DoubleProperty(JsonElement element, string propertyName) =>
+        element.ValueKind == JsonValueKind.Object &&
+        element.TryGetProperty(propertyName, out var property) &&
+        property.ValueKind == JsonValueKind.Number &&
+        property.TryGetDouble(out var value)
+            ? value
+            : null;
+
+    private static string? TextProperty(JsonElement element, string propertyName) =>
+        element.ValueKind == JsonValueKind.Object &&
+        element.TryGetProperty(propertyName, out var property) &&
+        property.ValueKind == JsonValueKind.String &&
+        !string.IsNullOrWhiteSpace(property.GetString())
+            ? property.GetString()
+            : null;
+
+    private static DateTime? DateProperty(JsonElement element, string propertyName)
+    {
+        var text = TextProperty(element, propertyName);
+        return text is not null && DateTime.TryParse(text, out var value) ? value : null;
     }
 
     private static List<JsonElement> ParseWorkEvents(string? eventsJsonl)

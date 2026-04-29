@@ -2,6 +2,8 @@ export type JsonObject = Record<string, unknown>;
 
 export const SUBAGENT_RUN_SCHEMA = "den_subagent_run";
 export const SUBAGENT_RUN_SCHEMA_VERSION = 1;
+export const SUBAGENT_LIFECYCLE_SCHEMA = "den_subagent_lifecycle";
+export const SUBAGENT_LIFECYCLE_SCHEMA_VERSION = 1;
 export const DEFAULT_REASONING_PREVIEW_CHARS = 240;
 export const MIN_REASONING_PREVIEW_CHARS = 1;
 export const MAX_REASONING_PREVIEW_CHARS = 2_000;
@@ -29,6 +31,19 @@ export type SubagentArtifacts = {
   session_dir?: string;
   session_file_path?: string;
   session_id?: string;
+};
+
+export type SubagentUsageSummary = {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
+  total_tokens?: number;
+  total_cost?: number;
+  currency?: string;
+  source: string;
+  message_count?: number;
+  latest_usage_at?: string;
 };
 
 export type SubagentRunContext = {
@@ -122,6 +137,46 @@ export function normalizeSubagentRunEvent(event: JsonObject): JsonObject {
     schema_version: SUBAGENT_RUN_SCHEMA_VERSION,
     ...event,
   });
+}
+
+export function buildSubagentLifecycleMetadata(eventName: string, extra: JsonObject = {}): JsonObject {
+  return omitUndefined({
+    schema: SUBAGENT_LIFECYCLE_SCHEMA,
+    schema_version: SUBAGENT_LIFECYCLE_SCHEMA_VERSION,
+    operator_event: eventName,
+    event_visibility: "summary",
+    ...extra,
+  });
+}
+
+export function taskThreadPacketOperatorEvent(packetType: unknown): string | undefined {
+  switch (packetType) {
+    case "coder_context_packet":
+      return "coder_context_prepared";
+    case "implementation_packet":
+      return "implementation_packet_posted";
+    case "validation_packet":
+      return "validation_completed";
+    case "drift_check_packet":
+      return "drift_check_completed";
+    default:
+      return undefined;
+  }
+}
+
+export function subagentOperatorEventForOpsEvent(eventType: string, role: unknown): string | undefined {
+  const normalizedRole = typeof role === "string" ? role.trim().toLowerCase() : undefined;
+  if (eventType === "subagent_started" && normalizedRole === "coder") return "coder_started";
+  if (eventType === "subagent_started" && normalizedRole === "reviewer") return "reviewer_started";
+  if (["subagent_completed", "subagent_failed", "subagent_timeout", "subagent_aborted"].includes(eventType)) {
+    if (normalizedRole === "coder") return "coder_completed";
+    if (normalizedRole === "reviewer") return "reviewer_completed";
+  }
+  return undefined;
+}
+
+export function subagentEventVisibility(eventType: string): "summary" | "debug" {
+  return eventType.startsWith("subagent_work_") ? "debug" : "summary";
 }
 
 export function buildSubagentRunContextMetadata(context: SubagentRunContext = {}): JsonObject {
@@ -749,6 +804,67 @@ function hasMeaningfulToolResult(value: unknown): boolean {
   return true;
 }
 
+export function summarizeSubagentUsageFromSessionJsonl(sessionJsonl: string | undefined): SubagentUsageSummary | undefined {
+  if (!sessionJsonl) return undefined;
+  let input = 0;
+  let output = 0;
+  let cacheRead = 0;
+  let cacheWrite = 0;
+  let totalCost = 0;
+  let currency: string | undefined;
+  let messageCount = 0;
+  let latestUsageAt: string | undefined;
+
+  for (const line of sessionJsonl.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let entry: any;
+    try {
+      entry = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    const message = entry?.message;
+    if (message?.role !== "assistant" || !message.usage || typeof message.usage !== "object") continue;
+    const usage = message.usage as Record<string, unknown>;
+    const inputTokens = finiteNonNegativeInteger(usage.input);
+    const outputTokens = finiteNonNegativeInteger(usage.output);
+    const cacheReadTokens = finiteNonNegativeInteger(usage.cacheRead ?? usage.cache_read);
+    const cacheWriteTokens = finiteNonNegativeInteger(usage.cacheWrite ?? usage.cache_write);
+    const totalTokens = finiteNonNegativeInteger(usage.totalTokens ?? usage.total_tokens);
+    if (inputTokens === undefined && outputTokens === undefined && cacheReadTokens === undefined && cacheWriteTokens === undefined && totalTokens === undefined) continue;
+
+    input += inputTokens ?? 0;
+    output += outputTokens ?? 0;
+    cacheRead += cacheReadTokens ?? 0;
+    cacheWrite += cacheWriteTokens ?? 0;
+    messageCount++;
+    latestUsageAt = normalizeString(entry.timestamp) ?? latestUsageAt;
+
+    const cost = usage.cost;
+    if (cost && typeof cost === "object") {
+      const costRecord = cost as Record<string, unknown>;
+      totalCost += finiteNonNegativeNumber(costRecord.total) ?? 0;
+      currency = normalizeString(costRecord.currency) ?? currency;
+    }
+  }
+
+  if (messageCount === 0) return undefined;
+  const computedTotal = input + output + cacheRead + cacheWrite;
+  return omitUndefined({
+    input_tokens: input,
+    output_tokens: output,
+    cache_read_tokens: cacheRead,
+    cache_write_tokens: cacheWrite,
+    total_tokens: computedTotal > 0 ? computedTotal : undefined,
+    total_cost: totalCost > 0 ? totalCost : undefined,
+    currency,
+    source: "pi_session_assistant_usage",
+    message_count: messageCount,
+    latest_usage_at: latestUsageAt,
+  }) as SubagentUsageSummary;
+}
+
 function workContextMetadata(context: PiWorkEventContext): JsonObject {
   return omitUndefined({
     run_id: normalizeString(context.runId),
@@ -779,6 +895,15 @@ function eventTimestamp(event: any, fallback: number): number {
 
 function finiteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function finiteNonNegativeNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function finiteNonNegativeInteger(value: unknown): number | undefined {
+  const number = finiteNonNegativeNumber(value);
+  return number === undefined ? undefined : Math.round(number);
 }
 
 function normalizeString(value: unknown): string | undefined {

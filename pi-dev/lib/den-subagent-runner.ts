@@ -11,10 +11,12 @@ import {
   isTerminalAssistantMessage,
   normalizePiWorkEvent,
   parsePiStdoutLine,
+  summarizeSubagentUsageFromSessionJsonl,
   type JsonObject,
   buildReasoningCaptureMetadata,
   type ReasoningCaptureOptions,
   type SubagentArtifacts,
+  type SubagentUsageSummary,
 } from "./den-subagent-pipeline.ts";
 import type { SubagentRunRecorder } from "./den-subagent-recorder.ts";
 import type { FinalHeadSource, FinalHeadStatus, FinalWorktreeStatus } from "./den-subagent-final-head.ts";
@@ -96,6 +98,7 @@ export type SubagentResult = {
   model?: string;
   message_count: number;
   assistant_message_count: number;
+  usage_summary?: SubagentUsageSummary;
   child_error_message?: string;
   infrastructure_failure_reason?: string;
   infrastructure_warning_reason?: string;
@@ -435,6 +438,9 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
       ...sessionMetadata(),
     });
   }
+  const usageSummary = piSessionFilePath
+    ? summarizeSubagentUsageFromSessionJsonl(await readFileOrUndefined(piSessionFilePath))
+    : undefined;
   const result: SubagentResult = {
     run_id: runId,
     role: options.role,
@@ -472,6 +478,7 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
     model: output.model,
     message_count: output.messageCount,
     assistant_message_count: output.assistantMessageCount,
+    usage_summary: usageSummary,
     child_error_message: output.childErrorMessage,
     artifacts,
   };
@@ -510,6 +517,7 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
     output_status: result.output_status,
     message_count: result.message_count,
     assistant_message_count: result.assistant_message_count,
+    usage_summary: result.usage_summary ?? null,
     model: result.model ?? null,
     reasoning_capture: reasoningCaptureMetadata,
     child_error_message: result.child_error_message ?? null,
@@ -717,6 +725,14 @@ async function discoverPiSessionFile(sessionDir: string | undefined, preferredSe
       if (matching) return matching;
     }
     return candidates.sort((a, b) => b.mtimeMs - a.mtimeMs)[0];
+  } catch {
+    return undefined;
+  }
+}
+
+async function readFileOrUndefined(filePath: string): Promise<string | undefined> {
+  try {
+    return await readFile(filePath, "utf8");
   } catch {
     return undefined;
   }

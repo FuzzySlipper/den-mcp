@@ -535,6 +535,21 @@ export interface SubagentRunSummary {
   project_id: string | null;
   backend: string | null;
   model: string | null;
+  review_round_id: number | null;
+  workspace_id: string | null;
+  purpose: string | null;
+  worktree_path: string | null;
+  branch: string | null;
+  base_branch: string | null;
+  base_commit: string | null;
+  head_commit: string | null;
+  final_head_commit: string | null;
+  final_head_status: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  usage_summary: SubagentRunUsageSummary | null;
+  event_counts: SubagentRunEventCounts;
+  operator_events: SubagentRunOperatorEvent[];
   output_status: string | null;
   timeout_kind: string | null;
   infrastructure_failure_reason: string | null;
@@ -553,6 +568,37 @@ export interface SubagentRunSummary {
   duration_ms: number | null;
   artifact_dir: string | null;
   event_count: number;
+}
+
+export interface SubagentRunUsageSummary {
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cache_read_tokens: number | null;
+  cache_write_tokens: number | null;
+  total_tokens: number | null;
+  total_cost: number | null;
+  currency: string | null;
+  source: string | null;
+  message_count: number | null;
+  latest_usage_at: string | null;
+}
+
+export interface SubagentRunEventCounts {
+  total: number;
+  lifecycle: number;
+  raw_work: number;
+  operator_summary: number;
+  debug: number;
+}
+
+export interface SubagentRunOperatorEvent {
+  event_name: string;
+  source: string;
+  source_event_type: string | null;
+  stream_entry_id: number | null;
+  source_message_type: string | null;
+  occurred_at: string | null;
+  visibility: string;
 }
 
 export interface SubagentRunDetail {
