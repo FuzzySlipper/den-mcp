@@ -6,14 +6,19 @@ using System.Security.Cryptography;
 using System.Text;
 using Den.Bridge.Abstractions;
 using Den.Bridge.Protocol;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Den.Bridge.Transport.WebSockets;
 
 public sealed class WebSocketBridgeServer : IBridgeEventPublisher, IBridgeProgressPublisher, IAsyncDisposable
 {
+    private const int EphemeralPortBindAttempts = 10;
+
     private readonly WebSocketBridgeServerOptions _options;
     private readonly IBridgeCommandRouter _router;
-    private readonly HttpListener _listener = new();
+    private readonly ILogger<WebSocketBridgeServer> _logger;
+    private HttpListener _listener = new();
     private readonly CancellationTokenSource _stopCts = new();
     private readonly ConcurrentDictionary<Guid, WebSocketBridgeConnection> _connections = new();
     private Task? _acceptTask;
@@ -22,7 +27,8 @@ public sealed class WebSocketBridgeServer : IBridgeEventPublisher, IBridgeProgre
 
     public WebSocketBridgeServer(
         WebSocketBridgeServerOptions options,
-        IBridgeCommandRouter router)
+        IBridgeCommandRouter router,
+        ILogger<WebSocketBridgeServer>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(router);
@@ -30,6 +36,7 @@ public sealed class WebSocketBridgeServer : IBridgeEventPublisher, IBridgeProgre
 
         _options = options;
         _router = router;
+        _logger = logger ?? NullLogger<WebSocketBridgeServer>.Instance;
     }
 
     public Uri? Endpoint { get; private set; }
@@ -57,14 +64,11 @@ public sealed class WebSocketBridgeServer : IBridgeEventPublisher, IBridgeProgre
             return Task.CompletedTask;
         }
 
-        Port = _options.Port == 0 ? AllocateEphemeralLoopbackPort(_options.ListenAddress) : _options.Port;
-        var prefix = $"http://{FormatListenAddress(_options.ListenAddress)}:{Port}/";
-        _listener.Prefixes.Add(prefix);
-        _listener.Start();
+        StartListenerWithRetry(cancellationToken);
 
-        Endpoint = new UriBuilder("ws", FormatUriHost(_options.ListenAddress), Port, NormalizePath(_options.Path).TrimStart('/')).Uri;
+        Endpoint = CreateEndpointUri(_options.ListenAddress, Port, _options.Path);
         _started = true;
-        _acceptTask = Task.Run(AcceptLoopAsync, cancellationToken);
+        _acceptTask = Task.Run(AcceptLoopAsync, CancellationToken.None);
         return Task.CompletedTask;
     }
 
@@ -130,6 +134,83 @@ public sealed class WebSocketBridgeServer : IBridgeEventPublisher, IBridgeProgre
         }
     }
 
+    private void StartListenerWithRetry(CancellationToken cancellationToken)
+    {
+        if (_options.Port != 0)
+        {
+            StartListenerOnPort(_options.Port);
+            Port = _options.Port;
+            return;
+        }
+
+        Exception? lastBindException = null;
+        for (var attempt = 1; attempt <= EphemeralPortBindAttempts; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var candidatePort = AllocateEphemeralLoopbackPort(_options.ListenAddress);
+            try
+            {
+                StartListenerOnPort(candidatePort);
+                Port = candidatePort;
+                return;
+            }
+            catch (HttpListenerException ex)
+            {
+                lastBindException = ex;
+                _logger.LogWarning(
+                    ex,
+                    "Bridge WebSocket server failed to bind reserved ephemeral port {Port} on attempt {Attempt}/{MaxAttempts}.",
+                    candidatePort,
+                    attempt,
+                    EphemeralPortBindAttempts);
+                ResetListenerAfterFailedStart();
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Bridge WebSocket server could not bind an ephemeral loopback port after {EphemeralPortBindAttempts} attempts.",
+            lastBindException);
+    }
+
+    private void StartListenerOnPort(int port)
+    {
+        var prefix = $"http://{FormatListenAddress(_options.ListenAddress)}:{port}/";
+        _listener.Prefixes.Clear();
+        _listener.Prefixes.Add(prefix);
+        try
+        {
+            _listener.Start();
+        }
+        catch
+        {
+            TryClearPrefixes(_listener);
+            throw;
+        }
+    }
+
+    private void ResetListenerAfterFailedStart()
+    {
+        try
+        {
+            _listener.Close();
+        }
+        finally
+        {
+            _listener = new HttpListener();
+        }
+    }
+
+    private static void TryClearPrefixes(HttpListener listener)
+    {
+        try
+        {
+            listener.Prefixes.Clear();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
     private static int AllocateEphemeralLoopbackPort(IPAddress listenAddress)
     {
         var listener = new TcpListener(listenAddress, 0);
@@ -151,9 +232,9 @@ public sealed class WebSocketBridgeServer : IBridgeEventPublisher, IBridgeProgre
             : address.ToString();
     }
 
-    private static string FormatUriHost(IPAddress address)
+    private static Uri CreateEndpointUri(IPAddress listenAddress, int port, string path)
     {
-        return address.ToString();
+        return new Uri($"ws://{FormatListenAddress(listenAddress)}:{port}{NormalizePath(path)}");
     }
 
     private static string NormalizePath(string path)
@@ -184,7 +265,23 @@ public sealed class WebSocketBridgeServer : IBridgeEventPublisher, IBridgeProgre
                 break;
             }
 
-            _ = Task.Run(() => HandleContextAsync(context), _stopCts.Token);
+            _ = Task.Run(() => HandleContextAsyncWithLogging(context), CancellationToken.None);
+        }
+    }
+
+    private async Task HandleContextAsyncWithLogging(HttpListenerContext context)
+    {
+        try
+        {
+            await HandleContextAsync(context).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (_stopCts.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unhandled bridge WebSocket connection handler failure.");
+            TryAbortResponse(context);
         }
     }
 
@@ -222,10 +319,26 @@ public sealed class WebSocketBridgeServer : IBridgeEventPublisher, IBridgeProgre
             _connections.TryAdd(connection.Id, connection);
             await connection.RunAsync().ConfigureAwait(false);
         }
-        catch (WebSocketException)
+        catch (WebSocketException ex)
+        {
+            _logger.LogDebug(ex, "Bridge WebSocket connection failed during upgrade or receive loop.");
+        }
+        catch (HttpListenerException ex)
+        {
+            _logger.LogDebug(ex, "Bridge WebSocket listener failed while handling a connection.");
+        }
+    }
+
+    private static void TryAbortResponse(HttpListenerContext context)
+    {
+        try
+        {
+            context.Response.Abort();
+        }
+        catch (ObjectDisposedException)
         {
         }
-        catch (HttpListenerException)
+        catch (InvalidOperationException)
         {
         }
     }
@@ -282,11 +395,20 @@ public sealed class WebSocketBridgeServer : IBridgeEventPublisher, IBridgeProgre
 
     private async ValueTask BroadcastAsync(IBridgeFrame frame, CancellationToken cancellationToken)
     {
-        foreach (var connection in _connections.Values.ToArray())
+        var connections = _connections.Values.ToArray();
+        if (connections.Length == 0)
+        {
+            return;
+        }
+
+        var sendTasks = new Task[connections.Length];
+        for (var index = 0; index < connections.Length; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await connection.TrySendFrameAsync(frame, cancellationToken).ConfigureAwait(false);
+            sendTasks[index] = connections[index].TrySendFrameAsync(frame, cancellationToken).AsTask();
         }
+
+        await Task.WhenAll(sendTasks).ConfigureAwait(false);
     }
 
     private void RemoveConnection(Guid id)
@@ -386,6 +508,14 @@ public sealed class WebSocketBridgeServer : IBridgeEventPublisher, IBridgeProgre
             catch (IOException)
             {
             }
+            catch (ObjectDisposedException)
+            {
+            }
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested && !_server._stopCts.IsCancellationRequested)
+            {
+                _server._logger.LogWarning(ex, "Bridge WebSocket send failed unexpectedly; removing connection {ConnectionId}.", Id);
+                _server.RemoveConnection(Id);
+            }
         }
 
         private ValueTask HandleIncomingFrameAsync(IBridgeFrame frame)
@@ -393,7 +523,7 @@ public sealed class WebSocketBridgeServer : IBridgeEventPublisher, IBridgeProgre
             switch (frame)
             {
                 case BridgeRequestFrame request:
-                    _ = Task.Run(() => DispatchRequestAsync(request), _server._stopCts.Token);
+                    _ = Task.Run(() => DispatchRequestWithLoggingAsync(request), CancellationToken.None);
                     break;
                 case BridgeCancelFrame cancel:
                     CancelRequest(cancel.RequestId);
@@ -401,6 +531,21 @@ public sealed class WebSocketBridgeServer : IBridgeEventPublisher, IBridgeProgre
             }
 
             return ValueTask.CompletedTask;
+        }
+
+        private async Task DispatchRequestWithLoggingAsync(BridgeRequestFrame request)
+        {
+            try
+            {
+                await DispatchRequestAsync(request).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (_server._stopCts.IsCancellationRequested)
+            {
+            }
+            catch (Exception ex)
+            {
+                _server._logger.LogError(ex, "Unhandled bridge WebSocket request dispatch failure for request {RequestId}.", request.RequestId);
+            }
         }
 
         private async Task DispatchRequestAsync(BridgeRequestFrame request)

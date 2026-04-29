@@ -1,9 +1,13 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.WebSockets;
+using System.Reflection;
+using System.Text;
 using System.Text.Json;
 using Den.Bridge.Abstractions;
 using Den.Bridge.Protocol;
 using Den.Bridge.Transport.WebSockets;
+using Microsoft.Extensions.Logging;
 
 namespace Den.Bridge.Tests;
 
@@ -46,6 +50,43 @@ public class WebSocketBridgeTransportTests
                 Endpoint = endpoint,
                 AuthToken = "wrong-token",
             }));
+    }
+
+    [Fact]
+    public void Server_FormatsIPv6LoopbackEndpointWithBracketedAuthority()
+    {
+        var endpoint = CreateEndpointUri(IPAddress.IPv6Loopback, 12345, "/bridge");
+
+        Assert.Equal("ws://[::1]:12345/bridge", endpoint.AbsoluteUri);
+        Assert.Equal("[::1]:12345", endpoint.Authority);
+    }
+
+    [Fact]
+    public async Task Server_CleansUpAndLogsUnexpectedConnectionHandlerFailures()
+    {
+        var logger = new CapturingLogger<WebSocketBridgeServer>();
+        var router = new DelegatingRouter((request, _) =>
+            ValueTask.FromResult(BridgeResponseFrame.Success(request.RequestId)));
+        await using var server = new WebSocketBridgeServer(
+            new WebSocketBridgeServerOptions { Port = 0, AuthToken = "token" },
+            router,
+            logger);
+        await server.StartAsync();
+
+        using var socket = new ClientWebSocket();
+        socket.Options.SetRequestHeader("Authorization", $"{WebSocketBridgeAuth.AuthorizationScheme} token");
+        await socket.ConnectAsync(Assert.IsType<Uri>(server.Endpoint), CancellationToken.None);
+        await WaitUntilAsync(() => GetConnectionCount(server) == 1);
+
+        var invalidJson = Encoding.UTF8.GetBytes("{not valid json");
+        await socket.SendAsync(
+            invalidJson,
+            WebSocketMessageType.Text,
+            WebSocketMessageFlags.EndOfMessage,
+            CancellationToken.None);
+
+        await WaitUntilAsync(() => GetConnectionCount(server) == 0);
+        Assert.Contains(logger.Entries, entry => entry.Level == LogLevel.Error && entry.Exception is JsonException);
     }
 
     [Fact]
@@ -249,6 +290,33 @@ public class WebSocketBridgeTransportTests
         });
     }
 
+    private static Uri CreateEndpointUri(IPAddress listenAddress, int port, string path)
+    {
+        var method = typeof(WebSocketBridgeServer).GetMethod("CreateEndpointUri", BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        var endpoint = method.Invoke(null, [listenAddress, port, path]);
+        return Assert.IsType<Uri>(endpoint);
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (!condition())
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(25), timeout.Token);
+        }
+    }
+
+    private static int GetConnectionCount(WebSocketBridgeServer server)
+    {
+        var field = typeof(WebSocketBridgeServer).GetField("_connections", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        var connections = field.GetValue(server);
+        Assert.NotNull(connections);
+        var count = connections.GetType().GetProperty("Count")?.GetValue(connections);
+        return Assert.IsType<int>(count);
+    }
+
     private static async Task<T> ReadOneAsync<T>(IAsyncEnumerable<T> source)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -258,6 +326,43 @@ public class WebSocketBridgeTransportTests
         }
 
         throw new JsonException("The bridge stream completed before an item was available.");
+    }
+
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public ConcurrentQueue<LogEntry> Entries { get; } = new();
+
+        public IDisposable BeginScope<TState>(TState state)
+            where TState : notnull
+        {
+            return NullScope.Instance;
+        }
+
+        public bool IsEnabled(LogLevel logLevel)
+        {
+            return true;
+        }
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Entries.Enqueue(new LogEntry(logLevel, exception, formatter(state, exception)));
+        }
+    }
+
+    private sealed record LogEntry(LogLevel Level, Exception? Exception, string Message);
+
+    private sealed class NullScope : IDisposable
+    {
+        public static NullScope Instance { get; } = new();
+
+        public void Dispose()
+        {
+        }
     }
 
     private sealed class DelegatingRouter : IBridgeCommandRouter
