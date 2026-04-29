@@ -125,8 +125,9 @@ public sealed class ReviewFindingRepository : IReviewFindingRepository
                     ELSE datetime('now')
                 END,
                 follow_up_task_id = CASE
-                    WHEN @followUpTaskId IS NULL THEN follow_up_task_id
-                    ELSE @followUpTaskId
+                    WHEN @status IS NULL THEN follow_up_task_id
+                    WHEN @status = @splitStatus THEN @followUpTaskId
+                    ELSE NULL
                 END,
                 updated_at = datetime('now')
             WHERE id = @id
@@ -142,6 +143,7 @@ public sealed class ReviewFindingRepository : IReviewFindingRepository
         cmd.Parameters.AddWithValue("@status", input.Status is not null ? input.Status.Value.ToDbValue() : DBNull.Value);
         cmd.Parameters.AddWithValue("@statusNotes", (object?)input.StatusNotes ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@followUpTaskId", (object?)input.FollowUpTaskId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@splitStatus", ReviewFindingStatus.SplitToFollowUp.ToDbValue());
 
         await using var reader = await cmd.ExecuteReaderAsync();
         if (!await reader.ReadAsync())
@@ -162,8 +164,8 @@ public sealed class ReviewFindingRepository : IReviewFindingRepository
                 status_notes = @statusNotes,
                 status_updated_at = datetime('now'),
                 follow_up_task_id = CASE
-                    WHEN @followUpTaskId IS NULL THEN follow_up_task_id
-                    ELSE @followUpTaskId
+                    WHEN @status = @splitStatus THEN @followUpTaskId
+                    ELSE NULL
                 END,
                 updated_at = datetime('now')
             WHERE id = @id
@@ -178,6 +180,7 @@ public sealed class ReviewFindingRepository : IReviewFindingRepository
         cmd.Parameters.AddWithValue("@updatedBy", input.UpdatedBy);
         cmd.Parameters.AddWithValue("@statusNotes", (object?)input.Notes ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@followUpTaskId", (object?)input.FollowUpTaskId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@splitStatus", ReviewFindingStatus.SplitToFollowUp.ToDbValue());
 
         await using var reader = await cmd.ExecuteReaderAsync();
         if (!await reader.ReadAsync())
@@ -189,6 +192,9 @@ public sealed class ReviewFindingRepository : IReviewFindingRepository
     {
         if (status == ReviewFindingStatus.SplitToFollowUp && followUpTaskId is null)
             throw new InvalidOperationException("split_to_follow_up requires follow_up_task_id.");
+
+        if (status != ReviewFindingStatus.SplitToFollowUp && followUpTaskId is not null)
+            throw new InvalidOperationException("follow_up_task_id can only be supplied when status is split_to_follow_up.");
     }
 
     private static async Task<int> GetNextFindingNumberAsync(SqliteConnection conn, int taskId)

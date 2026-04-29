@@ -249,16 +249,16 @@ public sealed class TaskTools
         return JsonSerializer.Serialize(findings, JsonOpts.Default);
     }
 
-    [McpServerTool(Name = "respond_to_review_finding"), Description("Add implementer response notes to a review finding and optionally mark it claimed_fixed or otherwise update status.")]
+    [McpServerTool(Name = "respond_to_review_finding"), Description("Add implementer response notes to a review finding and optionally mark it claimed_fixed or otherwise update status. response_notes record the implementer response; status_notes record evidence for the status transition. Use follow_up_task_id only with split_to_follow_up.")]
     public static async Task<string> RespondToReviewFinding(
         IReviewFindingRepository repo,
         ITaskRepository taskRepo,
         [Description("Review finding ID.")] int review_finding_id,
         [Description("Agent or user responding to the finding.")] string responded_by,
-        [Description("Optional implementer response notes.")] string? response_notes = null,
+        [Description("Optional implementer response notes; stored separately from reviewer/status verification notes.")] string? response_notes = null,
         [Description("Optional status update: open, claimed_fixed, verified_fixed, not_fixed, superseded, split_to_follow_up.")] string? status = null,
-        [Description("Optional notes explaining the status update.")] string? status_notes = null,
-        [Description("Optional follow-up task ID when the finding is split out.")] int? follow_up_task_id = null)
+        [Description("Optional notes explaining this status transition; use for current verification/status evidence.")] string? status_notes = null,
+        [Description("Optional follow-up task ID. Required for split_to_follow_up and rejected for all other statuses.")] int? follow_up_task_id = null)
     {
         await ValidateFollowUpTaskProjectAsync(repo, taskRepo, review_finding_id, follow_up_task_id);
 
@@ -273,15 +273,15 @@ public sealed class TaskTools
         return JsonSerializer.Serialize(updated, JsonOpts.Default);
     }
 
-    [McpServerTool(Name = "set_review_finding_status"), Description("Update the status for a review finding.")]
+    [McpServerTool(Name = "set_review_finding_status"), Description("Update the status for a review finding. Notes are status/verification evidence and do not replace implementer response_notes. Use follow_up_task_id only with split_to_follow_up; non-split status transitions clear any old follow-up link.")]
     public static async Task<string> SetReviewFindingStatus(
         IReviewFindingRepository repo,
         ITaskRepository taskRepo,
         [Description("Review finding ID.")] int review_finding_id,
         [Description("New status: open, claimed_fixed, verified_fixed, not_fixed, superseded, split_to_follow_up.")] string status,
         [Description("Agent or user updating the finding status.")] string updated_by,
-        [Description("Optional status notes.")] string? notes = null,
-        [Description("Optional follow-up task ID when the finding is split out.")] int? follow_up_task_id = null)
+        [Description("Optional status/verification notes for this transition.")] string? notes = null,
+        [Description("Optional follow-up task ID. Required for split_to_follow_up and rejected for all other statuses.")] int? follow_up_task_id = null)
     {
         await ValidateFollowUpTaskProjectAsync(repo, taskRepo, review_finding_id, follow_up_task_id);
 

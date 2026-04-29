@@ -121,6 +121,131 @@ public class ReviewFindingRepositoryTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RespondAsync_SplitToFollowUp_RequiresFollowUpTask()
+    {
+        var round = await CreateRoundAsync();
+        var finding = await _findings.CreateAsync(new CreateReviewFindingInput
+        {
+            ReviewRoundId = round.Id,
+            CreatedBy = "codex",
+            Category = ReviewFindingCategory.FollowUpCandidate,
+            Summary = "Better handled separately"
+        });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _findings.RespondAsync(finding.Id,
+            new RespondToReviewFindingInput
+            {
+                RespondedBy = "claude-code",
+                ResponseNotes = "Split out separately",
+                Status = ReviewFindingStatus.SplitToFollowUp
+            }));
+    }
+
+    [Fact]
+    public async Task SetStatusAsync_RejectsFollowUpTaskForNonSplitStatus()
+    {
+        var round = await CreateRoundAsync();
+        var finding = await _findings.CreateAsync(new CreateReviewFindingInput
+        {
+            ReviewRoundId = round.Id,
+            CreatedBy = "codex",
+            Category = ReviewFindingCategory.BlockingBug,
+            Summary = "Needs verification"
+        });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _findings.SetStatusAsync(finding.Id,
+            new UpdateReviewFindingStatusInput
+            {
+                Status = ReviewFindingStatus.VerifiedFixed,
+                UpdatedBy = "codex",
+                FollowUpTaskId = 123
+            }));
+    }
+
+    [Fact]
+    public async Task NonSplitStatusTransitions_ClearStaleFollowUpTask()
+    {
+        var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Split then verify" });
+        var followUp = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Follow-up task" });
+        var round = await _rounds.CreateAsync(new CreateReviewRoundInput
+        {
+            TaskId = task.Id,
+            RequestedBy = "claude-code",
+            Branch = "task/595",
+            BaseBranch = "main",
+            BaseCommit = "aaa111",
+            HeadCommit = "bbb222"
+        });
+        var finding = await _findings.CreateAsync(new CreateReviewFindingInput
+        {
+            ReviewRoundId = round.Id,
+            CreatedBy = "codex",
+            Category = ReviewFindingCategory.FollowUpCandidate,
+            Summary = "Originally split"
+        });
+
+        var split = await _findings.SetStatusAsync(finding.Id, new UpdateReviewFindingStatusInput
+        {
+            Status = ReviewFindingStatus.SplitToFollowUp,
+            UpdatedBy = "codex",
+            Notes = "Tracked separately",
+            FollowUpTaskId = followUp.Id
+        });
+        Assert.Equal(followUp.Id, split.FollowUpTaskId);
+
+        var verified = await _findings.SetStatusAsync(finding.Id, new UpdateReviewFindingStatusInput
+        {
+            Status = ReviewFindingStatus.VerifiedFixed,
+            UpdatedBy = "codex"
+        });
+
+        Assert.Equal(ReviewFindingStatus.VerifiedFixed, verified.Status);
+        Assert.Null(verified.FollowUpTaskId);
+    }
+
+    [Fact]
+    public async Task RespondAsync_NonSplitStatusTransition_ClearsStaleFollowUpTaskAndPreservesResponseNotes()
+    {
+        var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Split then respond" });
+        var followUp = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Follow-up task" });
+        var round = await _rounds.CreateAsync(new CreateReviewRoundInput
+        {
+            TaskId = task.Id,
+            RequestedBy = "claude-code",
+            Branch = "task/595",
+            BaseBranch = "main",
+            BaseCommit = "aaa111",
+            HeadCommit = "bbb222"
+        });
+        var finding = await _findings.CreateAsync(new CreateReviewFindingInput
+        {
+            ReviewRoundId = round.Id,
+            CreatedBy = "codex",
+            Category = ReviewFindingCategory.FollowUpCandidate,
+            Summary = "Originally split"
+        });
+
+        await _findings.SetStatusAsync(finding.Id, new UpdateReviewFindingStatusInput
+        {
+            Status = ReviewFindingStatus.SplitToFollowUp,
+            UpdatedBy = "codex",
+            Notes = "Tracked separately",
+            FollowUpTaskId = followUp.Id
+        });
+
+        var updated = await _findings.RespondAsync(finding.Id, new RespondToReviewFindingInput
+        {
+            RespondedBy = "claude-code",
+            ResponseNotes = "Fixed directly instead",
+            Status = ReviewFindingStatus.ClaimedFixed
+        });
+
+        Assert.Equal(ReviewFindingStatus.ClaimedFixed, updated.Status);
+        Assert.Equal("Fixed directly instead", updated.ResponseNotes);
+        Assert.Null(updated.FollowUpTaskId);
+    }
+
+    [Fact]
     public async Task GetDetailAsync_GroupsOpenAndResolvedFindingsSeparately()
     {
         var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Grouping target" });

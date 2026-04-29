@@ -151,6 +151,25 @@ public class ReviewFindingApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SetReviewFindingStatus_Returns400_WhenFollowUpTaskProvidedForNonSplitStatus()
+    {
+        var (task, round) = await CreateRoundAsync();
+        var finding = await CreateFindingAsync(task.Id, round.Id);
+        var followUp = await CreateTaskAsync("Follow-up item");
+
+        var response = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/tasks/{task.Id}/review-findings/{finding.Id}/status", new
+        {
+            status = "verified_fixed",
+            updated_by = "codex",
+            follow_up_task_id = followUp.Id
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadAsStringAsync();
+        Assert.Contains("follow_up_task_id", error);
+    }
+
+    [Fact]
     public async Task RespondToReviewFinding_Returns400_WhenFollowUpTaskIsInDifferentProject()
     {
         var (task, round) = await CreateRoundAsync();

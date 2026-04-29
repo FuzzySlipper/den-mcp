@@ -3,7 +3,6 @@ import type {
   AgentWorkspace,
   GitStatusResponse,
   Message,
-  ReviewFinding,
   ReviewTimelineEntry,
   ReviewVerdict,
   SubagentRunState,
@@ -16,6 +15,7 @@ import { formatSubagentDuration } from '../subagentRuns';
 import { formatTimeAgo, truncate } from '../utils';
 import { messageIntentLabel } from '../messageIntents';
 import { buildTaskGitFocus, dirtyCount, reviewGitAlignmentWarnings, summarizeGitStatus, type GitFocus } from '../git';
+import { renderFindingMeta } from '../reviewFindings';
 
 interface Props {
   projectId: string;
@@ -48,15 +48,6 @@ function formatTimeline(entry: ReviewTimelineEntry): string {
   if (entry.addressed_finding_count > 0) parts.push(`${entry.addressed_finding_count} addressed`);
   if (entry.resolved_finding_count > 0) parts.push(`${entry.resolved_finding_count} resolved`);
   return parts.join(' · ');
-}
-
-function renderFindingMeta(finding: ReviewFinding): string[] {
-  const parts: string[] = [];
-  if (finding.file_references?.length) parts.push(`Files: ${finding.file_references.join(', ')}`);
-  if (finding.test_commands?.length) parts.push(`Tests: ${finding.test_commands.join(', ')}`);
-  if (finding.status_notes) parts.push(`Status note: ${finding.status_notes}`);
-  else if (finding.response_notes) parts.push(`Response: ${finding.response_notes}`);
-  return parts;
 }
 
 function isActiveRunState(state: SubagentRunState): boolean {

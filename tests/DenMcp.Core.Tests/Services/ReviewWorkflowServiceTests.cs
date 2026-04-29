@@ -141,6 +141,59 @@ public class ReviewWorkflowServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RequestReviewAsync_DoesNotUseStaleResponseNotesAfterReviewerStatusUpdate()
+    {
+        var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Stale response guard" });
+        var round = await _rounds.CreateAsync(new CreateReviewRoundInput
+        {
+            TaskId = task.Id,
+            RequestedBy = "claude-code",
+            Branch = "task/934-review-loop",
+            BaseBranch = "main",
+            BaseCommit = "aaa111",
+            HeadCommit = "bbb222"
+        });
+        var finding = await _findings.CreateAsync(new CreateReviewFindingInput
+        {
+            ReviewRoundId = round.Id,
+            CreatedBy = "codex",
+            Category = ReviewFindingCategory.BlockingBug,
+            Summary = "Original finding"
+        });
+
+        await _findings.RespondAsync(finding.Id, new RespondToReviewFindingInput
+        {
+            RespondedBy = "claude-code",
+            ResponseNotes = "Implemented an unrelated stale-looking note",
+            Status = ReviewFindingStatus.ClaimedFixed
+        });
+        await _findings.SetStatusAsync(finding.Id, new UpdateReviewFindingStatusInput
+        {
+            Status = ReviewFindingStatus.VerifiedFixed,
+            UpdatedBy = "codex"
+        });
+
+        var stored = await _findings.GetByIdAsync(finding.Id);
+        Assert.Equal("Implemented an unrelated stale-looking note", stored!.ResponseNotes);
+        Assert.Null(stored.StatusNotes);
+
+        var result = await _workflow.RequestReviewAsync("proj", new RequestReviewInput
+        {
+            TaskId = task.Id,
+            RequestedBy = "claude-code",
+            Branch = "task/934-review-loop",
+            BaseBranch = "main",
+            BaseCommit = "ccc333",
+            HeadCommit = "ddd444",
+            LastReviewedHeadCommit = "bbb222"
+        });
+
+        Assert.Contains(finding.FindingKey, result.Packet.Content);
+        Assert.Contains("verified_fixed", result.Packet.Content);
+        Assert.DoesNotContain("Implemented an unrelated stale-looking note", result.Packet.Content);
+    }
+
+    [Fact]
     public async Task PostReviewFindingsAsync_BuildsStructuredPacketWithVerdictAndEvidence()
     {
         var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Findings packet" });

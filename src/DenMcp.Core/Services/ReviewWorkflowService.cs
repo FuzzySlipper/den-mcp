@@ -391,10 +391,33 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
     private static string FormatFindingOverviewLine(ReviewFinding finding)
     {
         var line = $"`{finding.FindingKey}` `{finding.Category.ToDbValue()}` `{finding.Status.ToDbValue()}` {finding.Summary}";
-        var detail = finding.StatusNotes ?? finding.ResponseNotes;
+        var detail = GetCurrentFindingDisplayNote(finding);
         return string.IsNullOrWhiteSpace(detail)
             ? line
             : $"{line} ({CollapseWhitespace(detail)})";
+    }
+
+    private static string? GetCurrentFindingDisplayNote(ReviewFinding finding)
+    {
+        if (!string.IsNullOrWhiteSpace(finding.StatusNotes))
+            return finding.StatusNotes;
+
+        if (string.IsNullOrWhiteSpace(finding.ResponseNotes))
+            return null;
+
+        if (finding.StatusUpdatedAt is null)
+            return finding.ResponseNotes;
+
+        if (finding.ResponseAt > finding.StatusUpdatedAt)
+            return finding.ResponseNotes;
+
+        if (finding.Status == ReviewFindingStatus.ClaimedFixed &&
+            string.Equals(finding.StatusUpdatedBy, finding.ResponseBy, StringComparison.Ordinal))
+        {
+            return finding.ResponseNotes;
+        }
+
+        return null;
     }
 
     private static string? FormatBranchComposition(ReviewRound round)
