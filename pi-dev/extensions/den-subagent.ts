@@ -849,11 +849,9 @@ async function runDenSubagent(
       });
     } catch (packetError) {
       // Packet posting is advisory; failures should not break the sub-agent result flow.
-      // The conductor can detect the missing packet via context-packet preparation.
-      // Visible warning so operators/debuggers can trace silent posting failures.
       console.warn(
         `Failed to post implementation packet for task ${effectiveOptions.taskId}:`,
-        packetError instanceof Error ? packetError.message : packetError,
+        packetError,
       );
     }
   }
