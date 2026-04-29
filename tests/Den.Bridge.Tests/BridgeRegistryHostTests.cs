@@ -22,6 +22,55 @@ public class BridgeRegistryHostTests
     }
 
     [Fact]
+    public void Builder_BuildMethodsReturnRepeatableSnapshots()
+    {
+        var builder = new BridgeRegistryBuilder()
+            .RegisterCommand<EchoRequest, EchoResponse, EchoHandler>("sample.echo")
+            .RegisterEvent<EchoEventPayload>("sample.echoed");
+
+        var firstCommandRegistry = builder.BuildCommandRegistry();
+        var secondCommandRegistry = builder.BuildCommandRegistry();
+        var firstEventRegistry = builder.BuildEventRegistry();
+        var secondEventRegistry = builder.BuildEventRegistry();
+
+        Assert.NotSame(firstCommandRegistry, secondCommandRegistry);
+        Assert.NotSame(firstEventRegistry, secondEventRegistry);
+        Assert.Equal(new[] { "sample.echo" }, firstCommandRegistry.Commands.Select(descriptor => descriptor.Command));
+        Assert.Equal(new[] { "sample.echo" }, secondCommandRegistry.Commands.Select(descriptor => descriptor.Command));
+        Assert.Equal(new[] { "sample.echoed" }, firstEventRegistry.Events.Select(descriptor => descriptor.Event));
+        Assert.Equal(new[] { "sample.echoed" }, secondEventRegistry.Events.Select(descriptor => descriptor.Event));
+
+        builder
+            .RegisterCommand<EchoRequest, EchoResponse, EchoHandler>("sample.echo_again")
+            .RegisterEvent<EchoEventPayload>("sample.echoed_again");
+
+        Assert.Equal(new[] { "sample.echo" }, firstCommandRegistry.Commands.Select(descriptor => descriptor.Command));
+        Assert.Equal(new[] { "sample.echoed" }, firstEventRegistry.Events.Select(descriptor => descriptor.Event));
+        Assert.Equal(
+            new[] { "sample.echo", "sample.echo_again" },
+            builder.BuildCommandRegistry().Commands.Select(descriptor => descriptor.Command));
+        Assert.Equal(
+            new[] { "sample.echoed", "sample.echoed_again" },
+            builder.BuildEventRegistry().Events.Select(descriptor => descriptor.Event));
+    }
+
+    [Fact]
+    public void CapabilitiesProvider_ExposesDefaultSchemaNames()
+    {
+        using var provider = BuildProvider(builder => builder
+            .RegisterCommand<EchoRequest, EchoResponse, EchoHandler>("sample.echo")
+            .RegisterEvent<EchoEventPayload>("sample.echoed"));
+
+        var capabilities = provider.GetRequiredService<IBridgeCapabilitiesProvider>().CreateCapabilitiesFrame();
+        var command = Assert.Single(capabilities.Commands);
+        var evt = Assert.Single(capabilities.Events);
+
+        Assert.Equal("sample.echo.request", command.RequestSchema);
+        Assert.Equal("sample.echo.response", command.ResponseSchema);
+        Assert.Equal("sample.echoed.payload", evt.PayloadSchema);
+    }
+
+    [Fact]
     public async Task Invoker_MapsUnknownCommandToUnsupportedCapabilityError()
     {
         using var provider = BuildProvider(builder => { });

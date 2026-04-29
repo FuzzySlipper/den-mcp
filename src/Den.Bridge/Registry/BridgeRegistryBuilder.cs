@@ -47,7 +47,7 @@ public sealed class BridgeRegistryBuilder
     {
         var registration = new BridgeEventRegistration(@event)
         {
-            PayloadSchema = @event,
+            PayloadSchema = @event + ".payload",
         };
         configure?.Invoke(registration);
 
@@ -62,12 +62,12 @@ public sealed class BridgeRegistryBuilder
 
     public BridgeCommandRegistry BuildCommandRegistry()
     {
-        return new BridgeCommandRegistry(_commands);
+        return new BridgeCommandRegistry(_commands.ToArray());
     }
 
     public BridgeEventRegistry BuildEventRegistry()
     {
-        return new BridgeEventRegistry(_events);
+        return new BridgeEventRegistry(_events.ToArray());
     }
 
     private static async ValueTask<JsonElement?> InvokeTypedAsync<TRequest, TResponse, THandler>(
