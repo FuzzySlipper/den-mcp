@@ -428,9 +428,11 @@ test('formatDenContextCompactionResult includes resume info', () => {
 
 test('compaction guardrails mention fire-and-forget and resume semantics', () => {
   const guardrails = compactionGuardrails();
-  assert.ok(guardrails.length >= 4, 'should have updated guardrails');
+  assert.ok(guardrails.length >= 5, 'should have updated guardrails');
   const combined = guardrails.join('\n');
   assert.match(combined, /fire-and-forget/);
   assert.match(combined, /resume_after_compaction/);
   assert.match(combined, /suspended/);
+  assert.match(combined, /extension\/session reloads/);
+  assert.match(combined, /manually resume/);
 });

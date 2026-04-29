@@ -158,6 +158,7 @@ export function compactionGuardrails(): string[] {
     "Prefer task boundaries or just after a merge/review handoff; avoid mid-critical merge, review, or unresolved user-decision points.",
     "Compaction via ctx.compact() is fire-and-forget: the tool/command returns immediately and compaction runs asynchronously after the current turn ends.",
     "After compaction, the conductor session will be suspended until a follow-up prompt resumes it. When resume_after_compaction is enabled, the extension sends a resume prompt automatically.",
+    "If the extension/session reloads between compaction start and completion, the captured resume callback may be stale; the resume failure is reported and the operator can manually resume.",
     "After compaction (manual or auto-resume), re-check Den task/messages before starting the next substantial task.",
   ];
 }

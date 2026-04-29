@@ -128,6 +128,13 @@ The resume message intentionally asks the conductor to re-read Den state
 because compaction discards fine-grained context. The conductor should re-check
 task/thread state before continuing substantive work.
 
+A documentation guardrail is sufficient for the rare extension-reload edge case:
+if the extension/session reloads between compaction start and `onComplete`, the
+captured resume callback may be stale. The callback already catches and reports
+resume failures, and the operator can manually resume with a normal prompt. A
+runtime nonce check would not make this safer without risking false negatives
+that suppress a valid resume.
+
 ## Recommended conductor behavior
 
 - Check `den_context_status` before starting a large implementation/review task
