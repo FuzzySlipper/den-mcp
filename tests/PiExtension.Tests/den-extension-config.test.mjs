@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -9,6 +9,7 @@ import {
   reasoningCaptureOptionsFromConfig,
   resolveProjectDenConfigPaths,
   loadDenExtensionConfig,
+  saveDenExtensionConfig,
   denConfigPath,
 } from '../../pi-dev/lib/den-extension-config.ts';
 import { resolveReasoningCaptureOptions } from '../../pi-dev/lib/den-subagent-pipeline.ts';
@@ -169,6 +170,52 @@ test('loadDenExtensionConfig project scope prefers local config over inherited',
     }
   } finally {
     await rm(mainDir, { recursive: true, force: true });
+  }
+});
+
+test('saveDenExtensionConfig project scope writes to linked worktree local config only', async () => {
+  const mainDir = await makeTmpDir();
+  const worktreeDir = `${mainDir}-linked-save`;
+  try {
+    await execGit(mainDir, 'init');
+    await writeFile(path.join(mainDir, 'README.md'), 'test');
+    await execGit(mainDir, 'add', 'README.md');
+    await execGit(mainDir, 'commit', '-m', 'init');
+
+    const mainConfigPath = path.join(mainDir, '.pi', 'den-config.json');
+    const mainConfig = {
+      version: 1,
+      fallback_model: 'main-fallback',
+      subagents: { coder: { model: 'main-model' } },
+    };
+    await mkdir(path.dirname(mainConfigPath), { recursive: true });
+    await writeFile(mainConfigPath, `${JSON.stringify(mainConfig, null, 2)}\n`);
+
+    await execGit(mainDir, 'worktree', 'add', worktreeDir, '-b', 'test-branch-save');
+
+    try {
+      await saveDenExtensionConfig('project', worktreeDir, {
+        version: 1,
+        fallback_model: 'worktree-fallback',
+        subagents: { reviewer: { model: 'worktree-reviewer' } },
+      });
+
+      const worktreeConfigPath = path.join(worktreeDir, '.pi', 'den-config.json');
+      const worktreeConfig = JSON.parse(await readFile(worktreeConfigPath, 'utf8'));
+      const unchangedMainConfig = JSON.parse(await readFile(mainConfigPath, 'utf8'));
+
+      assert.deepEqual(worktreeConfig, {
+        version: 1,
+        fallback_model: 'worktree-fallback',
+        subagents: { reviewer: { model: 'worktree-reviewer' } },
+      });
+      assert.deepEqual(unchangedMainConfig, mainConfig);
+    } finally {
+      await execGit(mainDir, 'worktree', 'remove', worktreeDir, '--force');
+    }
+  } finally {
+    await rm(mainDir, { recursive: true, force: true });
+    await rm(worktreeDir, { recursive: true, force: true });
   }
 });
 
