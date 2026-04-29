@@ -1,3 +1,5 @@
+import { normalizeString, oneLine } from "./den-string-utils.ts";
+
 export const CODER_PROMPT_SLUG = "pi-coder-subagent-prompt";
 export const REVIEWER_PROMPT_SLUG = "pi-reviewer-subagent-prompt";
 
@@ -185,10 +187,3 @@ function truncatePacket(content: string): string {
   return content.length > maxChars ? `${content.slice(0, maxChars)}\n... (truncated)` : content;
 }
 
-function oneLine(value: string): string {
-  return value.replace(/\s+/g, " ").trim().slice(0, 220);
-}
-
-function normalizeString(value: any): string | undefined {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}

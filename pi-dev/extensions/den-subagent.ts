@@ -64,6 +64,7 @@ import {
   renderTemplate,
   summarizeTaskContext,
 } from "../lib/den-prompt-templates.ts";
+import { normalizeString, oneLine } from "../lib/den-string-utils.ts";
 import {
   formatCoderContextPacket,
   buildCoderContextPacketMeta,
@@ -432,7 +433,7 @@ export default function denSubagent(pi: ExtensionAPI) {
       const parsed = parseDriftSentinelArgs(args);
       const result = await runAndMaybePostDriftSentinel(cfg, parsed, ctx.cwd, undefined, undefined);
       const status = subagentSucceeded(result.subagent) ? `sentinel risk: ${result.parsed.risk ?? "unknown"}` : "sentinel failed";
-      ctx.ui.setWidget("den-subagent", [`Drift ${status}`, `Message #${result.message_id ?? (parsed.post_result === false ? "not posted" : "not posted")}`, oneLine(result.content)]);
+      ctx.ui.setWidget("den-subagent", [`Drift ${status}`, `Message #${result.message_id ?? (parsed.post_result === false ? "not posted" : "not posted")}`, oneLine(result.content, 180)]);
       ctx.ui.notify(`Drift sentinel for task #${parsed.task_id}: ${status}.`, result.parsed.risk === "high" ? "error" : "info");
     },
   });
@@ -1875,7 +1876,7 @@ function formatResultLines(result: SubagentResult): string[] {
   return [
     `${result.role} sub-agent ${status} (exit ${result.exit_code}${result.signal ? `, ${result.signal}` : ""})`,
     result.task_id ? `Task #${result.task_id}` : "No linked task",
-    oneLine(subagentSucceeded(result) ? result.final_output : formatFailureSummary(result)),
+    oneLine(subagentSucceeded(result) ? result.final_output : formatFailureSummary(result), 180),
   ];
 }
 
@@ -2029,17 +2030,17 @@ function formatProgressOpsBody(role: string, event: JsonObject): string {
     case "subagent.abort":
       return `${role} sub-agent abort requested.`;
     case "subagent.spawn_error":
-      return `${role} sub-agent spawn failed${typeof event.error === "string" ? `: ${oneLine(event.error)}` : ""}.`;
+      return `${role} sub-agent spawn failed${typeof event.error === "string" ? `: ${oneLine(event.error, 180)}` : ""}.`;
     case "subagent.work_turn_start":
       return `${role} sub-agent started a Pi turn.`;
     case "subagent.work_turn_end":
-      return `${role} sub-agent finished a Pi turn${typeof event.text_preview === "string" ? `: ${oneLine(event.text_preview)}` : ""}.`;
+      return `${role} sub-agent finished a Pi turn${typeof event.text_preview === "string" ? `: ${oneLine(event.text_preview, 180)}` : ""}.`;
     case "subagent.work_tool_start":
-      return `${role} sub-agent started tool ${formatWorkToolName(event)}${typeof event.args_preview === "string" ? `: ${oneLine(event.args_preview)}` : ""}.`;
+      return `${role} sub-agent started tool ${formatWorkToolName(event)}${typeof event.args_preview === "string" ? `: ${oneLine(event.args_preview, 180)}` : ""}.`;
     case "subagent.work_tool_end":
-      return `${role} sub-agent finished tool ${formatWorkToolName(event)}${event.is_error === true ? " with error" : ""}${typeof event.result_preview === "string" ? `: ${oneLine(event.result_preview)}` : ""}.`;
+      return `${role} sub-agent finished tool ${formatWorkToolName(event)}${event.is_error === true ? " with error" : ""}${typeof event.result_preview === "string" ? `: ${oneLine(event.result_preview, 180)}` : ""}.`;
     case "subagent.work_message_end":
-      return `${role} sub-agent produced an assistant message${typeof event.text_preview === "string" ? `: ${oneLine(event.text_preview)}` : ""}.`;
+      return `${role} sub-agent produced an assistant message${typeof event.text_preview === "string" ? `: ${oneLine(event.text_preview, 180)}` : ""}.`;
     default:
       return `${role} sub-agent progress update.`;
   }
@@ -2365,10 +2366,6 @@ function makeRunId(cfg: DenConfig, options: RunOptions): string {
     .slice(0, 16);
 }
 
-function normalizeString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
 function optionalNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
@@ -2384,10 +2381,6 @@ function baseUrlFromEnv(): string {
 function isPathInside(cwd: string, rootPath: string): boolean {
   const normalizedRoot = path.resolve(rootPath);
   return cwd === normalizedRoot || cwd.startsWith(`${normalizedRoot}${path.sep}`);
-}
-
-function oneLine(value: string): string {
-  return value.replace(/\s+/g, " ").trim().slice(0, 180);
 }
 
 function esc(value: string): string {
