@@ -391,6 +391,26 @@ test('buildImplementationPacketMeta prefers final head commit over launch head f
 // findDuplicateImplementationPacketMessage
 // ---------------------------------------------------------------------------
 
+test('findDuplicateImplementationPacketMessage handles empty and malformed message inputs', () => {
+  assert.equal(findDuplicateImplementationPacketMessage([], {
+    run_id: 'auto-run',
+    task_id: 940,
+    branch: 'task/940',
+    head_commit: 'abc1234',
+  }), undefined);
+
+  assert.equal(findDuplicateImplementationPacketMessage([
+    { id: 1, task_id: 940 },
+    { id: 2, task_id: 940, metadata: null },
+    { id: 3, task_id: 940, metadata: '{not json' },
+  ], {
+    run_id: 'auto-run',
+    task_id: 940,
+    branch: 'task/940',
+    head_commit: 'abc1234',
+  }), undefined);
+});
+
 test('findDuplicateImplementationPacketMessage prefers exact run id matches', () => {
   const messages = [
     { id: 1, task_id: 940, metadata: { type: 'implementation_packet', run_id: 'older-run', branch: 'task/a', head_commit: 'abc1234' } },
