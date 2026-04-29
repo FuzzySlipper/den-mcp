@@ -236,9 +236,12 @@ test('formatDriftCheckPacketMessage omits Task section when task fields are abse
 
   const message = formatDriftCheckPacketMessage(result);
 
+  const h2Headings = message.match(/^## .+$/gm) ?? [];
+
   assert.ok(message.includes('# Drift Check Packet'));
-  assert.ok(!message.includes('## Task\n'));
-  assert.ok(message.includes('## Branch and Base'));
+  assert.ok(!h2Headings.includes('## Task'));
+  assert.equal(h2Headings[0], '## Branch and Base');
+  assert.match(message, /\*\*Recommendation:\*\* flag-for-review\n\n## Branch and Base/);
 });
 
 test('extractTaskIntentFromContextPacket prefers user intent', () => {
