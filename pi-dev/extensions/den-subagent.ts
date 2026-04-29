@@ -102,6 +102,12 @@ import {
   parseStringList,
   tokenizeArgs,
 } from "../lib/den-drift-cmd-helpers.ts";
+import {
+  buildValidationPacketMeta,
+  formatValidationPacketMessage,
+  parseValidationArgs as parseValidationArgsImpl,
+  runValidation,
+} from "../lib/den-validation-packet.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -483,6 +489,54 @@ export default function denSubagent(pi: ExtensionAPI) {
       };
     },
   });
+
+  // -----------------------------------------------------------------------
+  // Validation packet — conductor-facing tool & command
+  // -----------------------------------------------------------------------
+
+  pi.registerCommand("den-validate", {
+    description: "Run validation commands for a task and post a validation_packet. Usage: /den-validate <task_id> [--commands <json>] [--timeout <ms>] [--no-post]",
+    handler: async (args, ctx) => {
+      const cfg = await resolveConfig(ctx);
+      const parsed = parseValidationArgs(args);
+      const result = await runAndMaybePostValidation(cfg, parsed, ctx.cwd);
+      ctx.ui.setWidget("den-subagent", [`Validation: ${result.run_result.status}`, `Message #${result.message_id ?? (parsed.post_result === false ? "not posted" : "posted")}`, ...result.run_result.command_results.map((r) => `${r.status}: ${r.command}`).slice(0, 5)]);
+      ctx.ui.notify(`Validation for task #${parsed.task_id}: ${result.run_result.status}.`, result.run_result.status === "pass" ? "info" : "error");
+    },
+  });
+
+  pi.registerTool({
+    name: "den_validate",
+    label: "Den Validate",
+    description: "Run validation commands for a task branch, collect deterministic pass/fail/blocked results, and post a validation_packet to the Den task thread.",
+    parameters: Type.Object({
+      task_id: Type.Number({ description: "Den task ID to validate." }),
+      cwd: Type.Optional(Type.String({ description: "Working tree path. Defaults to current Pi cwd." })),
+      branch: Type.Optional(Type.String({ description: "Branch name for the validation context." })),
+      base_commit: Type.Optional(Type.String({ description: "Base commit for the validation context." })),
+      head_commit: Type.Optional(Type.String({ description: "Head commit being validated." })),
+      commands: Type.Optional(Type.String({ description: "JSON array or newline-separated list of test/validation commands to execute." })),
+      timeout_ms: Type.Optional(Type.Number({ description: "Timeout per command in milliseconds. Default: 120000." })),
+      post_result: Type.Optional(Type.Boolean({ description: "Post validation_packet to Den. Defaults true." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const cfg = await resolveConfig(ctx);
+      const result = await runAndMaybePostValidation(cfg, {
+        task_id: params.task_id,
+        cwd: normalizeString(params.cwd),
+        branch: normalizeString(params.branch),
+        base_commit: normalizeString(params.base_commit),
+        head_commit: normalizeString(params.head_commit),
+        commands: parseStringList(params.commands),
+        timeout_ms: typeof params.timeout_ms === "number" ? params.timeout_ms : undefined,
+        post_result: typeof params.post_result === "boolean" ? params.post_result : undefined,
+      }, ctx.cwd);
+      return {
+        content: [{ type: "text", text: `${result.content.slice(0, 4000)}${result.message_id ? `\n\nPosted message #${result.message_id}.` : ""}` }],
+        details: { status: result.run_result.status, message_id: result.message_id ?? null },
+      };
+    },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -753,6 +807,119 @@ async function runAndMaybePostDriftCheck(
   }
 
   return { analysis, content, message_id: messageId };
+}
+
+// ---------------------------------------------------------------------------
+// Validation packet internals
+// ---------------------------------------------------------------------------
+
+function parseValidationArgs(args: string | undefined) {
+  return parseValidationArgsImpl(args);
+}
+
+async function runAndMaybePostValidation(
+  cfg: DenConfig,
+  options: {
+    task_id: number;
+    cwd?: string;
+    branch?: string;
+    base_commit?: string;
+    head_commit?: string;
+    commands?: string[];
+    timeout_ms?: number;
+    post_result?: boolean;
+  },
+  defaultCwd: string,
+): Promise<{ run_result: ReturnType<typeof runValidation> extends Promise<infer T> ? T : never; content: string; message_id?: number }> {
+  const cwd = options.cwd ?? defaultCwd;
+
+  // Resolve commands: explicit > implementation_packet > coder_context_packet.
+  let commands = options.commands;
+  if (!commands || commands.length === 0) {
+    const messages = await getTaskMessages(cfg, options.task_id);
+    const implementationPacket = latestStructuredMessage(messages, "implementation_packet");
+    const contextPacket = latestStructuredMessage(messages, "coder_context_packet");
+
+    // Try declared tests from implementation packet.
+    if (implementationPacket?.content) {
+      const declaredTests = extractDeclaredTestsFromImplementationPacket(implementationPacket.content);
+      if (declaredTests.length > 0) commands = declaredTests;
+    }
+
+    // Try validation_commands from context packet.
+    if ((!commands || commands.length === 0) && contextPacket?.content) {
+      commands = extractValidationCommandsFromContextPacket(contextPacket.content);
+    }
+  }
+
+  // Collect branch/head from context if not provided.
+  if (!options.branch || !options.head_commit) {
+    const messages = await getTaskMessages(cfg, options.task_id);
+    const contextPacket = latestStructuredMessage(messages, "coder_context_packet");
+    const contextMeta = metadataObject(contextPacket);
+    const implementationPacket = latestStructuredMessage(messages, "implementation_packet");
+    const implMeta = metadataObject(implementationPacket);
+    if (!options.branch) options.branch = metadataString(contextMeta, "branch") ?? metadataString(implMeta, "final_branch") ?? metadataString(implMeta, "branch");
+    if (!options.head_commit) options.head_commit = metadataString(implMeta, "final_head_commit") ?? metadataString(implMeta, "head_commit") ?? metadataString(contextMeta, "base_commit");
+  }
+
+  const runResult = await runValidation({
+    task_id: options.task_id,
+    branch: options.branch,
+    base_commit: options.base_commit,
+    head_commit: options.head_commit,
+    cwd,
+    commands: commands ?? [],
+    timeout_ms: options.timeout_ms,
+  });
+
+  const content = formatValidationPacketMessage(runResult);
+
+  let messageId: number | undefined;
+  if (options.post_result ?? true) {
+    const postResult = await sendTaskMessage(cfg, options.task_id, content, buildValidationPacketMeta(runResult));
+    messageId = optionalNumber(postResult?.id);
+    await appendPacketLifecycleOps(cfg, options.task_id, "validation_packet", messageId, {
+      branch: runResult.branch ?? null,
+      head_commit: runResult.head_commit ?? null,
+      status: runResult.status,
+    });
+  }
+
+  return { run_result: runResult, content, message_id: messageId };
+}
+
+/** Extract validation_commands from a coder_context_packet body. */
+function extractValidationCommandsFromContextPacket(content: string): string[] {
+  const section = extractMarkdownSectionFromText(content, /validation\s+commands?/i);
+  if (!section) return [];
+  return parseListOrLinesFromText(section);
+}
+
+function extractMarkdownSectionFromText(content: string, heading: RegExp): string | undefined {
+  const headingRegex = /^#{1,6}\s+([^\n]+)/gmi;
+  let match: RegExpExecArray | null;
+  while ((match = headingRegex.exec(content)) !== null) {
+    if (!heading.test(match[1])) continue;
+    const start = headingRegex.lastIndex;
+    const rest = content.slice(start);
+    const next = rest.match(/\n#{1,6}\s+/m);
+    const section = next ? rest.slice(0, next.index) : rest;
+    const trimmed = section.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+  return undefined;
+}
+
+function parseListOrLinesFromText(section: string): string[] {
+  const items: string[] = [];
+  for (const line of section.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const bullet = trimmed.match(/^[-*]\s+(.+)$/);
+    items.push(bullet ? bullet[1].trim() : trimmed);
+  }
+  return items;
 }
 
 async function getTaskMessages(cfg: DenConfig, taskId: number): Promise<any[]> {
