@@ -260,13 +260,15 @@ public sealed class TaskTools
         [Description("Optional notes explaining this status transition; use for current verification/status evidence.")] string? status_notes = null,
         [Description("Optional follow-up task ID. Required for split_to_follow_up and rejected for all other statuses.")] int? follow_up_task_id = null)
     {
+        var parsedStatus = status is not null ? EnumExtensions.ParseReviewFindingStatus(status) : (ReviewFindingStatus?)null;
+        ValidateFollowUpStatusCombination(parsedStatus, follow_up_task_id);
         await ValidateFollowUpTaskProjectAsync(repo, taskRepo, review_finding_id, follow_up_task_id);
 
         var updated = await repo.RespondAsync(review_finding_id, new RespondToReviewFindingInput
         {
             RespondedBy = responded_by,
             ResponseNotes = response_notes,
-            Status = status is not null ? EnumExtensions.ParseReviewFindingStatus(status) : null,
+            Status = parsedStatus,
             StatusNotes = status_notes,
             FollowUpTaskId = follow_up_task_id
         });
@@ -283,11 +285,13 @@ public sealed class TaskTools
         [Description("Optional status/verification notes for this transition.")] string? notes = null,
         [Description("Optional follow-up task ID. Required for split_to_follow_up and rejected for all other statuses.")] int? follow_up_task_id = null)
     {
+        var parsedStatus = EnumExtensions.ParseReviewFindingStatus(status);
+        ValidateFollowUpStatusCombination(parsedStatus, follow_up_task_id);
         await ValidateFollowUpTaskProjectAsync(repo, taskRepo, review_finding_id, follow_up_task_id);
 
         var updated = await repo.SetStatusAsync(review_finding_id, new UpdateReviewFindingStatusInput
         {
-            Status = EnumExtensions.ParseReviewFindingStatus(status),
+            Status = parsedStatus,
             UpdatedBy = updated_by,
             Notes = notes,
             FollowUpTaskId = follow_up_task_id
@@ -402,6 +406,15 @@ public sealed class TaskTools
     {
         await repo.RemoveDependencyAsync(task_id, depends_on);
         return JsonSerializer.Serialize(new { message = $"Removed dependency: task {task_id} no longer depends on task {depends_on}." }, JsonOpts.Default);
+    }
+
+    private static void ValidateFollowUpStatusCombination(ReviewFindingStatus? status, int? followUpTaskId)
+    {
+        if (followUpTaskId is null)
+            return;
+
+        if (status != ReviewFindingStatus.SplitToFollowUp)
+            throw new InvalidOperationException("follow_up_task_id can only be supplied when status is split_to_follow_up.");
     }
 
     private static async Task ValidateFollowUpTaskProjectAsync(

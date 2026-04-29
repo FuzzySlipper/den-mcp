@@ -230,6 +230,120 @@ public class ReviewFindingApiTests : IAsyncLifetime
         Assert.Contains("same project", ex.Message);
     }
 
+    [Fact]
+    public async Task McpSetReviewFindingStatus_RejectsNonSplitFollowUp_WithoutLookingUpFollowUpTask()
+    {
+        var (task, round) = await CreateRoundAsync();
+        var finding = await CreateFindingAsync(task.Id, round.Id);
+
+        using var scope = _factory.Services.CreateScope();
+        var findingRepo = scope.ServiceProvider.GetRequiredService<IReviewFindingRepository>();
+        var taskRepo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+
+        // Non-existent follow_up_task_id with a non-split status.
+        // Early validation should reject before looking up the follow-up task.
+        // If validation ordering were broken, GetByIdAsync(99999) would throw KeyNotFoundException.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => TaskTools.SetReviewFindingStatus(
+            findingRepo,
+            taskRepo,
+            finding.Id,
+            "verified_fixed",
+            "codex",
+            follow_up_task_id: 99999));
+
+        Assert.Contains("follow_up_task_id", ex.Message);
+    }
+
+    [Fact]
+    public async Task McpRespondToReviewFinding_RejectsNonSplitFollowUp_WithoutLookingUpFollowUpTask()
+    {
+        var (task, round) = await CreateRoundAsync();
+        var finding = await CreateFindingAsync(task.Id, round.Id);
+
+        using var scope = _factory.Services.CreateScope();
+        var findingRepo = scope.ServiceProvider.GetRequiredService<IReviewFindingRepository>();
+        var taskRepo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+
+        // Non-existent follow_up_task_id with a non-split status.
+        // Early validation should reject before looking up the follow-up task.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => TaskTools.RespondToReviewFinding(
+            findingRepo,
+            taskRepo,
+            finding.Id,
+            "claude-code",
+            status: "claimed_fixed",
+            follow_up_task_id: 99999));
+
+        Assert.Contains("follow_up_task_id", ex.Message);
+    }
+
+    [Fact]
+    public async Task McpRespondToReviewFinding_RejectsFollowUpWithNullStatus_WithoutLookingUpFollowUpTask()
+    {
+        var (task, round) = await CreateRoundAsync();
+        var finding = await CreateFindingAsync(task.Id, round.Id);
+
+        using var scope = _factory.Services.CreateScope();
+        var findingRepo = scope.ServiceProvider.GetRequiredService<IReviewFindingRepository>();
+        var taskRepo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+
+        // Non-existent follow_up_task_id with null status.
+        // Early validation should reject before looking up the follow-up task.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => TaskTools.RespondToReviewFinding(
+            findingRepo,
+            taskRepo,
+            finding.Id,
+            "claude-code",
+            response_notes: "some response",
+            follow_up_task_id: 99999));
+
+        Assert.Contains("follow_up_task_id", ex.Message);
+    }
+
+    [Fact]
+    public async Task ApiSetReviewFindingStatus_RejectsNonSplitFollowUp_WithoutLookingUpFollowUpTask()
+    {
+        var (task, round) = await CreateRoundAsync();
+        var finding = await CreateFindingAsync(task.Id, round.Id);
+
+        // Non-existent follow_up_task_id with a non-split status.
+        // Early validation should reject before looking up the follow-up task.
+        var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{ProjectId}/tasks/{task.Id}/review-findings/{finding.Id}/status",
+            new
+            {
+                status = "verified_fixed",
+                updated_by = "codex",
+                follow_up_task_id = 99999
+            });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadAsStringAsync();
+        Assert.Contains("follow_up_task_id", error);
+    }
+
+    [Fact]
+    public async Task ApiRespondToReviewFinding_RejectsNonSplitFollowUp_WithoutLookingUpFollowUpTask()
+    {
+        var (task, round) = await CreateRoundAsync();
+        var finding = await CreateFindingAsync(task.Id, round.Id);
+
+        // Non-existent follow_up_task_id with a non-split status.
+        // Early validation should reject before looking up the follow-up task.
+        var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{ProjectId}/tasks/{task.Id}/review-findings/{finding.Id}/response",
+            new
+            {
+                responded_by = "claude-code",
+                status = "claimed_fixed",
+                follow_up_task_id = 99999
+            });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadAsStringAsync();
+        Assert.Contains("follow_up_task_id", error);
+    }
+
     private async Task<(ProjectTask Task, ReviewRound Round)> CreateRoundAsync()
     {
         var task = await CreateTaskAsync("Review target");
