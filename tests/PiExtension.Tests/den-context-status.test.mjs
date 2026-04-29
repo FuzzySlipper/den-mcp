@@ -219,7 +219,7 @@ test('den_compact_context requests Pi compaction with conductor instructions', a
   assert.deepEqual(notifications, [{ message: 'Den conductor context compaction completed.', level: 'info' }]);
 });
 
-test('den_compact_context tool execute triggers compact through extension context', async () => {
+test('den_compact_context tool execute triggers idle resume through extension context', async () => {
   const tools = [];
   const resumeMessages = [];
   denExtension({
@@ -236,6 +236,7 @@ test('den_compact_context tool execute triggers compact through extension contex
     safe_point_notes: 'Between tasks',
   }, undefined, undefined, {
     compact(options) { calls.push(options); },
+    isIdle() { return true; },
     ui: { notify() {} },
   });
 
@@ -244,6 +245,32 @@ test('den_compact_context tool execute triggers compact through extension contex
   assert.equal(result.details.resume_configured, true); // sendResumeMessage is wired up via extension closure
   assert.equal(calls.length, 1);
   assert.equal(calls[0].customInstructions, 'Keep Den handoffs');
+  calls[0].onComplete({ summary: 'test', firstKeptEntryId: 'abc', tokensBefore: 1000, details: {} });
+  assert.equal(resumeMessages.length, 1);
+  assert.equal(resumeMessages[0].options, undefined);
+});
+
+test('den_compact_context tool queues follow-up resume if context still reports busy', async () => {
+  const tools = [];
+  const resumeMessages = [];
+  denExtension({
+    on() {},
+    registerCommand() {},
+    registerTool(definition) { tools.push(definition); },
+    sendUserMessage(message, options) { resumeMessages.push({ message, options }); },
+  });
+  const tool = tools.find((entry) => entry.name === 'den_compact_context');
+  const calls = [];
+  const result = await tool.execute('call-1', {
+    durable_context_posted: true,
+  }, undefined, undefined, {
+    compact(options) { calls.push(options); },
+    isIdle() { return false; },
+    ui: { notify() {} },
+  });
+
+  assert.equal(result.isError, false);
+  assert.equal(result.details.resume_configured, true);
   calls[0].onComplete({ summary: 'test', firstKeptEntryId: 'abc', tokensBefore: 1000, details: {} });
   assert.equal(resumeMessages.length, 1);
   assert.deepEqual(resumeMessages[0].options, { deliverAs: 'followUp' });

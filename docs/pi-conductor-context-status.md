@@ -121,8 +121,16 @@ When enabled, the extension calls `pi.sendUserMessage()` from the compaction
 > Conductor context compaction completed. Re-read your current Den task/thread
 > state and continue with the next step.
 
-This triggers a new agent turn with the compacted context, allowing the
-conductor to continue without manual intervention.
+The live task `#976` smoke test showed that always queuing this message as
+`{ deliverAs: "followUp" }` could leave an already-idle post-compaction session
+waiting for operator input. The extension now checks the Pi context state at
+`onComplete`: if Pi reports the agent is idle, it sends the user message normally
+so Pi starts a new turn immediately; if Pi still reports the agent as busy, it
+queues the message as `{ deliverAs: "followUp" }`.
+
+This triggers a new agent turn with the compacted context when the callback can
+reach the active session, allowing the conductor to continue without manual
+intervention.
 
 The resume message intentionally asks the conductor to re-read Den state
 because compaction discards fine-grained context. The conductor should re-check
@@ -167,4 +175,5 @@ The `den_compact_context` tool and `/den-compact-context` command use
 `ctx.compact()` internally but add a deterministic resume step: when
 `resume_after_compaction` is enabled, the extension calls
 `pi.sendUserMessage()` in the `onComplete` callback to trigger a new conductor
-turn automatically.
+turn automatically. The callback sends normally when the session is idle and
+uses follow-up delivery only when the context still reports a busy agent.

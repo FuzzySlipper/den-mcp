@@ -395,7 +395,7 @@ export default function denExtension(pi: ExtensionAPI) {
         safePointNotes: "Manual /den-compact-context command invoked; command invocation asserts durable Den state is already recorded.",
         resumeAfterCompaction: true,
       }, {
-        sendResumeMessage: (message) => pi.sendUserMessage(message, { deliverAs: "followUp" }),
+        sendResumeMessage: (message) => sendPostCompactionResumeMessage(pi, ctx, message),
       });
       ctx.ui.setWidget("den-context-compaction", formatDenContextCompactionResult(result).split("\n"));
       ctx.ui.notify(
@@ -431,7 +431,7 @@ export default function denExtension(pi: ExtensionAPI) {
         safePointNotes: normalizeOptionalString(params?.safe_point_notes),
         resumeAfterCompaction: params?.resume_after_compaction !== false,
       }, {
-        sendResumeMessage: (message) => pi.sendUserMessage(message, { deliverAs: "followUp" }),
+        sendResumeMessage: (message) => sendPostCompactionResumeMessage(pi, ctx, message),
       });
       return buildDenContextCompactionToolResult(result);
     },
@@ -439,6 +439,15 @@ export default function denExtension(pi: ExtensionAPI) {
 
   // General Den data access is intentionally provided by the configured Den MCP server.
   // This extension keeps Pi-native session binding, TUI commands, and conductor UX only.
+}
+
+function sendPostCompactionResumeMessage(pi: ExtensionAPI, ctx: any, message: string) {
+  if (typeof ctx?.isIdle === "function" && ctx.isIdle()) {
+    pi.sendUserMessage(message);
+    return;
+  }
+
+  pi.sendUserMessage(message, { deliverAs: "followUp" });
 }
 
 async function resolveConfig(ctx: any): Promise<DenConfig> {
