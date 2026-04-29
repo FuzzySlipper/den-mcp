@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.Json;
 using DenMcp.Core.Data;
 using DenMcp.Core.Models;
@@ -253,7 +252,6 @@ public sealed class SubagentRunServiceTests : IDisposable
         var runRepo = new FakeAgentRunRepository(records);
         var service = new SubagentRunService(stream, runRepo);
 
-        var sw = Stopwatch.StartNew();
         var summaries = await service.ListAsync(new SubagentRunListOptions
         {
             ProjectId = "proj",
@@ -261,7 +259,6 @@ public sealed class SubagentRunServiceTests : IDisposable
             Limit = 50,
             SourceLimit = 0
         });
-        sw.Stop();
 
         Assert.Equal(runCount, summaries.Count);
 
@@ -275,10 +272,11 @@ public sealed class SubagentRunServiceTests : IDisposable
             Assert.Equal(2, summary.OperatorEvents.Count);
         }
 
-        // Performance: 50 runs with materialized counters should complete quickly
-        // without per-run event loading (which would need 50 stream queries).
-        Assert.True(sw.ElapsedMilliseconds < 500, $"ListAsync took {sw.ElapsedMilliseconds}ms for {runCount} runs; expected <500ms");
-        Assert.Equal(0, stream.GetByIdAsyncCallCount); // Should use batch load, not individual loads
+        // Performance guard: the deterministic signal is the query path, not wall-clock
+        // timing (which can flake on slow CI runners). This would have been 100+
+        // single-entry lookups before the materialized/batched list projection.
+        Assert.Equal(0, stream.GetByIdAsyncCallCount);
+        Assert.True(stream.GetByIdsAsyncCallCount <= 2, $"Expected ≤2 GetByIdsAsync calls, got {stream.GetByIdsAsyncCallCount}");
     }
 
     [Fact]
@@ -403,7 +401,11 @@ public sealed class SubagentRunServiceTests : IDisposable
 
         public Task<List<AgentStreamEntry>> ListAsync(AgentStreamListOptions? options = null) =>
             Task.FromResult(entries
+                .Where(entry => options?.ProjectId is null || entry.ProjectId == options.ProjectId)
+                .Where(entry => options?.TaskId is null || entry.TaskId == options.TaskId)
+                .Where(entry => options?.StreamKind is null || entry.StreamKind == options.StreamKind)
                 .Where(entry => options?.MetadataRunId is null || entry.Metadata?.TryGetProperty("run_id", out var runId) == true && runId.GetString() == options.MetadataRunId)
+                .Take(Math.Clamp(options?.Limit ?? 50, 1, 200))
                 .ToList());
     }
 
