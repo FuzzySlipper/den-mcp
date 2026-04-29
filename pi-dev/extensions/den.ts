@@ -18,6 +18,12 @@ import {
   reasoningCaptureOptionsFromConfig,
 } from "../lib/den-extension-config.ts";
 import { errorMessage, normalizeString } from "../lib/den-string-utils.ts";
+import { Type } from "typebox";
+import {
+  compileResponse,
+  formatSessionSummary,
+  formatSessionDetail,
+} from "../lib/den-collaboration.ts";
 
 type JsonObject = Record<string, unknown>;
 
@@ -435,6 +441,307 @@ export default function denExtension(pi: ExtensionAPI) {
         sendResumeMessage: (message) => sendPostCompactionResumeMessage(pi, ctx, message),
       });
       return buildDenContextCompactionToolResult(result);
+    },
+  });
+
+  // -----------------------------------------------------------------------
+  // Collaboration session tools and commands
+  // -----------------------------------------------------------------------
+
+  pi.registerCommand("den-collab-create", {
+    description: "Create a collaboration session. Usage: /den-collab-create [--task <id>] [--title <text>] <markdown or - for last assistant>",
+    handler: async (args, ctx) => {
+      const cfg = await requireConfig(ctx);
+      const result = await handleCollabCreate(cfg, args, ctx);
+      ctx.ui.setWidget("den-collab", result.lines);
+      ctx.ui.notify(result.lines.join("\n"), "info");
+    },
+  });
+
+  pi.registerCommand("den-collab-list", {
+    description: "List collaboration sessions. Usage: /den-collab-list [--task <id>] [--status active|resolved|archived]",
+    handler: async (args, ctx) => {
+      const cfg = await requireConfig(ctx);
+      const result = await handleCollabList(cfg, args);
+      ctx.ui.setWidget("den-collab", result.lines);
+      ctx.ui.notify(result.lines.join("\n"), result.lines.length > 0 ? "info" : "warning");
+    },
+  });
+
+  pi.registerCommand("den-collab-open", {
+    description: "Open a collaboration session detail. Usage: /den-collab-open <session_id>",
+    handler: async (args, ctx) => {
+      const cfg = await requireConfig(ctx);
+      const sessionId = parseRequiredId(args, "session id");
+      const result = await handleCollabOpen(cfg, sessionId);
+      ctx.ui.setWidget("den-collab", result.lines);
+      ctx.ui.notify(result.summary, "info");
+    },
+  });
+
+  pi.registerCommand("den-collab-annotate", {
+    description: "Add an annotation to a session segment. Usage: /den-collab-annotate <session_id> <segment_id> <note|skip|done|flag> [body]",
+    handler: async (args, ctx) => {
+      const cfg = await requireConfig(ctx);
+      const result = await handleCollabAnnotate(cfg, args);
+      ctx.ui.notify(result.summary, "info");
+    },
+  });
+
+  pi.registerCommand("den-collab-compile", {
+    description: "Compile a response draft from session annotations. Usage: /den-collab-compile <session_id> [turn_id]",
+    handler: async (args, ctx) => {
+      const cfg = await requireConfig(ctx);
+      const result = await handleCollabCompile(cfg, args);
+      ctx.ui.setWidget("den-collab", result.lines);
+      ctx.ui.notify(result.summary, "info");
+    },
+  });
+
+  pi.registerCommand("den-collab-add-turn", {
+    description: "Add a new agent turn to a session. Usage: /den-collab-add-turn <session_id> <markdown>",
+    handler: async (args, ctx) => {
+      const cfg = await requireConfig(ctx);
+      const result = await handleCollabAddTurn(cfg, args, ctx);
+      ctx.ui.notify(result.summary, "info");
+    },
+  });
+
+  pi.registerCommand("den-collab-status", {
+    description: "Update session status. Usage: /den-collab-status <session_id> <expected_status> <new_status>",
+    handler: async (args, ctx) => {
+      const cfg = await requireConfig(ctx);
+      const result = await handleCollabStatus(cfg, args);
+      ctx.ui.notify(result.summary, "info");
+    },
+  });
+
+  // Collaboration tools available to LLM
+  pi.registerTool({
+    name: "den_collab_create_session",
+    label: "Den Create Collaboration Session",
+    description: "Create a Den collaboration session from markdown content with source context. Posts a session to Den so human or tooling can annotate segments.",
+    parameters: Type.Object({
+      raw_markdown: Type.String({ description: "Raw markdown content to annotate (e.g. agent response)." }),
+      project_id: Type.Optional(Type.String({ description: "Project ID. Defaults to current bound project." })),
+      task_id: Type.Optional(Type.Number({ description: "Optional Den task ID to link." })),
+      title: Type.Optional(Type.String({ description: "Optional session title." })),
+      role: Type.Optional(Type.String({ description: "Source role, e.g. assistant or user. Default: assistant." })),
+      source_kind: Type.Optional(Type.String({ description: "Source kind, e.g. den_message, pi_response, cli." })),
+      source_ref: Type.Optional(Type.String({ description: "Source reference ID." })),
+      source_uri: Type.Optional(Type.String({ description: "Source URI." })),
+      pi_run_id: Type.Optional(Type.String({ description: "Optional Pi run ID." })),
+      pi_session_id: Type.Optional(Type.String({ description: "Optional Pi session ID." })),
+      created_by: Type.Optional(Type.String({ description: "Who created the session. Defaults to bound agent." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const cfg = await requireConfig(ctx);
+      const result = await collabCreateSession(cfg, {
+        raw_markdown: params.raw_markdown,
+        project_id: normalizeString(params.project_id) ?? cfg.projectId,
+        task_id: optionalNumber(params.task_id),
+        title: normalizeString(params.title),
+        role: normalizeString(params.role) ?? "assistant",
+        source_kind: normalizeString(params.source_kind) ?? "pi_response",
+        source_ref: normalizeString(params.source_ref),
+        source_uri: normalizeString(params.source_uri),
+        pi_run_id: normalizeString(params.pi_run_id),
+        pi_session_id: normalizeString(params.pi_session_id),
+        created_by: normalizeString(params.created_by) ?? cfg.agent,
+      });
+      return { content: [{ type: "text", text: result.text }], details: { session_id: result.session?.id ?? null } };
+    },
+  });
+
+  pi.registerTool({
+    name: "den_collab_list_sessions",
+    label: "Den List Collaboration Sessions",
+    description: "List collaboration sessions for the current project, optionally filtered by task or status.",
+    parameters: Type.Object({
+      project_id: Type.Optional(Type.String({ description: "Project ID. Defaults to current bound project." })),
+      task_id: Type.Optional(Type.Number({ description: "Optional task ID filter." })),
+      status: Type.Optional(Type.String({ description: "Optional status filter: active, resolved, or archived." })),
+      limit: Type.Optional(Type.Number({ description: "Max results. Default 50." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const cfg = await requireConfig(ctx);
+      const projectId = normalizeString(params.project_id) ?? cfg.projectId;
+      const sessions = await collabListSessions(cfg, {
+        projectId,
+        taskId: optionalNumber(params.task_id),
+        status: normalizeString(params.status) as any,
+        limit: typeof params.limit === "number" ? params.limit : 50,
+      });
+      if (!Array.isArray(sessions) || sessions.length === 0) {
+        return { content: [{ type: "text", text: "No collaboration sessions found." }], details: { count: 0 } };
+      }
+      const lines = [`${sessions.length} collaboration session(s) for ${projectId}:`];
+      for (const session of sessions) {
+        lines.push(...formatSessionSummary(session, "  "));
+      }
+      return { content: [{ type: "text", text: lines.join("\n") }], details: { count: sessions.length } };
+    },
+  });
+
+  pi.registerTool({
+    name: "den_collab_get_session",
+    label: "Den Get Collaboration Session",
+    description: "Get full collaboration session details including turns, segments, annotations, and drafts.",
+    parameters: Type.Object({
+      session_id: Type.Number({ description: "Collaboration session ID." }),
+      project_id: Type.Optional(Type.String({ description: "Project ID. Defaults to current bound project." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const cfg = await requireConfig(ctx);
+      const projectId = normalizeString(params.project_id) ?? cfg.projectId;
+      const session = await collabGetSession(cfg, projectId, params.session_id);
+      const lines = formatSessionDetail(session);
+      return { content: [{ type: "text", text: lines.join("\n") }], details: { session_id: session.id, status: session.status ?? session.Status } };
+    },
+  });
+
+  pi.registerTool({
+    name: "den_collab_add_annotation",
+    label: "Den Add Collaboration Annotation",
+    description: "Add an annotation to a collaboration session segment. Types: note (comment), skip (no response needed), done (already handled), flag (needs discussion).",
+    parameters: Type.Object({
+      session_id: Type.Number({ description: "Collaboration session ID." }),
+      turn_id: Type.Number({ description: "Turn ID containing the segment." }),
+      segment_id: Type.Number({ description: "Segment ID to annotate." }),
+      annotation_type: Type.String({ description: "Annotation type: note, skip, done, or flag." }),
+      body: Type.Optional(Type.String({ description: "Optional annotation body text." })),
+      created_by: Type.Optional(Type.String({ description: "Who created the annotation. Defaults to bound agent." })),
+      project_id: Type.Optional(Type.String({ description: "Project ID. Defaults to current bound project." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const cfg = await requireConfig(ctx);
+      const projectId = normalizeString(params.project_id) ?? cfg.projectId;
+      const annotation = await collabCreateAnnotation(cfg, projectId, params.session_id, {
+        turn_id: params.turn_id,
+        segment_id: params.segment_id,
+        annotation_type: normalizeString(params.annotation_type) ?? "note",
+        body: normalizeString(params.body),
+        created_by: normalizeString(params.created_by) ?? cfg.agent,
+      });
+      return {
+        content: [{ type: "text", text: `Annotation #${annotation.id} created on segment #${params.segment_id} (${params.annotation_type}).` }],
+        details: { annotation_id: annotation.id, annotation_type: params.annotation_type },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "den_collab_update_annotation",
+    label: "Den Update Collaboration Annotation",
+    description: "Update an existing annotation's type, body, or revision (optimistic concurrency).",
+    parameters: Type.Object({
+      session_id: Type.Number({ description: "Collaboration session ID." }),
+      annotation_id: Type.Number({ description: "Annotation ID to update." }),
+      expected_revision: Type.Number({ description: "Expected current revision for optimistic concurrency." }),
+      annotation_type: Type.Optional(Type.String({ description: "New annotation type." })),
+      body: Type.Optional(Type.String({ description: "New annotation body." })),
+      updated_by: Type.Optional(Type.String({ description: "Who updated the annotation. Defaults to bound agent." })),
+      project_id: Type.Optional(Type.String({ description: "Project ID. Defaults to current bound project." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const cfg = await requireConfig(ctx);
+      const projectId = normalizeString(params.project_id) ?? cfg.projectId;
+      const updated = await collabUpdateAnnotation(cfg, projectId, params.session_id, {
+        annotation_id: params.annotation_id,
+        expected_revision: params.expected_revision,
+        annotation_type: normalizeString(params.annotation_type) ?? "note",
+        body: normalizeString(params.body),
+        updated_by: normalizeString(params.updated_by) ?? cfg.agent,
+      });
+      return {
+        content: [{ type: "text", text: `Annotation #${params.annotation_id} updated to revision ${updated.revision ?? updated.Revision}.` }],
+        details: { annotation_id: updated.id, revision: updated.revision ?? updated.Revision },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "den_collab_compile_response",
+    label: "Den Compile Collaboration Response",
+    description: "Compile session annotations into a structured response draft and optionally save it as a Den draft. Produces the same format as the server-side CollaborationResponseCompiler.",
+    parameters: Type.Object({
+      session_id: Type.Number({ description: "Collaboration session ID." }),
+      turn_id: Type.Optional(Type.Number({ description: "Optional turn ID to scope compilation. Uses latest turn when omitted." })),
+      save_draft: Type.Optional(Type.Boolean({ description: "Save the compiled response as a draft. Default: true." })),
+      project_id: Type.Optional(Type.String({ description: "Project ID. Defaults to current bound project." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const cfg = await requireConfig(ctx);
+      const projectId = normalizeString(params.project_id) ?? cfg.projectId;
+      const result = await collabCompileResponse(cfg, projectId, params.session_id, {
+        turnId: optionalNumber(params.turn_id),
+        saveDraft: params.save_draft !== false,
+      });
+      const lines = [
+        `Compiled response for session #${params.session_id}`,
+        `Segments: ${result.segmentCount}, Annotations: ${result.annotationCount}`,
+        `Draft saved: ${result.draftSaved}`,
+        "",
+        ...result.compiled.split("\n"),
+      ];
+      return { content: [{ type: "text", text: lines.join("\n") }], details: { segment_count: result.segmentCount, annotation_count: result.annotationCount, draft_saved: result.draftSaved } };
+    },
+  });
+
+  pi.registerTool({
+    name: "den_collab_add_turn",
+    label: "Den Add Collaboration Turn",
+    description: "Add a new annotatable turn to an existing collaboration session.",
+    parameters: Type.Object({
+      session_id: Type.Number({ description: "Collaboration session ID." }),
+      raw_markdown: Type.String({ description: "Raw markdown content for the new turn." }),
+      role: Type.Optional(Type.String({ description: "Source role. Default: assistant." })),
+      source_kind: Type.Optional(Type.String({ description: "Source kind." })),
+      source_ref: Type.Optional(Type.String({ description: "Source reference." })),
+      source_label: Type.Optional(Type.String({ description: "Source label." })),
+      source_uri: Type.Optional(Type.String({ description: "Source URI." })),
+      project_id: Type.Optional(Type.String({ description: "Project ID. Defaults to current bound project." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const cfg = await requireConfig(ctx);
+      const projectId = normalizeString(params.project_id) ?? cfg.projectId;
+      const turn = await collabAddTurn(cfg, projectId, params.session_id, {
+        raw_markdown: params.raw_markdown,
+        role: normalizeString(params.role) ?? "assistant",
+        source_kind: normalizeString(params.source_kind),
+        source_ref: normalizeString(params.source_ref),
+        source_label: normalizeString(params.source_label),
+        source_uri: normalizeString(params.source_uri),
+      });
+      const segments = Array.isArray(turn.segments ?? turn.Segments) ? (turn.segments ?? turn.Segments) : [];
+      return {
+        content: [{ type: "text", text: `Turn #${turn.id} added with ${segments.length} segment(s).` }],
+        details: { turn_id: turn.id, segment_count: segments.length },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "den_collab_update_session_status",
+    label: "Den Update Session Status",
+    description: "Update a collaboration session's status (active, resolved, archived) with optimistic concurrency check.",
+    parameters: Type.Object({
+      session_id: Type.Number({ description: "Collaboration session ID." }),
+      expected_status: Type.String({ description: "Expected current status for optimistic concurrency." }),
+      status: Type.String({ description: "New status: active, resolved, or archived." }),
+      project_id: Type.Optional(Type.String({ description: "Project ID. Defaults to current bound project." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const cfg = await requireConfig(ctx);
+      const projectId = normalizeString(params.project_id) ?? cfg.projectId;
+      const updated = await collabUpdateSessionStatus(cfg, projectId, params.session_id, {
+        expected_status: params.expected_status as any,
+        status: params.status as any,
+      });
+      return {
+        content: [{ type: "text", text: `Session #${params.session_id} status changed to ${updated.status ?? updated.Status}.` }],
+        details: { session_id: updated.id, status: updated.status ?? updated.Status },
+      };
     },
   });
 
@@ -998,6 +1305,480 @@ function formatUnboundStatus(ctx: any): string[] {
     "Start Pi inside a registered project root or set DEN_PI_PROJECT_ID explicitly.",
     `Base URL: ${baseUrlFromEnv()}`,
   ];
+}
+
+// ---------------------------------------------------------------------------
+// Collaboration creation helper (shared by command and tool)
+// ---------------------------------------------------------------------------
+
+async function collabCreateSession(
+  cfg: DenConfig,
+  options: {
+    raw_markdown: string;
+    project_id: string;
+    task_id?: number;
+    title?: string;
+    role: string;
+    source_kind: string;
+    source_ref?: string;
+    source_uri?: string;
+    pi_run_id?: string;
+    pi_session_id?: string;
+    created_by: string;
+  },
+): Promise<{ session: any; text: string }> {
+  const body: any = {
+    task_id: options.task_id,
+    title: options.title,
+    pi_run_id: options.pi_run_id,
+    pi_session_id: options.pi_session_id,
+    created_by: options.created_by,
+    initial_turn: {
+      role: options.role,
+      source_kind: options.source_kind,
+      source_ref: options.source_ref,
+      source_uri: options.source_uri,
+      source_context: {
+        taskId: options.task_id ?? null,
+        piSessionId: options.pi_session_id ?? null,
+      },
+      raw_markdown: options.raw_markdown,
+    },
+  };
+  // Remove undefined/null values
+  for (const key of Object.keys(body)) {
+    if (body[key] === undefined || body[key] === null) delete body[key];
+  }
+  for (const key of Object.keys(body.initial_turn)) {
+    if (body.initial_turn[key] === undefined || body.initial_turn[key] === null) delete body.initial_turn[key];
+  }
+  if (body.initial_turn.source_context && Object.keys(body.initial_turn.source_context).length === 0) {
+    delete body.initial_turn.source_context;
+  }
+
+  const session = await denFetch(cfg, `/api/projects/${esc(options.project_id)}/collaboration/sessions`, {
+    method: "POST",
+    body,
+  });
+
+  const summary = formatSessionSummary(session);
+  const text = [`Collaboration session #${session.id} created.`, ...summary].join("\n");
+  return { session, text };
+}
+
+async function collabListSessions(
+  cfg: DenConfig,
+  options: { projectId: string; taskId?: number; status?: string; limit: number },
+): Promise<any[]> {
+  const params: Record<string, string | number | undefined> = { limit: options.limit };
+  if (options.taskId) params.taskId = options.taskId;
+  if (options.status) params.status = options.status;
+  const sessions = await denFetch(cfg, `/api/projects/${esc(options.projectId)}/collaboration/sessions?${query(params)}`);
+  return Array.isArray(sessions) ? sessions : [];
+}
+
+async function collabGetSession(cfg: DenConfig, projectId: string, sessionId: number): Promise<any> {
+  return denFetch(cfg, `/api/projects/${esc(projectId)}/collaboration/sessions/${sessionId}`);
+}
+
+async function collabCreateAnnotation(
+  cfg: DenConfig,
+  projectId: string,
+  sessionId: number,
+  options: {
+    turn_id: number;
+    segment_id: number;
+    annotation_type: string;
+    body?: string;
+    created_by: string;
+  },
+): Promise<any> {
+  return denFetch(cfg, `/api/projects/${esc(projectId)}/collaboration/sessions/${sessionId}/turns/${options.turn_id}/annotations`, {
+    method: "POST",
+    body: {
+      segment_id: options.segment_id,
+      annotation_type: options.annotation_type,
+      body: options.body,
+      created_by: options.created_by,
+    },
+  });
+}
+
+async function collabUpdateAnnotation(
+  cfg: DenConfig,
+  projectId: string,
+  sessionId: number,
+  options: {
+    annotation_id: number;
+    expected_revision: number;
+    annotation_type: string;
+    body?: string;
+    updated_by: string;
+  },
+): Promise<any> {
+  return denFetch(cfg, `/api/projects/${esc(projectId)}/collaboration/sessions/${sessionId}/annotations/${options.annotation_id}`, {
+    method: "PUT",
+    body: {
+      expected_revision: options.expected_revision,
+      annotation_type: options.annotation_type,
+      body: options.body,
+      updated_by: options.updated_by,
+    },
+  });
+}
+
+async function collabAddTurn(
+  cfg: DenConfig,
+  projectId: string,
+  sessionId: number,
+  options: {
+    raw_markdown: string;
+    role: string;
+    source_kind?: string;
+    source_ref?: string;
+    source_label?: string;
+    source_uri?: string;
+  },
+): Promise<any> {
+  const body: any = {
+    role: options.role,
+    source_kind: options.source_kind,
+    source_ref: options.source_ref,
+    source_label: options.source_label,
+    source_uri: options.source_uri,
+    raw_markdown: options.raw_markdown,
+  };
+  for (const key of Object.keys(body)) {
+    if (body[key] === undefined) delete body[key];
+  }
+  return denFetch(cfg, `/api/projects/${esc(projectId)}/collaboration/sessions/${sessionId}/turns`, {
+    method: "POST",
+    body,
+  });
+}
+
+async function collabSaveDraft(
+  cfg: DenConfig,
+  projectId: string,
+  sessionId: number,
+  options: { turn_id?: number; content: string; created_by: string },
+): Promise<any> {
+  const body: any = {
+    turn_id: options.turn_id,
+    content: options.content,
+    created_by: options.created_by,
+  };
+  if (body.turn_id === undefined) delete body.turn_id;
+  return denFetch(cfg, `/api/projects/${esc(projectId)}/collaboration/sessions/${sessionId}/drafts`, {
+    method: "POST",
+    body,
+  });
+}
+
+async function collabUpdateSessionStatus(
+  cfg: DenConfig,
+  projectId: string,
+  sessionId: number,
+  options: { expected_status: string; status: string },
+): Promise<any> {
+  return denFetch(cfg, `/api/projects/${esc(projectId)}/collaboration/sessions/${sessionId}/status`, {
+    method: "PATCH",
+    body: {
+      expected_status: options.expected_status,
+      status: options.status,
+    },
+  });
+}
+
+async function collabCompileResponse(
+  cfg: DenConfig,
+  projectId: string,
+  sessionId: number,
+  options: { turnId?: number; saveDraft: boolean },
+): Promise<{ compiled: string; segmentCount: number; annotationCount: number; draftSaved: boolean }> {
+  const session = await collabGetSession(cfg, projectId, sessionId);
+
+  const turns = Array.isArray(session.turns ?? session.Turns) ? (session.turns ?? session.Turns) : [];
+  const annotations = Array.isArray(session.annotations ?? session.Annotations) ? (session.annotations ?? session.Annotations) : [];
+
+  // Find target turn
+  const targetTurn = options.turnId
+    ? turns.find((t: any) => (t.id ?? t.Id) === options.turnId)
+    : turns[turns.length - 1];
+
+  if (!targetTurn) {
+    throw new Error(`Turn ${options.turnId ?? "latest"} not found in session #${sessionId}.`);
+  }
+
+  const segments = Array.isArray(targetTurn.segments ?? targetTurn.Segments) ? (targetTurn.segments ?? targetTurn.Segments) : [];
+  const turnId = targetTurn.id ?? targetTurn.Id;
+
+  // Filter annotations to this turn
+  const turnAnnotations = annotations.filter((a: any) => (a.turn_id ?? a.TurnId ?? a.turnId) === turnId);
+
+  if (segments.length === 0) {
+    throw new Error(`Turn #${turnId} has no segments. Cannot compile response.`);
+  }
+
+  const compiled = compileResponse(segments, turnAnnotations);
+
+  let draftSaved = false;
+  if (options.saveDraft) {
+    await collabSaveDraft(cfg, projectId, sessionId, {
+      turn_id: turnId,
+      content: compiled,
+      created_by: cfg.agent,
+    });
+    draftSaved = true;
+  }
+
+  return { compiled, segmentCount: segments.length, annotationCount: turnAnnotations.length, draftSaved };
+}
+
+// ---------------------------------------------------------------------------
+// Collaboration command handlers
+// ---------------------------------------------------------------------------
+
+function optionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+async function handleCollabCreate(
+  cfg: DenConfig,
+  args: string | undefined,
+  ctx: any,
+): Promise<{ lines: string[] }> {
+  const trimmed = (args ?? "").trim();
+  let taskId: number | undefined;
+  let title: string | undefined;
+  let markdown = trimmed;
+
+  // Parse --task <id> and --title <text> flags
+  const taskMatch = trimmed.match(/^--task\s+(\d+)\s*/);
+  if (taskMatch) {
+    taskId = Number(taskMatch[1]);
+    markdown = trimmed.slice(taskMatch[0].length).trim();
+  }
+  // Parse --title with optional quotes
+  const titleMatch = markdown.match(/^--title\s+(["'])([^"']+)\1\s+|^--title\s+(\S+)\s*/);
+  if (titleMatch) {
+    title = titleMatch[2] ?? titleMatch[3];
+    markdown = markdown.slice(titleMatch[0].length).trim();
+  }
+
+  // If markdown is "-", try to get the last assistant message from Pi context
+  if (markdown === "-" || !markdown) {
+    const lastAssistant = await getLastAssistantResponse(ctx);
+    if (lastAssistant) {
+      markdown = lastAssistant;
+    } else {
+      throw new Error("No assistant response available. Provide markdown content or type '-' to use the last assistant response.");
+    }
+  }
+
+  const result = await collabCreateSession(cfg, {
+    raw_markdown: markdown,
+    project_id: cfg.projectId,
+    task_id: taskId ?? currentTaskId,
+    title: title ?? undefined,
+    role: "assistant",
+    source_kind: "pi_response",
+    created_by: cfg.agent,
+    pi_run_id: cfg.instanceId,
+    pi_session_id: cfg.sessionId,
+  });
+
+  return { lines: result.text.split("\n") };
+}
+
+async function getLastAssistantResponse(ctx: any): Promise<string | undefined> {
+  // Try to get the last assistant message from the Pi session context
+  try {
+    if (typeof ctx?.getLastAssistantResponse === "function") {
+      return await ctx.getLastAssistantResponse();
+    }
+    if (typeof ctx?.getMessages === "function") {
+      const messages = ctx.getMessages();
+      if (Array.isArray(messages)) {
+        for (let i = messages.length - 1; i >= 0; i--) {
+          const msg = messages[i];
+          if (msg?.role === "assistant" && typeof msg?.content === "string" && msg.content.trim()) {
+            return msg.content;
+          }
+        }
+      }
+    }
+  } catch {
+    // Best-effort
+  }
+  return undefined;
+}
+
+async function handleCollabList(
+  cfg: DenConfig,
+  args: string | undefined,
+): Promise<{ lines: string[] }> {
+  const trimmed = (args ?? "").trim();
+  let taskId: number | undefined;
+  let status: string | undefined;
+
+  const taskMatch = trimmed.match(/--task\s+(\d+)/);
+  if (taskMatch) taskId = Number(taskMatch[1]);
+  const statusMatch = trimmed.match(/--status\s+(\S+)/);
+  if (statusMatch) status = statusMatch[1];
+
+  const sessions = await collabListSessions(cfg, {
+    projectId: cfg.projectId,
+    taskId: taskId ?? currentTaskId,
+    status,
+    limit: 50,
+  });
+
+  if (!Array.isArray(sessions) || sessions.length === 0) {
+    return { lines: ["No collaboration sessions found."] };
+  }
+
+  const lines = [`${sessions.length} collaboration session(s):`, ""];
+  for (const session of sessions) {
+    lines.push(...formatSessionSummary(session));
+    lines.push("");
+  }
+  return { lines };
+}
+
+async function handleCollabOpen(
+  cfg: DenConfig,
+  sessionId: number,
+): Promise<{ lines: string[]; summary: string }> {
+  const session = await collabGetSession(cfg, cfg.projectId, sessionId);
+  const lines = formatSessionDetail(session);
+  const title = session.title ?? `Session #${sessionId}`;
+  return { lines, summary: `Opened ${title}` };
+}
+
+async function handleCollabAnnotate(
+  cfg: DenConfig,
+  args: string | undefined,
+): Promise<{ summary: string }> {
+  // Parse: <session_id> <segment_id> <note|skip|done|flag> [body...]
+  const parts = (args ?? "").trim().split(/\s+/);
+  if (parts.length < 3) throw new Error("Usage: /den-collab-annotate <session_id> <segment_id> <note|skip|done|flag> [body]");
+
+  const sessionId = Number(parts[0]);
+  if (!Number.isInteger(sessionId) || sessionId <= 0) throw new Error("Expected valid session_id.");
+  const segmentId = Number(parts[1]);
+  if (!Number.isInteger(segmentId) || segmentId <= 0) throw new Error("Expected valid segment_id.");
+  const annotationType = parts[2];
+  if (!["note", "skip", "done", "flag"].includes(annotationType)) throw new Error("Annotation type must be note, skip, done, or flag.");
+  const body = parts.slice(3).join(" ").trim() || undefined;
+
+  // Resolve turn_id from session
+  const session = await collabGetSession(cfg, cfg.projectId, sessionId);
+  const turns = Array.isArray(session.turns ?? session.Turns) ? (session.turns ?? session.Turns) : [];
+  if (turns.length === 0) throw new Error(`Session #${sessionId} has no turns.`);
+
+  // Find the turn that contains this segment
+  let turnId: number | undefined;
+  for (const turn of turns) {
+    const segments = Array.isArray(turn.segments ?? turn.Segments) ? (turn.segments ?? turn.Segments) : [];
+    if (segments.some((s: any) => (s.id ?? s.Id) === segmentId)) {
+      turnId = turn.id ?? turn.Id;
+      break;
+    }
+  }
+  if (!turnId) throw new Error(`Segment #${segmentId} not found in session #${sessionId}. Use /den-collab-open ${sessionId} to list available segments.`);
+
+  const annotation = await collabCreateAnnotation(cfg, cfg.projectId, sessionId, {
+    turn_id: turnId,
+    segment_id: segmentId,
+    annotation_type: annotationType,
+    body,
+    created_by: cfg.agent,
+  });
+
+  return { summary: `Annotation #${annotation.id} (${annotationType}) created on segment #${segmentId}.` };
+}
+
+async function handleCollabCompile(
+  cfg: DenConfig,
+  args: string | undefined,
+): Promise<{ lines: string[]; summary: string }> {
+  const parts = (args ?? "").trim().split(/\s+/);
+  if (parts.length < 1) throw new Error("Usage: /den-collab-compile <session_id> [turn_id]");
+
+  const sessionId = Number(parts[0]);
+  if (!Number.isInteger(sessionId) || sessionId <= 0) throw new Error("Expected valid session_id.");
+  const turnId = parts.length > 1 ? Number(parts[1]) : undefined;
+
+  const result = await collabCompileResponse(cfg, cfg.projectId, sessionId, {
+    turnId: turnId && Number.isInteger(turnId) && turnId > 0 ? turnId : undefined,
+    saveDraft: true,
+  });
+
+  const lines = [
+    `Compiled response for session #${sessionId} (turn ${result.segmentCount} segments, ${result.annotationCount} annotations):`,
+    `Draft saved: ${result.draftSaved}`,
+    "",
+    ...result.compiled.split("\n"),
+  ];
+  return { lines, summary: `Compiled response draft for session #${sessionId}.` };
+}
+
+async function handleCollabAddTurn(
+  cfg: DenConfig,
+  args: string | undefined,
+  ctx: any,
+): Promise<{ summary: string }> {
+  // Parse: <session_id> <markdown or ->
+  const trimmed = (args ?? "").trim();
+  const parts = trimmed.match(/^(\d+)\s+([\s\S]*)$/);
+  if (!parts) throw new Error("Usage: /den-collab-add-turn <session_id> <markdown>");
+
+  const sessionId = Number(parts[1]);
+  if (!Number.isInteger(sessionId) || sessionId <= 0) throw new Error("Expected valid session_id.");
+  let markdown = parts[2].trim();
+
+  if (markdown === "-" || !markdown) {
+    const lastAssistant = await getLastAssistantResponse(ctx);
+    if (lastAssistant) {
+      markdown = lastAssistant;
+    } else {
+      throw new Error("No assistant response available.");
+    }
+  }
+
+  const turn = await collabAddTurn(cfg, cfg.projectId, sessionId, {
+    raw_markdown: markdown,
+    role: "assistant",
+    source_kind: "pi_response",
+  });
+
+  const segments = Array.isArray(turn.segments ?? turn.Segments) ? (turn.segments ?? turn.Segments) : [];
+  return { summary: `Turn added to session #${sessionId} with ${segments.length} segment(s).` };
+}
+
+async function handleCollabStatus(
+  cfg: DenConfig,
+  args: string | undefined,
+): Promise<{ summary: string }> {
+  const parts = (args ?? "").trim().split(/\s+/);
+  if (parts.length < 3) throw new Error("Usage: /den-collab-status <session_id> <expected_status> <new_status>");
+
+  const sessionId = Number(parts[0]);
+  if (!Number.isInteger(sessionId) || sessionId <= 0) throw new Error("Expected valid session_id.");
+  const expectedStatus = parts[1];
+  const newStatus = parts[2];
+
+  const validStatuses = ["active", "resolved", "archived"];
+  if (!validStatuses.includes(expectedStatus)) throw new Error(`Expected status must be one of: ${validStatuses.join(", ")}`);
+  if (!validStatuses.includes(newStatus)) throw new Error(`New status must be one of: ${validStatuses.join(", ")}`);
+
+  const updated = await collabUpdateSessionStatus(cfg, cfg.projectId, sessionId, {
+    expected_status: expectedStatus,
+    status: newStatus,
+  });
+
+  return { summary: `Session #${sessionId} status changed from ${expectedStatus} to ${newStatus}.` };
 }
 
 function query(values: Record<string, string | number | undefined>): string {

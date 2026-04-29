@@ -316,6 +316,160 @@ The intended next shape is:
 The important distinction is user-facing conductor versus non-user-facing
 sub-agent run, not "coder terminal" versus "reviewer terminal."
 
+## Collaboration Sessions
+
+Pi-facing collaboration session tooling lets humans and agents create, read,
+annotate, and compile Den-backed collaboration sessions without requiring the
+Den Desktop UI.
+
+The feature is built on the Den collaboration REST API (`Task #916` API/model
+and `Task #921` segmenter/compiler) and exposed through Pi extension tools and
+commands.
+
+### Tools (model-callable)
+
+```text
+den_collab_create_session        Create a collaboration session from markdown content
+den_collab_list_sessions         List sessions for the current project
+den_collab_get_session           Get full session detail with segments/annotations/drafts
+den_collab_add_annotation        Add a note/skip/done/flag annotation to a segment
+den_collab_update_annotation     Update an existing annotation (optimistic concurrency)
+den_collab_compile_response      Compile annotations into a structured response draft
+den_collab_add_turn              Add a new annotatable turn to a session
+den_collab_update_session_status Change session status (active/resolved/archived)
+```
+
+### Commands (human Pi TUI)
+
+```text
+/den-collab-create [--task <id>] [--title <text>] <markdown or ->
+/den-collab-list [--task <id>] [--status active|resolved|archived]
+/den-collab-open <session_id>
+/den-collab-annotate <session_id> <segment_id> <note|skip|done|flag> [body]
+/den-collab-compile <session_id> [turn_id]
+/den-collab-add-turn <session_id> <markdown or ->
+/den-collab-status <session_id> <expected_status> <new_status>
+```
+
+### Workflow examples
+
+**Human starts a collaboration session from the last assistant response:**
+
+```text
+/den-collab-create - --title "Annotate architecture plan"
+
+Session #42 created.
+  Session #42: Annotate architecture plan [active]
+  Task #918
+  Pi run: pi-den-mcp-abc123
+  Created by: pi
+  Turns: 1
+  Segments: 7
+```
+
+**Agent creates a session programmatically:**
+
+Via `den_collab_create_session` tool with `raw_markdown`, `task_id`, `source_kind:"den_message"`, `source_ref:"2614"`, etc.
+
+**List pending sessions for the current task:**
+
+```text
+/den-collab-list --task 918
+
+2 collaboration session(s):
+
+  Session #42: Annotate architecture plan [active]
+    Task #918
+    Created by: pi
+    Turns: 1
+    Segments: 7
+
+  Session #15: Review PR comments [active]
+    Created by: user
+    Turns: 2
+    Annotations: 4
+```
+
+**Open a session to see segments and annotations:**
+
+```text
+/den-collab-open 42
+
+Session #42: Annotate architecture plan [active]
+  Task #918
+  ...
+
+--- Turn #1 (assistant, pi_response) ---
+  [1] heading: # Architecture Plan
+  [2] paragraph: We recommend using Den for session persistence...
+  [3] code_block: [code block: const session = await collabCrea...]
+  [4] paragraph: The tooling layer should expose...
+
+--- Annotations ---
+  [note]: Consider adding a delete endpoint too (user)
+  [flag]: Needs discussion on auth model (user)
+```
+
+**Annotate a segment:**
+
+```text
+/den-collab-annotate 42 3 flag "Add rate limiting concerns"
+
+Annotation #101 (flag) created on segment #3.
+```
+
+**Compile the response draft:**
+
+```text
+/den-collab-compile 42
+
+Compiled response for session #42 (turn 7 segments, 2 annotations):
+Draft saved: true
+
+> [segment 2 · abc12345] We recommend using Den for session persistence...
+  [note]: Consider adding a delete endpoint too
+
+> [segment 3 · def67890] [code block: const session = await collabCrea...]
+  [FLAG]: Needs discussion on auth model
+
+---
+[5 section(s) not annotated — treat as acknowledged, proceed with flagged items]
+```
+
+### Agent-driven workflow
+
+An agent can drive the full workflow through model-callable tools without
+requiring Desktop or TUI:
+
+1. **Create** a session with `den_collab_create_session`, linking to task and run.
+2. **List** open sessions with `den_collab_list_sessions` to find pending ones.
+3. **Get** session detail with `den_collab_get_session` to read segments and annotations.
+4. **Compile** response with `den_collab_compile_response` to consume annotations
+   as structured text. The saved draft is also visible in Den Desktop.
+5. **Add a new turn** with `den_collab_add_turn` for follow-up responses.
+6. **Resolve** the session with `den_collab_update_session_status` when done.
+
+### Metadata and linking
+
+Sessions created by Pi tools include in the `source_context`:
+
+- `taskId`: the current Den task ID (or provided task_id)
+- `piSessionId`: the Pi session ID
+- `model`: the active model provider/id when available
+
+Tools also set `pi_run_id` to the instance ID and `pi_session_id` to the
+session ID for provenance.
+
+### Implementation notes
+
+- All collaboration data is persisted through the Den REST API. No local files.
+- Response compilation mirrors the server-side `CollaborationResponseCompiler`
+  output format for consistent formatting between Desktop-compiled and
+  Pi-compiled drafts.
+- The content hash segmenter runs server-side; Pi sends raw markdown and
+  receives segmented turns in the response.
+- Annotations use optimistic concurrency via `expected_revision`.
+
 ## Open follow-ups
 
 - Persist richer sub-agent session IDs and run metadata, possibly in an
@@ -326,3 +480,5 @@ sub-agent run, not "coder terminal" versus "reviewer terminal."
   criteria, review findings, and coder responses.
 - Decide whether the long-term Den agent identity should be `pi`, `conductor`,
   or project-configurable per repo.
+- Collaboration: threaded follow-up annotations per segment; parallel
+  human/agent editing; delivery of compiled responses to agent input.
