@@ -15,10 +15,21 @@ public sealed record BridgeSchemaBundle
     [JsonPropertyOrder(-100)]
     public string BundleKind { get; init; } = CurrentBundleKind;
 
+    /// <summary>
+    /// Version of the schema-bundle container contract. Version 1 describes the
+    /// bundle artifact shape (metadata, definitions, command/event indexes), not
+    /// the app schema content revision. Increment only for breaking changes to
+    /// this bundle JSON shape; content/tool compatibility is expressed through
+    /// <see cref="BundleId" />, <see cref="ProtocolVersion" />, and
+    /// <see cref="SchemaVersion" />.
+    /// </summary>
     [JsonPropertyName("version")]
     [JsonPropertyOrder(-99)]
     public int Version { get; init; } = 1;
 
+    /// <summary>
+    /// Stable identity for the exact schema bundle content emitted by tooling.
+    /// </summary>
     [JsonPropertyName("bundle_id")]
     [JsonPropertyOrder(-98)]
     public required string BundleId { get; init; }
@@ -27,6 +38,9 @@ public sealed record BridgeSchemaBundle
     [JsonPropertyOrder(-97)]
     public string ProtocolVersion { get; init; } = BridgeProtocol.ProtocolVersion;
 
+    /// <summary>
+    /// App schema/content compatibility version compared during bridge startup.
+    /// </summary>
     [JsonPropertyName("schema_version")]
     [JsonPropertyOrder(-96)]
     public string SchemaVersion { get; init; } = BridgeProtocol.DefaultSchemaVersion;

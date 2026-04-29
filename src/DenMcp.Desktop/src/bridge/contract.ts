@@ -4,9 +4,16 @@ export type BridgeFrameType = 'request' | 'response' | 'event' | 'progress' | 'c
 
 export interface BridgeSchemaBundle {
   bundle_kind: 'den.bridge.schema_bundle';
+  /**
+   * Bundle artifact contract version. Version 1 describes this JSON container
+   * shape (metadata, definitions, command/event indexes), not the app schema
+   * content revision. Breaking container-shape changes increment this value.
+   */
   version: 1;
+  /** Stable content identity for the exact schema bundle emitted by tooling. */
   bundle_id: string;
   protocol_version: string;
+  /** App schema/content compatibility version compared during bridge startup. */
   schema_version: string;
   definitions: Record<string, BridgeJsonSchema>;
   commands: BridgeCommandSchema[];
@@ -250,7 +257,10 @@ export function assertBridgeSchemaBundle(value: unknown): asserts value is Bridg
 
   expectNumber(bundle.version, 'bundle.version');
   if (bundle.version !== 1) {
-    fail(`Unsupported bridge schema bundle version '${String(bundle.version)}'.`);
+    fail(
+      `Unsupported bridge schema bundle container version '${String(bundle.version)}'; ` +
+        'this TypeScript client supports container version 1. Schema content compatibility is tracked by bundle_id, protocol_version, and schema_version.',
+    );
   }
 
   expectString(bundle.bundle_id, 'bundle.bundle_id');
@@ -553,10 +563,18 @@ function assertValueMatchesSchema(
   }
 
   if (schema.oneOf) {
-    const matches = schema.oneOf.filter((candidate) => safelyMatches(value, candidate, bundle, path)).length;
+    const branchResults = schema.oneOf.map((candidate) => collectSchemaMatch(value, candidate, bundle, path));
+    const matches = branchResults.filter((result) => result.matched).length;
     if (matches !== 1) {
-      fail(`${path} must match exactly one oneOf schema; matched ${matches}.`);
+      const details = branchResults
+        .map((result, index) => (result.matched ? `branch ${index + 1}: matched` : `branch ${index + 1}: ${result.error}`))
+        .join('; ');
+      fail(`${path} must match exactly one oneOf schema; matched ${matches}. Branch results: ${details}.`);
     }
+  }
+
+  if (schema.format !== undefined) {
+    assertValueMatchesFormat(value, schema.format, path);
   }
 
   if (schema.type !== undefined) {
@@ -597,17 +615,68 @@ function assertValueMatchesSchema(
   }
 }
 
-function safelyMatches(value: unknown, schema: BridgeJsonSchema, bundle: BridgeSchemaBundle, path: string): boolean {
+type SchemaMatchResult = { matched: true } | { matched: false; error: string };
+
+function collectSchemaMatch(
+  value: unknown,
+  schema: BridgeJsonSchema,
+  bundle: BridgeSchemaBundle,
+  path: string,
+): SchemaMatchResult {
   try {
     assertValueMatchesSchema(value, schema, bundle, path);
-    return true;
+    return { matched: true };
   } catch (error) {
     if (error instanceof BridgeContractError) {
-      return false;
+      return { matched: false, error: error.message };
     }
 
     throw error;
   }
+}
+
+function assertValueMatchesFormat(value: unknown, format: string, path: string): void {
+  switch (format) {
+    case 'date-time':
+      if (typeof value === 'string' && !isJsonSchemaDateTime(value)) {
+        fail(`${path} must match date-time format.`);
+      }
+      return;
+    default:
+      return;
+  }
+}
+
+function isJsonSchemaDateTime(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-]\d{2}:\d{2})$/.exec(value);
+  if (!match) {
+    return false;
+  }
+
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, offsetText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const offsetHour = offsetText === 'Z' ? 0 : Number(offsetText.slice(1, 3));
+  const offsetMinute = offsetText === 'Z' ? 0 : Number(offsetText.slice(4, 6));
+
+  return month >= 1 &&
+    month <= 12 &&
+    day >= 1 &&
+    day <= daysInMonth(year, month) &&
+    hour <= 23 &&
+    minute <= 59 &&
+    second <= 59 &&
+    offsetHour <= 23 &&
+    offsetMinute <= 59 &&
+    Number.isFinite(Date.parse(value));
+}
+
+function daysInMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
 function requireDefinition(definitions: Record<string, BridgeJsonSchema>, name: string): BridgeJsonSchema {

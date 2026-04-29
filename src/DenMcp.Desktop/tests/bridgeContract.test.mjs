@@ -7,6 +7,7 @@ import {
   assertBridgeFrameMatchesBundle,
   assertBridgeSchemaBundle,
   assertCapabilitiesCompatibleWithBundle,
+  assertJsonMatchesSchema,
   createBridgeCommandFacade,
   createCheckedBridgeClient,
 } from '../src/bridge/contract.ts';
@@ -48,6 +49,65 @@ test('TypeScript bridge checks accept C# representative wire frames', async () =
   assertBridgeFrameMatchesBundle(frames.health, bundle);
   assertBridgeFrameMatchesBundle(frames.capabilities, bundle);
   assertCapabilitiesCompatibleWithBundle(frames.capabilities, bundle);
+});
+
+test('TypeScript bridge checks reject invalid date-time formatted fields', async () => {
+  const bundle = await readJson('sample-schema-bundle.json');
+  const fixture = await readJson('sample-wire-frames.json');
+  const invalidRequest = structuredClone(fixture.frames.request);
+  invalidRequest.sent_at = 'not-a-date';
+
+  assert.throws(
+    () => assertBridgeFrameMatchesBundle(invalidRequest, bundle),
+    /bridge\.request_frame\.sent_at must match date-time format\./,
+  );
+});
+
+test('oneOf mismatch diagnostics include nested branch failures', async () => {
+  const bundle = await readJson('sample-schema-bundle.json');
+  bundle.definitions['sample.one_of_nested'] = {
+    oneOf: [
+      {
+        type: 'object',
+        additionalProperties: false,
+        required: ['kind', 'payload'],
+        properties: {
+          kind: { const: 'text' },
+          payload: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['message'],
+            properties: { message: { type: 'string' } },
+          },
+        },
+      },
+      {
+        type: 'object',
+        additionalProperties: false,
+        required: ['kind', 'payload'],
+        properties: {
+          kind: { const: 'count' },
+          payload: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['count'],
+            properties: { count: { type: 'integer' } },
+          },
+        },
+      },
+    ],
+  };
+
+  assert.throws(
+    () => assertJsonMatchesSchema({ kind: 'text', payload: { message: 42 } }, bundle, 'sample.one_of_nested'),
+    (error) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /sample\.one_of_nested must match exactly one oneOf schema; matched 0\./);
+      assert.match(error.message, /branch 1: sample\.one_of_nested\.payload\.message must be string, got integer\./);
+      assert.match(error.message, /branch 2: sample\.one_of_nested\.kind must equal "count"\./);
+      return true;
+    },
+  );
 });
 
 test('checked client and facade keep preload exposure allow-list oriented', async () => {
