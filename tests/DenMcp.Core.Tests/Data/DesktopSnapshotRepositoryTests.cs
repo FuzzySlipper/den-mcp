@@ -8,6 +8,7 @@ public class DesktopSnapshotRepositoryTests : IAsyncLifetime
     private readonly TestDb _testDb = new();
     private DateTime _now = new(2026, 4, 27, 12, 0, 0, DateTimeKind.Utc);
     private DesktopSnapshotRepository _snapshots = null!;
+    private DesktopSessionEventRepository _sessionEvents = null!;
     private ProjectTask _task = null!;
     private AgentWorkspace _workspace = null!;
 
@@ -15,6 +16,7 @@ public class DesktopSnapshotRepositoryTests : IAsyncLifetime
     {
         await _testDb.InitializeAsync();
         _snapshots = new DesktopSnapshotRepository(_testDb.Db, () => _now);
+        _sessionEvents = new DesktopSessionEventRepository(_testDb.Db, () => _now);
 
         var projects = new ProjectRepository(_testDb.Db);
         await projects.CreateAsync(new Project { Id = "proj", Name = "Project", RootPath = "/not/local" });
@@ -300,4 +302,270 @@ public class DesktopSnapshotRepositoryTests : IAsyncLifetime
         SourceDisplayName = "Desktop A",
         ObservedAt = observedAt
     };
+
+    [Fact]
+    public async Task SessionEvent_AppendAndListRoundTripsFields()
+    {
+        var evt = await _sessionEvents.AppendAsync(new DesktopSessionEvent
+        {
+            ProjectId = "proj",
+            TaskId = _task.Id,
+            WorkspaceId = _workspace.Id,
+            SourceInstanceId = "desktop-a",
+            SessionId = "pty-1",
+            EventType = "created",
+            Payload = "{\"kind\":\"terminal\"}",
+            RequestedBy = "user",
+            Reason = "Session launched from project dashboard",
+            ObservedAt = _now.AddSeconds(-10)
+        });
+
+        Assert.True(evt.Id > 0);
+        Assert.Equal("proj", evt.ProjectId);
+        Assert.Equal(_task.Id, evt.TaskId);
+        Assert.Equal(_workspace.Id, evt.WorkspaceId);
+        Assert.Equal("desktop-a", evt.SourceInstanceId);
+        Assert.Equal("pty-1", evt.SessionId);
+        Assert.Equal("created", evt.EventType);
+        Assert.Contains("terminal", evt.Payload);
+        Assert.Equal("user", evt.RequestedBy);
+        Assert.Contains("dashboard", evt.Reason);
+        Assert.Equal(_now.AddSeconds(-10), evt.ObservedAt);
+        Assert.Equal(_now, evt.CreatedAt);
+    }
+
+    [Fact]
+    public async Task SessionEvent_AppendMultipleAndListBySession()
+    {
+        await _sessionEvents.AppendAsync(new DesktopSessionEvent
+        {
+            ProjectId = "proj",
+            SessionId = "pty-2",
+            SourceInstanceId = "desktop-a",
+            EventType = "created",
+            ObservedAt = _now.AddSeconds(-20)
+        });
+        await _sessionEvents.AppendAsync(new DesktopSessionEvent
+        {
+            ProjectId = "proj",
+            SessionId = "pty-2",
+            SourceInstanceId = "desktop-a",
+            EventType = "status_changed",
+            Payload = "{\"from\":\"starting\",\"to\":\"running\"}",
+            ObservedAt = _now.AddSeconds(-10)
+        });
+        await _sessionEvents.AppendAsync(new DesktopSessionEvent
+        {
+            ProjectId = "proj",
+            SessionId = "pty-2",
+            SourceInstanceId = "desktop-a",
+            EventType = "crashed",
+            Reason = "PTY process exited with signal 9",
+            ObservedAt = _now
+        });
+
+        var all = await _sessionEvents.ListAsync(new DesktopSessionEventListOptions
+        {
+            ProjectId = "proj",
+            SessionId = "pty-2",
+            Limit = 10
+        });
+        Assert.Equal(3, all.Count);
+        Assert.Equal("crashed", all[0].EventType);
+        Assert.Equal("status_changed", all[1].EventType);
+        Assert.Equal("created", all[2].EventType);
+    }
+
+    [Fact]
+    public async Task SessionEvent_ListByEventTypeFilter()
+    {
+        await _sessionEvents.AppendAsync(new DesktopSessionEvent
+        {
+            ProjectId = "proj",
+            SessionId = "pty-3",
+            SourceInstanceId = "desktop-a",
+            EventType = "created",
+            ObservedAt = _now.AddSeconds(-5)
+        });
+        await _sessionEvents.AppendAsync(new DesktopSessionEvent
+        {
+            ProjectId = "proj",
+            SessionId = "pty-3",
+            SourceInstanceId = "desktop-a",
+            EventType = "attached",
+            RequestedBy = "pi",
+            ObservedAt = _now
+        });
+        await _sessionEvents.AppendAsync(new DesktopSessionEvent
+        {
+            ProjectId = "proj",
+            SessionId = "pty-3",
+            SourceInstanceId = "desktop-a",
+            EventType = "lease_acquired",
+            Payload = "{\"lease_id\":\"l1\"}",
+            ObservedAt = _now
+        });
+
+        var typeFiltered = await _sessionEvents.ListAsync(new DesktopSessionEventListOptions
+        {
+            ProjectId = "proj",
+            SessionId = "pty-3",
+            EventTypes = "created,attached",
+            Limit = 10
+        });
+        Assert.Equal(2, typeFiltered.Count);
+        Assert.Contains(typeFiltered, e => e.EventType == "created");
+        Assert.Contains(typeFiltered, e => e.EventType == "attached");
+    }
+
+    [Fact]
+    public async Task SessionEvent_ListBySourceInstanceAndTask()
+    {
+        await _sessionEvents.AppendAsync(new DesktopSessionEvent
+        {
+            ProjectId = "proj",
+            TaskId = _task.Id,
+            SessionId = "pty-4",
+            SourceInstanceId = "desktop-a",
+            EventType = "created",
+            ObservedAt = _now
+        });
+        await _sessionEvents.AppendAsync(new DesktopSessionEvent
+        {
+            ProjectId = "proj",
+            SessionId = "pty-5",
+            SourceInstanceId = "desktop-b",
+            EventType = "created",
+            ObservedAt = _now
+        });
+
+        var sourceFiltered = await _sessionEvents.ListAsync(new DesktopSessionEventListOptions
+        {
+            ProjectId = "proj",
+            SourceInstanceId = "desktop-a",
+            Limit = 10
+        });
+        Assert.Single(sourceFiltered);
+        Assert.Equal("pty-4", sourceFiltered[0].SessionId);
+
+        var taskFiltered = await _sessionEvents.ListAsync(new DesktopSessionEventListOptions
+        {
+            ProjectId = "proj",
+            TaskId = _task.Id,
+            Limit = 10
+        });
+        Assert.Single(taskFiltered);
+        Assert.Equal("pty-4", taskFiltered[0].SessionId);
+    }
+
+    [Fact]
+    public async Task SessionEvent_DoesNotStoreRawTerminalBytesOrHeartbeats()
+    {
+        // Verify payload bounds are enforced
+        var largePayload = new string('x', 10241);
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+            _sessionEvents.AppendAsync(new DesktopSessionEvent
+            {
+                ProjectId = "proj",
+                SessionId = "pty-6",
+                SourceInstanceId = "desktop-a",
+                EventType = "warning",
+                Payload = largePayload,
+                ObservedAt = _now
+            }));
+        Assert.Contains("10240", ex.Message);
+
+        // Verify reason length is bounded
+        var longReason = new string('y', 2001);
+        ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+            _sessionEvents.AppendAsync(new DesktopSessionEvent
+            {
+                ProjectId = "proj",
+                SessionId = "pty-6",
+                SourceInstanceId = "desktop-a",
+                EventType = "warning",
+                Reason = longReason,
+                ObservedAt = _now
+            }));
+        Assert.Contains("2000", ex.Message);
+
+        // Valid bounded payload is accepted
+        var valid = await _sessionEvents.AppendAsync(new DesktopSessionEvent
+        {
+            ProjectId = "proj",
+            SessionId = "pty-6",
+            SourceInstanceId = "desktop-a",
+            EventType = "warning",
+            Payload = "{\"code\":\"E001\",\"message\":\"Disk space low\"}",
+            Reason = "Low disk space warning",
+            ObservedAt = _now
+        });
+        Assert.Equal("warning", valid.EventType);
+        Assert.NotNull(valid.Payload);
+        Assert.NotNull(valid.Reason);
+    }
+
+    [Fact]
+    public async Task SessionEvent_RejectsMissingRequiredFields()
+    {
+        // Missing project id
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+            _sessionEvents.AppendAsync(new DesktopSessionEvent
+            {
+                ProjectId = "",
+                SessionId = "pty-7",
+                SourceInstanceId = "desktop-a",
+                EventType = "created",
+                ObservedAt = _now
+            }));
+        Assert.Contains("Project id", ex.Message);
+
+        // Missing session id
+        ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+            _sessionEvents.AppendAsync(new DesktopSessionEvent
+            {
+                ProjectId = "proj",
+                SessionId = "",
+                SourceInstanceId = "desktop-a",
+                EventType = "created",
+                ObservedAt = _now
+            }));
+        Assert.Contains("Session id", ex.Message);
+
+        // Missing source instance id
+        ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+            _sessionEvents.AppendAsync(new DesktopSessionEvent
+            {
+                ProjectId = "proj",
+                SessionId = "pty-7",
+                SourceInstanceId = "",
+                EventType = "created",
+                ObservedAt = _now
+            }));
+        Assert.Contains("Source instance id", ex.Message);
+
+        // Missing event type
+        ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+            _sessionEvents.AppendAsync(new DesktopSessionEvent
+            {
+                ProjectId = "proj",
+                SessionId = "pty-7",
+                SourceInstanceId = "desktop-a",
+                EventType = "",
+                ObservedAt = _now
+            }));
+        Assert.Contains("Event type", ex.Message);
+
+        // Missing observed at
+        ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+            _sessionEvents.AppendAsync(new DesktopSessionEvent
+            {
+                ProjectId = "proj",
+                SessionId = "pty-7",
+                SourceInstanceId = "desktop-a",
+                EventType = "created",
+                ObservedAt = default
+            }));
+        Assert.Contains("Observed at", ex.Message);
+    }
 }

@@ -176,3 +176,68 @@ public sealed class DesktopSessionSnapshotListOptions
     public TimeSpan StaleAfter { get; set; } = TimeSpan.FromMinutes(2);
     public int Limit { get; set; } = 50;
 }
+
+/// <summary>
+/// Append-only session lifecycle/control event types.
+/// </summary>
+public enum SessionEventType
+{
+    Created,
+    Discovered,
+    StatusChanged,
+    CapabilitiesChanged,
+    Attached,
+    Detached,
+    InputSent,
+    ResizeRequested,
+    TerminateRequested,
+    TerminateCompleted,
+    Reconnect,
+    LeaseAcquired,
+    LeaseLost,
+    LeaseConflict,
+    Warning,
+    Crashed,
+    Exited,
+    SnapshotPublished,
+    SnapshotPublishFailed
+}
+
+/// <summary>
+/// An append-only record of a session lifecycle or control event.
+/// Does not store raw terminal byte streams or high-frequency heartbeats.
+/// Payload is bounded to 10 KB and excludes raw terminal output/input text.
+/// </summary>
+public sealed class DesktopSessionEvent
+{
+    public long Id { get; set; }
+    public required string ProjectId { get; set; }
+    public int? TaskId { get; set; }
+    public string? WorkspaceId { get; set; }
+    public required string SourceInstanceId { get; set; }
+    public required string SessionId { get; set; }
+    /// <summary>Event kind, e.g. created, status_changed, crashed.</summary>
+    public required string EventType { get; set; }
+    /// <summary>Bounded JSON payload. Max 10 KB. Must not contain raw terminal streams or raw input text.</summary>
+    public string? Payload { get; set; }
+    /// <summary>Agent or entity that requested/provoked this event (for audit).</summary>
+    public string? RequestedBy { get; set; }
+    /// <summary>Optional free-text reason for the event.</summary>
+    public string? Reason { get; set; }
+    /// <summary>When the event was observed by the source.</summary>
+    public DateTime ObservedAt { get; set; }
+    /// <summary>When the event was received/stored by the server (append-only, auto-set).</summary>
+    public DateTime CreatedAt { get; set; }
+}
+
+public sealed class DesktopSessionEventListOptions
+{
+    public string? ProjectId { get; set; }
+    public int? TaskId { get; set; }
+    public string? WorkspaceId { get; set; }
+    public string? SourceInstanceId { get; set; }
+    public string? SessionId { get; set; }
+    /// <summary>Comma-separated event type filter.</summary>
+    public string? EventTypes { get; set; }
+    public int Limit { get; set; } = 50;
+}

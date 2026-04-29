@@ -392,4 +392,52 @@ public static class EnumExtensions
         ReviewFindingStatus.SplitToFollowUp => true,
         _ => false
     };
+
+    public static string ToDbValue(this SessionEventType eventType) => eventType switch
+    {
+        SessionEventType.Created => "created",
+        SessionEventType.Discovered => "discovered",
+        SessionEventType.StatusChanged => "status_changed",
+        SessionEventType.CapabilitiesChanged => "capabilities_changed",
+        SessionEventType.Attached => "attached",
+        SessionEventType.Detached => "detached",
+        SessionEventType.InputSent => "input_sent",
+        SessionEventType.ResizeRequested => "resize_requested",
+        SessionEventType.TerminateRequested => "terminate_requested",
+        SessionEventType.TerminateCompleted => "terminate_completed",
+        SessionEventType.Reconnect => "reconnect",
+        SessionEventType.LeaseAcquired => "lease_acquired",
+        SessionEventType.LeaseLost => "lease_lost",
+        SessionEventType.LeaseConflict => "lease_conflict",
+        SessionEventType.Warning => "warning",
+        SessionEventType.Crashed => "crashed",
+        SessionEventType.Exited => "exited",
+        SessionEventType.SnapshotPublished => "snapshot_published",
+        SessionEventType.SnapshotPublishFailed => "snapshot_publish_failed",
+        _ => throw new ArgumentOutOfRangeException(nameof(eventType), eventType, null)
+    };
+
+    public static SessionEventType ParseSessionEventType(string value) => value switch
+    {
+        "created" => SessionEventType.Created,
+        "discovered" => SessionEventType.Discovered,
+        "status_changed" => SessionEventType.StatusChanged,
+        "capabilities_changed" => SessionEventType.CapabilitiesChanged,
+        "attached" => SessionEventType.Attached,
+        "detached" => SessionEventType.Detached,
+        "input_sent" => SessionEventType.InputSent,
+        "resize_requested" => SessionEventType.ResizeRequested,
+        "terminate_requested" => SessionEventType.TerminateRequested,
+        "terminate_completed" => SessionEventType.TerminateCompleted,
+        "reconnect" => SessionEventType.Reconnect,
+        "lease_acquired" => SessionEventType.LeaseAcquired,
+        "lease_lost" => SessionEventType.LeaseLost,
+        "lease_conflict" => SessionEventType.LeaseConflict,
+        "warning" => SessionEventType.Warning,
+        "crashed" => SessionEventType.Crashed,
+        "exited" => SessionEventType.Exited,
+        "snapshot_published" => SessionEventType.SnapshotPublished,
+        "snapshot_publish_failed" => SessionEventType.SnapshotPublishFailed,
+        _ => throw new ArgumentException($"Unknown session event type: {value}", nameof(value))
+    };
 }

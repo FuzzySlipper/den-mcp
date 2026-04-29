@@ -688,6 +688,59 @@ public sealed class DatabaseInitializer
             WHERE task_id IS NOT NULL;
         CREATE INDEX IF NOT EXISTS idx_desktop_session_snapshots_source_observed
             ON desktop_session_snapshots(source_instance_id, observed_at DESC, id DESC);
+
+        ------------------------------------------------------------
+        -- DESKTOP SESSION EVENTS (append-only lifecycle/control event log)
+        ------------------------------------------------------------
+        CREATE TABLE IF NOT EXISTS desktop_session_events (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id            TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            task_id               INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+            workspace_id          TEXT REFERENCES agent_workspaces(id) ON DELETE SET NULL,
+            source_instance_id    TEXT NOT NULL,
+            session_id            TEXT NOT NULL,
+            event_type            TEXT NOT NULL
+                                  CHECK (event_type IN (
+                                      'created',
+                                      'discovered',
+                                      'status_changed',
+                                      'capabilities_changed',
+                                      'attached',
+                                      'detached',
+                                      'input_sent',
+                                      'resize_requested',
+                                      'terminate_requested',
+                                      'terminate_completed',
+                                      'reconnect',
+                                      'lease_acquired',
+                                      'lease_lost',
+                                      'lease_conflict',
+                                      'warning',
+                                      'crashed',
+                                      'exited',
+                                      'snapshot_published',
+                                      'snapshot_publish_failed'
+                                  )),
+            payload               TEXT
+                                  CHECK (length(payload) <= 10240),
+            requested_by          TEXT,
+            reason                TEXT
+                                  CHECK (reason IS NULL OR length(reason) <= 2000),
+            observed_at           TEXT NOT NULL,
+            created_at            TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_desktop_session_events_project_created
+            ON desktop_session_events(project_id, created_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_desktop_session_events_source_created
+            ON desktop_session_events(source_instance_id, created_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_desktop_session_events_session_created
+            ON desktop_session_events(session_id, created_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_desktop_session_events_task_created
+            ON desktop_session_events(task_id, created_at DESC, id DESC)
+            WHERE task_id IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_desktop_session_events_event_type_created
+            ON desktop_session_events(event_type, created_at DESC, id DESC);
         """;
 
     private async Task RunMigrationsAsync(SqliteConnection connection)
@@ -1232,6 +1285,64 @@ public sealed class DatabaseInitializer
             """);
         await EnsureIndexAsync(connection, "idx_desktop_session_snapshots_source_observed",
             "CREATE INDEX IF NOT EXISTS idx_desktop_session_snapshots_source_observed ON desktop_session_snapshots(source_instance_id, observed_at DESC, id DESC)");
+
+        // Append-only session lifecycle/control event log
+        await using var eventsTableCmd = connection.CreateCommand();
+        eventsTableCmd.CommandText = """
+            CREATE TABLE IF NOT EXISTS desktop_session_events (
+                id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id            TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                task_id               INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+                workspace_id          TEXT REFERENCES agent_workspaces(id) ON DELETE SET NULL,
+                source_instance_id    TEXT NOT NULL,
+                session_id            TEXT NOT NULL,
+                event_type            TEXT NOT NULL
+                                      CHECK (event_type IN (
+                                          'created',
+                                          'discovered',
+                                          'status_changed',
+                                          'capabilities_changed',
+                                          'attached',
+                                          'detached',
+                                          'input_sent',
+                                          'resize_requested',
+                                          'terminate_requested',
+                                          'terminate_completed',
+                                          'reconnect',
+                                          'lease_acquired',
+                                          'lease_lost',
+                                          'lease_conflict',
+                                          'warning',
+                                          'crashed',
+                                          'exited',
+                                          'snapshot_published',
+                                          'snapshot_publish_failed'
+                                      )),
+                payload               TEXT
+                                      CHECK (length(payload) <= 10240),
+                requested_by          TEXT,
+                reason                TEXT
+                                      CHECK (reason IS NULL OR length(reason) <= 2000),
+                observed_at           TEXT NOT NULL,
+                created_at            TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """;
+        await eventsTableCmd.ExecuteNonQueryAsync();
+
+        await EnsureIndexAsync(connection, "idx_desktop_session_events_project_created",
+            "CREATE INDEX IF NOT EXISTS idx_desktop_session_events_project_created ON desktop_session_events(project_id, created_at DESC, id DESC)");
+        await EnsureIndexAsync(connection, "idx_desktop_session_events_source_created",
+            "CREATE INDEX IF NOT EXISTS idx_desktop_session_events_source_created ON desktop_session_events(source_instance_id, created_at DESC, id DESC)");
+        await EnsureIndexAsync(connection, "idx_desktop_session_events_session_created",
+            "CREATE INDEX IF NOT EXISTS idx_desktop_session_events_session_created ON desktop_session_events(session_id, created_at DESC, id DESC)");
+        await EnsureIndexAsync(connection, "idx_desktop_session_events_task_created",
+            """
+            CREATE INDEX IF NOT EXISTS idx_desktop_session_events_task_created
+            ON desktop_session_events(task_id, created_at DESC, id DESC)
+            WHERE task_id IS NOT NULL
+            """);
+        await EnsureIndexAsync(connection, "idx_desktop_session_events_event_type_created",
+            "CREATE INDEX IF NOT EXISTS idx_desktop_session_events_event_type_created ON desktop_session_events(event_type, created_at DESC, id DESC)");
     }
 
     private static async Task EnsureBlackboardSchemaAsync(SqliteConnection connection)
