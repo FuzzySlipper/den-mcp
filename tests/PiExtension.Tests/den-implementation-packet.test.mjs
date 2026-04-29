@@ -445,6 +445,23 @@ test('findDuplicateImplementationPacketMessage matches same task head and branch
   assert.equal(duplicate?.id, 12);
 });
 
+test('findDuplicateImplementationPacketMessage matches manual packets by final resolved head when launch head is stale', () => {
+  const messages = [
+    { id: 20, task_id: 951, metadata: { type: 'implementation_packet', branch: 'task/951', head_commit: 'final999' } },
+    { id: 19, task_id: 951, metadata: { type: 'implementation_packet', branch: 'task/951', head_commit: 'launch111', final_head_commit: 'final999' } },
+  ];
+
+  const duplicate = findDuplicateImplementationPacketMessage(messages, {
+    run_id: 'auto-run',
+    task_id: 951,
+    branch: 'task/951',
+    head_commit: 'launch111',
+    final_head_commit: 'final999',
+  });
+
+  assert.equal(duplicate?.id, 20);
+});
+
 test('findDuplicateImplementationPacketMessage does not match different branch for same head', () => {
   const messages = [
     { id: 1, task_id: 940, metadata: { type: 'implementation_packet', branch: 'task/other', head_commit: 'abc1234' } },

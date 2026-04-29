@@ -65,7 +65,10 @@ export interface ImplementationPacketMeta {
 export type ImplementationPacketDuplicateCandidate = Pick<
   ImplementationPacketMeta,
   "run_id" | "task_id" | "branch" | "head_commit"
->;
+> & {
+  final_branch?: string | null;
+  final_head_commit?: string | null;
+};
 
 /** Result of extracting and validating a packet. */
 export interface ExtractionResult {
@@ -360,11 +363,15 @@ export function findDuplicateImplementationPacketMessage<T extends { metadata?: 
     if (sameRun) return sameRun;
   }
 
-  if (!candidate.head_commit) return undefined;
+  const candidateHead = candidate.final_head_commit ?? candidate.head_commit;
+  const candidateBranch = candidate.final_branch ?? candidate.branch;
+  if (!candidateHead) return undefined;
   return candidates.find((message) => {
     const meta = metadataObject(message.metadata);
-    if (meta.head_commit !== candidate.head_commit) return false;
-    if (candidate.branch && meta.branch && meta.branch !== candidate.branch) return false;
+    const messageHead = meta.final_head_commit ?? meta.head_commit;
+    const messageBranch = meta.final_branch ?? meta.branch;
+    if (messageHead !== candidateHead) return false;
+    if (candidateBranch && messageBranch && messageBranch !== candidateBranch) return false;
     return true;
   });
 }

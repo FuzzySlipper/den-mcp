@@ -1579,11 +1579,20 @@ async function runDenSubagent(
     try {
       const extraction = extractImplementationPacket(result.final_output);
       const packetContent = formatImplementationPacketMessage(result, extraction);
-      const packetMeta = buildImplementationPacketMeta(result, extraction);
+      const extractedPacketMeta = buildImplementationPacketMeta(result, extraction);
+      const packetMeta = {
+        ...extractedPacketMeta,
+        branch: metadataString(finalHeadMetadata, "final_branch") ?? extractedPacketMeta.branch,
+        head_commit: metadataString(finalHeadMetadata, "final_head_commit") ?? extractedPacketMeta.head_commit,
+      };
       let duplicatePacket: any | undefined;
       try {
         const existingPackets = await getTaskMessages(cfg, effectiveOptions.taskId);
-        duplicatePacket = findDuplicateImplementationPacketMessage(existingPackets, packetMeta);
+        duplicatePacket = findDuplicateImplementationPacketMessage(existingPackets, {
+          ...packetMeta,
+          final_branch: metadataString(finalHeadMetadata, "final_branch") ?? null,
+          final_head_commit: metadataString(finalHeadMetadata, "final_head_commit") ?? null,
+        });
       } catch {
         // Duplicate detection is best-effort; still try to post the auto packet.
       }
