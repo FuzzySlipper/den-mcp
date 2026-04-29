@@ -8,6 +8,29 @@ public delegate ValueTask<JsonElement?> BridgeCommandHandler(
     BridgeRequestContext context,
     CancellationToken cancellationToken);
 
+public interface IBridgeCommandHandler<in TRequest, TResponse>
+{
+    ValueTask<TResponse?> HandleAsync(
+        TRequest request,
+        BridgeRequestContext context,
+        CancellationToken cancellationToken);
+}
+
+public interface IBridgeProgressPublisher
+{
+    ValueTask PublishAsync(
+        BridgeProgressFrame frame,
+        CancellationToken cancellationToken = default);
+}
+
+public interface IBridgeCapabilityGate
+{
+    ValueTask<bool> IsAllowedAsync(
+        IReadOnlyList<string> requiredCapabilities,
+        BridgeRequestFrame request,
+        CancellationToken cancellationToken = default);
+}
+
 public interface IBridgeClient
 {
     ValueTask<BridgeResponseFrame> SendAsync(

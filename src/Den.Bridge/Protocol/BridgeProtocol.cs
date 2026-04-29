@@ -20,8 +20,11 @@ public static class BridgeFrameTypes
 public static class BridgeErrorCodes
 {
     public const string CommandUnsupported = "bridge.command.unsupported";
+    public const string CapabilityUnsupported = "bridge.capability.unsupported";
     public const string RequestDuplicate = "bridge.request.duplicate";
+    public const string RequestInvalid = "bridge.request.invalid";
     public const string RequestCancelled = "bridge.request.cancelled";
+    public const string HandlerFailed = "bridge.handler.failed";
 }
 
 public static class BridgeErrorCategories

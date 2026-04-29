@@ -75,4 +75,7 @@ public sealed record BridgeEventCapability
 
     [JsonPropertyName("payload_schema")]
     public string? PayloadSchema { get; init; }
+
+    [JsonPropertyName("required_capabilities")]
+    public IReadOnlyList<string>? RequiredCapabilities { get; init; }
 }
