@@ -51,6 +51,13 @@ import {
   renderTemplate,
   summarizeTaskContext,
 } from "../lib/den-prompt-templates.ts";
+import {
+  formatCoderContextPacket,
+  buildCoderContextPacketMeta,
+  summarizeDependencies,
+  summarizeRecentPackets,
+  resolveEffectiveCoderConfig,
+} from "../lib/den-coder-context-packet.ts";
 
 const DEFAULT_BASE_URL = "http://192.168.1.10:5199";
 const GLOBAL_SUFFIX = "-default";
@@ -275,6 +282,170 @@ export default function denSubagent(pi: ExtensionAPI) {
       return resultTool(result);
     },
   });
+
+  // -----------------------------------------------------------------------
+  // Prepare coder context packet — conductor-facing tool & command
+  // -----------------------------------------------------------------------
+
+  pi.registerCommand("den-prepare-coder-context", {
+    description: "Prepare a coder context packet for a task and post it to the Den thread. Usage: /den-prepare-coder-context <task_id> [extra notes]",
+    handler: async (args, ctx) => {
+      const cfg = await resolveConfig(ctx);
+      const parsed = parsePrepareCoderContextArgs(args);
+      const result = await prepareAndPostCoderContext(cfg, parsed, ctx.cwd);
+      ctx.ui.setWidget("den-subagent", ["Coder context packet prepared.", `Message #${result.message_id ?? "(posted)"}`, result.content.slice(0, 200) + "..."]);
+      ctx.ui.notify(`Coder context packet posted for task #${parsed.task_id}.`, "info");
+    },
+  });
+
+  pi.registerTool({
+    name: "den_prepare_coder_context",
+    label: "Den Prepare Coder Context",
+    description: "Prepare a curated coder context packet for a task, resolving dependency summaries, recent packets, effective config/model, and post it to the Den task thread with metadata.type = coder_context_packet.",
+    parameters: Type.Object({
+      task_id: Type.Number({ description: "Den task ID to prepare the context packet for." }),
+      branch: Type.Optional(Type.String({ description: "Branch the coder should work on." })),
+      worktree_path: Type.Optional(Type.String({ description: "Worktree path for the isolated checkout." })),
+      base_commit: Type.Optional(Type.String({ description: "Base commit the branch was created from." })),
+      extra_notes: Type.Optional(Type.String({ description: "Optional extra conductor notes." })),
+      user_intent: Type.Optional(Type.String({ description: "Optional user intent override." })),
+      acceptance_criteria: Type.Optional(Type.String({ description: "Optional acceptance criteria override." })),
+      constraints: Type.Optional(Type.String({ description: "Optional constraints or scope boundaries." })),
+      file_pointers: Type.Optional(Type.String({ description: "Optional JSON array of {path, description?} objects." })),
+      validation_commands: Type.Optional(Type.String({ description: "Optional JSON array of validation command strings." })),
+      relevant_docs: Type.Optional(Type.String({ description: "Optional JSON array of {ref, description?} doc references." })),
+      cwd: Type.Optional(Type.String({ description: "Working directory for config resolution. Defaults to current Pi cwd." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const cfg = await resolveConfig(ctx);
+      const filePointers = tryParseJsonArray(params.file_pointers);
+      const validationCommands = tryParseJsonArray(params.validation_commands);
+      const relevantDocs = tryParseJsonArray(params.relevant_docs);
+      const result = await prepareAndPostCoderContext(cfg, {
+        task_id: params.task_id,
+        branch: normalizeString(params.branch),
+        worktree_path: normalizeString(params.worktree_path),
+        base_commit: normalizeString(params.base_commit),
+        extra_notes: normalizeString(params.extra_notes),
+        user_intent: normalizeString(params.user_intent),
+        acceptance_criteria: normalizeString(params.acceptance_criteria),
+        constraints: normalizeString(params.constraints),
+        file_pointers: filePointers?.map((fp: any) => ({ path: String(fp.path ?? ""), description: fp.description ? String(fp.description) : undefined })),
+        validation_commands: validationCommands?.map((c: any) => String(c)),
+        relevant_docs: relevantDocs?.map((d: any) => ({ ref: String(d.ref ?? ""), description: d.description ? String(d.description) : undefined })),
+        cwd: normalizeString(params.cwd),
+      }, ctx.cwd);
+      return {
+        content: [{ type: "text", text: `Coder context packet prepared and posted for task #${params.task_id}.\n\n${result.content.slice(0, 4000)}` }],
+      };
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Prepare coder context packet internals
+// ---------------------------------------------------------------------------
+
+function parsePrepareCoderContextArgs(args: string | undefined) {
+  const trimmed = (args ?? "").trim();
+  const match = trimmed.match(/^(\d+)(?:\s+([\s\S]*))?$/);
+  if (!match) throw new Error("Usage: /den-prepare-coder-context <task_id> [extra notes]");
+  const taskId = Number(match[1]);
+  if (!Number.isInteger(taskId) || taskId <= 0) throw new Error("Expected a positive task_id.");
+  return { task_id: taskId, extra_notes: (match[2] ?? "").trim() || undefined };
+}
+
+async function prepareAndPostCoderContext(
+  cfg: DenConfig,
+  options: {
+    task_id: number;
+    branch?: string;
+    worktree_path?: string;
+    base_commit?: string;
+    extra_notes?: string;
+    user_intent?: string;
+    acceptance_criteria?: string;
+    constraints?: string;
+    file_pointers?: Array<{ path: string; description?: string }>;
+    validation_commands?: string[];
+    relevant_docs?: Array<{ ref: string; description?: string }>;
+    cwd?: string;
+  },
+  defaultCwd: string,
+): Promise<{ content: string; message_id?: number }> {
+  const cwd = options.cwd ?? defaultCwd;
+
+  // Fetch task detail from Den.
+  const detail = await getTask(cfg, options.task_id);
+  const task = detail?.task ?? detail;
+
+  // Resolve effective coder config/model.
+  const coderConfig = await resolveEffectiveCoderConfig(cwd, {
+    loadMergedDenExtensionConfig,
+    denConfigPaths,
+  });
+
+  // Summarize dependencies.
+  const depSummaries = summarizeDependencies(detail);
+
+  // Summarize recent structured packets from task messages.
+  const messages = taskMessages(detail);
+  const recentPackets = summarizeRecentPackets(messages);
+
+  // Build the packet input.
+  const packetInput = {
+    task_id: options.task_id,
+    parent_task_id: optionalNumber(task?.parent_id ?? task?.parentId) ?? undefined,
+    task_title: task?.title ?? undefined,
+    task_description: task?.description ?? undefined,
+    task_status: task?.status ?? undefined,
+    task_tags: Array.isArray(task?.tags) ? task.tags : undefined,
+    branch: options.branch,
+    worktree_path: options.worktree_path,
+    base_commit: options.base_commit,
+    effective_coder_model: coderConfig.effective_coder_model,
+    config_source: coderConfig.config_source,
+    user_intent: options.user_intent,
+    acceptance_criteria: options.acceptance_criteria,
+    dependency_summaries: depSummaries.length > 0 ? depSummaries : undefined,
+    relevant_docs: options.relevant_docs,
+    recent_packets: recentPackets.length > 0 ? recentPackets : undefined,
+    constraints: options.constraints,
+    file_pointers: options.file_pointers,
+    validation_commands: options.validation_commands,
+    extra_notes: options.extra_notes,
+  };
+
+  const content = formatCoderContextPacket(packetInput);
+  const metadata = buildCoderContextPacketMeta(packetInput);
+
+  // Post to Den task thread.
+  const postResult = await sendTaskMessage(cfg, options.task_id, content, {
+    ...metadata,
+    prepared_by: "conductor",
+  });
+
+  return {
+    content,
+    message_id: optionalNumber(postResult?.id),
+  };
+}
+
+function tryParseJsonArray(value: string | undefined): any[] | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function taskMessages(detail: any): any[] {
+  for (const key of ["recent_messages", "recentMessages", "messages"] as const) {
+    if (Array.isArray(detail?.[key])) return detail[key];
+  }
+  return [];
 }
 
 async function runDenConfigCommand(ctx: any) {
