@@ -71,6 +71,16 @@ test('formatCoderContextPacket produces markdown with all sections from full inp
   assert.ok(md.includes('zai/glm-5.1'));
   assert.ok(md.includes('inherited:/home/patch/dev/den-mcp/.pi/den-config.json'));
 
+  // Task description section
+  assert.ok(md.includes('## Task description'));
+  assert.ok(md.includes('Add tooling to prepare a curated context packet for coder sub-agents.'));
+
+  // Task status and tags in identity
+  assert.ok(md.includes('`in_progress`'));
+  assert.ok(md.includes('`den`'));
+  assert.ok(md.includes('`pi`'));
+  assert.ok(md.includes('`context`'));
+
   // Sections
   assert.ok(md.includes('## User intent'));
   assert.ok(md.includes('## Acceptance criteria'));
@@ -107,6 +117,7 @@ test('formatCoderContextPacket handles minimal input with just task_id', () => {
   assert.ok(md.includes('## Task'));
   assert.ok(md.includes('`#100`'));
   // No optional sections should appear
+  assert.ok(!md.includes('## Task description'));
   assert.ok(!md.includes('## User intent'));
   assert.ok(!md.includes('## Acceptance criteria'));
   assert.ok(!md.includes('## Dependency summaries'));
@@ -118,6 +129,34 @@ test('formatCoderContextPacket handles minimal input with just task_id', () => {
   assert.ok(!md.includes('## Extra conductor notes'));
 });
 
+test('formatCoderContextPacket renders task description when present', () => {
+  const md = formatCoderContextPacket({
+    task_id: 42,
+    task_description: 'This is the task description from Den.',
+  });
+  assert.ok(md.includes('## Task description'));
+  assert.ok(md.includes('This is the task description from Den.'));
+});
+
+test('formatCoderContextPacket omits task description section when absent', () => {
+  const md = formatCoderContextPacket({
+    task_id: 42,
+    task_title: 'Some title',
+  });
+  assert.ok(!md.includes('## Task description'));
+});
+
+test('formatCoderContextPacket renders status and tags in task identity', () => {
+  const md = formatCoderContextPacket({
+    task_id: 42,
+    task_status: 'in_progress',
+    task_tags: ['den', 'coder'],
+  });
+  assert.ok(md.includes('`in_progress`'));
+  assert.ok(md.includes('`den`'));
+  assert.ok(md.includes('`coder`'));
+});
+
 test('formatCoderContextPacket truncates long free-text fields', () => {
   const longText = 'x'.repeat(10000);
   const md = formatCoderContextPacket({
@@ -126,6 +165,15 @@ test('formatCoderContextPacket truncates long free-text fields', () => {
   });
   assert.ok(md.includes('truncated at 8000 chars'));
   assert.ok(md.length < 10000);
+});
+
+test('formatCoderContextPacket truncates long task description', () => {
+  const longDesc = 'd'.repeat(10000);
+  const md = formatCoderContextPacket({
+    task_id: 1,
+    task_description: longDesc,
+  });
+  assert.ok(md.includes('truncated at 8000 chars'));
 });
 
 test('formatCoderContextPacket limits dependency count and shows overflow', () => {
@@ -286,24 +334,68 @@ test('summarizeRecentPackets truncates long content to one-line summary', () => 
 });
 
 // ---------------------------------------------------------------------------
-// resolveEffectiveCoderConfig
+// resolveEffectiveCoderConfig — config source accuracy
 // ---------------------------------------------------------------------------
 
-test('resolveEffectiveCoderConfig returns model and source from config module', async () => {
+test('resolveEffectiveCoderConfig reports local path when local config exists (even if inherited also present)', async () => {
+  const localPath = '/home/user/project/.pi/den-config.json';
+  const inheritedPath = '/home/user/main-project/.pi/den-config.json';
   const mockConfig = {
     loadMergedDenExtensionConfig: async (_cwd) => ({
       subagents: { coder: { model: 'test/model-v1' } },
-      fallback_model: 'fallback/model',
     }),
-    denConfigPaths: async (_cwd) => [
-      '/home/user/project/.pi/den-config.json',
-      '/home/user/main-project/.pi/den-config.json',
-    ],
+    denConfigPaths: async (_cwd) => [localPath, inheritedPath],
   };
-
-  const result = await resolveEffectiveCoderConfig('/home/user/project', mockConfig);
+  // Both files exist; local should be reported (no "inherited:" prefix).
+  const fileReadable = async (p) => true;
+  const result = await resolveEffectiveCoderConfig('/home/user/project', mockConfig, fileReadable);
   assert.equal(result.effective_coder_model, 'test/model-v1');
-  assert.equal(result.config_source, 'inherited:/home/user/main-project/.pi/den-config.json');
+  assert.equal(result.config_source, localPath);
+});
+
+test('resolveEffectiveCoderConfig reports inherited path when only inherited exists', async () => {
+  const localPath = '/home/user/project/.pi/den-config.json';
+  const inheritedPath = '/home/user/main-project/.pi/den-config.json';
+  const mockConfig = {
+    loadMergedDenExtensionConfig: async (_cwd) => ({
+      subagents: { coder: { model: 'test/model-v1' } },
+    }),
+    denConfigPaths: async (_cwd) => [localPath, inheritedPath],
+  };
+  // Only inherited exists; local is missing.
+  const fileReadable = async (p) => p === inheritedPath;
+  const result = await resolveEffectiveCoderConfig('/home/user/project', mockConfig, fileReadable);
+  assert.equal(result.effective_coder_model, 'test/model-v1');
+  assert.equal(result.config_source, `inherited:${inheritedPath}`);
+});
+
+test('resolveEffectiveCoderConfig reports undefined source when no project config exists', async () => {
+  const localPath = '/home/user/project/.pi/den-config.json';
+  const mockConfig = {
+    loadMergedDenExtensionConfig: async (_cwd) => ({
+      fallback_model: 'global-default/model',
+    }),
+    denConfigPaths: async (_cwd) => [localPath],
+  };
+  // No project config file exists; model comes from global/default.
+  const fileReadable = async (_p) => false;
+  const result = await resolveEffectiveCoderConfig('/home/user/project', mockConfig, fileReadable);
+  assert.equal(result.effective_coder_model, 'global-default/model');
+  assert.equal(result.config_source, undefined);
+});
+
+test('resolveEffectiveCoderConfig reports local path with single config path', async () => {
+  const localPath = '/home/user/project/.pi/den-config.json';
+  const mockConfig = {
+    loadMergedDenExtensionConfig: async (_cwd) => ({
+      subagents: { coder: { model: 'test/model-v2' } },
+    }),
+    denConfigPaths: async (_cwd) => [localPath],
+  };
+  const fileReadable = async (p) => p === localPath;
+  const result = await resolveEffectiveCoderConfig('/home/user/project', mockConfig, fileReadable);
+  assert.equal(result.effective_coder_model, 'test/model-v2');
+  assert.equal(result.config_source, localPath);
 });
 
 test('resolveEffectiveCoderConfig falls back to fallback_model when no coder model', async () => {
@@ -314,10 +406,9 @@ test('resolveEffectiveCoderConfig falls back to fallback_model when no coder mod
     }),
     denConfigPaths: async (_cwd) => ['/home/user/project/.pi/den-config.json'],
   };
-
-  const result = await resolveEffectiveCoderConfig('/home/user/project', mockConfig);
+  const fileReadable = async (_p) => true;
+  const result = await resolveEffectiveCoderConfig('/home/user/project', mockConfig, fileReadable);
   assert.equal(result.effective_coder_model, 'fallback/model');
-  assert.equal(result.config_source, '/home/user/project/.pi/den-config.json');
 });
 
 test('resolveEffectiveCoderConfig returns empty when config fails to load', async () => {
@@ -325,9 +416,20 @@ test('resolveEffectiveCoderConfig returns empty when config fails to load', asyn
     loadMergedDenExtensionConfig: async (_cwd) => { throw new Error('ENOENT'); },
     denConfigPaths: async (_cwd) => { throw new Error('ENOENT'); },
   };
-
   const result = await resolveEffectiveCoderConfig('/tmp/nonexistent', mockConfig);
   assert.equal(result.effective_coder_model, undefined);
+  assert.equal(result.config_source, undefined);
+});
+
+test('resolveEffectiveCoderConfig reports undefined source with empty paths array', async () => {
+  const mockConfig = {
+    loadMergedDenExtensionConfig: async (_cwd) => ({
+      fallback_model: 'some/model',
+    }),
+    denConfigPaths: async (_cwd) => [],
+  };
+  const result = await resolveEffectiveCoderConfig('/home/user/project', mockConfig);
+  assert.equal(result.effective_coder_model, 'some/model');
   assert.equal(result.config_source, undefined);
 });
 

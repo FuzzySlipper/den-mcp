@@ -107,6 +107,8 @@ export interface CoderContextPacketMeta {
   config_source: string | null;
 }
 
+import { access, constants } from "node:fs/promises";
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -143,6 +145,8 @@ export function formatCoderContextPacket(input: CoderContextPacketInput): string
   lines.push("## Task", "");
   lines.push(`- Task: \`#${input.task_id}${input.task_title ? ` ${input.task_title}` : ""}\``);
   if (input.parent_task_id) lines.push(`- Parent: \`#${input.parent_task_id}\``);
+  if (input.task_status) lines.push(`- Status: \`${input.task_status}\``);
+  if (input.task_tags && input.task_tags.length > 0) lines.push(`- Tags: ${input.task_tags.map(t => `\`${t}\``).join(", ")}`);
   if (input.branch) lines.push(`- Branch: \`${input.branch}\``);
   if (input.worktree_path) lines.push(`- Worktree: \`${input.worktree_path}\``);
   if (input.base_commit) lines.push(`- Base commit: \`${input.base_commit}\``);
@@ -152,6 +156,12 @@ export function formatCoderContextPacket(input: CoderContextPacketInput): string
       (input.config_source ? ` from \`${input.config_source}\`` : "") + ".");
   }
   lines.push("");
+
+  // Task description
+  if (input.task_description) {
+    lines.push("## Task description", "");
+    lines.push(boundedText(input.task_description), "");
+  }
 
   // User intent
   if (input.user_intent) {
@@ -320,6 +330,10 @@ export function summarizeRecentPackets(
 /**
  * Resolve the effective coder model and config source from the Den extension
  * config for a given worktree/cwd.
+ *
+ * Config source reporting is accurate about which project config file is
+ * actually used: local takes priority over inherited; if no project config
+ * exists the source is undefined (model comes from global config or defaults).
  */
 export async function resolveEffectiveCoderConfig(
   cwd: string,
@@ -327,23 +341,49 @@ export async function resolveEffectiveCoderConfig(
     loadMergedDenExtensionConfig: (cwd: string) => Promise<any>;
     denConfigPaths: (cwd: string) => Promise<string[]>;
   },
+  fileReadableFn?: (filePath: string) => Promise<boolean>,
 ): Promise<{ effective_coder_model?: string; config_source?: string }> {
+  const checkReadable = fileReadableFn ?? defaultFileReadable;
   try {
     const config = await configModule.loadMergedDenExtensionConfig(cwd);
     const paths = await configModule.denConfigPaths(cwd);
     const model = config?.subagents?.coder?.model ?? config?.fallback_model;
-    // The config source is the first path that exists, or the inherited path.
-    const sourcePath = paths.length > 1
-      ? `inherited:${paths[1]}`
-      : paths.length === 1
-        ? paths[0]
-        : undefined;
+
+    // Check which candidate project config paths actually exist.
+    const localPath = paths[0];
+    const inheritedPath = paths.length > 1 ? paths[1] : undefined;
+
+    const localExists = localPath ? await checkReadable(localPath) : false;
+    const inheritedExists = inheritedPath ? await checkReadable(inheritedPath) : false;
+
+    // Report source accurately: local wins over inherited; if neither project
+    // config exists, the model comes from global config or defaults only.
+    let sourcePath: string | undefined;
+    if (localExists) {
+      sourcePath = localPath;
+    } else if (inheritedExists) {
+      sourcePath = `inherited:${inheritedPath}`;
+    }
+
     return {
       effective_coder_model: model || undefined,
       config_source: sourcePath,
     };
   } catch {
     return {};
+  }
+}
+
+/**
+ * Default file-readability check using `fs.access`.
+ * Overridable in tests via the `fileReadableFn` parameter.
+ */
+async function defaultFileReadable(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath, constants.R_OK);
+    return true;
+  } catch {
+    return false;
   }
 }
 
