@@ -190,6 +190,7 @@ export function App() {
       snapshots={runtime.snapshots}
       sessionSnapshots={runtime.sessionSnapshots}
       diagnostics={runtime.status?.diagnostics ?? []}
+      ipcHealth={runtime.ipcHealth}
     >
       {tabContent}
     </AppShell>

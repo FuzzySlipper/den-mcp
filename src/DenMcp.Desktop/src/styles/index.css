@@ -377,6 +377,7 @@ kbd { border: var(--bw) solid var(--bd-default); border-bottom-color: var(--bd-s
 .console-header { display: flex; align-items: center; gap: var(--sp-3); padding: 0 var(--sp-3); border-bottom: var(--bw) solid var(--bd-subtle); }
 .console-prompt { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; flex: 1; }
 .console-glyph { color: var(--accent); font-family: var(--font-mono); font-weight: 800; }
+.console-mode-stub { color: var(--accent); font-family: var(--font-mono); font-size: var(--fs-2xs); padding: 1px 7px; border: var(--bw) solid color-mix(in oklab, var(--accent) 35%, transparent); border-radius: 999px; background: var(--accent-bg); white-space: nowrap; }
 .console-target { color: var(--fg-secondary); font-family: var(--font-mono); font-size: var(--fs-2xs); white-space: nowrap; }
 .console-prompt input { min-width: 0; flex: 1; height: 22px; border: 0; outline: 0; background: transparent; color: var(--fg-primary); padding: 0; }
 .console-controls { display: flex; gap: var(--sp-1); }

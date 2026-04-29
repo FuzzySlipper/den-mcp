@@ -1,8 +1,7 @@
-import { ReactNode } from 'react';
+import { ReactNode, useMemo } from 'react';
 import {
   ShellAccent,
   ShellBodyFont,
-  ShellConsoleMode,
   ShellDensity,
   ShellRailMode,
   ShellState,
@@ -19,6 +18,9 @@ import {
   shellThemes,
 } from '../shellState';
 import { DiagnosticEntry, LocalGitSnapshot, LocalSessionSnapshot, OperatorStatus } from '../desktop/tauriApi';
+import { IpcHealth } from '../desktop/ipcHealth';
+import { buildConsoleLines } from '../consoleLines';
+import { ConsoleDock } from './ConsoleDock';
 
 interface AppShellProps {
   state: ShellState;
@@ -27,14 +29,25 @@ interface AppShellProps {
   snapshots: LocalGitSnapshot[];
   sessionSnapshots: LocalSessionSnapshot[];
   diagnostics: DiagnosticEntry[];
+  ipcHealth: IpcHealth | null;
   children: Record<ShellTabId, ReactNode>;
 }
 
-export function AppShell({ state, onStateChange, status, snapshots, sessionSnapshots, diagnostics, children }: AppShellProps) {
+export function AppShell({ state, onStateChange, status, snapshots, sessionSnapshots, diagnostics, ipcHealth, children }: AppShellProps) {
   const setState = (patch: Partial<ShellState>) => onStateChange({ ...state, ...patch });
   const activeTab = shellTabs.some((tab) => tab.id === state.activeTab) ? state.activeTab : 'operator';
   const activeTabTitle = shellTabs.find((tab) => tab.id === activeTab)?.label ?? 'operator';
   const dataAttributes = shellStateToDataAttributes(state);
+  const consoleLines = useMemo(
+    () => buildConsoleLines({
+      diagnostics,
+      ipcHealth,
+      denConnection: status?.denConnection ?? null,
+      observerStatuses: status?.observerStatuses ?? [],
+      lastSyncAt: status?.lastSyncAt ?? null,
+    }),
+    [diagnostics, ipcHealth, status?.denConnection, status?.observerStatuses, status?.lastSyncAt],
+  );
 
   return (
     <div className="desktop-shell" {...dataAttributes}>
@@ -58,7 +71,7 @@ export function AppShell({ state, onStateChange, status, snapshots, sessionSnaps
           ) : children[activeTab]}
         </section>
       </div>
-      <ConsoleDock diagnostics={diagnostics} mode={state.consoleMode} onModeChange={(consoleMode) => setState({ consoleMode })} />
+      <ConsoleDock mode={state.consoleMode} onModeChange={(consoleMode) => setState({ consoleMode })} lines={consoleLines} />
       <StatusBar status={status} snapshots={snapshots} sessionSnapshots={sessionSnapshots} state={state} />
     </div>
   );
@@ -186,43 +199,6 @@ function LeftRail({
   );
 }
 
-function ConsoleDock({ diagnostics, mode, onModeChange }: { diagnostics: DiagnosticEntry[]; mode: ShellConsoleMode; onModeChange: (mode: ShellConsoleMode) => void }) {
-  const lines = diagnostics.slice(-8).reverse();
-  return (
-    <section className="console-dock" data-mode={mode} aria-label="Console dock">
-      <div className="console-header">
-        <div className="console-prompt">
-          <span className="console-glyph">›_</span>
-          <span className="console-target">den-mcp · operator</span>
-          <input aria-label="Command palette input" placeholder="run a command, ask an agent, or filter logs…" />
-        </div>
-        <div className="console-controls">
-          {shellConsoleModes.map((option) => (
-            <button key={option} type="button" title={option} className={mode === option ? 'active' : ''} onClick={() => onModeChange(option)}>
-              {consoleModeGlyph(option)}
-            </button>
-          ))}
-        </div>
-      </div>
-      {mode !== 'collapsed' && (
-        <div className="console-output">
-          {lines.length === 0 ? (
-            <div className="console-line"><span className="ts">--:--:--</span><span className="lvl info">info</span><span>waiting for runtime diagnostics</span></div>
-          ) : (
-            lines.map((entry, index) => (
-              <div className="console-line" key={`${entry.observedAt}:${index}`}>
-                <span className="ts">{new Date(entry.observedAt).toLocaleTimeString()}</span>
-                <span className={`lvl ${entry.level}`}>{entry.level}</span>
-                <span>{entry.source}: {entry.message}</span>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-    </section>
-  );
-}
-
 function StatusBar({
   status,
   snapshots,
@@ -314,14 +290,6 @@ function compactTimestamp(value: string): string {
   return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
 }
 
-function consoleModeGlyph(mode: ShellConsoleMode): string {
-  switch (mode) {
-    case 'collapsed': return '▁';
-    case 'preview': return '▂';
-    case 'half': return '▄';
-    case 'full': return '█';
-  }
-}
 
 function statusClass(state: string): string {
   if (state === 'connected' || state === 'ok' || state === 'ready') return 'ok';
