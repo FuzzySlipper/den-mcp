@@ -140,6 +140,7 @@ public sealed class AgentRunRepository : IAgentRunRepository
             record.ReviewRoundId = IntMetadata(item.Metadata, "review_round_id") ?? record.ReviewRoundId;
             record.WorkspaceId = TextMetadata(item.Metadata, "workspace_id") ?? record.WorkspaceId;
             record.Role = TextMetadata(item.Metadata, "role") ?? record.Role;
+            role = record.Role ?? role;
             record.Backend = TextMetadata(item.Metadata, "backend") ?? record.Backend;
             record.Model = TextMetadata(item.Metadata, "model") ?? record.Model;
             record.SenderInstanceId = item.SenderInstanceId ?? TextMetadata(item.Metadata, "sender_instance_id") ?? record.SenderInstanceId;
