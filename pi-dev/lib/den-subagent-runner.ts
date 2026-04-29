@@ -17,6 +17,7 @@ import {
   type SubagentArtifacts,
 } from "./den-subagent-pipeline.ts";
 import type { SubagentRunRecorder } from "./den-subagent-recorder.ts";
+import type { FinalHeadSource, FinalHeadStatus, FinalWorktreeStatus } from "./den-subagent-final-head.ts";
 
 export type DenConfig = {
   baseUrl: string;
@@ -61,6 +62,15 @@ export type SubagentResult = {
   base_commit?: string;
   head_commit?: string;
   purpose?: string;
+  final_head_commit?: string;
+  final_head_status?: FinalHeadStatus;
+  final_head_source?: FinalHeadSource;
+  final_branch?: string;
+  final_worktree_branch?: string;
+  final_branch_matches_worktree?: boolean;
+  final_worktree_status?: FinalWorktreeStatus;
+  final_worktree_status_short?: string;
+  final_head_error?: string;
   session_mode: string;
   session?: string;
   pi_session_id?: string;

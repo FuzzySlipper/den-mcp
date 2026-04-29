@@ -1,9 +1,15 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { promisify } from 'node:util';
 import { createSubagentRunRecorder } from '../../pi-dev/lib/den-subagent-recorder.ts';
+import {
+  buildFinalBranchHeadMetadata,
+  collectFinalBranchHead,
+} from '../../pi-dev/lib/den-subagent-final-head.ts';
 import {
   addSessionArgs,
   buildSubagentPrompt,
@@ -34,6 +40,8 @@ import {
   subagentOpsEventTypeForEvent,
   subagentRunStateFromOpsEventType,
 } from '../../pi-dev/lib/den-subagent-pipeline.ts';
+
+const execFileAsync = promisify(execFile);
 
 function assistantMessage(text, extra = {}) {
   return {
@@ -115,6 +123,28 @@ async function readJson(filePath) {
 async function readJsonLines(filePath) {
   const text = await readFile(filePath, 'utf8');
   return text.trim() ? text.trim().split('\n').map((line) => JSON.parse(line)) : [];
+}
+
+async function git(cwd, args) {
+  const { stdout } = await execFileAsync('git', ['-C', cwd, ...args], { timeout: 10_000 });
+  return String(stdout).trim();
+}
+
+async function initGitRepoWithTaskBranch(t, branch = 'task/final-head') {
+  const repo = await mkdtemp(path.join(os.tmpdir(), 'den-final-head-'));
+  t.after(async () => rm(repo, { recursive: true, force: true }));
+  await git(repo, ['init', '-b', 'main']);
+  await git(repo, ['config', 'user.email', 'test@example.com']);
+  await git(repo, ['config', 'user.name', 'Test User']);
+  await writeFile(path.join(repo, 'work.txt'), 'launch\n', 'utf8');
+  await git(repo, ['add', 'work.txt']);
+  await git(repo, ['commit', '-m', 'launch']);
+  const launchHead = await git(repo, ['rev-parse', 'HEAD']);
+  await git(repo, ['checkout', '-b', branch]);
+  await writeFile(path.join(repo, 'work.txt'), 'final\n', 'utf8');
+  await git(repo, ['commit', '-am', 'final']);
+  const finalHead = await git(repo, ['rev-parse', 'HEAD']);
+  return { repo, branch, launchHead, finalHead };
 }
 
 test('parsePiStdoutLine preserves json and raw stdout separately', () => {
@@ -429,6 +459,75 @@ test('subagent run schema helpers emit canonical metadata and event mapping', ()
   assert.equal(subagentRunStateFromOpsEventType('subagent_completed'), 'complete');
   assert.equal(subagentRunStateFromOpsEventType('subagent_failed'), 'failed');
   assert.equal(subagentRunStateFromOpsEventType('something_else'), 'unknown');
+});
+
+test('final branch head metadata preserves launch head while recording resolved final head', async (t) => {
+  const { repo, branch, launchHead, finalHead } = await initGitRepoWithTaskBranch(t);
+  const state = await collectFinalBranchHead({ worktreePath: repo, branch });
+
+  assert.equal(state.final_head_commit, finalHead);
+  assert.equal(state.final_head_status, 'clean');
+  assert.equal(state.final_head_source, 'supplied_branch');
+  assert.equal(state.final_branch, branch);
+  assert.equal(state.final_worktree_branch, branch);
+  assert.equal(state.final_branch_matches_worktree, true);
+  assert.equal(state.final_worktree_status, 'clean');
+
+  const metadata = buildSubagentRunMetadata({
+    runId: 'run-final-head',
+    role: 'coder',
+    taskId: 954,
+    cwd: repo,
+    backend: 'pi-cli',
+    worktreePath: repo,
+    branch,
+    headCommit: launchHead,
+    purpose: 'implementation',
+  }, buildFinalBranchHeadMetadata(state));
+
+  assert.equal(metadata.head_commit, launchHead);
+  assert.equal(metadata.final_head_commit, finalHead);
+  assert.notEqual(metadata.head_commit, metadata.final_head_commit);
+  assert.equal(metadata.final_head_status, 'clean');
+  assert.equal(metadata.final_worktree_status, 'clean');
+});
+
+test('final branch head inspection reports dirty uncommitted work explicitly', async (t) => {
+  const { repo, branch, finalHead } = await initGitRepoWithTaskBranch(t, 'task/dirty-final-head');
+  await writeFile(path.join(repo, 'work.txt'), 'final plus uncommitted edit\n', 'utf8');
+  await writeFile(path.join(repo, 'untracked.txt'), 'untracked\n', 'utf8');
+
+  const state = await collectFinalBranchHead({ worktreePath: repo, branch });
+
+  assert.equal(state.final_head_commit, finalHead);
+  assert.equal(state.final_head_status, 'dirty_uncommitted');
+  assert.equal(state.final_worktree_status, 'dirty_uncommitted');
+  assert.match(state.final_worktree_status_short, /M work\.txt/);
+  assert.match(state.final_worktree_status_short, /\?\? untracked\.txt/);
+});
+
+test('final branch head inspection reports branch mismatches while resolving the requested branch', async (t) => {
+  const { repo, branch, finalHead } = await initGitRepoWithTaskBranch(t, 'task/mismatched-final-head');
+  await git(repo, ['checkout', 'main']);
+
+  const state = await collectFinalBranchHead({ worktreePath: repo, branch });
+
+  assert.equal(state.final_head_commit, finalHead);
+  assert.equal(state.final_head_status, 'branch_mismatch');
+  assert.equal(state.final_branch, branch);
+  assert.equal(state.final_worktree_branch, 'main');
+  assert.equal(state.final_branch_matches_worktree, false);
+  assert.equal(state.final_worktree_status, 'clean');
+});
+
+test('final branch head inspection reports unavailable worktrees without a commit claim', async () => {
+  const missing = path.join(os.tmpdir(), `den-missing-final-head-${Date.now()}`);
+  const state = await collectFinalBranchHead({ worktreePath: missing, branch: 'task/missing' });
+
+  assert.equal(state.final_head_commit, undefined);
+  assert.equal(state.final_head_status, 'unavailable');
+  assert.equal(state.final_worktree_status, 'unavailable');
+  assert.match(state.final_head_error, /worktree_path unavailable/);
 });
 
 test('subagent run recorder writes normalized artifacts and ordered progress events', async (t) => {

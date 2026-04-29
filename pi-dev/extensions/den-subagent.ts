@@ -23,9 +23,16 @@ import {
   formatImplementationPacketMessage,
 } from "../lib/den-implementation-packet.ts";
 import {
+  buildFinalBranchHeadMetadata,
+  collectFinalBranchHead,
+  finalBranchHeadInspectionError,
+  type FinalBranchHeadState,
+} from "../lib/den-subagent-final-head.ts";
+import {
   DEFAULT_REASONING_PREVIEW_CHARS,
   SUBAGENT_RUN_SCHEMA,
   SUBAGENT_RUN_SCHEMA_VERSION,
+  buildSubagentRunContextMetadata,
   buildSubagentRunMetadata,
   isSubagentInfrastructureFailure,
   normalizeSubagentRunPurpose,
@@ -1133,6 +1140,18 @@ async function runDenSubagent(
   }
 
   const finalRequestedModel = fallbackModel ?? effectiveOptions.model;
+  const finalHeadState = await collectFinalHeadForSuccessfulCoderRun(effectiveOptions, result, cwd);
+  const finalHeadMetadata = buildFinalBranchHeadMetadata(finalHeadState);
+  if (finalHeadState) {
+    applyFinalHeadState(result, finalHeadState);
+    await recorder.appendEvent({
+      type: "subagent.final_branch_head",
+      ts: Date.now(),
+      ...buildSubagentRunContextMetadata(effectiveOptions),
+      ...finalHeadMetadata,
+    });
+    await recorder.flushEvents();
+  }
   const completionEventType = subagentSucceeded(result)
     ? "subagent_completed"
     : result.aborted
@@ -1178,6 +1197,7 @@ async function runDenSubagent(
       infrastructure_failure_reason: result.infrastructure_failure_reason ?? null,
       infrastructure_warning_reason: result.infrastructure_warning_reason ?? null,
       stderr_preview: result.stderr_tail,
+      ...finalHeadMetadata,
     }),
   });
 
@@ -1213,6 +1233,7 @@ async function runDenSubagent(
       infrastructure_warning_reason: result.infrastructure_warning_reason ?? null,
       fallback_from_model: result.fallback_from_model ?? null,
       fallback_from_exit_code: result.fallback_from_exit_code ?? null,
+      ...finalHeadMetadata,
     });
   }
 
@@ -1243,6 +1264,7 @@ async function runDenSubagent(
           artifacts: result.artifacts,
         }),
         ...packetMeta,
+        ...finalHeadMetadata,
       });
     } catch (packetError) {
       // Packet posting is advisory; failures should not break the sub-agent result flow.
@@ -1254,6 +1276,41 @@ async function runDenSubagent(
   }
 
   return result;
+}
+
+async function collectFinalHeadForSuccessfulCoderRun(
+  options: RunOptions,
+  result: SubagentResult,
+  cwd: string,
+): Promise<FinalBranchHeadState | undefined> {
+  if (!subagentSucceeded(result)) return undefined;
+  if (options.role.toLowerCase() !== "coder") return undefined;
+  if (!options.worktreePath && !options.branch) return undefined;
+  try {
+    return await collectFinalBranchHead({
+      worktreePath: options.worktreePath,
+      branch: options.branch,
+      cwd,
+    });
+  } catch (error) {
+    return finalBranchHeadInspectionError(error, {
+      worktreePath: options.worktreePath,
+      branch: options.branch,
+      cwd,
+    });
+  }
+}
+
+function applyFinalHeadState(result: SubagentResult, state: FinalBranchHeadState) {
+  result.final_head_commit = state.final_head_commit;
+  result.final_head_status = state.final_head_status;
+  result.final_head_source = state.final_head_source;
+  result.final_branch = state.final_branch;
+  result.final_worktree_branch = state.final_worktree_branch;
+  result.final_branch_matches_worktree = state.final_branch_matches_worktree;
+  result.final_worktree_status = state.final_worktree_status;
+  result.final_worktree_status_short = state.final_worktree_status_short;
+  result.final_head_error = state.final_head_error;
 }
 
 function shouldRetryWithFallback(
@@ -1499,6 +1556,7 @@ function formatResultMessage(result: SubagentResult): string {
     result.model ? `Model: ${result.model}` : null,
     result.timeout_kind ? `Termination note: ${result.timeout_kind}${result.forced_kill ? " (forced kill)" : ""}` : null,
     result.fallback_from_model ? `Fallback retry from: ${result.fallback_from_model} (exit ${result.fallback_from_exit_code ?? "unknown"})` : null,
+    formatFinalHeadLine(result),
     `Artifacts: ${result.artifacts.dir}`,
     "",
     output,
@@ -1521,6 +1579,7 @@ function formatFailureMessage(result: SubagentResult): string {
     result.forced_kill ? "Forced kill: true" : null,
     result.child_error_message ? `Child error: ${result.child_error_message}` : null,
     result.fallback_from_model ? `Fallback retry from: ${result.fallback_from_model} (exit ${result.fallback_from_exit_code ?? "unknown"})` : null,
+    formatFinalHeadLine(result),
     `Artifacts: ${result.artifacts.dir}`,
     "",
     result.role === "reviewer"
@@ -1528,6 +1587,16 @@ function formatFailureMessage(result: SubagentResult): string {
       : "No valid assistant final output was produced.",
     result.stderr_tail ? `\nStderr tail:\n${result.stderr_tail}` : null,
   ].filter((line): line is string => line !== null).join("\n");
+}
+
+function formatFinalHeadLine(result: SubagentResult): string | null {
+  if (result.final_head_commit) {
+    return `Final branch head: ${result.final_head_commit}${result.final_head_status ? ` (${result.final_head_status})` : ""}`;
+  }
+  if (result.final_head_status) {
+    return `Final branch head: ${result.final_head_status}${result.final_head_error ? ` (${result.final_head_error})` : ""}`;
+  }
+  return null;
 }
 
 function formatFailureSummary(result: SubagentResult): string {
