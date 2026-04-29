@@ -121,13 +121,35 @@ public class PiSessionSnapshotBuilderTests
             Assert.Equal("tool_result", activityItems[2].GetProperty("kind").GetString());
             Assert.Equal("bash", activityItems[2].GetProperty("tool").GetString());
 
-            var capabilities = snapshot.Request.ControlCapabilities;
-            Assert.Equal("den_desktop_session_capabilities", capabilities.GetProperty("schema").GetString());
-            Assert.False(capabilities.GetProperty("can_focus").GetBoolean());
-            Assert.False(capabilities.GetProperty("can_stream_raw_terminal").GetBoolean());
+            // Legacy control_capabilities preserved
+            var controlCapabilities = snapshot.Request.ControlCapabilities;
+            Assert.Equal("den_desktop_session_capabilities", controlCapabilities.GetProperty("schema").GetString());
+            Assert.False(controlCapabilities.GetProperty("can_focus").GetBoolean());
+            Assert.False(controlCapabilities.GetProperty("can_stream_raw_terminal").GetBoolean());
+            Assert.False(controlCapabilities.GetProperty("can_send_input").GetBoolean());
+            Assert.False(controlCapabilities.GetProperty("can_stop").GetBoolean());
+            Assert.False(controlCapabilities.GetProperty("can_launch_managed_session").GetBoolean());
+
+            // New first-class OperatorSession fields (task #1009)
+            Assert.Equal("status-run", snapshot.Request.Title);
+            Assert.Equal("coder", snapshot.Request.DisplayName);
+            Assert.Equal(Path.Combine(nestedRepo, "src"), snapshot.Request.Cwd);
+            Assert.Equal("artifact_observer", snapshot.Request.Kind);
+            Assert.Equal("pi_artifact", snapshot.Request.Backend);
+            Assert.Equal("running", snapshot.Request.Status);
+            Assert.Equal("2026-04-29T00:00:00.000Z", snapshot.Request.StartedAt);
+            Assert.Null(snapshot.Request.ExitedAt);
+            Assert.Null(snapshot.Request.ExitCode);
+            Assert.Equal("Desktop Test", snapshot.Request.SourceDisplayName);
+
+            // Structured capabilities
+            Assert.NotNull(snapshot.Request.Capabilities);
+            var capabilities = snapshot.Request.Capabilities!.Value;
+            Assert.Equal("den_desktop_session_capabilities_v2", capabilities.GetProperty("schema").GetString());
+            Assert.False(capabilities.GetProperty("can_attach").GetBoolean());
+            Assert.False(capabilities.GetProperty("can_terminate").GetBoolean());
             Assert.False(capabilities.GetProperty("can_send_input").GetBoolean());
-            Assert.False(capabilities.GetProperty("can_stop").GetBoolean());
-            Assert.False(capabilities.GetProperty("can_launch_managed_session").GetBoolean());
+            Assert.True(capabilities.GetProperty("can_read_activity").GetBoolean());
 
             var children = snapshot.Request.ChildSessions;
             Assert.Equal("den_desktop_session_children", children.GetProperty("schema").GetString());
@@ -163,6 +185,16 @@ public class PiSessionSnapshotBuilderTests
             Assert.Equal("pi-cli", snapshot.Request.CurrentCommand);
             Assert.Contains(snapshot.Request.Warnings, warning => warning.Contains("session file path", StringComparison.Ordinal));
             Assert.Contains(snapshot.Request.Warnings, warning => warning.Contains("Session is complete", StringComparison.Ordinal));
+
+            // New first-class fields for completed Pi artifact session
+            Assert.Equal("fallback-dir", snapshot.Request.Title);
+            Assert.Equal("planner", snapshot.Request.DisplayName);
+            Assert.Null(snapshot.Request.Cwd);
+            Assert.Equal("artifact_observer", snapshot.Request.Kind);
+            Assert.Equal("pi_artifact", snapshot.Request.Backend);
+            Assert.Equal("exited", snapshot.Request.Status);
+            Assert.Equal("2026-04-29T00:10:00.000Z", snapshot.Request.ExitedAt);
+            Assert.Equal(0L, snapshot.Request.ExitCode);
         }
         finally
         {

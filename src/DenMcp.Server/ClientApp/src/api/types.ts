@@ -397,6 +397,18 @@ export interface DesktopSessionSnapshot {
   role: string | null;
   current_command: string | null;
   current_phase: string | null;
+  title: string | null;
+  display_name: string | null;
+  cwd: string | null;
+  kind: string | null;
+  backend: string | null;
+  status: string | null;
+  started_at: string | null;
+  last_activity_at: string | null;
+  exited_at: string | null;
+  exit_code: number | null;
+  source_display_name: string | null;
+  capabilities: unknown | null;
   recent_activity: unknown | null;
   child_sessions: unknown | null;
   control_capabilities: unknown | null;

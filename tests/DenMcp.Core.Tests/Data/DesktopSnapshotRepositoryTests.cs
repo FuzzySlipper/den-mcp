@@ -212,6 +212,70 @@ public class DesktopSnapshotRepositoryTests : IAsyncLifetime
         Assert.Single(listed);
     }
 
+    [Fact]
+    public async Task UpsertSessionSnapshot_RoundTripsNewFirstClassFields()
+    {
+        var capabilitiesJson = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>("""
+            {"can_attach":false,"can_terminate":true,"can_send_input":false,"can_stream_terminal":true}
+            """);
+        var saved = await _snapshots.UpsertSessionSnapshotAsync(new DesktopSessionSnapshot
+        {
+            ProjectId = "proj",
+            TaskId = _task.Id,
+            WorkspaceId = _workspace.Id,
+            SessionId = "pty-2",
+            Title = "My Terminal",
+            DisplayName = "bash (task/foo)",
+            Cwd = "/home/user/dev/project",
+            Kind = "terminal",
+            Backend = "direct_pty",
+            Status = "running",
+            StartedAt = _now.AddMinutes(-30),
+            LastActivityAt = _now.AddSeconds(-10),
+            ExitedAt = null,
+            ExitCode = null,
+            SourceDisplayName = "Desktop A",
+            Capabilities = capabilitiesJson,
+            SourceInstanceId = "desktop-a",
+            ObservedAt = _now.AddSeconds(-2)
+        });
+
+        Assert.Equal("My Terminal", saved.Title);
+        Assert.Equal("bash (task/foo)", saved.DisplayName);
+        Assert.Equal("/home/user/dev/project", saved.Cwd);
+        Assert.Equal("terminal", saved.Kind);
+        Assert.Equal("direct_pty", saved.Backend);
+        Assert.Equal("running", saved.Status);
+        Assert.Equal(_now.AddMinutes(-30), saved.StartedAt);
+        Assert.Equal(_now.AddSeconds(-10), saved.LastActivityAt);
+        Assert.Null(saved.ExitedAt);
+        Assert.Null(saved.ExitCode);
+        Assert.Equal("Desktop A", saved.SourceDisplayName);
+        Assert.NotNull(saved.Capabilities);
+        Assert.True(saved.Capabilities!.Value.GetProperty("can_stream_terminal").GetBoolean());
+
+        // Update with exited state
+        var updated = await _snapshots.UpsertSessionSnapshotAsync(new DesktopSessionSnapshot
+        {
+            ProjectId = "proj",
+            TaskId = _task.Id,
+            WorkspaceId = _workspace.Id,
+            SessionId = "pty-2",
+            Status = "exited",
+            ExitedAt = _now,
+            ExitCode = 0,
+            SourceDisplayName = "Desktop A",
+            SourceInstanceId = "desktop-a",
+            ObservedAt = _now
+        });
+
+        Assert.Equal(saved.Id, updated.Id);
+        Assert.Equal("exited", updated.Status);
+        Assert.Equal(_now, updated.ExitedAt);
+        Assert.Equal(0, updated.ExitCode);
+        Assert.Equal("Desktop A", updated.SourceDisplayName);
+    }
+
     private DesktopGitSnapshot NewGitSnapshot(DateTime observedAt) => new()
     {
         ProjectId = "proj",

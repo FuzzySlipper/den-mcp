@@ -154,6 +154,60 @@ public class DesktopSnapshotApiTests : IAsyncLifetime
         Assert.True(session.ControlCapabilities!.Value.GetProperty("focus").GetBoolean());
     }
 
+    [Fact]
+    public async Task DesktopSessionSnapshots_RoundTripsNewFirstClassFields()
+    {
+        var startedAt = DateTime.UtcNow.AddMinutes(-30);
+        var lastActivityAt = DateTime.UtcNow.AddSeconds(-10);
+
+        var sessionResponse = await _client.PutAsJsonAsync($"/api/projects/{ProjectId}/desktop/session-snapshots", new
+        {
+            task_id = _task.Id,
+            workspace_id = _workspace.Id,
+            session_id = "pty-2",
+            title = "My Terminal",
+            display_name = "bash (task/foo)",
+            cwd = "/home/user/dev/project",
+            kind = "terminal",
+            backend = "direct_pty",
+            status = "running",
+            started_at = startedAt,
+            last_activity_at = lastActivityAt,
+            source_display_name = "Desktop A",
+            capabilities = new { can_attach = false, can_terminate = true, can_stream_terminal = true },
+            source_instance_id = "desktop-a",
+            observed_at = DateTime.UtcNow
+        }, JsonOpts);
+        sessionResponse.EnsureSuccessStatusCode();
+
+        using var sessionJson = JsonDocument.Parse(await sessionResponse.Content.ReadAsStringAsync());
+        Assert.Equal("My Terminal", sessionJson.RootElement.GetProperty("title").GetString());
+        Assert.Equal("bash (task/foo)", sessionJson.RootElement.GetProperty("display_name").GetString());
+        Assert.Equal("/home/user/dev/project", sessionJson.RootElement.GetProperty("cwd").GetString());
+        Assert.Equal("terminal", sessionJson.RootElement.GetProperty("kind").GetString());
+        Assert.Equal("direct_pty", sessionJson.RootElement.GetProperty("backend").GetString());
+        Assert.Equal("running", sessionJson.RootElement.GetProperty("status").GetString());
+        Assert.Equal("Desktop A", sessionJson.RootElement.GetProperty("source_display_name").GetString());
+
+        var caps = sessionJson.RootElement.GetProperty("capabilities");
+        Assert.True(caps.GetProperty("can_stream_terminal").GetBoolean());
+        Assert.True(caps.GetProperty("can_terminate").GetBoolean());
+        Assert.False(caps.GetProperty("can_attach").GetBoolean());
+
+        // Legacy fields still work
+        Assert.Equal("pty-2", sessionJson.RootElement.GetProperty("session_id").GetString());
+
+        // List and verify
+        var listResponse = await _client.GetAsync($"/api/projects/{ProjectId}/desktop/session-snapshots?taskId={_task.Id}&sourceInstanceId=desktop-a");
+        listResponse.EnsureSuccessStatusCode();
+        using var listJson = JsonDocument.Parse(await listResponse.Content.ReadAsStringAsync());
+        var sessions = listJson.RootElement.EnumerateArray().ToList();
+        var found = sessions.First(s => s.GetProperty("session_id").GetString() == "pty-2");
+        Assert.Equal("My Terminal", found.GetProperty("title").GetString());
+        Assert.Equal("direct_pty", found.GetProperty("backend").GetString());
+        Assert.Equal("running", found.GetProperty("status").GetString());
+    }
+
     private sealed class SnapshotAppFactory : WebApplicationFactory<Program>
     {
         private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"den-mcp-snapshot-api-{Guid.NewGuid()}.db");

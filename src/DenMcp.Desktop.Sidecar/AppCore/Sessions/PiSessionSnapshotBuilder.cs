@@ -153,12 +153,26 @@ public sealed class PiSessionSnapshotBuilder
             ?? TrimToOption(status.Backend);
         var artifactRoot = TrimToOption(status.Artifacts?.Dir) ?? runDirectory;
 
+        // Derive normalized status from legacy phase/state (task #1009).
+        // Mapping: "complete" -> "exited", "observed" -> "running" or "idle"
+        // depending on activity, others map to "running".
+        var normalizedStatus = phase switch
+        {
+            "complete" => "exited",
+            "running" => "running",
+            "working" or "coding" or "tool_use" => "running",
+            "failed" => "failed",
+            _ when TrimToOption(status.EndedAt) is not null => "exited",
+            _ => "running"
+        };
+
         var requestWarnings = activity.Warnings.ToList();
         if (TrimToOption(status.EndedAt) is not null)
         {
             requestWarnings.Add("Session is complete; snapshot is retained for correlation/history.");
         }
 
+        var nowString = _nowString();
         var recentActivity = ToJsonElement(new
         {
             schema = "den_desktop_recent_activity",
@@ -180,6 +194,9 @@ public sealed class PiSessionSnapshotBuilder
             items = Array.Empty<object>(),
             note = "Sub-agent children are available from Den run records; local artifact scan does not infer a process tree yet.",
         });
+
+        // Legacy Pi builder capability blob (preserved for backward compat).
+        // All control flags are false for observer-only Pi artifact sessions.
         var controlCapabilities = ToJsonElement(new
         {
             schema = "den_desktop_session_capabilities",
@@ -190,6 +207,31 @@ public sealed class PiSessionSnapshotBuilder
             can_stop = false,
             can_launch_managed_session = false,
             reason = "Artifact-observer mode only; no PTY ownership or safe controls are active in this spike.",
+        });
+
+        // Structured capabilities with OperatorSession vocabulary (task #1009).
+        // Mapping from legacy Pi builder capability keys:
+        //   can_stream_raw_terminal -> can_stream_terminal
+        //   can_stop               -> can_terminate
+        //   can_send_input         -> can_send_input
+        //   can_launch_managed_session -> can_deliver_compiled_response
+        //   can_focus              -> can_focus
+        var capabilities = ToJsonElement(new
+        {
+            schema = "den_desktop_session_capabilities_v2",
+            schema_version = 1,
+            can_attach = false,
+            can_detach = false,
+            can_send_input = false,
+            can_resize = false,
+            can_terminate = false,
+            can_kill = false,
+            can_reconnect = false,
+            can_focus = false,
+            can_read_activity = activity.Items.Count > 0,
+            can_stream_terminal = false,
+            can_deliver_compiled_response = false,
+            reason = "Artifact-observer mode only; no PTY ownership or safe controls are active.",
         });
 
         return new LocalSessionSnapshot
@@ -206,12 +248,26 @@ public sealed class PiSessionSnapshotBuilder
                 Role = TrimToOption(status.Role),
                 CurrentCommand = command,
                 CurrentPhase = phase,
+                // First-class OperatorSession fields (task #1009)
+                Title = TrimToOption(runId), // use resolved runId (with fallback to directory name)
+                DisplayName = TrimToOption(status.Role),
+                Cwd = TrimToOption(status.Cwd),
+                Kind = "artifact_observer",
+                Backend = "pi_artifact",
+                Status = normalizedStatus,
+                StartedAt = status.StartedAt,
+                LastActivityAt = activity.Items.Count > 0 ? nowString : null,
+                ExitedAt = status.EndedAt,
+                ExitCode = status.ExitCode,
+                SourceDisplayName = settings.SourceDisplayName,
+                Capabilities = capabilities,
+                // Legacy fields preserved for backward compatibility
                 RecentActivity = recentActivity,
                 ChildSessions = childSessions,
                 ControlCapabilities = controlCapabilities,
                 Warnings = requestWarnings,
                 SourceInstanceId = settings.SourceInstanceId,
-                ObservedAt = _nowString(),
+                ObservedAt = nowString,
             },
             LastPublishStatus = "pending",
         };

@@ -261,6 +261,18 @@ public static class DesktopSnapshotRoutes
         Role = TrimToNull(req.Role),
         CurrentCommand = TrimToNull(req.CurrentCommand),
         CurrentPhase = TrimToNull(req.CurrentPhase),
+        Title = TrimToNull(req.Title),
+        DisplayName = TrimToNull(req.DisplayName),
+        Cwd = TrimToNull(req.Cwd),
+        Kind = TrimToNull(req.Kind),
+        Backend = TrimToNull(req.Backend),
+        Status = TrimToNull(req.Status),
+        StartedAt = req.StartedAt,
+        LastActivityAt = req.LastActivityAt,
+        ExitedAt = req.ExitedAt,
+        ExitCode = req.ExitCode,
+        SourceDisplayName = TrimToNull(req.SourceDisplayName),
+        Capabilities = req.Capabilities?.Clone(),
         RecentActivity = req.RecentActivity?.Clone(),
         ChildSessions = req.ChildSessions?.Clone(),
         ControlCapabilities = req.ControlCapabilities?.Clone(),
@@ -338,6 +350,18 @@ public sealed record UpsertDesktopSessionSnapshotRequest
     public string? Role { get; init; }
     public string? CurrentCommand { get; init; }
     public string? CurrentPhase { get; init; }
+    public string? Title { get; init; }
+    public string? DisplayName { get; init; }
+    public string? Cwd { get; init; }
+    public string? Kind { get; init; }
+    public string? Backend { get; init; }
+    public string? Status { get; init; }
+    public DateTime? StartedAt { get; init; }
+    public DateTime? LastActivityAt { get; init; }
+    public DateTime? ExitedAt { get; init; }
+    public int? ExitCode { get; init; }
+    public string? SourceDisplayName { get; init; }
+    public JsonElement? Capabilities { get; init; }
     public JsonElement? RecentActivity { get; init; }
     public JsonElement? ChildSessions { get; init; }
     public JsonElement? ControlCapabilities { get; init; }

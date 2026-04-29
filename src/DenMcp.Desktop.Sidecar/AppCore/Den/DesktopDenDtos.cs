@@ -287,6 +287,42 @@ public sealed record DesktopSessionSnapshotRequest
     [JsonPropertyName("current_phase")]
     public string? CurrentPhase { get; init; }
 
+    [JsonPropertyName("title")]
+    public string? Title { get; init; }
+
+    [JsonPropertyName("display_name")]
+    public string? DisplayName { get; init; }
+
+    [JsonPropertyName("cwd")]
+    public string? Cwd { get; init; }
+
+    [JsonPropertyName("kind")]
+    public string? Kind { get; init; }
+
+    [JsonPropertyName("backend")]
+    public string? Backend { get; init; }
+
+    [JsonPropertyName("status")]
+    public string? Status { get; init; }
+
+    [JsonPropertyName("started_at")]
+    public string? StartedAt { get; init; }
+
+    [JsonPropertyName("last_activity_at")]
+    public string? LastActivityAt { get; init; }
+
+    [JsonPropertyName("exited_at")]
+    public string? ExitedAt { get; init; }
+
+    [JsonPropertyName("exit_code")]
+    public long? ExitCode { get; init; }
+
+    [JsonPropertyName("source_display_name")]
+    public string? SourceDisplayName { get; init; }
+
+    [JsonPropertyName("capabilities")]
+    public JsonElement? Capabilities { get; init; }
+
     [JsonPropertyName("recent_activity")]
     public JsonElement RecentActivity { get; init; }
 

@@ -658,6 +658,18 @@ public sealed class DatabaseInitializer
             role                  TEXT,
             current_command       TEXT,
             current_phase         TEXT,
+            title                 TEXT,
+            display_name          TEXT,
+            cwd                   TEXT,
+            kind                  TEXT,
+            backend               TEXT,
+            status                TEXT,
+            started_at            TEXT,
+            last_activity_at      TEXT,
+            exited_at             TEXT,
+            exit_code             INTEGER,
+            source_display_name   TEXT,
+            capabilities          TEXT,
             recent_activity       TEXT,
             child_sessions        TEXT,
             control_capabilities  TEXT,
@@ -692,6 +704,18 @@ public sealed class DatabaseInitializer
         // so we check via PRAGMA table_info.
         await TryAddColumnAsync(connection, "agent_sessions", "session_id", "TEXT");
         await TryAddColumnAsync(connection, "desktop_diff_snapshots", "source_display_name", "TEXT");
+        await TryAddColumnAsync(connection, "desktop_session_snapshots", "title", "TEXT");
+        await TryAddColumnAsync(connection, "desktop_session_snapshots", "display_name", "TEXT");
+        await TryAddColumnAsync(connection, "desktop_session_snapshots", "cwd", "TEXT");
+        await TryAddColumnAsync(connection, "desktop_session_snapshots", "kind", "TEXT");
+        await TryAddColumnAsync(connection, "desktop_session_snapshots", "backend", "TEXT");
+        await TryAddColumnAsync(connection, "desktop_session_snapshots", "status", "TEXT");
+        await TryAddColumnAsync(connection, "desktop_session_snapshots", "started_at", "TEXT");
+        await TryAddColumnAsync(connection, "desktop_session_snapshots", "last_activity_at", "TEXT");
+        await TryAddColumnAsync(connection, "desktop_session_snapshots", "exited_at", "TEXT");
+        await TryAddColumnAsync(connection, "desktop_session_snapshots", "exit_code", "INTEGER");
+        await TryAddColumnAsync(connection, "desktop_session_snapshots", "source_display_name", "TEXT");
+        await TryAddColumnAsync(connection, "desktop_session_snapshots", "capabilities", "TEXT");
         await TryAddColumnAsync(connection, "dispatch_entries", "completed_by", "TEXT");
         await TryAddColumnAsync(connection, "dispatch_entries", "context_json", "TEXT");
         await TryAddColumnAsync(connection, "messages", "intent",
@@ -1153,6 +1177,18 @@ public sealed class DatabaseInitializer
                 role                  TEXT,
                 current_command       TEXT,
                 current_phase         TEXT,
+                title                 TEXT,
+                display_name          TEXT,
+                cwd                   TEXT,
+                kind                  TEXT,
+                backend               TEXT,
+                status                TEXT,
+                started_at            TEXT,
+                last_activity_at      TEXT,
+                exited_at             TEXT,
+                exit_code             INTEGER,
+                source_display_name   TEXT,
+                capabilities          TEXT,
                 recent_activity       TEXT,
                 child_sessions        TEXT,
                 control_capabilities  TEXT,

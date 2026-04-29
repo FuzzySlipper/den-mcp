@@ -193,6 +193,18 @@ export interface DesktopSessionSnapshotRequest {
   role: string | null;
   current_command: string | null;
   current_phase: string | null;
+  title: string | null;
+  display_name: string | null;
+  cwd: string | null;
+  kind: string | null;
+  backend: string | null;
+  status: string | null;
+  started_at: string | null;
+  last_activity_at: string | null;
+  exited_at: string | null;
+  exit_code: number | null;
+  source_display_name: string | null;
+  capabilities: unknown;
   recent_activity: unknown;
   child_sessions: unknown;
   control_capabilities: unknown;

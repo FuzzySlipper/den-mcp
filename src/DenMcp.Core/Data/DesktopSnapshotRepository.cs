@@ -32,8 +32,10 @@ public sealed class DesktopSnapshotRepository : IDesktopSnapshotRepository
 
     private const string SessionColumns = """
         id, project_id, task_id, workspace_id, session_id, parent_session_id, agent_identity,
-        role, current_command, current_phase, recent_activity, child_sessions,
-        control_capabilities, warnings, source_instance_id, observed_at, received_at, updated_at
+        role, current_command, current_phase, title, display_name, cwd, kind, backend, status,
+        started_at, last_activity_at, exited_at, exit_code, source_display_name, capabilities,
+        recent_activity, child_sessions, control_capabilities, warnings, source_instance_id,
+        observed_at, received_at, updated_at
         """;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -235,12 +237,16 @@ public sealed class DesktopSnapshotRepository : IDesktopSnapshotRepository
         cmd.CommandText = $"""
             INSERT INTO desktop_session_snapshots (
                 project_id, task_id, workspace_id, session_id, parent_session_id,
-                agent_identity, role, current_command, current_phase, recent_activity,
+                agent_identity, role, current_command, current_phase, title, display_name,
+                cwd, kind, backend, status, started_at, last_activity_at, exited_at,
+                exit_code, source_display_name, capabilities, recent_activity,
                 child_sessions, control_capabilities, warnings, source_instance_id,
                 observed_at, received_at, updated_at
             ) VALUES (
                 @projectId, @taskId, @workspaceId, @sessionId, @parentSessionId,
-                @agentIdentity, @role, @currentCommand, @currentPhase, @recentActivity,
+                @agentIdentity, @role, @currentCommand, @currentPhase, @title, @displayName,
+                @cwd, @kind, @backend, @status, @startedAt, @lastActivityAt, @exitedAt,
+                @exitCode, @sourceDisplayName, @capabilities, @recentActivity,
                 @childSessions, @controlCapabilities, @warnings, @sourceInstanceId,
                 @observedAt, @receivedAt, @updatedAt
             )
@@ -252,6 +258,18 @@ public sealed class DesktopSnapshotRepository : IDesktopSnapshotRepository
                 role = excluded.role,
                 current_command = excluded.current_command,
                 current_phase = excluded.current_phase,
+                title = excluded.title,
+                display_name = excluded.display_name,
+                cwd = excluded.cwd,
+                kind = excluded.kind,
+                backend = excluded.backend,
+                status = excluded.status,
+                started_at = excluded.started_at,
+                last_activity_at = excluded.last_activity_at,
+                exited_at = excluded.exited_at,
+                exit_code = excluded.exit_code,
+                source_display_name = excluded.source_display_name,
+                capabilities = excluded.capabilities,
                 recent_activity = excluded.recent_activity,
                 child_sessions = excluded.child_sessions,
                 control_capabilities = excluded.control_capabilities,
@@ -410,6 +428,18 @@ public sealed class DesktopSnapshotRepository : IDesktopSnapshotRepository
         cmd.Parameters.AddWithValue("@role", NullIfWhiteSpace(snapshot.Role));
         cmd.Parameters.AddWithValue("@currentCommand", NullIfWhiteSpace(snapshot.CurrentCommand));
         cmd.Parameters.AddWithValue("@currentPhase", NullIfWhiteSpace(snapshot.CurrentPhase));
+        cmd.Parameters.AddWithValue("@title", NullIfWhiteSpace(snapshot.Title));
+        cmd.Parameters.AddWithValue("@displayName", NullIfWhiteSpace(snapshot.DisplayName));
+        cmd.Parameters.AddWithValue("@cwd", NullIfWhiteSpace(snapshot.Cwd));
+        cmd.Parameters.AddWithValue("@kind", NullIfWhiteSpace(snapshot.Kind));
+        cmd.Parameters.AddWithValue("@backend", NullIfWhiteSpace(snapshot.Backend));
+        cmd.Parameters.AddWithValue("@status", NullIfWhiteSpace(snapshot.Status));
+        cmd.Parameters.AddWithValue("@startedAt", snapshot.StartedAt is null ? DBNull.Value : ToDbTime(snapshot.StartedAt.Value));
+        cmd.Parameters.AddWithValue("@lastActivityAt", snapshot.LastActivityAt is null ? DBNull.Value : ToDbTime(snapshot.LastActivityAt.Value));
+        cmd.Parameters.AddWithValue("@exitedAt", snapshot.ExitedAt is null ? DBNull.Value : ToDbTime(snapshot.ExitedAt.Value));
+        cmd.Parameters.AddWithValue("@exitCode", (object?)snapshot.ExitCode ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@sourceDisplayName", NullIfWhiteSpace(snapshot.SourceDisplayName));
+        cmd.Parameters.AddWithValue("@capabilities", JsonOrNull(snapshot.Capabilities));
         cmd.Parameters.AddWithValue("@recentActivity", JsonOrNull(snapshot.RecentActivity));
         cmd.Parameters.AddWithValue("@childSessions", JsonOrNull(snapshot.ChildSessions));
         cmd.Parameters.AddWithValue("@controlCapabilities", JsonOrNull(snapshot.ControlCapabilities));
@@ -483,7 +513,7 @@ public sealed class DesktopSnapshotRepository : IDesktopSnapshotRepository
 
     private DesktopSessionSnapshot ReadSessionSnapshot(SqliteDataReader reader, TimeSpan staleAfter)
     {
-        var observedAt = FromDbTime(reader.GetString(15));
+        var observedAt = FromDbTime(reader.GetString(27));
         return new DesktopSessionSnapshot
         {
             Id = reader.GetInt64(0),
@@ -496,14 +526,26 @@ public sealed class DesktopSnapshotRepository : IDesktopSnapshotRepository
             Role = reader.IsDBNull(7) ? null : reader.GetString(7),
             CurrentCommand = reader.IsDBNull(8) ? null : reader.GetString(8),
             CurrentPhase = reader.IsDBNull(9) ? null : reader.GetString(9),
-            RecentActivity = reader.IsDBNull(10) ? null : JsonSerializer.Deserialize<JsonElement>(reader.GetString(10)).Clone(),
-            ChildSessions = reader.IsDBNull(11) ? null : JsonSerializer.Deserialize<JsonElement>(reader.GetString(11)).Clone(),
-            ControlCapabilities = reader.IsDBNull(12) ? null : JsonSerializer.Deserialize<JsonElement>(reader.GetString(12)).Clone(),
-            Warnings = JsonSerializer.Deserialize<List<string>>(reader.GetString(13), JsonOptions) ?? [],
-            SourceInstanceId = reader.GetString(14),
+            Title = reader.IsDBNull(10) ? null : reader.GetString(10),
+            DisplayName = reader.IsDBNull(11) ? null : reader.GetString(11),
+            Cwd = reader.IsDBNull(12) ? null : reader.GetString(12),
+            Kind = reader.IsDBNull(13) ? null : reader.GetString(13),
+            Backend = reader.IsDBNull(14) ? null : reader.GetString(14),
+            Status = reader.IsDBNull(15) ? null : reader.GetString(15),
+            StartedAt = reader.IsDBNull(16) ? null : FromDbTime(reader.GetString(16)),
+            LastActivityAt = reader.IsDBNull(17) ? null : FromDbTime(reader.GetString(17)),
+            ExitedAt = reader.IsDBNull(18) ? null : FromDbTime(reader.GetString(18)),
+            ExitCode = reader.IsDBNull(19) ? null : reader.GetInt32(19),
+            SourceDisplayName = reader.IsDBNull(20) ? null : reader.GetString(20),
+            Capabilities = reader.IsDBNull(21) ? null : JsonSerializer.Deserialize<JsonElement>(reader.GetString(21)).Clone(),
+            RecentActivity = reader.IsDBNull(22) ? null : JsonSerializer.Deserialize<JsonElement>(reader.GetString(22)).Clone(),
+            ChildSessions = reader.IsDBNull(23) ? null : JsonSerializer.Deserialize<JsonElement>(reader.GetString(23)).Clone(),
+            ControlCapabilities = reader.IsDBNull(24) ? null : JsonSerializer.Deserialize<JsonElement>(reader.GetString(24)).Clone(),
+            Warnings = JsonSerializer.Deserialize<List<string>>(reader.GetString(25), JsonOptions) ?? [],
+            SourceInstanceId = reader.GetString(26),
             ObservedAt = observedAt,
-            ReceivedAt = FromDbTime(reader.GetString(16)),
-            UpdatedAt = FromDbTime(reader.GetString(17)),
+            ReceivedAt = FromDbTime(reader.GetString(28)),
+            UpdatedAt = FromDbTime(reader.GetString(29)),
             IsStale = IsStale(observedAt, staleAfter),
             FreshnessSeconds = FreshnessSeconds(observedAt)
         };
