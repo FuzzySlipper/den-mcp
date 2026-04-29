@@ -4,6 +4,7 @@ import {
   defaultShellState,
   loadShellState,
   nextConsoleMode,
+  nextTheme,
   parseShellState,
   saveShellState,
   serializeShellState,
@@ -79,4 +80,7 @@ test('data attributes and console cycling match shell contract', () => {
   assert.equal(nextConsoleMode('preview'), 'half');
   assert.equal(nextConsoleMode('half'), 'full');
   assert.equal(nextConsoleMode('full'), 'collapsed');
+
+  assert.equal(nextTheme('amber-dark'), 'graphite-dark');
+  assert.equal(nextTheme('graphite-dark'), 'amber-dark');
 });
