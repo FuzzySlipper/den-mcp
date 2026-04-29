@@ -141,7 +141,7 @@ export function fallbackPrompt(slug: string): string {
   ].join("\n");
 }
 
-function taskMessages(detail: any): any[] {
+export function taskMessages(detail: any): any[] {
   for (const key of ["recent_messages", "recentMessages", "messages"] as const) {
     if (Array.isArray(detail?.[key])) return detail[key];
   }

@@ -22,6 +22,7 @@ import {
   fallbackPrompt,
   renderTemplate,
   summarizeTaskContext,
+  taskMessages,
 } from '../../pi-dev/lib/den-prompt-templates.ts';
 import {
   SUBAGENT_LIFECYCLE_SCHEMA,
@@ -635,6 +636,25 @@ test('den prompt template fallbacks enforce delegated coder and reviewer guardra
   assert.match(reviewerPrompt, /scope drift/i);
   assert.match(reviewerPrompt, /test\/scoring harness/i);
   assert.match(reviewerPrompt, /blocking.*follow-up.*informational/s);
+});
+
+test('taskMessages extracts messages from task detail with multiple key conventions', () => {
+  const withSnakeCase = { recent_messages: [{ id: 1 }], task: {} };
+  assert.deepEqual(taskMessages(withSnakeCase), [{ id: 1 }]);
+
+  const withCamelCase = { recentMessages: [{ id: 2 }], task: {} };
+  assert.deepEqual(taskMessages(withCamelCase), [{ id: 2 }]);
+
+  const withGeneric = { messages: [{ id: 3 }], task: {} };
+  assert.deepEqual(taskMessages(withGeneric), [{ id: 3 }]);
+
+  // snake_case takes precedence
+  const both = { recent_messages: [{ id: 1 }], recentMessages: [{ id: 2 }], task: {} };
+  assert.deepEqual(taskMessages(both), [{ id: 1 }]);
+
+  assert.deepEqual(taskMessages({}), []);
+  assert.deepEqual(taskMessages(null), []);
+  assert.deepEqual(taskMessages(undefined), []);
 });
 
 test('den task context summary includes structured workflow packets from recent messages', () => {

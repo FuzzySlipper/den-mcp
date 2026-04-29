@@ -64,6 +64,7 @@ import {
   fallbackPrompt,
   renderTemplate,
   summarizeTaskContext,
+  taskMessages,
 } from "../lib/den-prompt-templates.ts";
 import { normalizeString, oneLine } from "../lib/den-string-utils.ts";
 import {
@@ -996,13 +997,6 @@ function tryParseJsonArray(value: string | undefined): any[] | undefined {
   } catch {
     return undefined;
   }
-}
-
-function taskMessages(detail: any): any[] {
-  for (const key of ["recent_messages", "recentMessages", "messages"] as const) {
-    if (Array.isArray(detail?.[key])) return detail[key];
-  }
-  return [];
 }
 
 async function runDenConfigCommand(ctx: any) {
