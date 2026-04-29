@@ -48,7 +48,7 @@ public sealed record DenAgentWorkspace
     public string ProjectId { get; init; } = string.Empty;
 
     [JsonPropertyName("task_id")]
-    public int TaskId { get; init; }
+    public long TaskId { get; init; }
 
     [JsonPropertyName("branch")]
     public string Branch { get; init; } = string.Empty;
@@ -96,7 +96,7 @@ public sealed record LatestDiffSnapshotRequest
     public string ProjectId { get; init; } = string.Empty;
 
     [JsonPropertyName("taskId")]
-    public int? TaskId { get; init; }
+    public long? TaskId { get; init; }
 
     [JsonPropertyName("workspaceId")]
     public string? WorkspaceId { get; init; }
@@ -162,7 +162,7 @@ public sealed class DesktopSnapshotStateJsonConverter : JsonConverter<DesktopSna
 public sealed record DesktopGitSnapshotRequest
 {
     [JsonPropertyName("task_id")]
-    public int? TaskId { get; init; }
+    public long? TaskId { get; init; }
 
     [JsonPropertyName("workspace_id")]
     public string? WorkspaceId { get; init; }
@@ -186,10 +186,10 @@ public sealed record DesktopGitSnapshotRequest
     public string? Upstream { get; init; }
 
     [JsonPropertyName("ahead")]
-    public int? Ahead { get; init; }
+    public long? Ahead { get; init; }
 
     [JsonPropertyName("behind")]
-    public int? Behind { get; init; }
+    public long? Behind { get; init; }
 
     [JsonPropertyName("dirty_counts")]
     public GitDirtyCounts DirtyCounts { get; init; } = new();
@@ -216,7 +216,7 @@ public sealed record DesktopGitSnapshotRequest
 public sealed record DesktopDiffSnapshotRequest
 {
     [JsonPropertyName("task_id")]
-    public int? TaskId { get; init; }
+    public long? TaskId { get; init; }
 
     [JsonPropertyName("workspace_id")]
     public string? WorkspaceId { get; init; }
@@ -234,7 +234,7 @@ public sealed record DesktopDiffSnapshotRequest
     public string? HeadRef { get; init; }
 
     [JsonPropertyName("max_bytes")]
-    public int MaxBytes { get; init; }
+    public long MaxBytes { get; init; }
 
     [JsonPropertyName("staged")]
     public bool Staged { get; init; }
@@ -264,7 +264,7 @@ public sealed record DesktopDiffSnapshotRequest
 public sealed record DesktopSessionSnapshotRequest
 {
     [JsonPropertyName("task_id")]
-    public int? TaskId { get; init; }
+    public long? TaskId { get; init; }
 
     [JsonPropertyName("workspace_id")]
     public string? WorkspaceId { get; init; }
@@ -309,28 +309,28 @@ public sealed record DesktopSessionSnapshotRequest
 public sealed record GitDirtyCounts
 {
     [JsonPropertyName("total")]
-    public int Total { get; init; }
+    public long Total { get; init; }
 
     [JsonPropertyName("staged")]
-    public int Staged { get; init; }
+    public long Staged { get; init; }
 
     [JsonPropertyName("unstaged")]
-    public int Unstaged { get; init; }
+    public long Unstaged { get; init; }
 
     [JsonPropertyName("untracked")]
-    public int Untracked { get; init; }
+    public long Untracked { get; init; }
 
     [JsonPropertyName("modified")]
-    public int Modified { get; init; }
+    public long Modified { get; init; }
 
     [JsonPropertyName("added")]
-    public int Added { get; init; }
+    public long Added { get; init; }
 
     [JsonPropertyName("deleted")]
-    public int Deleted { get; init; }
+    public long Deleted { get; init; }
 
     [JsonPropertyName("renamed")]
-    public int Renamed { get; init; }
+    public long Renamed { get; init; }
 }
 
 public sealed record GitFileStatus
@@ -360,7 +360,7 @@ public sealed record DesktopDiffSnapshotLatestResult
     public string ProjectId { get; init; } = string.Empty;
 
     [JsonPropertyName("task_id")]
-    public int? TaskId { get; init; }
+    public long? TaskId { get; init; }
 
     [JsonPropertyName("workspace_id")]
     public string? WorkspaceId { get; init; }
@@ -396,7 +396,7 @@ public sealed record DesktopDiffSnapshot
     public string ProjectId { get; init; } = string.Empty;
 
     [JsonPropertyName("task_id")]
-    public int? TaskId { get; init; }
+    public long? TaskId { get; init; }
 
     [JsonPropertyName("workspace_id")]
     public string? WorkspaceId { get; init; }
@@ -414,7 +414,7 @@ public sealed record DesktopDiffSnapshot
     public string? HeadRef { get; init; }
 
     [JsonPropertyName("max_bytes")]
-    public int MaxBytes { get; init; }
+    public long MaxBytes { get; init; }
 
     [JsonPropertyName("staged")]
     public bool Staged { get; init; }
