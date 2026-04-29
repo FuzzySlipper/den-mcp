@@ -186,4 +186,3 @@ function truncatePacket(content: string): string {
   const maxChars = 6000;
   return content.length > maxChars ? `${content.slice(0, maxChars)}\n... (truncated)` : content;
 }
-
