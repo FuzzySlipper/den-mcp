@@ -58,6 +58,16 @@ import {
   summarizeRecentPackets,
   resolveEffectiveCoderConfig,
 } from "../lib/den-coder-context-packet.ts";
+import {
+  analyzeDriftCheck,
+  buildDriftCheckPacketMeta,
+  collectGitDriftCheckInput,
+  extractDeclaredTestsFromImplementationPacket,
+  extractExpectedScopeFromContextPacket,
+  extractTaskIntentFromContextPacket,
+  formatDriftCheckPacketMessage,
+  type DriftExpectedScope,
+} from "../lib/den-drift-check.ts";
 
 const DEFAULT_BASE_URL = "http://192.168.1.10:5199";
 const GLOBAL_SUFFIX = "-default";
@@ -340,6 +350,222 @@ export default function denSubagent(pi: ExtensionAPI) {
       };
     },
   });
+
+  // -----------------------------------------------------------------------
+  // Drift check packet — conductor-facing tool & command
+  // -----------------------------------------------------------------------
+
+  pi.registerCommand("den-drift-check", {
+    description: "Run deterministic drift check for a task branch and post a drift_check_packet. Usage: /den-drift-check <task_id> [--base <ref>] [--no-post]",
+    handler: async (args, ctx) => {
+      const cfg = await resolveConfig(ctx);
+      const parsed = parseDriftCheckArgs(args);
+      const result = await runAndMaybePostDriftCheck(cfg, parsed, ctx.cwd);
+      ctx.ui.setWidget("den-subagent", [`Drift check risk: ${result.analysis.risk}`, `Message #${result.message_id ?? (parsed.post_result === false ? "not posted" : "posted")}`, ...result.analysis.reasons.slice(0, 5)]);
+      ctx.ui.notify(`Drift check for task #${parsed.task_id}: ${result.analysis.risk} risk.`, result.analysis.risk === "high" ? "error" : "info");
+    },
+  });
+
+  pi.registerTool({
+    name: "den_drift_check",
+    label: "Den Drift Check",
+    description: "Collect deterministic git branch metadata, compare changed paths against coder context packet scope hints, and post a drift_check_packet with low/medium/high risk reasons.",
+    parameters: Type.Object({
+      task_id: Type.Number({ description: "Den task ID to validate." }),
+      cwd: Type.Optional(Type.String({ description: "Working tree path. Defaults to current Pi cwd." })),
+      base_ref: Type.Optional(Type.String({ description: "Base ref/commit for git diff. Defaults to coder context base_commit or main." })),
+      base_commit: Type.Optional(Type.String({ description: "Base commit from the coder context packet." })),
+      branch: Type.Optional(Type.String({ description: "Fallback branch name for reporting if git collection cannot resolve it." })),
+      head_commit: Type.Optional(Type.String({ description: "Fallback head commit for reporting if git collection cannot resolve it." })),
+      expected_paths: Type.Optional(Type.String({ description: "Optional JSON array or comma-separated list of expected path hints." })),
+      declared_tests: Type.Optional(Type.String({ description: "Optional JSON array or newline-separated declared test results." })),
+      implementation_summary: Type.Optional(Type.String({ description: "Optional one-line implementation summary." })),
+      post_result: Type.Optional(Type.Boolean({ description: "Post drift_check_packet to Den. Defaults true." })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const cfg = await resolveConfig(ctx);
+      const result = await runAndMaybePostDriftCheck(cfg, {
+        task_id: params.task_id,
+        cwd: normalizeString(params.cwd),
+        base_ref: normalizeString(params.base_ref),
+        base_commit: normalizeString(params.base_commit),
+        branch: normalizeString(params.branch),
+        head_commit: normalizeString(params.head_commit),
+        expected_paths: parseStringList(params.expected_paths),
+        declared_tests: parseStringList(params.declared_tests),
+        implementation_summary: normalizeString(params.implementation_summary),
+        post_result: typeof params.post_result === "boolean" ? params.post_result : undefined,
+      }, ctx.cwd);
+      return {
+        content: [{ type: "text", text: `${result.content.slice(0, 4000)}${result.message_id ? `\n\nPosted message #${result.message_id}.` : ""}` }],
+        details: { risk: result.analysis.risk, message_id: result.message_id ?? null },
+      };
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Drift check internals
+// ---------------------------------------------------------------------------
+
+function parseDriftCheckArgs(args: string | undefined) {
+  const tokens = tokenizeArgs(args ?? "");
+  const taskToken = tokens.shift();
+  const taskId = Number(taskToken);
+  if (!Number.isInteger(taskId) || taskId <= 0) {
+    throw new Error("Usage: /den-drift-check <task_id> [--base <ref>] [--base-commit <sha>] [--declared-tests <text>] [--expected-paths <json|csv>] [--no-post]");
+  }
+
+  const parsed: {
+    task_id: number;
+    cwd?: string;
+    base_ref?: string;
+    base_commit?: string;
+    branch?: string;
+    head_commit?: string;
+    expected_paths?: string[];
+    declared_tests?: string[];
+    implementation_summary?: string;
+    post_result?: boolean;
+  } = { task_id: taskId };
+
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (token === "--no-post") {
+      parsed.post_result = false;
+      continue;
+    }
+    const value = tokens[++i];
+    if (!value) throw new Error(`${token} requires a value.`);
+    switch (token) {
+      case "--cwd": parsed.cwd = value; break;
+      case "--base": parsed.base_ref = value; break;
+      case "--base-ref": parsed.base_ref = value; break;
+      case "--base-commit": parsed.base_commit = value; break;
+      case "--branch": parsed.branch = value; break;
+      case "--head": parsed.head_commit = value; break;
+      case "--head-commit": parsed.head_commit = value; break;
+      case "--expected-paths": parsed.expected_paths = parseStringList(value); break;
+      case "--declared-tests": parsed.declared_tests = parseStringList(value); break;
+      case "--summary": parsed.implementation_summary = value; break;
+      default: throw new Error(`Unknown drift-check flag: ${token}`);
+    }
+  }
+
+  return parsed;
+}
+
+async function runAndMaybePostDriftCheck(
+  cfg: DenConfig,
+  options: {
+    task_id: number;
+    cwd?: string;
+    base_ref?: string;
+    base_commit?: string;
+    branch?: string;
+    head_commit?: string;
+    expected_paths?: string[];
+    declared_tests?: string[];
+    implementation_summary?: string;
+    post_result?: boolean;
+  },
+  defaultCwd: string,
+): Promise<{ analysis: ReturnType<typeof analyzeDriftCheck>; content: string; message_id?: number }> {
+  const cwd = options.cwd ?? defaultCwd;
+  const detail = await getTask(cfg, options.task_id);
+  const task = detail?.task ?? detail;
+  const messages = await getTaskMessages(cfg, options.task_id);
+  const contextPacket = latestStructuredMessage(messages, "coder_context_packet");
+  const implementationPacket = latestStructuredMessage(messages, "implementation_packet");
+  const contextMeta = metadataObject(contextPacket);
+
+  const contextScope = contextPacket?.content ? extractExpectedScopeFromContextPacket(contextPacket.content) : undefined;
+  const explicitScope = expectedScopeFromPaths(options.expected_paths);
+  const expectedScope = mergeExpectedScopes(contextScope, explicitScope);
+  const declaredTests = options.declared_tests?.length
+    ? options.declared_tests
+    : (implementationPacket?.content ? extractDeclaredTestsFromImplementationPacket(implementationPacket.content) : []);
+
+  const collected = await collectGitDriftCheckInput({
+    cwd,
+    task_id: options.task_id,
+    task_title: normalizeString(task?.title),
+    task_intent: contextPacket?.content ? extractTaskIntentFromContextPacket(contextPacket.content) : normalizeString(task?.description),
+    implementation_summary: options.implementation_summary,
+    base_ref: options.base_ref ?? options.base_commit ?? metadataString(contextMeta, "base_commit") ?? "main",
+    base_commit: options.base_commit ?? metadataString(contextMeta, "base_commit"),
+    declared_tests: declaredTests,
+    expected_scope: expectedScope,
+  });
+
+  const analysis = analyzeDriftCheck({
+    ...collected,
+    branch: collected.branch ?? options.branch ?? metadataString(contextMeta, "branch"),
+    head_commit: collected.head_commit ?? options.head_commit,
+  });
+  const content = formatDriftCheckPacketMessage(analysis);
+
+  let messageId: number | undefined;
+  if (options.post_result ?? true) {
+    const postResult = await sendTaskMessage(cfg, options.task_id, content, buildDriftCheckPacketMeta(analysis));
+    messageId = optionalNumber(postResult?.id);
+  }
+
+  return { analysis, content, message_id: messageId };
+}
+
+async function getTaskMessages(cfg: DenConfig, taskId: number): Promise<any[]> {
+  const result = await denFetch(cfg, `/api/projects/${esc(cfg.projectId)}/messages?taskId=${taskId}&limit=50`);
+  return Array.isArray(result) ? result : [];
+}
+
+function latestStructuredMessage(messages: any[], type: string): any | undefined {
+  return [...messages]
+    .filter((msg) => metadataString(metadataObject(msg), "type") === type)
+    .sort((a, b) => (optionalNumber(b?.id) ?? 0) - (optionalNumber(a?.id) ?? 0))[0];
+}
+
+function expectedScopeFromPaths(paths: string[] | undefined): DriftExpectedScope | undefined {
+  if (!paths || paths.length === 0) return undefined;
+  return { paths, raw_hints: paths };
+}
+
+function mergeExpectedScopes(a: DriftExpectedScope | undefined, b: DriftExpectedScope | undefined): DriftExpectedScope | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  return {
+    paths: [...(a.paths ?? []), ...(b.paths ?? [])],
+    globs: [...(a.globs ?? []), ...(b.globs ?? [])],
+    raw_hints: [...(a.raw_hints ?? []), ...(b.raw_hints ?? [])],
+  };
+}
+
+function parseStringList(value: unknown): string[] | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const trimmed = value.trim();
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) return parsed.map((item) => String(item).trim()).filter(Boolean);
+  } catch {
+    // Fall through to delimiter parsing.
+  }
+  return trimmed.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean);
+}
+
+function tokenizeArgs(input: string): string[] {
+  const tokens: string[] = [];
+  const regex = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(input)) !== null) tokens.push(match[1] ?? match[2] ?? match[3]);
+  return tokens;
+}
+
+function metadataObject(value: any): any {
+  const metadata = value?.metadata ?? value;
+  if (typeof metadata === "string") {
+    try { return JSON.parse(metadata); } catch { return {}; }
+  }
+  return metadata && typeof metadata === "object" ? metadata : {};
 }
 
 // ---------------------------------------------------------------------------
@@ -1614,7 +1840,7 @@ function createSubagentControlSource(cfg: DenConfig, runId: string): SubagentCon
 }
 
 function metadataString(entry: any, key: string): string | undefined {
-  return normalizeString(entry?.metadata?.[key]);
+  return normalizeString(entry?.metadata?.[key] ?? entry?.[key]);
 }
 
 async function appendOps(
