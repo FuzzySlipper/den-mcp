@@ -7,6 +7,7 @@ import {
   buildImplementationPacketMeta,
   REQUIRED_FIELDS,
 } from '../../pi-dev/lib/den-implementation-packet.ts';
+import { buildSubagentRunMetadata } from '../../pi-dev/lib/den-subagent-pipeline.ts';
 
 // ---------------------------------------------------------------------------
 // Sample coder output fixtures
@@ -430,4 +431,90 @@ None.
   assert.ok(Array.isArray(result.packet.artifact_links));
   assert.equal(result.packet.artifact_links?.length, 2);
   assert.ok(result.packet.artifact_links?.[0]?.includes('example.com/build'));
+});
+
+// ---------------------------------------------------------------------------
+// Regression: packetMeta branch/head_commit must not be overwritten by nulls
+// ---------------------------------------------------------------------------
+
+test('packetMeta branch and head_commit survive merge with buildSubagentRunMetadata that has nulls', () => {
+  // Simulate a coder run where contextIdentity has null branch/head_commit
+  // (common because the runner often doesn't know the final commit before launch).
+  const extraction = extractImplementationPacket(COMPLETE_CODER_OUTPUT);
+  const packetMeta = buildImplementationPacketMeta(
+    { run_id: 'run1', role: 'coder', task_id: 940, purpose: 'implementation' },
+    extraction,
+  );
+
+  // Build run metadata with null branch/head_commit (simulates coder launch context).
+  const runMeta = buildSubagentRunMetadata({
+    runId: 'run1',
+    role: 'coder',
+    taskId: 940,
+    cwd: '/tmp/worktree',
+    backend: 'pi-cli',
+    model: 'test-model',
+    tools: 'read,bash',
+    sessionMode: 'fresh',
+    session: null,
+    rerunOfRunId: null,
+    reviewRoundId: null,
+    workspaceId: null,
+    worktreePath: '/tmp/worktree',
+    branch: null,
+    baseBranch: null,
+    baseCommit: null,
+    headCommit: null,
+    purpose: null,
+    artifacts: null,
+  });
+
+  // BUG was: { ...packetMeta, ...runMeta } => runMeta.branch=null overwrites packetMeta.branch
+  // FIX is:  { ...runMeta, ...packetMeta } => packetMeta.branch wins
+  const merged = { ...runMeta, ...packetMeta };
+
+  assert.equal(merged.branch, 'task/123-add-feature',
+    'packetMeta.branch must survive merge with runMeta that has branch=null');
+  assert.equal(merged.head_commit, 'abc123def456',
+    'packetMeta.head_commit must survive merge with runMeta that has head_commit=null');
+  assert.equal(merged.type, 'implementation_packet');
+  assert.equal(merged.packet_completeness, 'complete');
+});
+
+test('old spread order (packetMeta first) loses branch/head_commit to null runMeta', () => {
+  // This test documents the old buggy behavior to make the regression obvious.
+  const extraction = extractImplementationPacket(COMPLETE_CODER_OUTPUT);
+  const packetMeta = buildImplementationPacketMeta(
+    { run_id: 'run1', role: 'coder', task_id: 940, purpose: 'implementation' },
+    extraction,
+  );
+
+  const runMeta = buildSubagentRunMetadata({
+    runId: 'run1',
+    role: 'coder',
+    taskId: 940,
+    cwd: '/tmp/worktree',
+    backend: 'pi-cli',
+    model: 'test-model',
+    tools: 'read,bash',
+    sessionMode: 'fresh',
+    session: null,
+    rerunOfRunId: null,
+    reviewRoundId: null,
+    workspaceId: null,
+    worktreePath: '/tmp/worktree',
+    branch: null,
+    baseBranch: null,
+    baseCommit: null,
+    headCommit: null,
+    purpose: null,
+    artifacts: null,
+  });
+
+  // OLD buggy order: packetMeta first, then runMeta overwrites with nulls.
+  const buggyMerged = { ...packetMeta, ...runMeta };
+  assert.equal(buggyMerged.branch, null,
+    'old spread order clobbers branch with null — confirms the bug existed');
+  assert.equal(buggyMerged.head_commit, null,
+    'old spread order clobbers head_commit with null — confirms the bug existed');
 });

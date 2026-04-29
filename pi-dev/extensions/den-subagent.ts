@@ -831,7 +831,6 @@ async function runDenSubagent(
       const packetContent = formatImplementationPacketMessage(result, extraction);
       const packetMeta = buildImplementationPacketMeta(result, extraction);
       await sendTaskMessage(cfg, effectiveOptions.taskId, packetContent, {
-        ...packetMeta,
         ...buildSubagentRunMetadata({
           runId,
           role: effectiveOptions.role,
@@ -846,6 +845,7 @@ async function runDenSubagent(
           ...contextIdentity,
           artifacts: result.artifacts,
         }),
+        ...packetMeta,
       });
     } catch (packetError) {
       // Packet posting is advisory; failures should not break the sub-agent result flow.
