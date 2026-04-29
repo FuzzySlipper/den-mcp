@@ -310,11 +310,13 @@ export function formatDriftCheckPacketMessage(result: DriftCheckResult): string 
     "",
   ];
 
-  lines.push("## Task", "");
-  if (result.task_id !== undefined) lines.push(`- Task: \`#${result.task_id}\``);
-  if (result.task_intent) lines.push(`- Task intent: ${result.task_intent}`);
-  if (result.implementation_summary) lines.push(`- Implementation summary: ${result.implementation_summary}`);
-  lines.push("");
+  const taskLines: string[] = [];
+  if (result.task_id !== undefined) taskLines.push(`- Task: \`#${result.task_id}\``);
+  if (result.task_intent) taskLines.push(`- Task intent: ${result.task_intent}`);
+  if (result.implementation_summary) taskLines.push(`- Implementation summary: ${result.implementation_summary}`);
+  if (taskLines.length > 0) {
+    lines.push("## Task", "", ...taskLines, "");
+  }
 
   lines.push("## Branch and Base", "");
   lines.push(`- Branch: ${result.branch ? `\`${result.branch}\`` : "(unknown)"}`);

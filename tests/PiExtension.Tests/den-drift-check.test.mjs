@@ -218,10 +218,27 @@ test('formatDriftCheckPacketMessage and metadata include risk, paths, and Den pa
 
   assert.ok(message.includes('# Drift Check Packet'));
   assert.ok(message.includes('**Risk:** low'));
+  assert.ok(message.includes('## Task'));
+  assert.ok(message.includes('- Task: `#937`'));
   assert.ok(message.includes('`pi-dev/lib/den-drift-check.ts`'));
   assert.equal(meta.type, 'drift_check_packet');
   assert.equal(meta.task_id, 937);
   assert.equal(meta.risk, 'low');
+});
+
+test('formatDriftCheckPacketMessage omits Task section when task fields are absent', () => {
+  const result = analyzeDriftCheck({
+    branch: 'task/no-task-fields',
+    base_ref: 'main',
+    head_commit: 'abc1234',
+    changed_paths: [{ status: 'M', path: 'pi-dev/lib/den-drift-check.ts', additions: 1, deletions: 0 }],
+  });
+
+  const message = formatDriftCheckPacketMessage(result);
+
+  assert.ok(message.includes('# Drift Check Packet'));
+  assert.ok(!message.includes('## Task\n'));
+  assert.ok(message.includes('## Branch and Base'));
 });
 
 test('extractTaskIntentFromContextPacket prefers user intent', () => {
