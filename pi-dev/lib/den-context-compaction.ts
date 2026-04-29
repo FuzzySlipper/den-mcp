@@ -1,3 +1,5 @@
+import { errorMessage, normalizeString } from "./den-string-utils.ts";
+
 export const DEN_CONTEXT_COMPACTION_SCHEMA = "den_context_compaction_request";
 export const DEN_CONTEXT_COMPACTION_SCHEMA_VERSION = 1;
 
@@ -41,8 +43,8 @@ export function requestDenContextCompaction(
   request: DenContextCompactionRequest,
   options?: DenContextCompactionOptions,
 ): DenContextCompactionResult {
-  const customInstructions = normalizeOptionalString(request.customInstructions) ?? defaultConductorCompactionInstructions();
-  const safePointNotes = normalizeOptionalString(request.safePointNotes) ?? null;
+  const customInstructions = normalizeString(request.customInstructions) ?? defaultConductorCompactionInstructions();
+  const safePointNotes = normalizeString(request.safePointNotes) ?? null;
   const guardrails = compactionGuardrails();
   const resumeAfterCompaction = request.resumeAfterCompaction !== false;
   const sendResume = resumeAfterCompaction && typeof options?.sendResumeMessage === "function";
@@ -161,14 +163,4 @@ export function compactionGuardrails(): string[] {
     "If the extension/session reloads between compaction start and completion, the captured resume callback may be stale; the resume failure is reported and the operator can manually resume.",
     "After compaction (manual or auto-resume), re-check Den task/messages before starting the next substantial task.",
   ];
-}
-
-function normalizeOptionalString(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

@@ -17,6 +17,7 @@ import {
   loadMergedDenExtensionConfig,
   reasoningCaptureOptionsFromConfig,
 } from "../lib/den-extension-config.ts";
+import { errorMessage, normalizeString } from "../lib/den-string-utils.ts";
 
 type JsonObject = Record<string, unknown>;
 
@@ -391,7 +392,7 @@ export default function denExtension(pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       const result = requestDenContextCompaction(ctx, {
         durableContextPosted: true,
-        customInstructions: normalizeOptionalString(args),
+        customInstructions: normalizeString(args),
         safePointNotes: "Manual /den-compact-context command invoked; command invocation asserts durable Den state is already recorded.",
         resumeAfterCompaction: true,
       }, {
@@ -427,8 +428,8 @@ export default function denExtension(pi: ExtensionAPI) {
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const result = requestDenContextCompaction(ctx, {
         durableContextPosted: params?.durable_context_posted === true,
-        customInstructions: normalizeOptionalString(params?.custom_instructions),
-        safePointNotes: normalizeOptionalString(params?.safe_point_notes),
+        customInstructions: normalizeString(params?.custom_instructions),
+        safePointNotes: normalizeString(params?.safe_point_notes),
         resumeAfterCompaction: params?.resume_after_compaction !== false,
       }, {
         sendResumeMessage: (message) => sendPostCompactionResumeMessage(pi, ctx, message),
@@ -489,17 +490,17 @@ async function requireConfig(ctx: any): Promise<DenConfig> {
 }
 
 async function resolveProjectId(baseUrl: string, cwd: string): Promise<string> {
-  const explicitProjectId = normalizeOptionalString(process.env.DEN_PI_PROJECT_ID);
+  const explicitProjectId = normalizeString(process.env.DEN_PI_PROJECT_ID);
   if (explicitProjectId) return explicitProjectId;
 
   const projects = await denFetchBase(baseUrl, "/api/projects/");
   const cwdPath = path.resolve(cwd);
   const matches = take(projects, Number.MAX_SAFE_INTEGER)
-    .map((project) => ({ project, rootPath: normalizeOptionalString(project.root_path ?? project.rootPath) }))
+    .map((project) => ({ project, rootPath: normalizeString(project.root_path ?? project.rootPath) }))
     .filter((entry) => entry.rootPath && isPathInside(cwdPath, entry.rootPath))
     .sort((a, b) => b.rootPath!.length - a.rootPath!.length);
 
-  const projectId = normalizeOptionalString(matches[0]?.project?.id);
+  const projectId = normalizeString(matches[0]?.project?.id);
   if (projectId) return projectId;
 
   throw new UnboundProjectError(`Den is not bound to a project for cwd '${cwdPath}'. Start Pi inside a registered Den project root or set DEN_PI_PROJECT_ID explicitly.`);
@@ -614,7 +615,7 @@ async function loadParentReasoningCapture(cwd: string): Promise<ReasoningCapture
 }
 
 export function normalizeParentAgentWorkEvent(sourceEvent: any, identity: ParentAgentWorkIdentity, now = Date.now()): JsonObject | undefined {
-  if (normalizeOptionalString(sourceEvent?.message?.role) === "user") return undefined;
+  if (normalizeString(sourceEvent?.message?.role) === "user") return undefined;
 
   const normalized = normalizePiWorkEvent(sourceEvent, now, {
     taskId: identity.taskId,
@@ -625,7 +626,7 @@ export function normalizeParentAgentWorkEvent(sourceEvent: any, identity: Parent
   });
   if (!normalized || typeof normalized.type !== "string") return undefined;
 
-  const piSessionId = normalizeOptionalString(normalized.session_id) ?? identity.piSessionId;
+  const piSessionId = normalizeString(normalized.session_id) ?? identity.piSessionId;
   const payload: JsonObject = {
     ...normalized,
     type: normalized.type.replace(/^subagent\.work_/, "agent.work_"),
@@ -1027,10 +1028,6 @@ function baseUrlFromEnv(): string {
   return normalizeBaseUrl(process.env.DEN_MCP_URL ?? process.env.DEN_MCP_BASE_URL ?? DEFAULT_BASE_URL);
 }
 
-function normalizeOptionalString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
 function isPathInside(cwd: string, rootPath: string): boolean {
   const normalizedRoot = path.resolve(rootPath);
   return cwd === normalizedRoot || cwd.startsWith(`${normalizedRoot}${path.sep}`);
@@ -1045,8 +1042,4 @@ class UnboundProjectError extends Error {
 
 function esc(value: string): string {
   return encodeURIComponent(value);
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

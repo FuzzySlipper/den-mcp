@@ -1,3 +1,5 @@
+import { normalizeString } from "./den-string-utils.ts";
+
 type JsonObject = Record<string, unknown>;
 
 export const DEN_CONTEXT_STATUS_SCHEMA = "den_context_status";
@@ -87,12 +89,12 @@ type UsageSnapshot = {
 
 export function captureDenContextStatus(ctx: any): DenContextStatus {
   return buildDenContextStatus({
-    cwd: normalizeOptionalString(ctx?.cwd) ?? null,
+    cwd: normalizeString(ctx?.cwd) ?? null,
     sessionId: safeStringCall(ctx?.sessionManager, "getSessionId"),
     sessionFile: safeStringCall(ctx?.sessionManager, "getSessionFile"),
     model: ctx?.model ? {
-      provider: normalizeOptionalString(ctx.model.provider) ?? null,
-      id: normalizeOptionalString(ctx.model.id) ?? null,
+      provider: normalizeString(ctx.model.provider) ?? null,
+      id: normalizeString(ctx.model.id) ?? null,
       contextWindow: finitePositiveNumber(ctx.model.contextWindow),
       maxTokens: finitePositiveNumber(ctx.model.maxTokens),
     } : null,
@@ -106,8 +108,8 @@ export function buildDenContextStatus(input: DenContextStatusInput): DenContextS
   const modelContextWindow = finitePositiveNumber(input.model?.contextWindow) ?? null;
   const usageContextWindow = finitePositiveNumber(input.contextUsage?.contextWindow) ?? null;
   const contextWindow = usageContextWindow ?? modelContextWindow;
-  const modelProvider = normalizeOptionalString(input.model?.provider) ?? null;
-  const modelId = normalizeOptionalString(input.model?.id) ?? null;
+  const modelProvider = normalizeString(input.model?.provider) ?? null;
+  const modelId = normalizeString(input.model?.id) ?? null;
   const modelDisplay = modelProvider && modelId ? `${modelProvider}/${modelId}` : modelId ?? modelProvider;
   const notes: string[] = [];
 
@@ -193,9 +195,9 @@ export function buildDenContextStatus(input: DenContextStatusInput): DenContextS
     compaction,
     recommendation,
     session: {
-      cwd: normalizeOptionalString(input.cwd) ?? null,
-      session_id: normalizeOptionalString(input.sessionId) ?? null,
-      session_file: normalizeOptionalString(input.sessionFile) ?? null,
+      cwd: normalizeString(input.cwd) ?? null,
+      session_id: normalizeString(input.sessionId) ?? null,
+      session_file: normalizeString(input.sessionFile) ?? null,
       branch_entry_count: Array.isArray(input.sessionEntries) ? input.sessionEntries.length : null,
     },
   };
@@ -362,7 +364,7 @@ function lastAssistantUsageFromEntries(entries: unknown[]): UsageSnapshot | unde
     if (tokens === null) continue;
     return {
       tokens,
-      timestamp: normalizeOptionalString(message.timestamp) ?? normalizeOptionalString(entry.timestamp) ?? null,
+      timestamp: normalizeString(message.timestamp) ?? normalizeString(entry.timestamp) ?? null,
     };
   }
   return undefined;
@@ -378,7 +380,7 @@ function usageTokens(usage: Record<string, unknown>): number | null {
 
 function safeStringCall(target: any, method: string): string | null {
   try {
-    return normalizeOptionalString(target?.[method]?.()) ?? null;
+    return normalizeString(target?.[method]?.()) ?? null;
   } catch {
     return null;
   }
@@ -403,10 +405,6 @@ function finitePositiveNumber(value: unknown): number | undefined {
 
 function finiteNonNegativeNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
-}
-
-function normalizeOptionalString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function roundPercent(value: number): number {
