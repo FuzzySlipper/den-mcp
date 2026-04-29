@@ -128,7 +128,10 @@ conductor can compact between tasks instead of relying on child-run transcript
 artifacts or stale intuition. Task `#967` adds `den_compact_context` and
 `/den-compact-context` so conductors can request compaction themselves at safe
 Den-recorded task boundaries instead of stopping solely to ask the user to run
-`/compact`.
+`/compact`. Task `#974` adds post-compaction resume so the conductor session is
+not suspended after compaction; when `resume_after_compaction` is enabled
+(default), the extension sends a follow-up user message automatically after
+compaction completes.
 
 The canonical metadata schema is:
 

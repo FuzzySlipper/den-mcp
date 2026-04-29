@@ -5,7 +5,15 @@ export type DenContextCompactionRequest = {
   durableContextPosted?: boolean;
   customInstructions?: string | null;
   safePointNotes?: string | null;
+  resumeAfterCompaction?: boolean;
 };
+
+export type DenContextCompactionOptions = {
+  sendResumeMessage?: (message: string) => void;
+};
+
+export const DEFAULT_RESUME_PROMPT =
+  "Conductor context compaction completed. Re-read your current Den task/thread state (use den_get_task, den_get_messages) and continue with the next step.";
 
 export type DenContextCompactionResult = {
   schema: typeof DEN_CONTEXT_COMPACTION_SCHEMA;
@@ -15,6 +23,8 @@ export type DenContextCompactionResult = {
   reason: string;
   custom_instructions: string | null;
   safe_point_notes: string | null;
+  resume_configured: boolean;
+  resume_note: string | null;
   guardrails: string[];
 };
 
@@ -26,10 +36,21 @@ export function defaultConductorCompactionInstructions(): string {
   ].join(" ");
 }
 
-export function requestDenContextCompaction(ctx: any, request: DenContextCompactionRequest): DenContextCompactionResult {
+export function requestDenContextCompaction(
+  ctx: any,
+  request: DenContextCompactionRequest,
+  options?: DenContextCompactionOptions,
+): DenContextCompactionResult {
   const customInstructions = normalizeOptionalString(request.customInstructions) ?? defaultConductorCompactionInstructions();
   const safePointNotes = normalizeOptionalString(request.safePointNotes) ?? null;
   const guardrails = compactionGuardrails();
+  const resumeAfterCompaction = request.resumeAfterCompaction !== false;
+  const sendResume = resumeAfterCompaction && typeof options?.sendResumeMessage === "function";
+  const resumeNote = sendResume
+    ? `A follow-up prompt will be sent automatically after compaction to resume the conductor session.`
+    : resumeAfterCompaction
+      ? `Resume requested but no sendResumeMessage callback available. The conductor session will be suspended after compaction until the operator manually sends a prompt.`
+      : `Resume not requested. The conductor session will be suspended after compaction until the operator manually sends a prompt.`;
 
   if (request.durableContextPosted !== true) {
     return {
@@ -40,6 +61,8 @@ export function requestDenContextCompaction(ctx: any, request: DenContextCompact
       reason: "Refusing to compact until the conductor confirms durable Den context has been posted or is already up to date.",
       custom_instructions: customInstructions,
       safe_point_notes: safePointNotes,
+      resume_configured: false,
+      resume_note: "Compaction was not requested; resume does not apply.",
       guardrails,
     };
   }
@@ -53,6 +76,8 @@ export function requestDenContextCompaction(ctx: any, request: DenContextCompact
       reason: "This Pi runtime context does not expose ctx.compact(). Ask the user to run /compact or use a Pi RPC/session entrypoint that supports compaction.",
       custom_instructions: customInstructions,
       safe_point_notes: safePointNotes,
+      resume_configured: false,
+      resume_note: "Compaction was not requested; resume does not apply.",
       guardrails,
     };
   }
@@ -60,17 +85,30 @@ export function requestDenContextCompaction(ctx: any, request: DenContextCompact
   try {
     ctx.compact({
       customInstructions,
-      onComplete: () => ctx?.ui?.notify?.("Den conductor context compaction completed.", "info"),
-      onError: (error: unknown) => ctx?.ui?.notify?.(`Den conductor context compaction failed: ${errorMessage(error)}`, "error"),
+      onComplete: () => {
+        ctx?.ui?.notify?.("Den conductor context compaction completed.", "info");
+        if (sendResume) {
+          try {
+            options!.sendResumeMessage!(DEFAULT_RESUME_PROMPT);
+          } catch (resumeError) {
+            ctx?.ui?.notify?.(`Post-compaction resume failed: ${errorMessage(resumeError)}`, "error");
+          }
+        }
+      },
+      onError: (error: unknown) => {
+        ctx?.ui?.notify?.(`Den conductor context compaction failed: ${errorMessage(error)}`, "error");
+      },
     });
     return {
       schema: DEN_CONTEXT_COMPACTION_SCHEMA,
       schema_version: DEN_CONTEXT_COMPACTION_SCHEMA_VERSION,
       requested: true,
       status: "requested",
-      reason: "Compaction was requested for the current Pi session. Pi runs compaction asynchronously and will emit compaction events/results through the normal session UI/events.",
+      reason: "Compaction was requested for the current Pi session. Pi runs compaction asynchronously. The tool/command returns immediately; compaction and optional resume happen after the current turn ends.",
       custom_instructions: customInstructions,
       safe_point_notes: safePointNotes,
+      resume_configured: sendResume,
+      resume_note: sendResume ? resumeNote : resumeNote,
       guardrails,
     };
   } catch (error) {
@@ -82,6 +120,8 @@ export function requestDenContextCompaction(ctx: any, request: DenContextCompact
       reason: `Compaction request failed before it could start: ${errorMessage(error)}`,
       custom_instructions: customInstructions,
       safe_point_notes: safePointNotes,
+      resume_configured: false,
+      resume_note: "Compaction failed to start; resume does not apply.",
       guardrails,
     };
   }
@@ -95,6 +135,8 @@ export function formatDenContextCompactionResult(result: DenContextCompactionRes
     `Instructions: ${result.custom_instructions ?? "(none)"}`,
   ];
   if (result.safe_point_notes) lines.push(`Safe point notes: ${result.safe_point_notes}`);
+  lines.push(`Resume after compaction: ${result.resume_configured ? "yes" : "no"}`);
+  if (result.resume_note) lines.push(`Resume note: ${result.resume_note}`);
   lines.push("Guardrails:");
   for (const guardrail of result.guardrails) lines.push(`- ${guardrail}`);
   return lines.join("\n");
@@ -112,7 +154,9 @@ export function compactionGuardrails(): string[] {
   return [
     "Post or verify durable Den handoff/status context before compacting.",
     "Prefer task boundaries or just after a merge/review handoff; avoid mid-critical merge, review, or unresolved user-decision points.",
-    "After compaction, re-check Den task/messages before starting the next substantial task.",
+    "Compaction via ctx.compact() is fire-and-forget: the tool/command returns immediately and compaction runs asynchronously after the current turn ends.",
+    "After compaction, the conductor session will be suspended until a follow-up prompt resumes it. When resume_after_compaction is enabled, the extension sends a resume prompt automatically.",
+    "After compaction (manual or auto-resume), re-check Den task/messages before starting the next substantial task.",
   ];
 }
 

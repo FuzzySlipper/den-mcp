@@ -78,6 +78,10 @@ const DEN_COMPACT_CONTEXT_PARAMETERS = {
       type: "string",
       description: "Optional note explaining why this is a safe compaction point, e.g. after merge summary or between tasks.",
     },
+    resume_after_compaction: {
+      type: "boolean",
+      description: "Whether to send a follow-up prompt automatically after compaction to resume the conductor session. Default: true. Set to false only if you intend to stop after compaction.",
+    },
   },
   required: ["durable_context_posted"],
   additionalProperties: false,
@@ -383,12 +387,15 @@ export default function denExtension(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("den-compact-context", {
-    description: "Request Pi context compaction; invoking this command asserts durable Den state is already recorded. Usage: /den-compact-context [custom instructions]",
+    description: "Request Pi context compaction; invoking this command asserts durable Den state is already recorded. After compaction, a follow-up prompt resumes the conductor automatically. Usage: /den-compact-context [custom instructions]",
     handler: async (args, ctx) => {
       const result = requestDenContextCompaction(ctx, {
         durableContextPosted: true,
         customInstructions: normalizeOptionalString(args),
         safePointNotes: "Manual /den-compact-context command invoked; command invocation asserts durable Den state is already recorded.",
+        resumeAfterCompaction: true,
+      }, {
+        sendResumeMessage: (message) => pi.sendUserMessage(message),
       });
       ctx.ui.setWidget("den-context-compaction", formatDenContextCompactionResult(result).split("\n"));
       ctx.ui.notify(
@@ -411,13 +418,20 @@ export default function denExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "den_compact_context",
     label: "Den Compact Context",
-    description: "Request Pi parent-session context compaction when the conductor is at a safe boundary. Confirm durable_context_posted=true only after Den task/thread status is recorded or already up to date; otherwise this tool refuses to compact.",
+    description:
+      "Request Pi parent-session context compaction when the conductor is at a safe boundary. " +
+      "This tool is fire-and-forget: it returns immediately and compaction runs asynchronously after the current turn. " +
+      "When resume_after_compaction is true (default), a follow-up prompt is sent automatically after compaction to resume the conductor. " +
+      "Confirm durable_context_posted=true only after Den task/thread status is recorded or already up to date; otherwise this tool refuses to compact.",
     parameters: DEN_COMPACT_CONTEXT_PARAMETERS,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const result = requestDenContextCompaction(ctx, {
         durableContextPosted: params?.durable_context_posted === true,
         customInstructions: normalizeOptionalString(params?.custom_instructions),
         safePointNotes: normalizeOptionalString(params?.safe_point_notes),
+        resumeAfterCompaction: params?.resume_after_compaction !== false,
+      }, {
+        sendResumeMessage: (message) => pi.sendUserMessage(message),
       });
       return buildDenContextCompactionToolResult(result);
     },
