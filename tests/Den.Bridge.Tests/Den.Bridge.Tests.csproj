@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Den.Bridge\Den.Bridge.csproj" />
+  </ItemGroup>
+
+</Project>
