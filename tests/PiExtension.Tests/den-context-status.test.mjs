@@ -7,6 +7,10 @@ import {
   captureDenContextStatus,
   summarizeDenContextStatusForMetadata,
 } from '../../pi-dev/lib/den-context-status.ts';
+import {
+  buildDenContextCompactionToolResult,
+  requestDenContextCompaction,
+} from '../../pi-dev/lib/den-context-compaction.ts';
 
 const generatedAt = '2026-04-27T00:00:00.000Z';
 
@@ -53,7 +57,7 @@ test('context status classifies ok, watch, and compact-after-task thresholds', (
     contextUsage: { tokens: 76_000, contextWindow: 100_000, percent: 76 },
   }));
   assert.equal(compact.recommendation.status, 'compact_after_current_task');
-  assert.match(compact.recommendation.action, /compact before starting another substantial task/);
+  assert.match(compact.recommendation.action, /den_compact_context/);
 });
 
 test('context status handles missing and unknown usage conservatively', () => {
@@ -121,7 +125,7 @@ test('captureDenContextStatus uses ctx.getContextUsage ahead of stale session us
   assert.equal(status.session.branch_entry_count, 1);
 });
 
-test('den extension registers context status command and model-callable tool', () => {
+test('den extension registers context status and compact commands/tools', () => {
   const commands = [];
   const tools = [];
   denExtension({
@@ -136,9 +140,76 @@ test('den extension registers context status command and model-callable tool', (
 
   assert.ok(commands.some((entry) => entry.name === 'den-context-status'));
   assert.ok(commands.some((entry) => entry.name === 'den-compaction-status'));
-  const tool = tools.find((entry) => entry.name === 'den_context_status');
-  assert.ok(tool, 'den_context_status should be registered');
-  assert.deepEqual(tool.parameters, { type: 'object', properties: {}, additionalProperties: false });
+  assert.ok(commands.some((entry) => entry.name === 'den-compact-context'));
+  const statusTool = tools.find((entry) => entry.name === 'den_context_status');
+  assert.ok(statusTool, 'den_context_status should be registered');
+  assert.deepEqual(statusTool.parameters, { type: 'object', properties: {}, additionalProperties: false });
+
+  const compactTool = tools.find((entry) => entry.name === 'den_compact_context');
+  assert.ok(compactTool, 'den_compact_context should be registered');
+  assert.deepEqual(compactTool.parameters.required, ['durable_context_posted']);
+  assert.equal(compactTool.parameters.properties.durable_context_posted.type, 'boolean');
+});
+
+test('den_compact_context refuses before durable Den context is confirmed', () => {
+  let compactCalled = false;
+  const result = requestDenContextCompaction({ compact: () => { compactCalled = true; } }, {
+    durableContextPosted: false,
+    customInstructions: 'Keep task state',
+  });
+
+  assert.equal(result.requested, false);
+  assert.equal(result.status, 'blocked');
+  assert.equal(compactCalled, false);
+  const toolResult = buildDenContextCompactionToolResult(result);
+  assert.equal(toolResult.isError, true);
+  assert.match(toolResult.content[0].text, /durable Den context/);
+});
+
+test('den_compact_context requests Pi compaction with conductor instructions', async () => {
+  const calls = [];
+  const notifications = [];
+  const result = requestDenContextCompaction({
+    compact(options) { calls.push(options); },
+    ui: { notify(message, level) { notifications.push({ message, level }); } },
+  }, {
+    durableContextPosted: true,
+    customInstructions: 'Focus on workflow decisions',
+    safePointNotes: 'After merge summary',
+  });
+
+  assert.equal(result.requested, true);
+  assert.equal(result.status, 'requested');
+  assert.equal(result.custom_instructions, 'Focus on workflow decisions');
+  assert.equal(result.safe_point_notes, 'After merge summary');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].customInstructions, 'Focus on workflow decisions');
+  calls[0].onComplete({});
+  assert.deepEqual(notifications, [{ message: 'Den conductor context compaction completed.', level: 'info' }]);
+});
+
+test('den_compact_context tool execute triggers compact through extension context', async () => {
+  const tools = [];
+  denExtension({
+    on() {},
+    registerCommand() {},
+    registerTool(definition) { tools.push(definition); },
+  });
+  const tool = tools.find((entry) => entry.name === 'den_compact_context');
+  const calls = [];
+  const result = await tool.execute('call-1', {
+    durable_context_posted: true,
+    custom_instructions: 'Keep Den handoffs',
+    safe_point_notes: 'Between tasks',
+  }, undefined, undefined, {
+    compact(options) { calls.push(options); },
+    ui: { notify() {} },
+  });
+
+  assert.equal(result.isError, false);
+  assert.equal(result.details.status, 'requested');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].customInstructions, 'Keep Den handoffs');
 });
 
 test('context status tool result and binding metadata stay compact', () => {

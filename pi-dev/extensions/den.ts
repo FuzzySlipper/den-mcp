@@ -7,6 +7,11 @@ import {
   formatDenContextStatusLines,
   summarizeDenContextStatusForMetadata,
 } from "../lib/den-context-status.ts";
+import {
+  buildDenContextCompactionToolResult,
+  formatDenContextCompactionResult,
+  requestDenContextCompaction,
+} from "../lib/den-context-compaction.ts";
 import { normalizePiWorkEvent, type ReasoningCaptureOptions } from "../lib/den-subagent-pipeline.ts";
 import {
   loadMergedDenExtensionConfig,
@@ -56,6 +61,25 @@ const GLOBAL_CONDUCTOR_GUIDANCE_SLUG = "pi-conductor-guidance-default";
 const EMPTY_TOOL_PARAMETERS = {
   type: "object",
   properties: {},
+  additionalProperties: false,
+} as any;
+const DEN_COMPACT_CONTEXT_PARAMETERS = {
+  type: "object",
+  properties: {
+    durable_context_posted: {
+      type: "boolean",
+      description: "Confirm durable Den task/thread status has been posted or is already up to date before compacting.",
+    },
+    custom_instructions: {
+      type: "string",
+      description: "Optional custom compaction instructions. Defaults preserve Den workflow state, decisions, branch/head, tests, findings, and next steps.",
+    },
+    safe_point_notes: {
+      type: "string",
+      description: "Optional note explaining why this is a safe compaction point, e.g. after merge summary or between tasks.",
+    },
+  },
+  required: ["durable_context_posted"],
   additionalProperties: false,
 } as any;
 
@@ -358,6 +382,22 @@ export default function denExtension(pi: ExtensionAPI) {
     handler: showContextStatus,
   });
 
+  pi.registerCommand("den-compact-context", {
+    description: "Request Pi context compaction after durable Den state is recorded. Usage: /den-compact-context [custom instructions]",
+    handler: async (args, ctx) => {
+      const result = requestDenContextCompaction(ctx, {
+        durableContextPosted: true,
+        customInstructions: normalizeOptionalString(args),
+        safePointNotes: "Manual /den-compact-context command invoked by the operator/conductor.",
+      });
+      ctx.ui.setWidget("den-context-compaction", formatDenContextCompactionResult(result).split("\n"));
+      ctx.ui.notify(
+        result.requested ? "Requested Den conductor context compaction." : result.reason,
+        result.requested ? "info" : "warning",
+      );
+    },
+  });
+
   pi.registerTool({
     name: "den_context_status",
     label: "Den Context Status",
@@ -365,6 +405,21 @@ export default function denExtension(pi: ExtensionAPI) {
     parameters: EMPTY_TOOL_PARAMETERS,
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
       return buildDenContextStatusToolResult(captureDenContextStatus(ctx));
+    },
+  });
+
+  pi.registerTool({
+    name: "den_compact_context",
+    label: "Den Compact Context",
+    description: "Request Pi parent-session context compaction when the conductor is at a safe boundary. Confirm durable_context_posted=true only after Den task/thread status is recorded or already up to date; otherwise this tool refuses to compact.",
+    parameters: DEN_COMPACT_CONTEXT_PARAMETERS,
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const result = requestDenContextCompaction(ctx, {
+        durableContextPosted: params?.durable_context_posted === true,
+        customInstructions: normalizeOptionalString(params?.custom_instructions),
+        safePointNotes: normalizeOptionalString(params?.safe_point_notes),
+      });
+      return buildDenContextCompactionToolResult(result);
     },
   });
 

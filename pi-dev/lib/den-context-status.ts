@@ -272,7 +272,7 @@ function recommendContextAction(options: {
     return {
       status: "compact_after_current_task",
       reason: `Estimated context use is ${formatPercentValue(options.usedPercent)}, ${thresholdReason}.`,
-      action: "Finish the current handoff/review/merge step, record durable Den state, then compact before starting another substantial task.",
+      action: "Finish the current handoff/review/merge step, record durable Den state, then call den_compact_context with durable_context_posted=true before starting another substantial task.",
     };
   }
 
@@ -280,7 +280,7 @@ function recommendContextAction(options: {
     return {
       status: "watch",
       reason: `Estimated context use is ${formatPercentValue(options.usedPercent)}, above the watch threshold (${formatPercentValue(watchThreshold)}).`,
-      action: "Prefer compacting between tasks or before launching into a long implementation/review loop; avoid mid-handoff compaction unless necessary.",
+      action: "Prefer calling den_compact_context between tasks or before launching into a long implementation/review loop; avoid mid-handoff compaction unless necessary.",
     };
   }
 

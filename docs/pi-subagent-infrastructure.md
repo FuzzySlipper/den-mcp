@@ -125,7 +125,10 @@ Task `#852` adds the complementary parent-session budget surface documented in
 model-callable `den_context_status` tool and `/den-context-status` command report
 a clearly labeled estimate of the conductor's current Pi context budget so the
 conductor can compact between tasks instead of relying on child-run transcript
-artifacts or stale intuition.
+artifacts or stale intuition. Task `#967` adds `den_compact_context` and
+`/den-compact-context` so conductors can request compaction themselves at safe
+Den-recorded task boundaries instead of stopping solely to ask the user to run
+`/compact`.
 
 The canonical metadata schema is:
 
