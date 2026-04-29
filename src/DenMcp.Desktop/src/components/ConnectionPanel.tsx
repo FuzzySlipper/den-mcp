@@ -6,9 +6,10 @@ interface Props {
   settings: OperatorSettings | null;
   onRefresh: () => Promise<void>;
   onSaveSettings: (request: SaveOperatorSettingsRequest) => Promise<void>;
+  showSettingsForm?: boolean;
 }
 
-export function ConnectionPanel({ status, settings, onRefresh, onSaveSettings }: Props) {
+export function ConnectionPanel({ status, settings, onRefresh, onSaveSettings, showSettingsForm = true }: Props) {
   const [denBaseUrl, setDenBaseUrl] = useState('http://localhost:5199');
   const [displayName, setDisplayName] = useState('');
   const [pollInterval, setPollInterval] = useState(30);
@@ -66,32 +67,40 @@ export function ConnectionPanel({ status, settings, onRefresh, onSaveSettings }:
         <Metric label="Last publish" value={formatRelative(status?.lastPublishAt)} />
       </div>
 
-      <form className="settings-form" onSubmit={submit}>
-        <label>
-          <span>Den server URL</span>
-          <input value={denBaseUrl} onChange={(event) => setDenBaseUrl(event.target.value)} />
-        </label>
-        <label>
-          <span>Source display name</span>
-          <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Den Desktop" />
-        </label>
-        <label>
-          <span>Poll interval seconds</span>
-          <input
-            type="number"
-            min={5}
-            max={3600}
-            value={pollInterval}
-            onChange={(event) => setPollInterval(Number(event.target.value))}
-          />
-        </label>
-        <div className="button-row">
-          <button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</button>
+      {showSettingsForm ? (
+        <form className="settings-form" onSubmit={submit}>
+          <label>
+            <span>Den server URL</span>
+            <input value={denBaseUrl} onChange={(event) => setDenBaseUrl(event.target.value)} />
+          </label>
+          <label>
+            <span>Source display name</span>
+            <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Den Desktop" />
+          </label>
+          <label>
+            <span>Poll interval seconds</span>
+            <input
+              type="number"
+              min={5}
+              max={3600}
+              value={pollInterval}
+              onChange={(event) => setPollInterval(Number(event.target.value))}
+            />
+          </label>
+          <div className="button-row">
+            <button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</button>
+            <button type="button" className="secondary" disabled={refreshing} onClick={refresh}>
+              {refreshing ? 'Refreshing…' : 'Refresh now'}
+            </button>
+          </div>
+        </form>
+      ) : (
+        <div className="button-row connection-actions">
           <button type="button" className="secondary" disabled={refreshing} onClick={refresh}>
             {refreshing ? 'Refreshing…' : 'Refresh now'}
           </button>
         </div>
-      </form>
+      )}
 
       <dl className="compact-list">
         <div>

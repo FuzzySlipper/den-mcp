@@ -114,6 +114,7 @@ export function App() {
           settings={runtime.settings}
           onRefresh={runtime.refresh}
           onSaveSettings={runtime.saveSettings}
+          showSettingsForm={false}
         />
         <DiagnosticsPane
           diagnostics={runtime.status?.diagnostics ?? []}
@@ -123,31 +124,62 @@ export function App() {
         />
       </div>
 
-      <div className="operator-grid">
-        <WorkspaceSummaryPane snapshots={runtime.snapshots} activeKey={activeSnapshot ? snapshotKey(activeSnapshot) : null} onSelect={selectSnapshot} />
+      <WorkspaceSummaryPane snapshots={runtime.snapshots} activeKey={activeSnapshot ? snapshotKey(activeSnapshot) : null} onSelect={selectSnapshot} />
+    </div>
+  );
+
+  const gitTab = (
+    <div className="git-tab tab-stack">
+      <section className="tab-intro panel surface-panel">
+        <p className="eyebrow">Git</p>
+        <h2>Workspace snapshots and bounded diffs</h2>
+        <p className="muted">
+          Existing local observer snapshots and Den-published bounded diffs, rehomed into the Git tab without changing the runtime bridge flow.
+        </p>
+      </section>
+      <div className="git-workbench-grid">
+        <GitSnapshotPane
+          snapshots={runtime.snapshots}
+          activeSnapshotKey={activeSnapshot ? snapshotKey(activeSnapshot) : null}
+          selectedFilePath={selectedFile?.path ?? null}
+          onSelectSnapshot={selectSnapshot}
+          onSelectFile={selectFile}
+        />
         <DiffPane snapshot={activeSnapshot} file={selectedFile} diff={diff} loading={diffLoading} error={diffError} />
       </div>
-
-      <SessionPane snapshots={runtime.sessionSnapshots} />
-
-      <GitSnapshotPane
-        snapshots={runtime.snapshots}
-        activeSnapshotKey={activeSnapshot ? snapshotKey(activeSnapshot) : null}
-        selectedFilePath={selectedFile?.path ?? null}
-        onSelectSnapshot={selectSnapshot}
-        onSelectFile={selectFile}
-      />
     </div>
+  );
+
+  const terminalsTab = (
+    <div className="terminals-tab tab-stack">
+      <section className="tab-intro panel surface-panel">
+        <p className="eyebrow">Terminals</p>
+        <h2>Observed Pi sessions</h2>
+        <p className="muted">
+          Read-only session cards from existing Pi artifact snapshots. Attach, input, and terminal control remain deferred to later backend-neutral terminal tasks.
+        </p>
+      </section>
+      <SessionPane snapshots={runtime.sessionSnapshots} />
+    </div>
+  );
+
+  const runtimeSettingsTab = (
+    <ConnectionPanel
+      status={runtime.status}
+      settings={runtime.settings}
+      onRefresh={runtime.refresh}
+      onSaveSettings={runtime.saveSettings}
+    />
   );
 
   const tabContent: Record<ShellTabId, ReactNode> = {
     operator: operatorTab,
     tasks: <StubSurface eyebrow="Tasks" title="Delegated workflow dashboard" description="Routed surface reserved for normalized Den task packets, coder/reviewer lanes, and worktree execution state once bridge snapshots expose them." />,
-    git: <StubSurface eyebrow="Git" title="Git review workbench" description="Routed surface reserved for bridge-backed changed-file lists, diffs, and review comments. Current local observer snapshots remain available in the Operator tab." />,
+    git: gitTab,
     compare: <StubSurface eyebrow="Compare" title="Multi-worktree compare" description="Routed surface reserved for pinned worktree panes and side-by-side terminal/output comparison without making renderer state authoritative." />,
-    terminals: <StubSurface eyebrow="Terminals" title="Session tiles" description="Routed surface reserved for terminal stream adapters and capability-driven controls. This task keeps raw terminal/session authority behind the bridge." />,
+    terminals: terminalsTab,
     collaboration: <StubSurface eyebrow="Collaboration" title="Annotations and compiled responses" description="Routed surface reserved for Den-backed annotation sessions and compiled response review flows. No mock collaboration data is copied into production state." />,
-    settings: <StubSurface eyebrow="Settings" title="Shell settings" description="Presentation settings render from the shell container so the same controls can update root data attributes." />,
+    settings: runtimeSettingsTab,
   };
 
   return (

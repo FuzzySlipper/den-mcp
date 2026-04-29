@@ -50,7 +50,12 @@ export function AppShell({ state, onStateChange, status, snapshots, sessionSnaps
       <div className="shell-main">
         <LeftRail snapshots={snapshots} mode={state.railMode} onModeChange={(railMode) => setState({ railMode })} />
         <section className="tab-canvas" aria-label={`${activeTabTitle} tab content`}>
-          {activeTab === 'settings' ? <SettingsSurface state={state} onStateChange={onStateChange} /> : children[activeTab]}
+          {activeTab === 'settings' ? (
+            <div className="settings-tab tab-stack">
+              <SettingsSurface state={state} onStateChange={onStateChange} />
+              {children.settings}
+            </div>
+          ) : children[activeTab]}
         </section>
       </div>
       <ConsoleDock diagnostics={diagnostics} mode={state.consoleMode} onModeChange={(consoleMode) => setState({ consoleMode })} />

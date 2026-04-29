@@ -417,8 +417,11 @@ kbd { border: var(--bw) solid var(--bd-default); border-bottom-color: var(--bd-s
 .status-degraded, .status-path_not_visible, .status-not_git_repository, .status-stopped, .publish-queued, .pill.warn { color: var(--st-warn); border-color: color-mix(in oklab, var(--st-warn) 45%, transparent); background: var(--st-warn-bg); }
 .status-offline, .status-misconfigured, .status-git_error, .status-failed, .publish-failed, .pill.err { color: var(--st-err); border-color: color-mix(in oklab, var(--st-err) 45%, transparent); background: var(--st-err-bg); }
 
-.content-grid, .operator-grid { display: grid; grid-template-columns: minmax(360px, 0.9fr) minmax(420px, 1.1fr); gap: var(--sp-4); }
+.content-grid, .operator-grid, .git-workbench-grid { display: grid; grid-template-columns: minmax(360px, 0.9fr) minmax(420px, 1.1fr); gap: var(--sp-4); }
 .operator-grid { grid-template-columns: minmax(320px, 0.8fr) minmax(460px, 1.2fr); }
+.git-workbench-grid { align-items: start; grid-template-columns: minmax(380px, 0.95fr) minmax(480px, 1.05fr); }
+.tab-intro p { max-width: 760px; }
+.connection-actions { margin-top: var(--sp-4); }
 
 button:not(.tab-button):not(.icon-button):not(.rail-add):not(.workspace-card):not(.file-button):not(.console-controls button):not(.rail-mode-controls button) { border: var(--bw) solid color-mix(in oklab, var(--accent) 35%, transparent); border-radius: var(--r-lg); padding: 0.65rem 0.9rem; background: var(--accent); color: var(--accent-fg); font-weight: 800; }
 button.secondary { background: var(--bg-panel-2) !important; color: var(--fg-primary) !important; border-color: var(--bd-default) !important; }
@@ -484,6 +487,8 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid color-mix(i
 .activity-list p { margin: 0; color: var(--fg-tertiary); font-size: var(--fs-xs); line-height: 1.45; }
 
 .git-panel, .session-panel { margin-top: 0; }
+.git-workbench-grid .diff-panel { position: sticky; top: 0; align-self: start; }
+.settings-tab .connection-panel { max-width: 980px; }
 .stub-surface { max-width: 860px; }
 .settings-grid { display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: var(--sp-3); margin-top: var(--sp-4); }
 .error-boundary-panel { max-width: 860px; margin: var(--sp-8) auto; }
@@ -499,7 +504,8 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid color-mix(i
   .desktop-shell { min-width: 0; min-height: 100vh; height: auto; }
   .shell-main { grid-template-columns: 1fr; }
   .left-rail { display: none; }
-  .content-grid, .operator-grid, .settings-form, .settings-grid { grid-template-columns: 1fr; }
+  .content-grid, .operator-grid, .git-workbench-grid, .settings-form, .settings-grid { grid-template-columns: 1fr; }
+  .git-workbench-grid .diff-panel { position: static; }
   .titlebar { grid-template-columns: 1fr auto; }
   .titlebar-center { display: none; }
   .tabbar { overflow-x: auto; }
