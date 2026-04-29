@@ -209,6 +209,17 @@ export function extractImplementationPacket(text: string): ExtractionResult {
     if (m) packet.head_commit = m[1].trim();
   }
 
+  // Last-resort heading-line extraction for compact packets such as
+  // `## Branch: task/foo` where extractSection consumes the whole heading line.
+  if (!packet.branch) {
+    const branch = extractHeadingLineValue(text, "branch");
+    if (branch && isSafeBranchValue(branch)) packet.branch = branch;
+  }
+  if (!packet.head_commit) {
+    const commit = extractHeadingLineValue(text, "(?:head\\s+commit|commit)");
+    if (commit && isSafeCommitValue(commit)) packet.head_commit = commit;
+  }
+
   return validatePacket(packet);
 }
 
@@ -388,4 +399,18 @@ function parseCodeOrValue(text: string): string {
   const labelMatch = trimmed.match(/:\s*(.+)/);
   if (labelMatch) return labelMatch[1].trim().replace(/`/g, "");
   return trimmed;
+}
+
+function extractHeadingLineValue(text: string, labelPattern: string): string | undefined {
+  const pattern = new RegExp(`^#{1,6}\\s+${labelPattern}\\s*:\\s*(?:\\\`([^\\\`\\n]+)\\\`|([^\\s\\n]+))\\s*$`, "im");
+  const match = pattern.exec(text);
+  return (match?.[1] ?? match?.[2])?.trim();
+}
+
+function isSafeBranchValue(value: string): boolean {
+  return /^[A-Za-z0-9._/-]+$/.test(value) && !/^(?:none|unknown|n\/a)$/i.test(value);
+}
+
+function isSafeCommitValue(value: string): boolean {
+  return /^[0-9a-f]{7,40}$/i.test(value);
 }

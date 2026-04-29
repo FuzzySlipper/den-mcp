@@ -181,6 +181,47 @@ test('extractImplementationPacket extracts head_commit from inline commit patter
   assert.equal(result.packet.branch, 'task/fix');
 });
 
+test('extractImplementationPacket extracts branch from heading line without backticks', () => {
+  const output = `
+## Branch: task/949-heading-fields
+
+## Head Commit
+abcdef1234567890
+`;
+  const result = extractImplementationPacket(output);
+  assert.equal(result.packet.branch, 'task/949-heading-fields');
+  assert.equal(result.packet.head_commit, 'abcdef1234567890');
+});
+
+test('extractImplementationPacket extracts safe commit heading-line forms without backticks', () => {
+  const headCommitOutput = `
+## Branch
+main
+
+## Head Commit: abcdef1234567890
+`;
+  assert.equal(extractImplementationPacket(headCommitOutput).packet.head_commit, 'abcdef1234567890');
+
+  const commitAliasOutput = `
+## Branch
+main
+
+## Commit: 1234567890abcdef
+`;
+  assert.equal(extractImplementationPacket(commitAliasOutput).packet.head_commit, '1234567890abcdef');
+});
+
+test('extractImplementationPacket ignores unsafe heading-line branch and commit values', () => {
+  const output = `
+## Branch: not a branch sentence
+
+## Commit: not-a-commit
+`;
+  const result = extractImplementationPacket(output);
+  assert.equal(result.packet.branch, undefined);
+  assert.equal(result.packet.head_commit, undefined);
+});
+
 test('extractImplementationPacket returns undefined branch/commit when no inline patterns match', () => {
   const output = `
 Done. No branch or commit info here.
