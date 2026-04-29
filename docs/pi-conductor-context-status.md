@@ -80,9 +80,12 @@ The compact tool returns schema `den_context_compaction_request` with:
 
 The model-callable tool requires `durable_context_posted: true`. This is a
 soft guardrail that forces the conductor to confirm Den already has the current
-handoff/status/review/merge state before starting a lossy compaction. If the
-runtime does not expose `ctx.compact()`, the tool reports `unavailable` and the
-operator can fall back to manual `/compact` or an RPC entrypoint.
+handoff/status/review/merge state before starting a lossy compaction. The slash
+command is an explicit operator/conductor action and treats command invocation
+itself as that durable-state assertion; use the model-callable tool when a model
+needs the guardrail enforced in parameters. If the runtime does not expose
+`ctx.compact()`, the tool reports `unavailable` and the operator can fall back to
+manual `/compact` or an RPC entrypoint.
 
 ## Recommended conductor behavior
 

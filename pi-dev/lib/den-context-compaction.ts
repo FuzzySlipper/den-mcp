@@ -1,5 +1,3 @@
-type JsonObject = Record<string, unknown>;
-
 export const DEN_CONTEXT_COMPACTION_SCHEMA = "den_context_compaction_request";
 export const DEN_CONTEXT_COMPACTION_SCHEMA_VERSION = 1;
 
@@ -116,16 +114,6 @@ export function compactionGuardrails(): string[] {
     "Prefer task boundaries or just after a merge/review handoff; avoid mid-critical merge, review, or unresolved user-decision points.",
     "After compaction, re-check Den task/messages before starting the next substantial task.",
   ];
-}
-
-export function summarizeDenContextCompactionForMetadata(result: DenContextCompactionResult): JsonObject {
-  return {
-    schema: result.schema,
-    schema_version: result.schema_version,
-    status: result.status,
-    requested: result.requested,
-    safe_point_notes: result.safe_point_notes,
-  };
 }
 
 function normalizeOptionalString(value: unknown): string | undefined {

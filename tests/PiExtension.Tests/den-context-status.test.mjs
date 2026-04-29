@@ -166,6 +166,30 @@ test('den_compact_context refuses before durable Den context is confirmed', () =
   assert.match(toolResult.content[0].text, /durable Den context/);
 });
 
+test('den_compact_context reports unavailable when Pi runtime has no compact hook', () => {
+  const result = requestDenContextCompaction({}, {
+    durableContextPosted: true,
+  });
+
+  assert.equal(result.requested, false);
+  assert.equal(result.status, 'unavailable');
+  assert.match(result.reason, /does not expose ctx\.compact/);
+  const toolResult = buildDenContextCompactionToolResult(result);
+  assert.equal(toolResult.isError, true);
+});
+
+test('den_compact_context reports failed when compact throws synchronously', () => {
+  const result = requestDenContextCompaction({
+    compact() { throw new Error('boom'); },
+  }, {
+    durableContextPosted: true,
+  });
+
+  assert.equal(result.requested, false);
+  assert.equal(result.status, 'failed');
+  assert.match(result.reason, /boom/);
+});
+
 test('den_compact_context requests Pi compaction with conductor instructions', async () => {
   const calls = [];
   const notifications = [];

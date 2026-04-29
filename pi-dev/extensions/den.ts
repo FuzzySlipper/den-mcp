@@ -383,12 +383,12 @@ export default function denExtension(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("den-compact-context", {
-    description: "Request Pi context compaction after durable Den state is recorded. Usage: /den-compact-context [custom instructions]",
+    description: "Request Pi context compaction; invoking this command asserts durable Den state is already recorded. Usage: /den-compact-context [custom instructions]",
     handler: async (args, ctx) => {
       const result = requestDenContextCompaction(ctx, {
         durableContextPosted: true,
         customInstructions: normalizeOptionalString(args),
-        safePointNotes: "Manual /den-compact-context command invoked by the operator/conductor.",
+        safePointNotes: "Manual /den-compact-context command invoked; command invocation asserts durable Den state is already recorded.",
       });
       ctx.ui.setWidget("den-context-compaction", formatDenContextCompactionResult(result).split("\n"));
       ctx.ui.notify(
