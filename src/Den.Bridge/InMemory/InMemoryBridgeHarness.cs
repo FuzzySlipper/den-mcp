@@ -44,7 +44,7 @@ public sealed class InMemoryBridgeHarness : IBridgeClient, IBridgeCommandRouter,
         {
             return CreateErrorResponse(
                 request,
-                "bridge.command.unsupported",
+                BridgeErrorCodes.CommandUnsupported,
                 $"Bridge command '{request.Command}' is not registered.",
                 BridgeErrorCategories.UnsupportedCapability,
                 retryable: false);
@@ -55,7 +55,7 @@ public sealed class InMemoryBridgeHarness : IBridgeClient, IBridgeCommandRouter,
         {
             return CreateErrorResponse(
                 request,
-                "bridge.request.duplicate",
+                BridgeErrorCodes.RequestDuplicate,
                 $"Bridge request '{request.RequestId}' is already active.",
                 BridgeErrorCategories.Conflict,
                 retryable: false);
@@ -66,19 +66,17 @@ public sealed class InMemoryBridgeHarness : IBridgeClient, IBridgeCommandRouter,
             var context = new BridgeRequestContext(request.RequestId, request.Correlation, ReportProgressAsync);
             var result = await handler(request, context, linkedCancellation.Token).ConfigureAwait(false);
 
-            return new BridgeResponseFrame
-            {
-                RequestId = request.RequestId,
-                Result = result ?? BridgeJson.EmptyObject(),
-                Correlation = request.Correlation,
-                SentAt = DateTimeOffset.UtcNow,
-            };
+            return BridgeResponseFrame.Success(
+                request.RequestId,
+                result ?? BridgeJson.EmptyObject(),
+                request.Correlation,
+                DateTimeOffset.UtcNow);
         }
         catch (OperationCanceledException) when (linkedCancellation.IsCancellationRequested)
         {
             return CreateErrorResponse(
                 request,
-                "bridge.request.cancelled",
+                BridgeErrorCodes.RequestCancelled,
                 $"Bridge request '{request.RequestId}' was cancelled.",
                 BridgeErrorCategories.Cancelled,
                 retryable: false);
@@ -197,20 +195,15 @@ public sealed class InMemoryBridgeHarness : IBridgeClient, IBridgeCommandRouter,
         System.Text.Json.JsonElement? details = null,
         IReadOnlyList<BridgeError>? causedBy = null)
     {
-        return new BridgeResponseFrame
-        {
-            RequestId = request.RequestId,
-            Error = new BridgeError
-            {
-                Code = code,
-                Message = message,
-                Category = category,
-                Details = details,
-                Retryable = retryable,
-                CausedBy = causedBy,
-            },
-            Correlation = request.Correlation,
-            SentAt = DateTimeOffset.UtcNow,
-        };
+        return BridgeResponseFrame.Failure(
+            request.RequestId,
+            code,
+            message,
+            category,
+            retryable,
+            details,
+            causedBy,
+            request.Correlation,
+            DateTimeOffset.UtcNow);
     }
 }

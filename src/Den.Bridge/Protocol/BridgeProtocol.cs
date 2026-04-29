@@ -17,6 +17,13 @@ public static class BridgeFrameTypes
     public const string Capabilities = "capabilities";
 }
 
+public static class BridgeErrorCodes
+{
+    public const string CommandUnsupported = "bridge.command.unsupported";
+    public const string RequestDuplicate = "bridge.request.duplicate";
+    public const string RequestCancelled = "bridge.request.cancelled";
+}
+
 public static class BridgeErrorCategories
 {
     public const string Validation = "validation";

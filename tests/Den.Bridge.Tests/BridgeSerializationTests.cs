@@ -31,20 +31,16 @@ public class BridgeSerializationTests
     [Fact]
     public void ResponseFrame_SerializesResultAndErrorShapes()
     {
-        var success = new BridgeResponseFrame
-        {
-            SchemaVersion = "den-desktop@2026-04-29",
-            RequestId = "req_001",
-            Result = BridgeJson.ToElement(new { SnapshotVersion = 42 }),
-            Correlation = new BridgeCorrelation { TraceId = "tr_001" },
-            SentAt = TestTimestamp,
-        };
+        var success = BridgeResponseFrame.Success(
+            "req_001",
+            BridgeJson.ToElement(new { SnapshotVersion = 42 }),
+            new BridgeCorrelation { TraceId = "tr_001" },
+            TestTimestamp,
+            "den-desktop@2026-04-29");
 
-        var failure = new BridgeResponseFrame
-        {
-            SchemaVersion = "den-desktop@2026-04-29",
-            RequestId = "req_002",
-            Error = new BridgeError
+        var failure = BridgeResponseFrame.Failure(
+            "req_002",
+            new BridgeError
             {
                 Code = "sample.failed",
                 Message = "Sample failure",
@@ -62,9 +58,9 @@ public class BridgeSerializationTests
                     },
                 },
             },
-            Correlation = new BridgeCorrelation { TraceId = "tr_002" },
-            SentAt = TestTimestamp,
-        };
+            new BridgeCorrelation { TraceId = "tr_002" },
+            TestTimestamp,
+            "den-desktop@2026-04-29");
 
         Assert.Equal(
             "{\"protocol_version\":\"1.0\",\"schema_version\":\"den-desktop@2026-04-29\",\"frame_type\":\"response\",\"request_id\":\"req_001\",\"result\":{\"snapshot_version\":42},\"correlation\":{\"trace_id\":\"tr_001\"},\"sent_at\":\"2026-04-29T12:34:56+00:00\"}",
@@ -72,6 +68,38 @@ public class BridgeSerializationTests
         Assert.Equal(
             "{\"protocol_version\":\"1.0\",\"schema_version\":\"den-desktop@2026-04-29\",\"frame_type\":\"response\",\"request_id\":\"req_002\",\"error\":{\"code\":\"sample.failed\",\"message\":\"Sample failure\",\"category\":\"transient\",\"details\":{\"retry_after_ms\":250},\"retryable\":true,\"caused_by\":[{\"code\":\"io.timeout\",\"message\":\"Timed out\",\"category\":\"transient\",\"retryable\":true}]},\"correlation\":{\"trace_id\":\"tr_002\"},\"sent_at\":\"2026-04-29T12:34:56+00:00\"}",
             BridgeJson.Serialize(failure));
+    }
+
+    [Fact]
+    public void ResponseFrame_HelpersSetExactlyOneOfResultOrError()
+    {
+        var success = BridgeResponseFrame.Success("req_success");
+        var failure = BridgeResponseFrame.Failure(
+            "req_failure",
+            "sample.failed",
+            "Sample failure",
+            BridgeErrorCategories.Internal);
+
+        Assert.NotNull(success.Result);
+        Assert.Null(success.Error);
+        Assert.Null(failure.Result);
+        Assert.NotNull(failure.Error);
+        Assert.Equal("sample.failed", failure.Error.Code);
+        Assert.Equal(BridgeErrorCategories.Internal, failure.Error.Category);
+    }
+
+    [Fact]
+    public void ResponseFrame_ConstructorRejectsMissingOrAmbiguousResultError()
+    {
+        var error = new BridgeError
+        {
+            Code = "sample.failed",
+            Message = "Sample failure",
+            Category = BridgeErrorCategories.Internal,
+        };
+
+        Assert.Throws<ArgumentException>(() => new BridgeResponseFrame("req_missing"));
+        Assert.Throws<ArgumentException>(() => new BridgeResponseFrame("req_ambiguous", BridgeJson.EmptyObject(), error));
     }
 
     [Fact]

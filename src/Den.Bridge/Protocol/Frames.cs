@@ -61,16 +61,105 @@ public sealed record BridgeRequestFrame : BridgeFrame
 
 public sealed record BridgeResponseFrame : BridgeFrame
 {
+    [JsonConstructor]
+    public BridgeResponseFrame(string requestId, JsonElement? result = null, BridgeError? error = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(requestId);
+        EnsureExactlyOneOfResultOrError(result, error);
+
+        RequestId = requestId;
+        Result = result;
+        Error = error;
+    }
+
+    public BridgeResponseFrame(string requestId, JsonElement result)
+        : this(requestId, (JsonElement?)result, error: null)
+    {
+    }
+
+    public BridgeResponseFrame(string requestId, BridgeError error)
+        : this(requestId, result: null, error: error)
+    {
+    }
+
     public override string FrameType => BridgeFrameTypes.Response;
 
     [JsonPropertyName("request_id")]
-    public required string RequestId { get; init; }
+    public string RequestId { get; private init; }
 
     [JsonPropertyName("result")]
-    public JsonElement? Result { get; init; }
+    public JsonElement? Result { get; private init; }
 
     [JsonPropertyName("error")]
-    public BridgeError? Error { get; init; }
+    public BridgeError? Error { get; private init; }
+
+    public static BridgeResponseFrame Success(
+        string requestId,
+        JsonElement? result = null,
+        BridgeCorrelation? correlation = null,
+        DateTimeOffset? sentAt = null,
+        string? schemaVersion = null)
+    {
+        return new BridgeResponseFrame(requestId, result ?? BridgeJson.EmptyObject())
+        {
+            Correlation = correlation ?? BridgeCorrelation.Empty,
+            SentAt = sentAt ?? DateTimeOffset.UtcNow,
+            SchemaVersion = schemaVersion ?? BridgeProtocol.DefaultSchemaVersion,
+        };
+    }
+
+    public static BridgeResponseFrame Failure(
+        string requestId,
+        BridgeError error,
+        BridgeCorrelation? correlation = null,
+        DateTimeOffset? sentAt = null,
+        string? schemaVersion = null)
+    {
+        ArgumentNullException.ThrowIfNull(error);
+
+        return new BridgeResponseFrame(requestId, error)
+        {
+            Correlation = correlation ?? BridgeCorrelation.Empty,
+            SentAt = sentAt ?? DateTimeOffset.UtcNow,
+            SchemaVersion = schemaVersion ?? BridgeProtocol.DefaultSchemaVersion,
+        };
+    }
+
+    public static BridgeResponseFrame Failure(
+        string requestId,
+        string code,
+        string message,
+        string category,
+        bool retryable = false,
+        JsonElement? details = null,
+        IReadOnlyList<BridgeError>? causedBy = null,
+        BridgeCorrelation? correlation = null,
+        DateTimeOffset? sentAt = null,
+        string? schemaVersion = null)
+    {
+        return Failure(
+            requestId,
+            new BridgeError
+            {
+                Code = code,
+                Message = message,
+                Category = category,
+                Details = details,
+                Retryable = retryable,
+                CausedBy = causedBy,
+            },
+            correlation,
+            sentAt,
+            schemaVersion);
+    }
+
+    private static void EnsureExactlyOneOfResultOrError(JsonElement? result, BridgeError? error)
+    {
+        if (result.HasValue == (error is not null))
+        {
+            throw new ArgumentException("Bridge response frames must set exactly one of result or error.");
+        }
+    }
 }
 
 public sealed record BridgeEventFrame : BridgeFrame

@@ -7,6 +7,14 @@ namespace Den.Bridge.Tests;
 public class InMemoryBridgeHarnessTests
 {
     [Fact]
+    public void BridgeErrorCodes_ExposeStableHarnessWireValues()
+    {
+        Assert.Equal("bridge.command.unsupported", BridgeErrorCodes.CommandUnsupported);
+        Assert.Equal("bridge.request.duplicate", BridgeErrorCodes.RequestDuplicate);
+        Assert.Equal("bridge.request.cancelled", BridgeErrorCodes.RequestCancelled);
+    }
+
+    [Fact]
     public async Task Harness_DispatchesSampleRequestAndPublishesProgressAndEvents()
     {
         await using var harness = new InMemoryBridgeHarness();
@@ -72,8 +80,49 @@ public class InMemoryBridgeHarnessTests
 
         Assert.Null(response.Result);
         Assert.NotNull(response.Error);
-        Assert.Equal("bridge.command.unsupported", response.Error.Code);
+        Assert.Equal(BridgeErrorCodes.CommandUnsupported, response.Error.Code);
         Assert.Equal(BridgeErrorCategories.UnsupportedCapability, response.Error.Category);
+    }
+
+    [Fact]
+    public async Task Harness_MapsDuplicateActiveRequestToDuplicateError()
+    {
+        await using var harness = new InMemoryBridgeHarness();
+        var handlerStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseHandler = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        harness.RegisterCommand(
+            "sample.wait",
+            async (_, _, cancellationToken) =>
+            {
+                handlerStarted.SetResult();
+                await releaseHandler.Task.WaitAsync(cancellationToken);
+                return BridgeJson.EmptyObject();
+            });
+
+        var firstRequest = new BridgeRequestFrame
+        {
+            RequestId = "req_duplicate",
+            Command = "sample.wait",
+        };
+        var firstResponseTask = harness.SendAsync(firstRequest).AsTask();
+
+        await handlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var duplicateResponse = await harness.SendAsync(new BridgeRequestFrame
+        {
+            RequestId = firstRequest.RequestId,
+            Command = firstRequest.Command,
+        });
+
+        releaseHandler.SetResult();
+        var firstResponse = await firstResponseTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Null(firstResponse.Error);
+        Assert.NotNull(firstResponse.Result);
+        Assert.Null(duplicateResponse.Result);
+        Assert.NotNull(duplicateResponse.Error);
+        Assert.Equal(BridgeErrorCodes.RequestDuplicate, duplicateResponse.Error.Code);
+        Assert.Equal(BridgeErrorCategories.Conflict, duplicateResponse.Error.Category);
     }
 
     [Fact]
@@ -107,7 +156,7 @@ public class InMemoryBridgeHarnessTests
         var response = await sendTask.WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.NotNull(response.Error);
-        Assert.Equal("bridge.request.cancelled", response.Error.Code);
+        Assert.Equal(BridgeErrorCodes.RequestCancelled, response.Error.Code);
         Assert.Equal(BridgeErrorCategories.Cancelled, response.Error.Category);
     }
 
