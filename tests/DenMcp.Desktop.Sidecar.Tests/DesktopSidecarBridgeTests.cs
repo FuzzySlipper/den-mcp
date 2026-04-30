@@ -32,6 +32,7 @@ public class DesktopSidecarBridgeTests
             DesktopSidecarProtocol.SaveSettingsCommand,
             DesktopSidecarProtocol.TerminalAckOutputCommand,
             DesktopSidecarProtocol.TerminalAttachCommand,
+            DesktopSidecarProtocol.TerminalCreateSessionCommand,
             DesktopSidecarProtocol.TerminalDetachCommand,
             DesktopSidecarProtocol.TerminalListSessionsCommand,
             DesktopSidecarProtocol.TerminalReadActivityCommand,
@@ -46,6 +47,7 @@ public class DesktopSidecarBridgeTests
 
         var sortedEvents = new[]
         {
+            DesktopSidecarProtocol.TerminalOutputEvent,
             DesktopSidecarProtocol.TerminalSessionListEvent,
             DesktopSidecarProtocol.TerminalSessionStatusEvent,
             DesktopSidecarProtocol.GitSnapshotEvent,
@@ -130,6 +132,7 @@ public class DesktopSidecarBridgeTests
         // All terminal command response schemas must define properties (not empty objects)
         var terminalResponseSuffixes = new[]
         {
+            DesktopSidecarProtocol.TerminalCreateSessionCommand + ".response",
             DesktopSidecarProtocol.TerminalListSessionsCommand + ".response",
             DesktopSidecarProtocol.TerminalReadActivityCommand + ".response",
             DesktopSidecarProtocol.TerminalAttachCommand + ".response",
@@ -153,6 +156,7 @@ public class DesktopSidecarBridgeTests
         // Terminal event payload schemas must also have properties
         var terminalEventPayloads = new[]
         {
+            DesktopSidecarProtocol.TerminalOutputEvent + ".payload",
             DesktopSidecarProtocol.TerminalSessionStatusEvent + ".payload",
             DesktopSidecarProtocol.TerminalSessionListEvent + ".payload",
         };

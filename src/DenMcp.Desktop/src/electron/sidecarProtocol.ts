@@ -84,7 +84,131 @@ export interface ConsoleCommandListResponse {
   commands: ConsoleCommandDefinition[];
 }
 
+export interface TerminalCreateSessionRequest extends Record<string, JsonValue | undefined> {
+  project_id: string;
+  task_id?: number | null;
+  workspace_id?: string | null;
+  title?: string | null;
+  cwd?: string | null;
+  backend?: string;
+}
+
+export interface TerminalAttachRequest extends Record<string, JsonValue | undefined> {
+  session_id: string;
+  mode?: 'terminal_stream' | 'activity_only' | 'external_attach_info' | string;
+  client_id?: string | null;
+  viewport?: { cols: number; rows: number } | null;
+}
+
+export interface TerminalDetachRequest extends Record<string, JsonValue | undefined> {
+  stream_id: string;
+  session_id: string;
+  reason?: string | null;
+}
+
+export interface TerminalSendInputRequest extends Record<string, JsonValue | undefined> {
+  session_id: string;
+  stream_id?: string | null;
+  input_id?: string | null;
+  encoding?: 'utf8' | 'base64' | string;
+  data: string;
+  byte_count?: number;
+}
+
+export interface TerminalResizeRequest extends Record<string, JsonValue | undefined> {
+  session_id: string;
+  stream_id?: string | null;
+  cols: number;
+  rows: number;
+}
+
+export interface TerminalTerminateRequest extends Record<string, JsonValue | undefined> {
+  session_id: string;
+  stream_id?: string | null;
+  mode?: string;
+  reason?: string | null;
+  requested_by?: string | null;
+}
+
+export interface TerminalReconnectRequest extends Record<string, JsonValue | undefined> {
+  session_id: string;
+  previous_stream_id?: string | null;
+  last_seen_cursor?: string | null;
+  viewport?: { cols: number; rows: number } | null;
+}
+
+export interface TerminalAckOutputRequest extends Record<string, JsonValue | undefined> {
+  session_id: string;
+  stream_id?: string | null;
+  ack_cursor?: string | null;
+  received_bytes?: number;
+}
+
+export interface TerminalReadActivityRequest extends Record<string, JsonValue | undefined> {
+  session_id: string;
+  after_cursor?: string | null;
+  limit?: number;
+}
+
+export interface TerminalListSessionsRequest extends Record<string, JsonValue | undefined> {
+  kind?: string | null;
+  backend?: string | null;
+  status?: string | null;
+}
+
+export type TerminalResponse = Record<string, JsonValue>;
+
 export const sidecarCommands: Record<string, BridgeCommandSpec<JsonValue, JsonValue>> = {
+  terminalCreateSession: {
+    command: 'den_desktop.terminal.create_session',
+    requestSchema: 'den_desktop.terminal.create_session.request',
+    responseSchema: 'den_desktop.terminal.create_session.response',
+  },
+  terminalListSessions: {
+    command: 'den_desktop.terminal.list_sessions',
+    requestSchema: 'den_desktop.terminal.list_sessions.request',
+    responseSchema: 'den_desktop.terminal.list_sessions.response',
+  },
+  terminalReadActivity: {
+    command: 'den_desktop.terminal.read_activity',
+    requestSchema: 'den_desktop.terminal.read_activity.request',
+    responseSchema: 'den_desktop.terminal.read_activity.response',
+  },
+  terminalAttach: {
+    command: 'den_desktop.terminal.attach',
+    requestSchema: 'den_desktop.terminal.attach.request',
+    responseSchema: 'den_desktop.terminal.attach.response',
+  },
+  terminalDetach: {
+    command: 'den_desktop.terminal.detach',
+    requestSchema: 'den_desktop.terminal.detach.request',
+    responseSchema: 'den_desktop.terminal.detach.response',
+  },
+  terminalSendInput: {
+    command: 'den_desktop.terminal.send_input',
+    requestSchema: 'den_desktop.terminal.send_input.request',
+    responseSchema: 'den_desktop.terminal.send_input.response',
+  },
+  terminalResize: {
+    command: 'den_desktop.terminal.resize',
+    requestSchema: 'den_desktop.terminal.resize.request',
+    responseSchema: 'den_desktop.terminal.resize.response',
+  },
+  terminalTerminate: {
+    command: 'den_desktop.terminal.terminate',
+    requestSchema: 'den_desktop.terminal.terminate.request',
+    responseSchema: 'den_desktop.terminal.terminate.response',
+  },
+  terminalReconnect: {
+    command: 'den_desktop.terminal.reconnect',
+    requestSchema: 'den_desktop.terminal.reconnect.request',
+    responseSchema: 'den_desktop.terminal.reconnect.response',
+  },
+  terminalAckOutput: {
+    command: 'den_desktop.terminal.ack_output',
+    requestSchema: 'den_desktop.terminal.ack_output.request',
+    responseSchema: 'den_desktop.terminal.ack_output.response',
+  },
   consoleListCommands: {
     command: 'den_desktop.console.list_commands',
     requestSchema: 'den_desktop.console.list_commands.request',
@@ -166,6 +290,18 @@ export const sidecarEvents: Record<string, BridgeEventSpec<JsonValue>> = {
     event: 'den://session-snapshot-updated',
     payloadSchema: 'den://session-snapshot-updated.payload',
   },
+  terminalOutput: {
+    event: 'den.terminal.output',
+    payloadSchema: 'den.terminal.output.payload',
+  },
+  terminalSessionStatus: {
+    event: 'den.terminal.session_status_changed',
+    payloadSchema: 'den.terminal.session_status_changed.payload',
+  },
+  terminalSessionList: {
+    event: 'den.terminal.session_list_updated',
+    payloadSchema: 'den.terminal.session_list_updated.payload',
+  },
 };
 
 export type SidecarBridgeClient = CheckedBridgeClient<typeof sidecarCommands, typeof sidecarEvents>;
@@ -190,6 +326,26 @@ export function createSidecarBridgeFacade(client: SidecarBridgeClient) {
     consoleListCommands: async <T>(): Promise<T> => facade.consoleListCommands({}) as Promise<T>,
     consoleRunCommand: async <TRequest, TResponse>(request: TRequest): Promise<TResponse> =>
       facade.consoleRunCommand(request as JsonValue) as Promise<TResponse>,
+    terminalCreateSession: async <TResponse = TerminalResponse>(request: TerminalCreateSessionRequest): Promise<TResponse> =>
+      facade.terminalCreateSession(request as JsonValue) as Promise<TResponse>,
+    terminalListSessions: async <TResponse = TerminalResponse>(request: TerminalListSessionsRequest = {}): Promise<TResponse> =>
+      facade.terminalListSessions(request as JsonValue) as Promise<TResponse>,
+    terminalReadActivity: async <TResponse = TerminalResponse>(request: TerminalReadActivityRequest): Promise<TResponse> =>
+      facade.terminalReadActivity(request as JsonValue) as Promise<TResponse>,
+    terminalAttach: async <TResponse = TerminalResponse>(request: TerminalAttachRequest): Promise<TResponse> =>
+      facade.terminalAttach(request as JsonValue) as Promise<TResponse>,
+    terminalDetach: async <TResponse = TerminalResponse>(request: TerminalDetachRequest): Promise<TResponse> =>
+      facade.terminalDetach(request as JsonValue) as Promise<TResponse>,
+    terminalSendInput: async <TResponse = TerminalResponse>(request: TerminalSendInputRequest): Promise<TResponse> =>
+      facade.terminalSendInput(request as JsonValue) as Promise<TResponse>,
+    terminalResize: async <TResponse = TerminalResponse>(request: TerminalResizeRequest): Promise<TResponse> =>
+      facade.terminalResize(request as JsonValue) as Promise<TResponse>,
+    terminalTerminate: async <TResponse = TerminalResponse>(request: TerminalTerminateRequest): Promise<TResponse> =>
+      facade.terminalTerminate(request as JsonValue) as Promise<TResponse>,
+    terminalReconnect: async <TResponse = TerminalResponse>(request: TerminalReconnectRequest): Promise<TResponse> =>
+      facade.terminalReconnect(request as JsonValue) as Promise<TResponse>,
+    terminalAckOutput: async <TResponse = TerminalResponse>(request: TerminalAckOutputRequest): Promise<TResponse> =>
+      facade.terminalAckOutput(request as JsonValue) as Promise<TResponse>,
     assertOperatorStatusEvent(frame: BridgeEventFrame): void {
       client.assertEvent('operatorStatus', frame);
     },
@@ -198,6 +354,15 @@ export function createSidecarBridgeFacade(client: SidecarBridgeClient) {
     },
     assertSessionSnapshotsEvent(frame: BridgeEventFrame): void {
       client.assertEvent('sessionSnapshots', frame);
+    },
+    assertTerminalOutputEvent(frame: BridgeEventFrame): void {
+      client.assertEvent('terminalOutput', frame);
+    },
+    assertTerminalSessionStatusEvent(frame: BridgeEventFrame): void {
+      client.assertEvent('terminalSessionStatus', frame);
+    },
+    assertTerminalSessionListEvent(frame: BridgeEventFrame): void {
+      client.assertEvent('terminalSessionList', frame);
     },
   };
 }

@@ -533,66 +533,95 @@ public class TerminalBridgeHandlerTests
         Assert.Equal("unsupported_capability", ex.Category);
     }
 
-    [Theory]
-    [InlineData("attach")]
-    [InlineData("detach")]
-    [InlineData("send_input")]
-    [InlineData("resize")]
-    [InlineData("terminate")]
-    [InlineData("reconnect")]
-    [InlineData("ack_output")]
-    public async Task TerminalControlStubs_ReturnUnsupportedCapability(string action)
+    [Fact]
+    public async Task TerminalCreateSessionHandler_CreatesTmuxSessionAndRegistersSummary()
     {
-        var ex = await ActStubAsync(action);
-        Assert.NotNull(ex);
-        Assert.Equal("unsupported_capability", ex!.Category);
+        var runner = new FakeTmuxCommandRunner();
+        var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
+        var handler = new TerminalCreateSessionHandler(CreateTmuxService(runner, registry));
+
+        var result = await handler.HandleAsync(
+            new TerminalCreateSessionRequest
+            {
+                ProjectId = "den-mcp",
+                TaskId = 909,
+                WorkspaceId = "ws-1",
+                Title = "Task 909",
+                Cwd = "/tmp/work",
+            },
+            TestContext(),
+            CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.StartsWith("tmux-session:", result!.Session.SessionId, StringComparison.Ordinal);
+        Assert.Equal(OperatorSessionBackend.Tmux, result.Session.Backend);
+        Assert.Equal("tmux", result.Session.PersistenceKind);
+        Assert.Equal("backend_persistent", result.Session.OwnershipKind);
+        Assert.True(result.Session.CanOpenExternalAttach);
+        Assert.Contains(runner.Calls, call => call.Args[0] == "new-session" && call.Args.Contains("-s"));
+        Assert.Contains(runner.Calls, call => call.Args[0] == "set-option" && call.Args.Contains("@den.project_id"));
     }
 
-    private static async Task<BridgeHandlerException?> ActStubAsync(string action)
+    [Fact]
+    public async Task TmuxAttachExternalInfo_ReturnsOpaqueAttachCommandWithoutRawStream()
     {
-        var ctx = TestContext();
-        try
-        {
-            switch (action)
-            {
-                case "attach":
-                    await new TerminalAttachHandler().HandleAsync(
-                        new TerminalAttachRequest { SessionId = "test" }, ctx, CancellationToken.None);
-                    break;
-                case "detach":
-                    await new TerminalDetachHandler().HandleAsync(
-                        new TerminalDetachRequest { StreamId = "stream", SessionId = "test" }, ctx, CancellationToken.None);
-                    break;
-                case "send_input":
-                    await new TerminalSendInputHandler().HandleAsync(
-                        new TerminalSendInputRequest { SessionId = "test", Data = "echo ok" }, ctx, CancellationToken.None);
-                    break;
-                case "resize":
-                    await new TerminalResizeHandler().HandleAsync(
-                        new TerminalResizeRequest { SessionId = "test", Cols = 80, Rows = 24 }, ctx, CancellationToken.None);
-                    break;
-                case "terminate":
-                    await new TerminalTerminateHandler().HandleAsync(
-                        new TerminalTerminateRequest { SessionId = "test" }, ctx, CancellationToken.None);
-                    break;
-                case "reconnect":
-                    await new TerminalReconnectHandler().HandleAsync(
-                        new TerminalReconnectRequest { SessionId = "test" }, ctx, CancellationToken.None);
-                    break;
-                case "ack_output":
-                    await new TerminalAckOutputHandler().HandleAsync(
-                        new TerminalAckOutputRequest { SessionId = "test" }, ctx, CancellationToken.None);
-                    break;
-                default:
-                    return null;
-            }
-        }
-        catch (BridgeHandlerException ex)
-        {
-            return ex;
-        }
+        var runner = new FakeTmuxCommandRunner();
+        var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
+        var service = CreateTmuxService(runner, registry);
+        var session = await service.CreateAsync(new TerminalCreateSessionRequest { ProjectId = "den-mcp", Title = "External" }, CancellationToken.None);
 
-        return null;
+        var response = await service.AttachAsync(new TerminalAttachRequest { SessionId = session.SessionId, Mode = "external_attach_info" }, CancellationToken.None);
+
+        Assert.Equal(session.SessionId, response.SessionId);
+        Assert.NotNull(response.ExternalAttach);
+        Assert.True(response.ExternalAttach!.Available);
+        Assert.Contains("tmux attach-session", response.ExternalAttach.Command, StringComparison.Ordinal);
+        Assert.DoesNotContain(runner.Calls, call => call.Args[0] == "capture-pane");
+    }
+
+    [Fact]
+    public async Task TmuxRediscover_RegistersExistingManagedSessionAndMarksMissingStale()
+    {
+        var runner = new FakeTmuxCommandRunner
+        {
+            ListSessionsOutput = "den-source-den-mcp-task909-abc\t1770000000\t0\t1770000100\tden-desktop-fixture\tden-mcp\t909\tws\tRediscovered\t/tmp/work\n",
+        };
+        var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
+        registry.Register(new OperatorSession
+        {
+            SessionId = TmuxSessionNaming.FromSessionName("den-missing").SessionId,
+            Kind = OperatorSessionKind.Terminal,
+            Backend = OperatorSessionBackend.Tmux,
+            BackendRef = TmuxSessionNaming.FromSessionName("den-missing").BackendRef,
+            Status = OperatorSessionStatus.Running,
+            SourceInstanceId = "den-desktop-fixture",
+            Capabilities = OperatorSessionCapabilities.FullControl(),
+            CreatedAt = new DateTime(2026, 4, 29, 11, 0, 0, DateTimeKind.Utc),
+        });
+        var service = CreateTmuxService(runner, registry);
+
+        var discovered = await service.RediscoverAsync(CancellationToken.None);
+
+        Assert.Single(discovered);
+        Assert.Equal("den-mcp", discovered[0].ProjectId);
+        Assert.Equal(909, discovered[0].TaskId);
+        var stale = registry.Get(TmuxSessionNaming.FromSessionName("den-missing").SessionId);
+        Assert.Equal(OperatorSessionStatus.Stale, stale!.Status);
+        Assert.False(stale.Capabilities.CanSendInput);
+    }
+
+    private static TmuxOperatorSessionService CreateTmuxService(FakeTmuxCommandRunner runner, OperatorSessionRegistry registry)
+    {
+        var options = DesktopSidecarFixtures.CreateFixtureOptions();
+        var settings = new OperatorSettingsService(OperatorSettingsStorage.ForPath(Path.Combine(Path.GetTempPath(), "den-tests", Guid.NewGuid().ToString("N"), "settings.json")));
+        var events = new OperatorRuntimeBridgeEventSink(new DesktopSidecarRuntimeState(options));
+        return new TmuxOperatorSessionService(
+            runner,
+            registry,
+            events,
+            settings,
+            new DenHttpClient(),
+            () => new DateTimeOffset(2026, 4, 29, 12, 0, 0, TimeSpan.Zero));
     }
 
     private static BridgeRequestContext TestContext()
@@ -873,3 +902,23 @@ public class TerminalProtocolConformanceFixtureTests
         Assert.StartsWith("unsupported", TerminalErrorResult.Unsupported("send_input", "no backend").Category, StringComparison.Ordinal);
     }
 }
+
+public sealed class FakeTmuxCommandRunner : ITmuxCommandRunner
+{
+    public string ListSessionsOutput { get; init; } = string.Empty;
+    public List<FakeTmuxCall> Calls { get; } = [];
+
+    public Task<TmuxCommandResult> RunAsync(IReadOnlyList<string> args, CancellationToken cancellationToken = default)
+    {
+        Calls.Add(new FakeTmuxCall(args.ToArray()));
+        var command = args.Count > 0 ? args[0] : string.Empty;
+        return Task.FromResult(command switch
+        {
+            "list-sessions" => new TmuxCommandResult { ExitCode = 0, Stdout = ListSessionsOutput },
+            "capture-pane" => new TmuxCommandResult { ExitCode = 0, Stdout = "captured output\n" },
+            _ => new TmuxCommandResult { ExitCode = 0 },
+        });
+    }
+}
+
+public sealed record FakeTmuxCall(IReadOnlyList<string> Args);

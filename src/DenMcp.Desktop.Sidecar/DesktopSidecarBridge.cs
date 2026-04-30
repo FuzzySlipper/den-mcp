@@ -24,6 +24,8 @@ public static class DesktopSidecarBridge
         services.AddSingleton<PiSessionSnapshotBuilder>();
         services.AddSingleton<OperatorSessionRegistry>();
         services.AddSingleton<OperatorSessionLeaseStore>();
+        services.AddSingleton<ITmuxCommandRunner, SystemTmuxCommandRunner>();
+        services.AddSingleton<TmuxOperatorSessionService>();
         services.AddSingleton<DesktopSidecarRuntimeState>();
         services.AddSingleton<OperatorRuntimeBridgeEventSink>();
         services.AddSingleton<IOperatorRuntimeEventSink>(sp => sp.GetRequiredService<OperatorRuntimeBridgeEventSink>());
@@ -38,7 +40,7 @@ public static class DesktopSidecarBridge
                 host.SchemaVersion = DesktopSidecarProtocol.SchemaVersion;
                 host.SchemaBundleId = DesktopSidecarProtocol.SchemaBundleId;
                 host.SupportedTransports = new[] { WebSocketBridgeTransportNames.LoopbackWebSocket };
-                host.FeatureFlags = new[] { "operator_runtime", "typed_runtime_bridge" };
+                host.FeatureFlags = new[] { "operator_runtime", "typed_runtime_bridge", "tmux_operator_sessions" };
             });
 
         return services.BuildServiceProvider(validateScopes: true);
@@ -72,6 +74,8 @@ public static class DesktopSidecarBridge
             .RegisterCommand<LatestDiffSnapshotRequest, DesktopDiffSnapshotLatestResult, GetLatestDiffSnapshotHandler>(
                 DesktopSidecarProtocol.GetLatestDiffSnapshotCommand)
             // Terminal protocol commands (task #1010, spec #945)
+            .RegisterCommand<TerminalCreateSessionRequest, TerminalCreateSessionResponse, TerminalCreateSessionHandler>(
+                DesktopSidecarProtocol.TerminalCreateSessionCommand)
             .RegisterCommand<TerminalListSessionsRequest, TerminalListSessionsResponse, TerminalListSessionsHandler>(
                 DesktopSidecarProtocol.TerminalListSessionsCommand)
             .RegisterCommand<TerminalReadActivityRequest, TerminalReadActivityResponse, TerminalReadActivityHandler>(
@@ -99,7 +103,8 @@ public static class DesktopSidecarBridge
             .RegisterEvent<OperatorStatus>(DesktopSidecarProtocol.OperatorStatusEvent)
             .RegisterEvent<IReadOnlyList<LocalGitSnapshot>>(DesktopSidecarProtocol.GitSnapshotEvent)
             .RegisterEvent<IReadOnlyList<LocalSessionSnapshot>>(DesktopSidecarProtocol.SessionSnapshotEvent)
-            // Terminal protocol events (task #1010, dot-convention names per R945-4)
+            // Terminal protocol events (task #1010/#909, dot-convention names per R945-4)
+            .RegisterEvent<TerminalOutputEvent>(DesktopSidecarProtocol.TerminalOutputEvent)
             .RegisterEvent<TerminalSessionEvent>(DesktopSidecarProtocol.TerminalSessionStatusEvent)
             .RegisterEvent<TerminalListSessionsResponse>(DesktopSidecarProtocol.TerminalSessionListEvent);
     }
@@ -164,7 +169,11 @@ public static class DesktopSidecarBridge
             Schema(DesktopSidecarProtocol.SessionSnapshotEvent + ".payload", """
                 {"type":"array","items":{"type":"object","additionalProperties":true}}
                 """),
-            // Terminal protocol command schemas (task #1010)
+            // Terminal protocol command schemas (task #1010/#909)
+            Schema(DesktopSidecarProtocol.TerminalCreateSessionCommand + ".request", """
+                {"type":"object","additionalProperties":false,"required":["project_id"],"properties":{"project_id":{"type":"string"},"task_id":{"type":["integer","null"]},"workspace_id":{"type":["string","null"]},"title":{"type":["string","null"]},"cwd":{"type":["string","null"]},"backend":{"type":"string"}}}
+                """),
+            Schema(DesktopSidecarProtocol.TerminalCreateSessionCommand + ".response", TerminalCreateSessionResponseSchema),
             Schema(DesktopSidecarProtocol.TerminalListSessionsCommand + ".request", """
                 {"type":"object","additionalProperties":false,"properties":{"kind":{"type":["string","null"]},"backend":{"type":["string","null"]},"status":{"type":["string","null"]}}}
                 """),
@@ -207,6 +216,7 @@ public static class DesktopSidecarBridge
             Schema(DesktopSidecarProtocol.ConsoleRunCommandCommand + ".request", ConsoleCommandRunRequestSchema),
             Schema(DesktopSidecarProtocol.ConsoleRunCommandCommand + ".response", ConsoleCommandRunResponseSchema),
             // Terminal protocol event schemas
+            Schema(DesktopSidecarProtocol.TerminalOutputEvent + ".payload", TerminalOutputEventPayloadSchema),
             Schema(DesktopSidecarProtocol.TerminalSessionStatusEvent + ".payload", TerminalSessionEventPayloadSchema),
             Schema(DesktopSidecarProtocol.TerminalSessionListEvent + ".payload", TerminalListSessionsResponseSchema),
         };
@@ -242,8 +252,12 @@ public static class DesktopSidecarBridge
 
     // ── Terminal response/event schemas (task #1010, matching DTOs from TerminalBridgeDtos.cs) ──
 
+    private const string TerminalCreateSessionResponseSchema = """
+        {"type":"object","additionalProperties":false,"required":["session"],"properties":{"session":{"type":"object","additionalProperties":true,"required":["session_id"],"properties":{"session_id":{"type":"string"},"backend":{"type":"string"},"status":{"type":"string"}}}}}
+        """;
+
     private const string TerminalListSessionsResponseSchema = """
-        {"type":"object","additionalProperties":false,"required":["sessions","count"],"properties":{"sessions":{"type":"array","items":{"type":"object","additionalProperties":true,"required":["session_id"],"properties":{"session_id":{"type":"string"},"title":{"type":["string","null"]},"display_name":{"type":["string","null"]},"kind":{"type":"string"},"backend":{"type":"string"},"status":{"type":"string"},"can_read_activity":{"type":"boolean"},"can_send_input":{"type":"boolean"},"can_terminate":{"type":"boolean"},"can_attach":{"type":"boolean"}}}},"count":{"type":"integer"}}}
+        {"type":"object","additionalProperties":false,"required":["sessions","count"],"properties":{"sessions":{"type":"array","items":{"type":"object","additionalProperties":true,"required":["session_id"],"properties":{"session_id":{"type":"string"},"title":{"type":["string","null"]},"display_name":{"type":["string","null"]},"kind":{"type":"string"},"backend":{"type":"string"},"status":{"type":"string"},"can_read_activity":{"type":"boolean"},"can_send_input":{"type":"boolean"},"can_terminate":{"type":"boolean"},"can_attach":{"type":"boolean"},"can_open_external_attach":{"type":"boolean"},"persistence_kind":{"type":["string","null"]},"ownership_kind":{"type":["string","null"]}}}},"count":{"type":"integer"}}}
         """;
 
     private const string TerminalReadActivityResponseSchema = """
@@ -251,7 +265,7 @@ public static class DesktopSidecarBridge
         """;
 
     private const string TerminalAttachResponseSchema = """
-        {"type":"object","additionalProperties":false,"required":["stream_id","session_id"],"properties":{"stream_id":{"type":"string"},"session_id":{"type":"string"},"attached_at":{"type":"string"},"start_cursor":{"type":"string"},"replay_available_from":{"type":"string"},"replay_gap":{"type":"boolean"},"capabilities":{"type":"object","additionalProperties":false,"required":["can_send_input","can_resize","can_detach","can_terminate","can_stream_terminal"],"properties":{"can_send_input":{"type":"boolean"},"can_resize":{"type":"boolean"},"can_detach":{"type":"boolean"},"can_terminate":{"type":"boolean"},"can_stream_terminal":{"type":"boolean"}}},"viewport_limits":{"type":["object","null"],"additionalProperties":false,"properties":{"min_cols":{"type":"integer"},"max_cols":{"type":"integer"},"min_rows":{"type":"integer"},"max_rows":{"type":"integer"}}},"limits":{"type":"object","additionalProperties":false,"properties":{"output_chunk_max_bytes":{"type":"integer"},"input_chunk_max_bytes":{"type":"integer"},"session_replay_max_bytes":{"type":"integer"},"subscriber_queue_max_bytes":{"type":"integer"},"ack_after_bytes":{"type":"integer"},"heartbeat_interval_ms":{"type":"integer"}}}}}
+        {"type":"object","additionalProperties":false,"required":["stream_id","session_id"],"properties":{"stream_id":{"type":"string"},"session_id":{"type":"string"},"attached_at":{"type":"string"},"start_cursor":{"type":"string"},"replay_available_from":{"type":"string"},"replay_gap":{"type":"boolean"},"capabilities":{"type":"object","additionalProperties":false,"required":["can_send_input","can_resize","can_detach","can_terminate","can_stream_terminal"],"properties":{"can_send_input":{"type":"boolean"},"can_resize":{"type":"boolean"},"can_detach":{"type":"boolean"},"can_terminate":{"type":"boolean"},"can_stream_terminal":{"type":"boolean"}}},"viewport_limits":{"type":["object","null"],"additionalProperties":false,"properties":{"min_cols":{"type":"integer"},"max_cols":{"type":"integer"},"min_rows":{"type":"integer"},"max_rows":{"type":"integer"}}},"limits":{"type":"object","additionalProperties":false,"properties":{"output_chunk_max_bytes":{"type":"integer"},"input_chunk_max_bytes":{"type":"integer"},"session_replay_max_bytes":{"type":"integer"},"subscriber_queue_max_bytes":{"type":"integer"},"ack_after_bytes":{"type":"integer"},"heartbeat_interval_ms":{"type":"integer"}}},"external_attach":{"type":["object","null"],"additionalProperties":false,"properties":{"available":{"type":"boolean"},"command":{"type":["string","null"]},"description":{"type":["string","null"]}}}}}
         """;
 
     private const string TerminalDetachResponseSchema = """
@@ -272,6 +286,10 @@ public static class DesktopSidecarBridge
 
     private const string TerminalAckOutputResponseSchema = """
         {"type":"object","additionalProperties":false,"required":["accepted"],"properties":{"accepted":{"type":"boolean"}}}
+        """;
+
+    private const string TerminalOutputEventPayloadSchema = """
+        {"type":"object","additionalProperties":false,"required":["terminal_protocol_version","stream_id","session_id","terminal_sequence","stream_cursor","chunk_id","encoding","data","byte_count"],"properties":{"terminal_protocol_version":{"type":"string"},"stream_id":{"type":"string"},"session_id":{"type":"string"},"terminal_sequence":{"type":"integer"},"stream_cursor":{"type":"string"},"chunk_id":{"type":"string"},"origin":{"type":["string","null"]},"encoding":{"type":"string"},"data":{"type":"string"},"byte_count":{"type":"integer"},"cols":{"type":["integer","null"]},"rows":{"type":["integer","null"]},"emitted_at":{"type":"string"},"truncated":{"type":"boolean"},"redacted":{"type":"boolean"}}}
         """;
 
     private const string TerminalSessionEventPayloadSchema = """

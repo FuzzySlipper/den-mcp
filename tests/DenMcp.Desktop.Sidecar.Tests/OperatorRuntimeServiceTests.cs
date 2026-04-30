@@ -207,11 +207,20 @@ public class OperatorRuntimeServiceTests
         var sidecarState = new DesktopSidecarRuntimeState(options, new DateTimeOffset(2026, 4, 29, 12, 0, 0, TimeSpan.Zero));
         var events = new OperatorRuntimeBridgeEventSink(sidecarState);
         var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
+        var den = new DenHttpClient(new HttpClient(http));
+        var tmux = new TmuxOperatorSessionService(
+            new FakeTmuxCommandRunner(),
+            registry,
+            events,
+            settingsService,
+            den,
+            () => new DateTimeOffset(2026, 4, 29, 12, 0, 0, TimeSpan.Zero));
         var runtime = new OperatorRuntimeService(
             settingsService,
-            new DenHttpClient(new HttpClient(http)),
+            den,
             new GitSnapshotBuilder(git),
             new PiSessionSnapshotBuilder(name => name == "PI_SUBAGENT_RUNS_DIR" ? Path.Combine(temp.Path, "runs") : null, () => "2026-04-29T12:00:00.000Z"),
+            tmux,
             events,
             registry,
             () => new DateTimeOffset(2026, 4, 29, 12, 0, 0, TimeSpan.Zero));

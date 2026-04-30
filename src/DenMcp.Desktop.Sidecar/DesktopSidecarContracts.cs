@@ -24,6 +24,7 @@ public static class DesktopSidecarProtocol
     public const string SessionSnapshotEvent = "den://session-snapshot-updated";
 
     // Terminal protocol commands (task #1010, spec #945)
+    public const string TerminalCreateSessionCommand = "den_desktop.terminal.create_session";
     public const string TerminalListSessionsCommand = "den_desktop.terminal.list_sessions";
     public const string TerminalReadActivityCommand = "den_desktop.terminal.read_activity";
     public const string TerminalAttachCommand = "den_desktop.terminal.attach";

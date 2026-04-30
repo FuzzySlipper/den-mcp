@@ -11,6 +11,36 @@ namespace DenMcp.Desktop.Sidecar;
 /// Legacy den:// names are used only in compatibility shims, not here.
 /// </summary>
 
+// ── Create ────────────────────────────────────────────────────────────────
+
+public sealed record TerminalCreateSessionRequest
+{
+    [JsonPropertyName("project_id")]
+    public required string ProjectId { get; init; }
+
+    [JsonPropertyName("task_id")]
+    public long? TaskId { get; init; }
+
+    [JsonPropertyName("workspace_id")]
+    public string? WorkspaceId { get; init; }
+
+    [JsonPropertyName("title")]
+    public string? Title { get; init; }
+
+    [JsonPropertyName("cwd")]
+    public string? Cwd { get; init; }
+
+    /// <summary>Only tmux is implemented in task #909; zellij remains future/optional.</summary>
+    [JsonPropertyName("backend")]
+    public string Backend { get; init; } = OperatorSessionBackend.Tmux;
+}
+
+public sealed record TerminalCreateSessionResponse
+{
+    [JsonPropertyName("session")]
+    public required TerminalSessionSummary Session { get; init; }
+}
+
 // ── Attach ────────────────────────────────────────────────────────────────
 
 public sealed record TerminalAttachRequest
@@ -70,6 +100,22 @@ public sealed record TerminalAttachResponse
 
     [JsonPropertyName("limits")]
     public TerminalStreamLimits Limits { get; init; } = new();
+
+    [JsonPropertyName("external_attach")]
+    public TerminalExternalAttachInfo? ExternalAttach { get; init; }
+}
+
+public sealed record TerminalExternalAttachInfo
+{
+    [JsonPropertyName("available")]
+    public bool Available { get; init; }
+
+    /// <summary>Operator-facing command text; renderer treats this as opaque display/copy text.</summary>
+    [JsonPropertyName("command")]
+    public string? Command { get; init; }
+
+    [JsonPropertyName("description")]
+    public string? Description { get; init; }
 }
 
 public sealed record TerminalAttachCapabilities
@@ -441,6 +487,15 @@ public sealed record TerminalSessionSummary
     [JsonPropertyName("can_attach")]
     public bool CanAttach { get; init; }
 
+    [JsonPropertyName("can_open_external_attach")]
+    public bool CanOpenExternalAttach { get; init; }
+
+    [JsonPropertyName("persistence_kind")]
+    public string? PersistenceKind { get; init; }
+
+    [JsonPropertyName("ownership_kind")]
+    public string? OwnershipKind { get; init; }
+
     [JsonPropertyName("created_at")]
     public string? CreatedAt { get; init; }
 
@@ -455,6 +510,54 @@ public sealed record TerminalSessionSummary
 }
 
 // ── Session status/capability changed event ───────────────────────────────
+
+public sealed record TerminalOutputEvent
+{
+    [JsonPropertyName("terminal_protocol_version")]
+    public string TerminalProtocolVersion { get; init; } = "1.0";
+
+    [JsonPropertyName("stream_id")]
+    public required string StreamId { get; init; }
+
+    [JsonPropertyName("session_id")]
+    public required string SessionId { get; init; }
+
+    [JsonPropertyName("terminal_sequence")]
+    public long TerminalSequence { get; init; }
+
+    [JsonPropertyName("stream_cursor")]
+    public required string StreamCursor { get; init; }
+
+    [JsonPropertyName("chunk_id")]
+    public required string ChunkId { get; init; }
+
+    [JsonPropertyName("origin")]
+    public string? Origin { get; init; }
+
+    [JsonPropertyName("encoding")]
+    public string Encoding { get; init; } = "base64";
+
+    [JsonPropertyName("data")]
+    public required string Data { get; init; }
+
+    [JsonPropertyName("byte_count")]
+    public int ByteCount { get; init; }
+
+    [JsonPropertyName("cols")]
+    public int? Cols { get; init; }
+
+    [JsonPropertyName("rows")]
+    public int? Rows { get; init; }
+
+    [JsonPropertyName("emitted_at")]
+    public string EmittedAt { get; init; } = string.Empty;
+
+    [JsonPropertyName("truncated")]
+    public bool Truncated { get; init; }
+
+    [JsonPropertyName("redacted")]
+    public bool Redacted { get; init; }
+}
 
 public sealed record TerminalSessionEvent
 {

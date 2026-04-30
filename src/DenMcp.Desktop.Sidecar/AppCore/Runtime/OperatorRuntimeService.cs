@@ -251,6 +251,7 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
     private readonly DenHttpClient _den;
     private readonly GitSnapshotBuilder _git;
     private readonly PiSessionSnapshotBuilder _sessions;
+    private readonly TmuxOperatorSessionService _tmuxSessions;
     private readonly IOperatorRuntimeEventSink _events;
     private readonly OperatorSessionRegistry _operatorSessions;
     private readonly Func<DateTimeOffset> _now;
@@ -271,6 +272,7 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
         DenHttpClient den,
         GitSnapshotBuilder git,
         PiSessionSnapshotBuilder sessions,
+        TmuxOperatorSessionService tmuxSessions,
         IOperatorRuntimeEventSink events,
         OperatorSessionRegistry operatorSessions,
         Func<DateTimeOffset>? now = null)
@@ -279,6 +281,7 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
         _den = den;
         _git = git;
         _sessions = sessions;
+        _tmuxSessions = tmuxSessions;
         _events = events;
         _operatorSessions = operatorSessions;
         _now = now ?? (() => DateTimeOffset.UtcNow);
@@ -606,8 +609,10 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
             }
         }
 
+        await _tmuxSessions.RediscoverAsync(cancellationToken).ConfigureAwait(false);
+
         var sessionResult = _sessions.ScanPiSessionSnapshots(settings, projects);
-        var sessionSnapshots = sessionResult.Snapshots.ToList();
+        var sessionSnapshots = sessionResult.Snapshots.Concat(_tmuxSessions.BuildSnapshotListForDen()).ToList();
         var sessionPublishSuccesses = 0;
         for (var index = 0; index < sessionSnapshots.Count; index++)
         {

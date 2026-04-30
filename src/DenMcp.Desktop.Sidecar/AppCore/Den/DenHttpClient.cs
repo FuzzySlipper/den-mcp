@@ -137,6 +137,35 @@ public sealed class DenHttpClient
             cancellationToken);
     }
 
+    public async Task PublishSessionEventAsync(
+        string baseUrl,
+        string projectId,
+        AppendDesktopSessionEventRequest sessionEvent,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(sessionEvent);
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+
+        var path = $"/api/projects/{EscapePathSegment(projectId)}/desktop/session-events";
+        var response = await SendAsync(
+            () => new HttpRequestMessage(HttpMethod.Post, JoinUrl(baseUrl, path))
+            {
+                Content = JsonContent(sessionEvent),
+            },
+            $"Unable to publish desktop session event for {projectId}",
+            cancellationToken).ConfigureAwait(false);
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await ReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+                throw new DenHttpClientException(
+                    $"Desktop session event publish for {projectId} returned HTTP {(int)response.StatusCode}: {body}");
+            }
+        }
+    }
+
     public async Task<DesktopDiffSnapshotLatestResult> LatestDiffSnapshotAsync(
         string baseUrl,
         LatestDiffSnapshotRequest request,

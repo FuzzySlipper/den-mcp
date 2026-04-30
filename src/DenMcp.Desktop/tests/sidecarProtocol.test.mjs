@@ -49,6 +49,7 @@ test('sidecar schema bundle and representative frames are compatible with the ch
     'den_desktop.operator.save_settings',
     'den_desktop.terminal.ack_output',
     'den_desktop.terminal.attach',
+    'den_desktop.terminal.create_session',
     'den_desktop.terminal.detach',
     'den_desktop.terminal.list_sessions',
     'den_desktop.terminal.read_activity',
@@ -58,6 +59,7 @@ test('sidecar schema bundle and representative frames are compatible with the ch
     'den_desktop.terminal.terminate',
   ]);
   assert.deepEqual(bundle.events.map((event) => event.event), [
+    'den.terminal.output',
     'den.terminal.session_list_updated',
     'den.terminal.session_status_changed',
     'den://git-snapshot-updated',
@@ -146,6 +148,9 @@ test('sidecar checked facade allow-lists health/capabilities/runtime commands an
     'assertGitSnapshotsEvent',
     'assertOperatorStatusEvent',
     'assertSessionSnapshotsEvent',
+    'assertTerminalOutputEvent',
+    'assertTerminalSessionListEvent',
+    'assertTerminalSessionStatusEvent',
     'consoleListCommands',
     'consoleRunCommand',
     'getAppearanceSettings',
@@ -159,6 +164,16 @@ test('sidecar checked facade allow-lists health/capabilities/runtime commands an
     'refreshNow',
     'saveAppearanceSettings',
     'saveOperatorSettings',
+    'terminalAckOutput',
+    'terminalAttach',
+    'terminalCreateSession',
+    'terminalDetach',
+    'terminalListSessions',
+    'terminalReadActivity',
+    'terminalReconnect',
+    'terminalResize',
+    'terminalSendInput',
+    'terminalTerminate',
   ].sort());
 });
 
@@ -212,6 +227,16 @@ test('preload sidecar API exposes no generic dispatch, token, endpoint, or node 
     'refreshNow',
     'saveAppearanceSettings',
     'saveOperatorSettings',
+    'terminalAckOutput',
+    'terminalAttach',
+    'terminalCreateSession',
+    'terminalDetach',
+    'terminalListSessions',
+    'terminalReadActivity',
+    'terminalReconnect',
+    'terminalResize',
+    'terminalSendInput',
+    'terminalTerminate',
   ].sort());
   assert.equal(api.dispatch, undefined);
   assert.equal(api.ipcRenderer, undefined);

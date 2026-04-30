@@ -342,6 +342,36 @@ public sealed record DesktopSessionSnapshotRequest
     public string ObservedAt { get; init; } = string.Empty;
 }
 
+public sealed record AppendDesktopSessionEventRequest
+{
+    [JsonPropertyName("task_id")]
+    public int? TaskId { get; init; }
+
+    [JsonPropertyName("workspace_id")]
+    public string? WorkspaceId { get; init; }
+
+    [JsonPropertyName("source_instance_id")]
+    public string? SourceInstanceId { get; init; }
+
+    [JsonPropertyName("session_id")]
+    public string? SessionId { get; init; }
+
+    [JsonPropertyName("event_type")]
+    public string? EventType { get; init; }
+
+    [JsonPropertyName("payload")]
+    public string? Payload { get; init; }
+
+    [JsonPropertyName("requested_by")]
+    public string? RequestedBy { get; init; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; init; }
+
+    [JsonPropertyName("observed_at")]
+    public DateTime? ObservedAt { get; init; }
+}
+
 public sealed record GitDirtyCounts
 {
     [JsonPropertyName("total")]

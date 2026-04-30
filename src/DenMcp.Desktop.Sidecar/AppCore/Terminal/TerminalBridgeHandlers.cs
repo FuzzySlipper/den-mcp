@@ -4,6 +4,32 @@ using Den.Bridge.Protocol;
 namespace DenMcp.Desktop.Sidecar;
 
 /// <summary>
+/// Bridge command handler for creating tmux-backed OperatorSessions.
+/// </summary>
+public sealed class TerminalCreateSessionHandler
+    : IBridgeCommandHandler<TerminalCreateSessionRequest, TerminalCreateSessionResponse>
+{
+    private readonly TmuxOperatorSessionService _tmux;
+
+    public TerminalCreateSessionHandler(TmuxOperatorSessionService tmux)
+    {
+        _tmux = tmux;
+    }
+
+    public async ValueTask<TerminalCreateSessionResponse?> HandleAsync(
+        TerminalCreateSessionRequest request,
+        BridgeRequestContext context,
+        CancellationToken cancellationToken)
+    {
+        var session = await _tmux.CreateAsync(request, cancellationToken).ConfigureAwait(false);
+        return new TerminalCreateSessionResponse
+        {
+            Session = TerminalSessionSummaryProjection.FromSession(session),
+        };
+    }
+}
+
+/// <summary>
 /// Bridge command handler for listing OperatorSessions.
 /// Returns typed summaries from the local registry.
 /// </summary>
@@ -25,29 +51,7 @@ public sealed class TerminalListSessionsHandler
         cancellationToken.ThrowIfCancellationRequested();
 
         var sessions = _registry.List(request.Kind, request.Backend, request.Status);
-        var summaries = sessions.Select(s => new TerminalSessionSummary
-        {
-            SessionId = s.SessionId,
-            Title = s.Title,
-            DisplayName = s.DisplayName,
-            Kind = s.Kind,
-            Backend = s.Backend,
-            Status = s.Status,
-            CurrentCommand = s.CurrentCommand,
-            AgentIdentity = s.AgentIdentity,
-            Role = s.Role,
-            ProjectId = s.ProjectId,
-            TaskId = s.TaskId,
-            WorkspaceId = s.WorkspaceId,
-            CanReadActivity = s.Capabilities.CanReadActivity,
-            CanSendInput = s.Capabilities.CanSendInput,
-            CanTerminate = s.Capabilities.CanTerminate,
-            CanAttach = s.Capabilities.CanAttach,
-            CreatedAt = FormatDateTime(s.CreatedAt),
-            LastActivityAt = FormatDateTime(s.LastActivityAt),
-            ExitedAt = FormatDateTime(s.ExitedAt),
-            ExitCode = s.ExitCode,
-        }).ToList();
+        var summaries = sessions.Select(TerminalSessionSummaryProjection.FromSession).ToList();
 
         return ValueTask.FromResult<TerminalListSessionsResponse?>(new TerminalListSessionsResponse
         {
@@ -56,7 +60,6 @@ public sealed class TerminalListSessionsHandler
         });
     }
 
-    private static string? FormatDateTime(DateTime? dt) => dt?.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'");
 }
 
 /// <summary>
@@ -130,136 +133,114 @@ public sealed class TerminalReadActivityHandler
     }
 }
 
-/// <summary>
-/// Stub handler for terminal.attach — returns unsupported capability error
-/// until a terminal backend is implemented (#909/#911).
-/// </summary>
 public sealed class TerminalAttachHandler
     : IBridgeCommandHandler<TerminalAttachRequest, TerminalAttachResponse>
 {
-    public ValueTask<TerminalAttachResponse?> HandleAsync(
+    private readonly TmuxOperatorSessionService _tmux;
+
+    public TerminalAttachHandler(TmuxOperatorSessionService tmux) => _tmux = tmux;
+
+    public async ValueTask<TerminalAttachResponse?> HandleAsync(
         TerminalAttachRequest request,
         BridgeRequestContext context,
         CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        throw new BridgeHandlerException(
-            "terminal.attach.unsupported",
-            "Terminal attach is not yet supported. A terminal backend (direct PTY, tmux) must be implemented first.",
-            "unsupported_capability");
+        return await _tmux.AttachAsync(request, cancellationToken).ConfigureAwait(false);
     }
 }
 
-/// <summary>
-/// Stub handler for terminal.detach — returns unsupported capability error.
-/// </summary>
 public sealed class TerminalDetachHandler
     : IBridgeCommandHandler<TerminalDetachRequest, TerminalDetachResponse>
 {
-    public ValueTask<TerminalDetachResponse?> HandleAsync(
+    private readonly TmuxOperatorSessionService _tmux;
+
+    public TerminalDetachHandler(TmuxOperatorSessionService tmux) => _tmux = tmux;
+
+    public async ValueTask<TerminalDetachResponse?> HandleAsync(
         TerminalDetachRequest request,
         BridgeRequestContext context,
         CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        throw new BridgeHandlerException(
-            "terminal.detach.unsupported",
-            "Terminal detach is not yet supported.",
-            "unsupported_capability");
+        return await _tmux.DetachAsync(request, cancellationToken).ConfigureAwait(false);
     }
 }
 
-/// <summary>
-/// Stub handler for terminal.send_input — returns unsupported capability error.
-/// </summary>
 public sealed class TerminalSendInputHandler
     : IBridgeCommandHandler<TerminalSendInputRequest, TerminalSendInputResponse>
 {
-    public ValueTask<TerminalSendInputResponse?> HandleAsync(
+    private readonly TmuxOperatorSessionService _tmux;
+
+    public TerminalSendInputHandler(TmuxOperatorSessionService tmux) => _tmux = tmux;
+
+    public async ValueTask<TerminalSendInputResponse?> HandleAsync(
         TerminalSendInputRequest request,
         BridgeRequestContext context,
         CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        throw new BridgeHandlerException(
-            "terminal.send_input.unsupported",
-            "Terminal input is not yet supported.",
-            "unsupported_capability");
+        return await _tmux.SendInputAsync(request, cancellationToken).ConfigureAwait(false);
     }
 }
 
-/// <summary>
-/// Stub handler for terminal.resize — returns unsupported capability error.
-/// </summary>
 public sealed class TerminalResizeHandler
     : IBridgeCommandHandler<TerminalResizeRequest, TerminalResizeResponse>
 {
-    public ValueTask<TerminalResizeResponse?> HandleAsync(
+    private readonly TmuxOperatorSessionService _tmux;
+
+    public TerminalResizeHandler(TmuxOperatorSessionService tmux) => _tmux = tmux;
+
+    public async ValueTask<TerminalResizeResponse?> HandleAsync(
         TerminalResizeRequest request,
         BridgeRequestContext context,
         CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        throw new BridgeHandlerException(
-            "terminal.resize.unsupported",
-            "Terminal resize is not yet supported.",
-            "unsupported_capability");
+        return await _tmux.ResizeAsync(request, cancellationToken).ConfigureAwait(false);
     }
 }
 
-/// <summary>
-/// Stub handler for terminal.terminate — returns unsupported capability error.
-/// </summary>
 public sealed class TerminalTerminateHandler
     : IBridgeCommandHandler<TerminalTerminateRequest, TerminalTerminateResponse>
 {
-    public ValueTask<TerminalTerminateResponse?> HandleAsync(
+    private readonly TmuxOperatorSessionService _tmux;
+
+    public TerminalTerminateHandler(TmuxOperatorSessionService tmux) => _tmux = tmux;
+
+    public async ValueTask<TerminalTerminateResponse?> HandleAsync(
         TerminalTerminateRequest request,
         BridgeRequestContext context,
         CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        throw new BridgeHandlerException(
-            "terminal.terminate.unsupported",
-            "Terminal terminate is not yet supported. A terminal backend must be implemented first.",
-            "unsupported_capability");
+        return await _tmux.TerminateAsync(request, cancellationToken).ConfigureAwait(false);
     }
 }
 
-/// <summary>
-/// Stub handler for terminal.reconnect — returns unsupported capability error.
-/// </summary>
 public sealed class TerminalReconnectHandler
     : IBridgeCommandHandler<TerminalReconnectRequest, TerminalAttachResponse>
 {
-    public ValueTask<TerminalAttachResponse?> HandleAsync(
+    private readonly TmuxOperatorSessionService _tmux;
+
+    public TerminalReconnectHandler(TmuxOperatorSessionService tmux) => _tmux = tmux;
+
+    public async ValueTask<TerminalAttachResponse?> HandleAsync(
         TerminalReconnectRequest request,
         BridgeRequestContext context,
         CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        throw new BridgeHandlerException(
-            "terminal.reconnect.unsupported",
-            "Terminal reconnect is not yet supported.",
-            "unsupported_capability");
+        return await _tmux.ReconnectAsync(request, cancellationToken).ConfigureAwait(false);
     }
 }
 
-/// <summary>
-/// Stub handler for terminal.ack_output — returns unsupported capability error.
-/// </summary>
 public sealed class TerminalAckOutputHandler
     : IBridgeCommandHandler<TerminalAckOutputRequest, TerminalAckOutputResponse>
 {
-    public ValueTask<TerminalAckOutputResponse?> HandleAsync(
+    private readonly TmuxOperatorSessionService _tmux;
+
+    public TerminalAckOutputHandler(TmuxOperatorSessionService tmux) => _tmux = tmux;
+
+    public async ValueTask<TerminalAckOutputResponse?> HandleAsync(
         TerminalAckOutputRequest request,
         BridgeRequestContext context,
         CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        throw new BridgeHandlerException(
-            "terminal.ack_output.unsupported",
-            "Terminal ack_output is not yet supported.",
-            "unsupported_capability");
+        return await _tmux.AckOutputAsync(request, cancellationToken).ConfigureAwait(false);
     }
 }
