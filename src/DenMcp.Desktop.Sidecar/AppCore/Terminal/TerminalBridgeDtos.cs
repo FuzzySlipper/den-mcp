@@ -161,8 +161,9 @@ public sealed record TerminalViewportLimits
 
 /// <summary>
 /// Stream flow-control limits. direct_pty tracks per-stream unacked bytes,
-/// emits terminal backpressure events at AckAfterBytes, reports paused
-/// heartbeats while unacked, and clears pressure on ack_output. Snapshot-only
+/// emits terminal backpressure events at AckAfterBytes or when unacked
+/// output remains pending for AckAfterMillis, reports paused heartbeats while
+/// ack-required, and clears pressure on ack_output. Snapshot-only
 /// backends that cannot throttle (for example current tmux capture) must still
 /// validate ack_output and document active queue enforcement as a live-backend
 /// responsibility.
@@ -183,6 +184,9 @@ public sealed record TerminalStreamLimits
 
     [JsonPropertyName("ack_after_bytes")]
     public int AckAfterBytes { get; init; } = 262_144;
+
+    [JsonPropertyName("ack_after_millis")]
+    public int AckAfterMillis { get; init; } = 500;
 
     [JsonPropertyName("heartbeat_interval_ms")]
     public int HeartbeatIntervalMs { get; init; } = 5000;

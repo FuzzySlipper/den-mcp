@@ -18,6 +18,7 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
     private readonly Dictionary<string, DirectPtyStreamState> _streams = new(StringComparer.Ordinal);
     private readonly Dictionary<string, OperatorSessionActivityBuffer> _buffers = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DirectPtyHeartbeatLoop> _heartbeatLoops = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, DirectPtyBackpressureTimer> _backpressureTimers = new(StringComparer.Ordinal);
     private readonly object _lock = new();
 
     public DirectPtyOperatorSessionService(
@@ -174,13 +175,16 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
         ArgumentNullException.ThrowIfNull(request);
         var session = RequireDirectSession(request.SessionId, s => s.Capabilities.CanDetach, "detach");
         DirectPtyHeartbeatLoop? heartbeatLoop;
+        DirectPtyBackpressureTimer? backpressureTimer;
         lock (_lock)
         {
             _streams.Remove(request.StreamId);
             heartbeatLoop = RemoveHeartbeatLoopLocked(request.StreamId);
+            backpressureTimer = RemoveBackpressureTimerLocked(request.StreamId);
         }
 
         await StopHeartbeatLoopAsync(heartbeatLoop).ConfigureAwait(false);
+        await StopBackpressureTimerAsync(backpressureTimer).ConfigureAwait(false);
         await PublishSessionEventsAsync(session, "session.detached", new { stream_id = request.StreamId }, null, request.Reason, cancellationToken).ConfigureAwait(false);
         return new TerminalDetachResponse { Detached = true, BackendPreserved = true };
     }
@@ -247,19 +251,22 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
         }, cancellationToken);
     }
 
-    public Task<TerminalAckOutputResponse> AckOutputAsync(TerminalAckOutputRequest request, CancellationToken cancellationToken = default)
+    public async Task<TerminalAckOutputResponse> AckOutputAsync(TerminalAckOutputRequest request, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         RequireDirectSession(request.SessionId, s => s.Capabilities.CanStreamTerminal, "ack_output");
+        DirectPtyBackpressureTimer? backpressureTimer = null;
         lock (_lock)
         {
             if (request.StreamId is not null && _streams.TryGetValue(request.StreamId, out var stream))
             {
-                _streams[request.StreamId] = stream with { UnackedBytes = 0 };
+                _streams[request.StreamId] = stream with { UnackedBytes = 0, BackpressureEmitted = false };
+                backpressureTimer = RemoveBackpressureTimerLocked(request.StreamId);
             }
         }
 
-        return Task.FromResult(new TerminalAckOutputResponse { Accepted = true });
+        await StopBackpressureTimerAsync(backpressureTimer).ConfigureAwait(false);
+        return new TerminalAckOutputResponse { Accepted = true };
     }
 
     public IReadOnlyList<LocalSessionSnapshot> BuildSnapshotListForDen()
@@ -286,18 +293,26 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
     {
         IDirectPtyProcess[] processes;
         DirectPtyHeartbeatLoop[] heartbeatLoops;
+        DirectPtyBackpressureTimer[] backpressureTimers;
         lock (_lock)
         {
             processes = _processes.Values.ToArray();
             heartbeatLoops = _heartbeatLoops.Values.ToArray();
+            backpressureTimers = _backpressureTimers.Values.ToArray();
             _processes.Clear();
             _streams.Clear();
             _heartbeatLoops.Clear();
+            _backpressureTimers.Clear();
         }
 
         foreach (var heartbeatLoop in heartbeatLoops)
         {
             await StopHeartbeatLoopAsync(heartbeatLoop).ConfigureAwait(false);
+        }
+
+        foreach (var backpressureTimer in backpressureTimers)
+        {
+            await StopBackpressureTimerAsync(backpressureTimer).ConfigureAwait(false);
         }
 
         foreach (var process in processes)
@@ -337,11 +352,13 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
             streams = _streams.Values.Where(s => string.Equals(s.SessionId, sessionId, StringComparison.Ordinal)).ToArray();
         }
 
+        var addedBytes = chunks.Sum(c => c.ByteCount);
         foreach (var stream in streams)
         {
             await PublishOutputChunksAsync(stream.StreamId, sessionId, chunks, cancellationToken).ConfigureAwait(false);
-            var addedBytes = chunks.Sum(c => c.ByteCount);
             DirectPtyStreamState next;
+            var publishByteBackpressure = false;
+            DirectPtyBackpressureTimer? backpressureTimer = null;
             lock (_lock)
             {
                 if (!_streams.TryGetValue(stream.StreamId, out var current))
@@ -349,21 +366,31 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
                     continue;
                 }
 
-                next = current with { UnackedBytes = current.UnackedBytes + addedBytes };
+                var unackedBytes = current.UnackedBytes + addedBytes;
+                var backpressureEmitted = current.BackpressureEmitted;
+                if (unackedBytes >= _limits.AckAfterBytes)
+                {
+                    publishByteBackpressure = true;
+                    backpressureEmitted = true;
+                    backpressureTimer = RemoveBackpressureTimerLocked(stream.StreamId);
+                }
+                else if (current.UnackedBytes == 0 && unackedBytes > 0 && !backpressureEmitted)
+                {
+                    EnsureBackpressureTimerLocked(stream.StreamId, sessionId);
+                }
+
+                next = current with { UnackedBytes = unackedBytes, BackpressureEmitted = backpressureEmitted };
                 _streams[stream.StreamId] = next;
             }
 
-            if (next.UnackedBytes >= _limits.AckAfterBytes)
+            if (backpressureTimer is not null)
             {
-                await _events.PublishAsync(DesktopSidecarProtocol.TerminalBackpressureEvent, new TerminalBackpressureEvent
-                {
-                    SessionId = sessionId,
-                    StreamId = stream.StreamId,
-                    State = "throttled",
-                    QueueBytes = next.UnackedBytes,
-                    DroppedBytes = BufferFor(sessionId).GetStats().DroppedBytesBeforeStart,
-                    NextAction = "ack_required",
-                }, cancellationToken).ConfigureAwait(false);
+                await StopBackpressureTimerAsync(backpressureTimer).ConfigureAwait(false);
+            }
+
+            if (publishByteBackpressure)
+            {
+                await PublishBackpressureAsync(sessionId, stream.StreamId, next.UnackedBytes, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -392,6 +419,7 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
 
         DirectPtyStreamState[] streams;
         DirectPtyHeartbeatLoop[] heartbeatLoops;
+        DirectPtyBackpressureTimer[] backpressureTimers;
         lock (_lock)
         {
             streams = _streams.Values.Where(s => string.Equals(s.SessionId, sessionId, StringComparison.Ordinal)).ToArray();
@@ -401,12 +429,18 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
             }
 
             heartbeatLoops = RemoveHeartbeatLoopsLocked(streams.Select(s => s.StreamId));
+            backpressureTimers = RemoveBackpressureTimersLocked(streams.Select(s => s.StreamId));
             _processes.Remove(sessionId);
         }
 
         foreach (var heartbeatLoop in heartbeatLoops)
         {
             await StopHeartbeatLoopAsync(heartbeatLoop).ConfigureAwait(false);
+        }
+
+        foreach (var backpressureTimer in backpressureTimers)
+        {
+            await StopBackpressureTimerAsync(backpressureTimer).ConfigureAwait(false);
         }
 
         foreach (var stream in streams)
@@ -445,6 +479,82 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
                 Truncated = chunk.Truncated,
                 Redacted = chunk.Redacted,
             }, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async ValueTask PublishBackpressureAsync(string sessionId, string streamId, int queueBytes, CancellationToken cancellationToken)
+    {
+        await _events.PublishAsync(DesktopSidecarProtocol.TerminalBackpressureEvent, new TerminalBackpressureEvent
+        {
+            SessionId = sessionId,
+            StreamId = streamId,
+            State = "throttled",
+            QueueBytes = queueBytes,
+            DroppedBytes = BufferFor(sessionId).GetStats().DroppedBytesBeforeStart,
+            NextAction = "ack_required",
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    private void EnsureBackpressureTimerLocked(string streamId, string sessionId)
+    {
+        if (_backpressureTimers.ContainsKey(streamId))
+        {
+            return;
+        }
+
+        var delay = TimeSpan.FromMilliseconds(Math.Max(1, _limits.AckAfterMillis));
+        var cancellation = new CancellationTokenSource();
+        var task = RunBackpressureTimerAsync(streamId, sessionId, delay, cancellation);
+        _backpressureTimers[streamId] = new DirectPtyBackpressureTimer(cancellation, task);
+    }
+
+    private async Task RunBackpressureTimerAsync(string streamId, string sessionId, TimeSpan delay, CancellationTokenSource cancellation)
+    {
+        try
+        {
+            await Task.Delay(delay, cancellation.Token).ConfigureAwait(false);
+
+            int queueBytes;
+            lock (_lock)
+            {
+                if (!_streams.TryGetValue(streamId, out var stream)
+                    || !string.Equals(stream.SessionId, sessionId, StringComparison.Ordinal)
+                    || stream.UnackedBytes <= 0
+                    || stream.BackpressureEmitted)
+                {
+                    return;
+                }
+
+                queueBytes = stream.UnackedBytes;
+                _streams[streamId] = stream with { BackpressureEmitted = true };
+            }
+
+            await PublishBackpressureAsync(sessionId, streamId, queueBytes, cancellation.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            // Expected when output is acked, detached, exited, or the service is disposed.
+        }
+        catch (Exception) when (!cancellation.IsCancellationRequested)
+        {
+            // Backpressure is advisory to the local bridge; do not crash the PTY session on a transient publish failure.
+        }
+        finally
+        {
+            var removed = false;
+            lock (_lock)
+            {
+                if (_backpressureTimers.TryGetValue(streamId, out var current) && ReferenceEquals(current.Cancellation, cancellation))
+                {
+                    _backpressureTimers.Remove(streamId);
+                    removed = true;
+                }
+            }
+
+            if (removed)
+            {
+                cancellation.Dispose();
+            }
         }
     }
 
@@ -529,7 +639,7 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
             BackendStatus = session.Status,
             LastActivityAt = Format(session.LastActivityAt),
             QueueBytes = stream.UnackedBytes,
-            Paused = stream.UnackedBytes >= _limits.AckAfterBytes,
+            Paused = stream.BackpressureEmitted || stream.UnackedBytes >= _limits.AckAfterBytes,
         }, cancellationToken).ConfigureAwait(false);
         return true;
     }
@@ -578,6 +688,52 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
         }
 
         return heartbeatLoops.ToArray();
+    }
+
+    private static async ValueTask StopBackpressureTimerAsync(DirectPtyBackpressureTimer? backpressureTimer)
+    {
+        if (backpressureTimer is null)
+        {
+            return;
+        }
+
+        await backpressureTimer.Cancellation.CancelAsync().ConfigureAwait(false);
+        try
+        {
+            await backpressureTimer.Task.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected.
+        }
+        finally
+        {
+            backpressureTimer.Cancellation.Dispose();
+        }
+    }
+
+    private DirectPtyBackpressureTimer? RemoveBackpressureTimerLocked(string streamId)
+    {
+        if (_backpressureTimers.Remove(streamId, out var backpressureTimer))
+        {
+            return backpressureTimer;
+        }
+
+        return null;
+    }
+
+    private DirectPtyBackpressureTimer[] RemoveBackpressureTimersLocked(IEnumerable<string> streamIds)
+    {
+        var backpressureTimers = new List<DirectPtyBackpressureTimer>();
+        foreach (var streamId in streamIds)
+        {
+            if (RemoveBackpressureTimerLocked(streamId) is { } backpressureTimer)
+            {
+                backpressureTimers.Add(backpressureTimer);
+            }
+        }
+
+        return backpressureTimers.ToArray();
     }
 
     private async ValueTask PublishStatusEventsAsync(OperatorSession session, CancellationToken cancellationToken)
@@ -824,7 +980,9 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
     private sealed record DirectPtyStreamState(string StreamId, string SessionId, string? ClientId, int Cols, int Rows)
     {
         public int UnackedBytes { get; init; }
+        public bool BackpressureEmitted { get; init; }
     }
 
     private sealed record DirectPtyHeartbeatLoop(CancellationTokenSource Cancellation, Task Task);
+    private sealed record DirectPtyBackpressureTimer(CancellationTokenSource Cancellation, Task Task);
 }

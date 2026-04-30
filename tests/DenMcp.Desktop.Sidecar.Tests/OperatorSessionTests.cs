@@ -942,6 +942,122 @@ public class TerminalBridgeHandlerTests
     }
 
     [Fact]
+    public async Task DirectPtyService_EmitsTimeBackpressureForSlowUnackedOutputBelowByteThreshold()
+    {
+        var backend = new FakeDirectPtyBackend();
+        var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
+        var events = new OperatorRuntimeBridgeEventSink(new DesktopSidecarRuntimeState(DesktopSidecarFixtures.CreateFixtureOptions()));
+        await using var service = CreateDirectPtyService(
+            backend,
+            registry,
+            events,
+            new TerminalStreamLimits { AckAfterBytes = 1024, AckAfterMillis = 30, SubscriberQueueMaxBytes = 2048, HeartbeatIntervalMs = 10 });
+
+        var session = await service.CreateAsync(new TerminalCreateSessionRequest
+        {
+            ProjectId = string.Empty,
+            Title = "Timed backpressure",
+            Backend = OperatorSessionBackend.DirectPty,
+        }, CancellationToken.None);
+        var attach = await service.AttachAsync(new TerminalAttachRequest { SessionId = session.SessionId }, CancellationToken.None);
+
+        backend.Processes[0].EmitOutput(Encoding.UTF8.GetBytes("a"));
+        await Task.Delay(10);
+        backend.Processes[0].EmitOutput(Encoding.UTF8.GetBytes("b"));
+
+        var backpressureFrame = await WaitForPublishedFrameAsync(
+            events,
+            DesktopSidecarProtocol.TerminalBackpressureEvent,
+            frame => string.Equals(frame.Payload.GetProperty("stream_id").GetString(), attach.StreamId, StringComparison.Ordinal)
+                && frame.Payload.GetProperty("queue_bytes").GetInt32() == 2);
+        var backpressure = JsonSerializer.Deserialize<TerminalBackpressureEvent>(backpressureFrame.Payload.GetRawText());
+
+        Assert.NotNull(backpressure);
+        Assert.Equal("throttled", backpressure!.State);
+        Assert.Equal("ack_required", backpressure.NextAction);
+        Assert.Equal(2, backpressure.QueueBytes);
+
+        var pausedHeartbeatFrame = await WaitForPublishedFrameAsync(
+            events,
+            DesktopSidecarProtocol.TerminalHeartbeatEvent,
+            frame => string.Equals(frame.Payload.GetProperty("stream_id").GetString(), attach.StreamId, StringComparison.Ordinal)
+                && frame.Payload.GetProperty("paused").GetBoolean()
+                && frame.Payload.GetProperty("queue_bytes").GetInt32() == 2);
+        var pausedHeartbeat = JsonSerializer.Deserialize<TerminalHeartbeatEvent>(pausedHeartbeatFrame.Payload.GetRawText());
+        Assert.True(pausedHeartbeat!.Paused);
+        Assert.Equal(2, pausedHeartbeat.QueueBytes);
+    }
+
+    [Fact]
+    public async Task DirectPtyService_AckCancelsTimeBackpressureTimerAndAllowsRecovery()
+    {
+        var backend = new FakeDirectPtyBackend();
+        var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
+        var events = new OperatorRuntimeBridgeEventSink(new DesktopSidecarRuntimeState(DesktopSidecarFixtures.CreateFixtureOptions()));
+        await using var service = CreateDirectPtyService(
+            backend,
+            registry,
+            events,
+            new TerminalStreamLimits { AckAfterBytes = 1024, AckAfterMillis = 50, SubscriberQueueMaxBytes = 2048, HeartbeatIntervalMs = 10 });
+
+        var session = await service.CreateAsync(new TerminalCreateSessionRequest
+        {
+            ProjectId = string.Empty,
+            Title = "Timed ack recovery",
+            Backend = OperatorSessionBackend.DirectPty,
+        }, CancellationToken.None);
+        var attach = await service.AttachAsync(new TerminalAttachRequest { SessionId = session.SessionId }, CancellationToken.None);
+
+        var firstWindowStart = events.PublishedFrames.Count;
+        backend.Processes[0].EmitOutput(Encoding.UTF8.GetBytes("abc"));
+        await WaitForPublishedFrameAsync(events, DesktopSidecarProtocol.TerminalOutputEvent,
+            frame => string.Equals(frame.Payload.GetProperty("stream_id").GetString(), attach.StreamId, StringComparison.Ordinal),
+            startIndex: firstWindowStart);
+
+        var ack = await service.AckOutputAsync(new TerminalAckOutputRequest
+        {
+            SessionId = session.SessionId,
+            StreamId = attach.StreamId,
+            AckCursor = "cur_000000000001",
+            ReceivedBytes = 3,
+        }, CancellationToken.None);
+        Assert.True(ack.Accepted);
+
+        await Task.Delay(100);
+        Assert.DoesNotContain(events.PublishedFrames.Skip(firstWindowStart), frame =>
+            frame.Event == DesktopSidecarProtocol.TerminalBackpressureEvent
+            && string.Equals(frame.Payload.GetProperty("stream_id").GetString(), attach.StreamId, StringComparison.Ordinal));
+
+        var recoveryStart = events.PublishedFrames.Count;
+        backend.Processes[0].EmitOutput(Encoding.UTF8.GetBytes("de"));
+        var recoveryBackpressureFrame = await WaitForPublishedFrameAsync(
+            events,
+            DesktopSidecarProtocol.TerminalBackpressureEvent,
+            frame => string.Equals(frame.Payload.GetProperty("stream_id").GetString(), attach.StreamId, StringComparison.Ordinal)
+                && frame.Payload.GetProperty("queue_bytes").GetInt32() == 2,
+            startIndex: recoveryStart);
+        var recoveryBackpressure = JsonSerializer.Deserialize<TerminalBackpressureEvent>(recoveryBackpressureFrame.Payload.GetRawText());
+        Assert.Equal(2, recoveryBackpressure!.QueueBytes);
+
+        var frameCountBeforeRecoveryAck = events.PublishedFrames.Count;
+        await service.AckOutputAsync(new TerminalAckOutputRequest
+        {
+            SessionId = session.SessionId,
+            StreamId = attach.StreamId,
+            AckCursor = "cur_000000000002",
+            ReceivedBytes = 2,
+        }, CancellationToken.None);
+
+        await WaitForPublishedFrameAsync(
+            events,
+            DesktopSidecarProtocol.TerminalHeartbeatEvent,
+            frame => string.Equals(frame.Payload.GetProperty("stream_id").GetString(), attach.StreamId, StringComparison.Ordinal)
+                && !frame.Payload.GetProperty("paused").GetBoolean()
+                && frame.Payload.GetProperty("queue_bytes").GetInt32() == 0,
+            startIndex: frameCountBeforeRecoveryAck);
+    }
+
+    [Fact]
     public async Task DirectPtyService_DetachPreservesBackendAndReattachCanReplayAndControl()
     {
         var backend = new FakeDirectPtyBackend();
@@ -1548,6 +1664,7 @@ public class TerminalBridgeDtosSerializationTests
                 SessionReplayMaxBytes = 1048576,
                 SubscriberQueueMaxBytes = 262144,
                 AckAfterBytes = 262144,
+                AckAfterMillis = 500,
                 HeartbeatIntervalMs = 5000,
             },
         };
@@ -1560,6 +1677,7 @@ public class TerminalBridgeDtosSerializationTests
         Assert.Contains("capabilities", json, StringComparison.Ordinal);
         Assert.Contains("\"can_send_input\":true", json, StringComparison.Ordinal);
         Assert.Contains("limits", json, StringComparison.Ordinal);
+        Assert.Contains("\"ack_after_millis\":500", json, StringComparison.Ordinal);
         Assert.Contains("\"heartbeat_interval_ms\":5000", json, StringComparison.Ordinal);
 
         // Roundtrip: deserialize back
@@ -1572,6 +1690,7 @@ public class TerminalBridgeDtosSerializationTests
         Assert.NotNull(deserialized.ViewportLimits);
         Assert.Equal(500, deserialized.ViewportLimits!.MaxCols);
         Assert.NotNull(deserialized.Limits);
+        Assert.Equal(500, deserialized.Limits.AckAfterMillis);
         Assert.Equal(5000, deserialized.Limits.HeartbeatIntervalMs);
     }
 
