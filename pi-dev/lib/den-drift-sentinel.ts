@@ -4,7 +4,7 @@
  * The sentinel is an optional model-assisted guard between deterministic drift
  * checks and full review. It is intentionally not a correctness reviewer; it
  * only assesses scope, intent, tamper, and packet-consistency risk from bounded
- * inputs prepared by the conductor.
+ * inputs prepared by the orchestrator.
  *
  * @module den-drift-sentinel
  */
@@ -72,7 +72,7 @@ export function buildDriftSentinelPrompt(input: DriftSentinelPromptInput): strin
     "You are a cheap drift-sentinel sub-agent. You are **not** a correctness reviewer.",
     "",
     "## Mission",
-    "Assess only whether this implementation appears to drift from the task intent or context packet, or shows tamper/scope-risk signals that need conductor attention before full review.",
+    "Assess only whether this implementation appears to drift from the task intent or context packet, or shows tamper/scope-risk signals that need orchestrator attention before full review.",
     "Do not decide whether the code is correct. Do not inspect broad code context. Do not request or run tools. Use only the bounded inputs below.",
     "",
     "## Look Only For",
@@ -86,7 +86,7 @@ export function buildDriftSentinelPrompt(input: DriftSentinelPromptInput): strin
     "- Do not perform a correctness review or approve the implementation.",
     "- Do not analyze full diffs beyond the selected suspicious hunks provided here.",
     "- Do not propose code fixes unless needed to explain a drift/tamper risk.",
-    "- Do not auto-block merge; only state whether conductor attention is needed.",
+    "- Do not auto-block merge; only state whether orchestrator attention is needed.",
     "",
     "## Required Output",
     "Return JSON only, with this exact shape:",
@@ -103,7 +103,7 @@ export function buildDriftSentinelPrompt(input: DriftSentinelPromptInput): strin
       notes: "optional concise note",
     }, null, 2), "json"),
     "",
-    "Use `low` only when the bounded inputs show no meaningful drift/tamper concern. Use `medium` when conductor/reviewer should look closely. Use `high` when conductor attention is needed before full review.",
+    "Use `low` only when the bounded inputs show no meaningful drift/tamper concern. Use `medium` when orchestrator/reviewer should look closely. Use `high` when orchestrator attention is needed before full review.",
     "",
     "## Task",
     formatTask(input.task),
@@ -165,7 +165,7 @@ export function formatDriftSentinelPacketMessage(input: {
     "# Drift Check Packet — Drift Sentinel",
     "",
     `**Risk:** ${risk}`,
-    `**Conductor attention needed:** ${typeof attention === "boolean" ? (attention ? "yes" : "no") : "unknown"}`,
+    `**Orchestrator attention needed:** ${typeof attention === "boolean" ? (attention ? "yes" : "no") : "unknown"}`,
     `**Recommendation:** ${parsed.recommendation ?? "unknown"}`,
     "",
     "## Source Context",

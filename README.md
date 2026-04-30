@@ -33,7 +33,7 @@ dotnet run --project src/DenMcp.Server -- --db-path /tmp/dev.db
 
 ### Connect an Agent Manually
 
-Pi/Den web is the current supported conductor/operator path. Claude Code,
+Pi/Den web is the current supported orchestrator/operator path. Claude Code,
 Codex, and similar agents can still use Den MCP manually when a human starts
 that session. Prefer a user/global MCP configuration over ad-hoc per-project
 `.mcp.json` files so project-local config does not shadow the working global
@@ -200,7 +200,7 @@ sudo cp deploy/den-mcp.service /etc/systemd/system/
 sudo systemctl enable --now den-mcp
 ```
 
-Signal/Telegram mobile bridge integrations are retired from the supported runtime. Current operator workflows use Den web, Pi/conductor runs, task-thread messages, review records, agent-stream ops, and AgentRun state.
+Signal/Telegram mobile bridge integrations are retired from the supported runtime. Current operator workflows use Den web, Pi/orchestrator runs, task-thread messages, review records, agent-stream ops, and AgentRun state.
 
 ## License
 

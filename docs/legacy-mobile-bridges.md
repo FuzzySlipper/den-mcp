@@ -9,7 +9,7 @@ on dispatch-first workflow assumptions that are no longer canonical.
 The supported runtime is now:
 
 - Den web/operator views
-- Pi/conductor and Pi sub-agent runs
+- Pi/orchestrator and Pi sub-agent runs
 - task-thread messages and review workflow records
 - agent-stream ops/control events
 - first-class AgentRun state

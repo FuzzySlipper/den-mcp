@@ -1,9 +1,9 @@
 /**
  * Coder context packet preparation, formatting, and metadata.
  *
- * A coder context packet is a curated, bounded summary that a conductor
+ * A coder context packet is a curated, bounded summary that an orchestrator
  * prepares before delegating work to a coder sub-agent.  It replaces
- * stuffing the conductor's live context with raw task history by producing
+ * stuffing the orchestrator's live context with raw task history by producing
  * a stable, link-rich markdown document posted to the Den task thread.
  *
  * The packet is consumed by coders via `summarizeTaskContext` /
@@ -42,7 +42,7 @@ export interface CoderContextPacketInput {
   /** Effective config source path (e.g. inherited .pi/den-config.json). */
   config_source?: string;
 
-  /** User intent / freeform description of what the conductor wants. */
+  /** User intent / freeform description of what the orchestrator wants. */
   user_intent?: string;
 
   /** Acceptance criteria from the task. */
@@ -66,7 +66,7 @@ export interface CoderContextPacketInput {
   /** Validation commands the coder should run. */
   validation_commands?: string[];
 
-  /** Extra conductor notes. */
+  /** Extra orchestrator notes. */
   extra_notes?: string;
 
   /**
@@ -260,7 +260,7 @@ export function formatCoderContextPacket(input: CoderContextPacketInput): string
 
   // Extra notes
   if (input.extra_notes) {
-    lines.push("## Extra conductor notes", "");
+    lines.push("## Extra orchestrator notes", "");
     lines.push(boundedText(input.extra_notes), "");
   }
 

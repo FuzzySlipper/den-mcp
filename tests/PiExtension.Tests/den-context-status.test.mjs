@@ -195,7 +195,7 @@ test('den_compact_context reports failed when compact throws synchronously', () 
   assert.match(result.reason, /boom/);
 });
 
-test('den_compact_context requests Pi compaction with conductor instructions', async () => {
+test('den_compact_context requests Pi compaction with orchestrator instructions', async () => {
   const calls = [];
   const notifications = [];
   const result = requestDenContextCompaction({
@@ -216,7 +216,7 @@ test('den_compact_context requests Pi compaction with conductor instructions', a
   assert.equal(calls.length, 1);
   assert.equal(calls[0].customInstructions, 'Focus on workflow decisions');
   calls[0].onComplete({});
-  assert.deepEqual(notifications, [{ message: 'Den conductor context compaction completed.', level: 'info' }]);
+  assert.deepEqual(notifications, [{ message: 'Den orchestrator context compaction completed.', level: 'info' }]);
 });
 
 test('den_compact_context tool execute triggers idle resume through extension context', async () => {

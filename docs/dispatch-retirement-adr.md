@@ -1,4 +1,4 @@
-# ADR: Retire dispatches from the canonical conductor workflow
+# ADR: Retire dispatches from the canonical orchestrator workflow
 
 Status: Accepted
 Date: 2026-04-26
@@ -7,11 +7,11 @@ Date: 2026-04-26
 
 Dispatches were introduced as a durable wake/delivery queue for bridges such as Signal, Telegram, and early agent-wrapper experiments. They worked as a compatibility layer, but they also created a second apparent work lane next to task-thread messages, review workflow records, agent-stream ops, and sub-agent run state.
 
-That ambiguity confused both operators and agents: pending dispatches looked like normal work even when the task thread already contained the real handoff, and routine targeted messages could create approval/reject prompts that competed with the current conductor workflow.
+That ambiguity confused both operators and agents: pending dispatches looked like normal work even when the task thread already contained the real handoff, and routine targeted messages could create approval/reject prompts that competed with the current orchestrator workflow.
 
 ## Decision
 
-Dispatches are retired from the canonical Den conductor path.
+Dispatches are retired from the canonical Den orchestrator path.
 
 The normal workflow is now:
 

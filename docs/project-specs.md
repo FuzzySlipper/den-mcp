@@ -391,7 +391,7 @@ Returns: confirmation.
 
 ## Agent Identity Convention
 
-Agents identify themselves with a simple string. Current Den-managed conductor
+Agents identify themselves with a simple string. Current Den-managed orchestrator
 work usually uses `pi`; manually launched agents may use identities such as
 `claude-code`, `codex`, `kimi-code`, or `user` for audit/read-state purposes.
 Those manual identities are not dispatch-routing instructions.

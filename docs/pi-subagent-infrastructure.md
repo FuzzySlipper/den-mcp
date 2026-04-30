@@ -5,7 +5,7 @@ Status: current stable shape after tasks `#785`, `#806`, `#813`, `#808`, `#815`,
 
 This note captures the intended shape for Pi-launched Den sub-agents after the
 observability and control hardening work. The goal is not to make Pi the whole
-conductor application. Pi remains the interactive agent runner; Den owns durable
+orchestrator application. Pi remains the interactive agent runner; Den owns durable
 workflow state and the primary observation surface.
 
 ## Shape
@@ -16,7 +16,7 @@ workflow state and the primary observation surface.
 - Artifact files: detailed forensic logs for stdout, stderr, status, live events, and child Pi session JSONL.
 - Den web: primary place to watch and manage sub-agent runs.
 
-The conductor chat can mention important outcomes, but it should not be the only
+The orchestrator chat can mention important outcomes, but it should not be the only
 place where run state is visible. As run volume grows, Den web should carry the
 operational view instead of flooding a chat stream with every agent heartbeat.
 
@@ -75,7 +75,7 @@ DEN_PI_PARENT_INSTANCE_ID
 ```
 
 These variables let child extensions recognize that they are running as a
-headless Den sub-agent rather than as an interactive conductor.
+headless Den sub-agent rather than as an interactive orchestrator.
 
 ## Durable Records
 
@@ -95,7 +95,7 @@ Large transcripts and raw event details belong in the artifact files. Fresh chil
 
 ## Parent Tool Return Boundary
 
-Task `#851` separates child-run forensics from the parent conductor's tool-result
+Task `#851` separates child-run forensics from the parent orchestrator's tool-result
 context. Pi persists model-callable tool results as parent session
 `toolResult` messages, and those messages include a `details` field in the
 session/context object. Pi's current first-party provider adapters and
@@ -117,18 +117,18 @@ bounded parent-facing payload with schema `den_subagent_parent_tool_result`:
 Full forensic data remains in `stdout.jsonl`, `stderr.log`, `events.jsonl`,
 `sessions/*.jsonl`, `status.json`, Den AgentRun/run detail, and task-thread
 result/failure messages where appropriate. The parent tool return may point at
-those artifacts, but it must not copy their raw contents into the conductor
+those artifacts, but it must not copy their raw contents into the orchestrator
 conversation.
 
 Task `#852` adds the complementary parent-session budget surface documented in
 [`pi-conductor-context-status.md`](pi-conductor-context-status.md). The
 model-callable `den_context_status` tool and `/den-context-status` command report
-a clearly labeled estimate of the conductor's current Pi context budget so the
-conductor can compact between tasks instead of relying on child-run transcript
+a clearly labeled estimate of the orchestrator's current Pi context budget so the
+orchestrator can compact between tasks instead of relying on child-run transcript
 artifacts or stale intuition. Task `#967` adds `den_compact_context` and
-`/den-compact-context` so conductors can request compaction themselves at safe
+`/den-compact-context` so orchestrators can request compaction themselves at safe
 Den-recorded task boundaries instead of stopping solely to ask the user to run
-`/compact`. Task `#974` adds post-compaction resume so the conductor session is
+`/compact`. Task `#974` adds post-compaction resume so the orchestrator session is
 not suspended after compaction; when `resume_after_compaction` is enabled
 (default), the extension sends a follow-up user message automatically after
 compaction completes.
@@ -168,11 +168,10 @@ Completion metadata also includes execution status such as `exit_code`,
 `prompt_echo_detected`, `output_status`, and infrastructure failure/warning
 classification.
 
-## Conductor Context Metadata
+## Orchestrator Context Metadata
 
-Task `#808` carries optional conductor context through Pi launch options and the
-run metadata layer. `den_run_subagent`, `den_run_coder`, and `den_run_reviewer`
-accept review/workspace/git context fields (`review_round_id`, `workspace_id`,
+Task `#808` carries optional orchestrator context through Pi launch options and the
+run metadata layer. `den_run_subagent`, `den_run_coder`, and `den_run_reviewer` accept review/workspace/git context fields (`review_round_id`, `workspace_id`,
 `worktree_path`, `branch`, `base_branch`, `base_commit`, `head_commit`) plus a
 normalized `purpose`. The same context is present on `subagent_started`, terminal
 lifecycle ops, task-thread result/failure metadata, `status.json`, and artifact
@@ -366,7 +365,7 @@ It avoids raw terminal streaming as a signal, throttles high-frequency assistant
 and reasoning update deltas before posting to Den, and depends on what the live
 Pi extension API emits during the interactive session. Detailed forensic replay
 still belongs to sub-agent run artifacts and task-thread/review records; parent
-operator entries are for situational awareness while the conductor is active.
+operator entries are for situational awareness while the orchestrator is active.
 
 ## Den Web Thoughts Lane
 
@@ -427,8 +426,8 @@ Abort:
 Rerun:
 
 - Web appends `subagent_rerun_requested` for a terminal run.
-- The live Pi conductor polls for requests targeted at its instance id.
-- If the conductor still has an in-memory snapshot for that run, it appends
+- The live Pi orchestrator polls for requests targeted at its instance id.
+- If the orchestrator still has an in-memory snapshot for that run, it appends
   `subagent_rerun_accepted` and launches a fresh run with `rerun_of_run_id`.
 - If the snapshot is stale, foreign, or unavailable, it appends
   `subagent_rerun_unavailable` with a reason such as
@@ -461,7 +460,7 @@ quiet in the local Pi window and visible through Den agent-stream/task records.
 
 This is a deliberate tradeoff:
 
-- Pi remains usable as the interactive conductor.
+- Pi remains usable as the interactive orchestrator.
 - Den becomes the durable place to inspect many concurrent runs.
 - Chat commentary can stay human-scale instead of becoming a raw event log.
 
@@ -471,7 +470,7 @@ state back into transient TUI widgets.
 
 ## Smoke Tests
 
-Run these against a live Pi conductor and Den web before treating the pipeline
+Run these against a live Pi orchestrator and Den web before treating the pipeline
 as healthy:
 
 1. Success path:
@@ -490,7 +489,7 @@ as healthy:
 
 3. Live rerun path:
    - launch a tiny completed run
-   - click Request rerun while the same Pi conductor session is still alive
+   - click Request rerun while the same Pi orchestrator session is still alive
    - expect `subagent_rerun_requested`, `subagent_rerun_accepted`, a new run
      with `rerun_of_run_id`, and a second clean task result
 

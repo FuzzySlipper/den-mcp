@@ -144,7 +144,7 @@ Minimum v1:
 
 - Launch Pi with explicit CLI flags derived from typed policy: `--model`/`--provider` when selected, and `--tools` or `--no-tools`/`--no-builtin-tools` for constrained runs.
 - Do not rely on renderer-selected buttons as authority; app-core recomputes allowed launch profile.
-- Preserve current Den conductor workflow; sandboxed sessions are operator-controlled sessions, not automatic task execution.
+- Preserve current Den orchestrator workflow; sandboxed sessions are operator-controlled sessions, not automatic task execution.
 
 Follow-up hardening:
 
@@ -261,4 +261,4 @@ Suggested follow-up implementation:
 
 ## Recommendation
 
-Proceed with a follow-up implementation slice for the typed Docker/tmux Pi launch wrapper when Den Desktop is ready to expose agent session launching. Keep #910 as a research/design baseline and do not change the normal Den conductor workflow yet.
+Proceed with a follow-up implementation slice for the typed Docker/tmux Pi launch wrapper when Den Desktop is ready to expose agent session launching. Keep #910 as a research/design baseline and do not change the normal Den orchestrator workflow yet.

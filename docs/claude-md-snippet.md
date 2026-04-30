@@ -3,10 +3,10 @@
 Status: current manual MCP reference. This is **not** a bridge/wake workflow and
 should not be used to configure dispatch-driven Codex/Claude launchers.
 
-Den's supported operator path is Den web plus Pi/conductor runs, task-thread
+Den's supported operator path is Den web plus Pi/orchestrator runs, task-thread
 messages, review workflow records, agent-stream ops, and AgentRun state. Claude
 Code, Codex CLI, and similar agents may still connect to Den MCP manually when a
-human launches them, but they should not be treated as the default conductor or
+human launches them, but they should not be treated as the default orchestrator or
 as dispatch-injection targets.
 
 ## MCP Server Configuration

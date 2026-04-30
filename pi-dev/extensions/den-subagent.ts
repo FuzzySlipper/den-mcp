@@ -250,7 +250,7 @@ export default function denSubagent(pi: ExtensionAPI) {
     description: "Load the Den-managed coder prompt template for a task and run a coder sub-agent.",
     parameters: Type.Object({
       task_id: Type.Number({ description: "Den task ID." }),
-      extra_notes: Type.Optional(Type.String({ description: "Optional extra conductor notes." })),
+      extra_notes: Type.Optional(Type.String({ description: "Optional extra orchestrator notes." })),
       review_round_id: Type.Optional(Type.Number({ description: "Optional Den review round ID this coder run is addressing." })),
       workspace_id: Type.Optional(Type.String({ description: "Optional future Den workspace ID." })),
       worktree_path: Type.Optional(Type.String({ description: "Optional local worktree path associated with this run." })),
@@ -337,7 +337,7 @@ export default function denSubagent(pi: ExtensionAPI) {
   });
 
   // -----------------------------------------------------------------------
-  // Prepare coder context packet — conductor-facing tool & command
+  // Prepare coder context packet — orchestrator-facing tool & command
   // -----------------------------------------------------------------------
 
   pi.registerCommand("den-prepare-coder-context", {
@@ -360,7 +360,7 @@ export default function denSubagent(pi: ExtensionAPI) {
       branch: Type.Optional(Type.String({ description: "Branch the coder should work on." })),
       worktree_path: Type.Optional(Type.String({ description: "Worktree path for the isolated checkout." })),
       base_commit: Type.Optional(Type.String({ description: "Base commit the branch was created from." })),
-      extra_notes: Type.Optional(Type.String({ description: "Optional extra conductor notes." })),
+      extra_notes: Type.Optional(Type.String({ description: "Optional extra orchestrator notes." })),
       user_intent: Type.Optional(Type.String({ description: "Optional user intent override." })),
       acceptance_criteria: Type.Optional(Type.String({ description: "Optional acceptance criteria override." })),
       constraints: Type.Optional(Type.String({ description: "Optional constraints or scope boundaries." })),
@@ -395,7 +395,7 @@ export default function denSubagent(pi: ExtensionAPI) {
   });
 
   // -----------------------------------------------------------------------
-  // Drift check packet — conductor-facing tool & command
+  // Drift check packet — orchestrator-facing tool & command
   // -----------------------------------------------------------------------
 
   pi.registerCommand("den-drift-check", {
@@ -492,7 +492,7 @@ export default function denSubagent(pi: ExtensionAPI) {
   });
 
   // -----------------------------------------------------------------------
-  // Validation packet — conductor-facing tool & command
+  // Validation packet — orchestrator-facing tool & command
   // -----------------------------------------------------------------------
 
   pi.registerCommand("den-validate", {

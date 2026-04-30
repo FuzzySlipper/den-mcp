@@ -4,7 +4,7 @@ Date: 2026-04-27
 Status: implemented for task `#852`; compaction trigger added for task `#967`;
 post-compaction resume added for task `#974`
 
-Long-lived Pi conductor sessions need a cheap way to decide whether to compact
+Long-lived Pi orchestrator sessions need a cheap way to decide whether to compact
 between Den tasks. The Den Pi extension exposes that signal without pretending it
 is exact tokenizer accounting.
 
@@ -44,7 +44,7 @@ reported usage (`totalTokens`, or input/output/cache-read/cache-write). This is 
 low-confidence snapshot because it can be stale and does not include messages or
 tool results added after that assistant response.
 
-The status is therefore a conductor decision aid, not exact tokenizer accounting.
+The status is therefore an orchestrator decision aid, not exact tokenizer accounting.
 It should not be used to make hard safety guarantees about provider limits.
 
 ## Recommendation policy
@@ -65,7 +65,7 @@ It recommends:
   the default high-water mark
 
 The warning thresholds intentionally fire before Pi auto-compaction so the
-conductor can finish the current Den handoff, review, or merge step and compact
+orchestrator can finish the current Den handoff, review, or merge step and compact
 at a natural boundary.
 
 ## Compaction trigger
@@ -82,9 +82,9 @@ The compact tool returns schema `den_context_compaction_request` with:
 - `guardrails`: durable-state and task-boundary reminders
 
 The model-callable tool requires `durable_context_posted: true`. This is a
-soft guardrail that forces the conductor to confirm Den already has the current
+soft guardrail that forces the orchestrator to confirm Den already has the current
 handoff/status/review/merge state before starting a lossy compaction. The slash
-command is an explicit operator/conductor action and treats command invocation
+command is an explicit operator/orchestrator action and treats command invocation
 itself as that durable-state assertion; use the model-callable tool when a model
 needs the guardrail enforced in parameters. If the runtime does not expose
 `ctx.compact()`, the tool reports `unavailable` and the operator can fall back to
@@ -104,11 +104,11 @@ This means:
 4. Compaction completes, the session context is rebuilt from the summary + kept
    messages.
 5. If `resume_after_compaction` is enabled (default), the extension sends a
-   follow-up user message to trigger a new conductor turn with the compacted
+   follow-up user message to trigger a new orchestrator turn with the compacted
    context.
 
 If `resume_after_compaction` is `false` or the `sendResumeMessage` callback is
-not available, the conductor session is **suspended** after compaction until the
+not available, the orchestrator session is **suspended** after compaction until the
 operator manually sends a prompt.
 
 ### Post-compaction resume
@@ -129,11 +129,11 @@ so Pi starts a new turn immediately; if Pi still reports the agent as busy, it
 queues the message as `{ deliverAs: "followUp" }`.
 
 This triggers a new agent turn with the compacted context when the callback can
-reach the active session, allowing the conductor to continue without manual
+reach the active session, allowing the orchestrator to continue without manual
 intervention.
 
-The resume message intentionally asks the conductor to re-read Den state
-because compaction discards fine-grained context. The conductor should re-check
+The resume message intentionally asks the orchestrator to re-read Den state
+because compaction discards fine-grained context. The orchestrator should re-check
 task/thread state before continuing substantive work.
 
 A documentation guardrail is sufficient for the rare extension-reload edge case:
@@ -143,10 +143,10 @@ resume failures, and the operator can manually resume with a normal prompt. A
 runtime nonce check would not make this safer without risking false negatives
 that suppress a valid resume.
 
-## Recommended conductor behavior
+## Recommended orchestrator behavior
 
 - Check `den_context_status` before starting a large implementation/review task
-  in a long-running conductor session.
+  in a long-running orchestrator session.
 - If the result is `watch`, prefer calling `den_compact_context` between tasks or
   after posting a durable Den planning/review/merge note.
 - If the result is `compact_after_current_task`, finish the current small step,
@@ -174,6 +174,6 @@ that suppress a valid resume.
 The `den_compact_context` tool and `/den-compact-context` command use
 `ctx.compact()` internally but add a deterministic resume step: when
 `resume_after_compaction` is enabled, the extension calls
-`pi.sendUserMessage()` in the `onComplete` callback to trigger a new conductor
+`pi.sendUserMessage()` in the `onComplete` callback to trigger a new orchestrator
 turn automatically. The callback sends normally when the session is idle and
 uses follow-up delivery only when the context still reports a busy agent.

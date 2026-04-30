@@ -88,7 +88,7 @@ const DEN_COMPACT_CONTEXT_PARAMETERS = {
     },
     resume_after_compaction: {
       type: "boolean",
-      description: "Whether to send a follow-up prompt automatically after compaction to resume the conductor session. Default: true. Set to false only if you intend to stop after compaction.",
+      description: "Whether to send a follow-up prompt automatically after compaction to resume the orchestrator session. Default: true. Set to false only if you intend to stop after compaction.",
     },
   },
   required: ["durable_context_posted"],
@@ -232,7 +232,7 @@ export default function denExtension(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("den-inbox", {
-    description: "Show pending Den work for this Pi conductor.",
+    description: "Show pending Den work for this Pi orchestrator.",
     handler: async (_args, ctx) => {
       const cfg = await requireConfig(ctx);
       lastInboxLines = await buildInboxLines(cfg);
@@ -366,14 +366,14 @@ export default function denExtension(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("den-conductor-guidance", {
-    description: "Load the Den-managed Pi conductor guidance.",
+    description: "Load the Den-managed Pi orchestrator guidance.",
     handler: async (_args, ctx) => {
       const cfg = await ensureConfig(ctx);
       const guidance = cfg
         ? await getConductorGuidance(cfg)
         : await getGlobalConductorGuidance(baseUrlFromEnv());
       ctx.ui.setWidget("den-conductor-guidance", guidance.content.split("\n").slice(0, 40));
-      ctx.ui.notify(`Loaded conductor guidance from ${guidance.project_id}/${guidance.slug}.`, "info");
+      ctx.ui.notify(`Loaded orchestrator guidance from ${guidance.project_id}/${guidance.slug}.`, "info");
     },
   });
 
@@ -385,7 +385,7 @@ export default function denExtension(pi: ExtensionAPI) {
   };
 
   pi.registerCommand("den-context-status", {
-    description: "Show the current Pi conductor context budget estimate and compaction recommendation.",
+    description: "Show the current Pi orchestrator context budget estimate and compaction recommendation.",
     handler: showContextStatus,
   });
 
@@ -395,7 +395,7 @@ export default function denExtension(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("den-compact-context", {
-    description: "Request Pi context compaction; invoking this command asserts durable Den state is already recorded. After compaction, a follow-up prompt resumes the conductor automatically. Usage: /den-compact-context [custom instructions]",
+    description: "Request Pi context compaction; invoking this command asserts durable Den state is already recorded. After compaction, a follow-up prompt resumes the orchestrator automatically. Usage: /den-compact-context [custom instructions]",
     handler: async (args, ctx) => {
       const result = requestDenContextCompaction(ctx, {
         durableContextPosted: true,
@@ -407,7 +407,7 @@ export default function denExtension(pi: ExtensionAPI) {
       });
       ctx.ui.setWidget("den-context-compaction", formatDenContextCompactionResult(result).split("\n"));
       ctx.ui.notify(
-        result.requested ? "Requested Den conductor context compaction." : result.reason,
+        result.requested ? "Requested Den orchestrator context compaction." : result.reason,
         result.requested ? "info" : "warning",
       );
     },
@@ -416,7 +416,7 @@ export default function denExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "den_context_status",
     label: "Den Context Status",
-    description: "Inspect the parent Pi conductor session context budget. Returns an estimate, confidence/limitations, and a recommendation for whether to compact between tasks.",
+    description: "Inspect the parent Pi orchestrator session context budget. Returns an estimate, confidence/limitations, and a recommendation for whether to compact between tasks.",
     parameters: EMPTY_TOOL_PARAMETERS,
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
       return buildDenContextStatusToolResult(captureDenContextStatus(ctx));
@@ -427,9 +427,9 @@ export default function denExtension(pi: ExtensionAPI) {
     name: "den_compact_context",
     label: "Den Compact Context",
     description:
-      "Request Pi parent-session context compaction when the conductor is at a safe boundary. " +
+      "Request Pi parent-session context compaction when the orchestrator is at a safe boundary. " +
       "This tool is fire-and-forget: it returns immediately and compaction runs asynchronously after the current turn. " +
-      "When resume_after_compaction is true (default), a follow-up prompt is sent automatically after compaction to resume the conductor. " +
+      "When resume_after_compaction is true (default), a follow-up prompt is sent automatically after compaction to resume the orchestrator. " +
       "Confirm durable_context_posted=true only after Den task/thread status is recorded or already up to date; otherwise this tool refuses to compact.",
     parameters: DEN_COMPACT_CONTEXT_PARAMETERS,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -841,7 +841,7 @@ export default function denExtension(pi: ExtensionAPI) {
   });
 
   // General Den data access is intentionally provided by the configured Den MCP server.
-  // This extension keeps Pi-native session binding, TUI commands, and conductor UX only.
+  // This extension keeps Pi-native session binding, TUI commands, and orchestrator UX only.
 }
 
 function sendPostCompactionResumeMessage(pi: ExtensionAPI, ctx: any, message: string) {
@@ -1286,7 +1286,7 @@ async function getGlobalConductorGuidance(baseUrl: string, projectId = "unbound"
     content: [
       "# Built-in Pi Conductor Guidance",
       "",
-      "You are the user-facing Pi conductor for this Den project.",
+      "You are the user-facing Pi orchestrator for this Den project.",
       "Use Den as the durable record for tasks, messages, documents, and sub-agent results.",
       "Delegate bounded implementation to coder sub-agents and independent review to reviewer sub-agents.",
       "Do not re-review every line yourself; compare coder/reviewer communication against task intent and ask the user when ambiguity or drift needs judgment.",

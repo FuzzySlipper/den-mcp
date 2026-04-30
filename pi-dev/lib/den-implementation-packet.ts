@@ -3,7 +3,7 @@
  *
  * After a coder sub-agent run completes successfully, the final output is
  * parsed into a normalized `ImplementationPacket`.  The packet is posted to
- * the Den task thread so that later coders, reviewers, and the conductor can
+ * the Den task thread so that later coders, reviewers, and the orchestrator can
  * consume structured implementation memory without re-parsing verbose
  * sub-agent result text.
  *
@@ -307,7 +307,7 @@ export function formatImplementationPacketMessage(
     lines.push("## Artifact Links", "", ...items.map((l) => `- ${l}`), "");
   }
 
-  // If partial, append a clear warning for the conductor.
+  // If partial, append a clear warning for the orchestrator.
   if (completeness === "partial") {
     lines.push("---", "", `⚠️ **Implementation packet is incomplete.** Missing fields: ${missing_fields.join(", ")}.`, "");
   }
