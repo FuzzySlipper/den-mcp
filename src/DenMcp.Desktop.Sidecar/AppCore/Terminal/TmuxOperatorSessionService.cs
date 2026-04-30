@@ -144,40 +144,22 @@ public sealed class TmuxOperatorSessionService
             ValidateViewport(request.Viewport);
         }
 
+        var now = Format(_now());
+        var capabilities = ToAttachCapabilities(session.Capabilities);
+        if (string.Equals(request.Mode, "external_attach_info", StringComparison.Ordinal))
+        {
+            var infoResponse = BuildAttachResponse(session, string.Empty, now, capabilities);
+            await PublishSessionEventsAsync(session, "session.external_attach_info_requested", new { mode = request.Mode, raw_stream = false }, null, null, cancellationToken).ConfigureAwait(false);
+            return infoResponse;
+        }
+
         var streamId = $"stream_{Guid.NewGuid():N}";
         lock (_lock)
         {
             _streams[streamId] = session.SessionId;
         }
 
-        var now = Format(_now());
-        var capabilities = ToAttachCapabilities(session.Capabilities);
-        var response = new TerminalAttachResponse
-        {
-            StreamId = streamId,
-            SessionId = session.SessionId,
-            AttachedAt = now,
-            StartCursor = "cur_000000000000",
-            ReplayAvailableFrom = "cur_000000000000",
-            ReplayGap = false,
-            Capabilities = capabilities,
-            ViewportLimits = TmuxViewportLimits,
-            Limits = new TerminalStreamLimits(),
-            ExternalAttach = session.Capabilities.CanOpenExternalAttach
-                ? new TerminalExternalAttachInfo
-                {
-                    Available = true,
-                    Command = TmuxSessionNaming.ExternalAttachCommand(TmuxNameFromSession(session) ?? session.SessionId),
-                    Description = "Display/copy-only tmux attach command text. Den Desktop must not auto-execute this string; any future attach action must route through a typed app-core command.",
-                }
-                : null,
-        };
-
-        if (string.Equals(request.Mode, "external_attach_info", StringComparison.Ordinal))
-        {
-            await PublishSessionEventsAsync(session, "session.external_attach_info_requested", new { stream_id = streamId }, null, null, cancellationToken).ConfigureAwait(false);
-            return response;
-        }
+        var response = BuildAttachResponse(session, streamId, now, capabilities);
 
         if (string.Equals(request.Mode, "activity_only", StringComparison.Ordinal))
         {
@@ -656,6 +638,30 @@ public sealed class TmuxOperatorSessionService
 
             return buffer;
         }
+    }
+
+    private static TerminalAttachResponse BuildAttachResponse(OperatorSession session, string streamId, string attachedAt, TerminalAttachCapabilities capabilities)
+    {
+        return new TerminalAttachResponse
+        {
+            StreamId = streamId,
+            SessionId = session.SessionId,
+            AttachedAt = attachedAt,
+            StartCursor = "cur_000000000000",
+            ReplayAvailableFrom = "cur_000000000000",
+            ReplayGap = false,
+            Capabilities = capabilities,
+            ViewportLimits = TmuxViewportLimits,
+            Limits = new TerminalStreamLimits(),
+            ExternalAttach = session.Capabilities.CanOpenExternalAttach
+                ? new TerminalExternalAttachInfo
+                {
+                    Available = true,
+                    Command = TmuxSessionNaming.ExternalAttachCommand(TmuxNameFromSession(session) ?? session.SessionId),
+                    Description = "Display/copy-only tmux attach command text. Den Desktop must not auto-execute this string; any future attach action must route through a typed app-core command.",
+                }
+                : null,
+        };
     }
 
     private static TerminalAttachCapabilities ToAttachCapabilities(OperatorSessionCapabilities caps)

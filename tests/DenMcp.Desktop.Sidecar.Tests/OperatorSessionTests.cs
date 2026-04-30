@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using Den.Bridge.Abstractions;
@@ -722,12 +723,42 @@ public class TerminalBridgeHandlerTests
         var response = await service.AttachAsync(new TerminalAttachRequest { SessionId = session.SessionId, Mode = "external_attach_info" }, CancellationToken.None);
 
         Assert.Equal(session.SessionId, response.SessionId);
+        Assert.Equal(string.Empty, response.StreamId);
         Assert.NotNull(response.ExternalAttach);
         Assert.True(response.ExternalAttach!.Available);
         Assert.Contains("tmux attach-session", response.ExternalAttach.Command, StringComparison.Ordinal);
         Assert.Contains("Display/copy-only", response.ExternalAttach.Description, StringComparison.Ordinal);
         Assert.Contains("must not auto-execute", response.ExternalAttach.Description, StringComparison.Ordinal);
         Assert.DoesNotContain(runner.Calls, call => call.Args[0] == "capture-pane");
+        Assert.Equal(0, GetTrackedTmuxStreamCount(service));
+    }
+
+    [Fact]
+    public async Task TmuxAttachExternalInfo_RepeatedRequestsDoNotCreateTrackedStreams()
+    {
+        var runner = new FakeTmuxCommandRunner();
+        var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
+        var service = CreateTmuxService(runner, registry);
+        var session = await service.CreateAsync(new TerminalCreateSessionRequest { ProjectId = "den-mcp", Title = "Repeated External" }, CancellationToken.None);
+
+        for (var i = 0; i < 5; i++)
+        {
+            var response = await service.AttachAsync(new TerminalAttachRequest { SessionId = session.SessionId, Mode = "external_attach_info" }, CancellationToken.None);
+
+            Assert.Equal(session.SessionId, response.SessionId);
+            Assert.Equal(string.Empty, response.StreamId);
+            Assert.NotNull(response.ExternalAttach);
+            Assert.Contains("must not auto-execute", response.ExternalAttach!.Description, StringComparison.Ordinal);
+        }
+
+        Assert.Equal(0, GetTrackedTmuxStreamCount(service));
+        Assert.DoesNotContain(runner.Calls, call => call.Args[0] == "capture-pane");
+
+        var stream = await service.AttachAsync(new TerminalAttachRequest { SessionId = session.SessionId, Mode = "terminal_stream" }, CancellationToken.None);
+        Assert.Equal(1, GetTrackedTmuxStreamCount(service));
+
+        await service.DetachAsync(new TerminalDetachRequest { SessionId = session.SessionId, StreamId = stream.StreamId }, CancellationToken.None);
+        Assert.Equal(0, GetTrackedTmuxStreamCount(service));
     }
 
     [Fact]
@@ -1545,6 +1576,14 @@ public class TerminalBridgeHandlerTests
             den,
             () => new DateTimeOffset(2026, 4, 29, 12, 0, 0, TimeSpan.Zero));
         return new TerminalOperatorSessionService(registry, tmux, direct);
+    }
+
+    private static int GetTrackedTmuxStreamCount(TmuxOperatorSessionService service)
+    {
+        var field = typeof(TmuxOperatorSessionService).GetField("_streams", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        var streams = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(field!.GetValue(service));
+        return streams.Count;
     }
 
     private static async Task WaitForActivityCountAsync(OperatorSessionRegistry registry, string sessionId, int expectedCount, int timeoutMs = 1000)
