@@ -90,32 +90,40 @@ public class WebSocketBridgeTransportTests
     }
 
     [Fact]
-    public async Task DispatchRequestWithLoggingAsync_LogsUnhandledDispatchFailures()
+    public async Task DispatchRequestWithLoggingAsync_LogsUnhandledSendFailuresAfterRouterDispatch()
     {
         var logger = new CapturingLogger<WebSocketBridgeServer>();
-        var router = new DelegatingRouter((_, _) =>
-            throw new InvalidOperationException("Unexpected router dispatch."));
+        var routerDispatchCount = 0;
+        var router = new DelegatingRouter((request, _) =>
+        {
+            routerDispatchCount++;
+            Assert.Equal("req_send_failure", request.RequestId);
+            return ValueTask.FromResult(BridgeResponseFrame.Success(request.RequestId));
+        });
         await using var server = new WebSocketBridgeServer(
             new WebSocketBridgeServerOptions { Port = 0, AuthToken = "token" },
             router,
             logger);
-        using var socket = new ClientWebSocket();
+        using var socket = new ThrowingStateWebSocket(() => new InvalidOperationException("Unexpected send state read."));
         var connection = CreateConnection(server, socket);
         var method = connection.GetType().GetMethod("DispatchRequestWithLoggingAsync", BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(method);
 
         var result = method.Invoke(connection, [new BridgeRequestFrame
         {
-            RequestId = null!,
+            RequestId = "req_send_failure",
             Command = "sample.invalid",
         }]);
 
         Assert.NotNull(result);
         await Assert.IsAssignableFrom<Task>(result).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(1, routerDispatchCount);
         Assert.Contains(logger.Entries, entry =>
             entry.Level == LogLevel.Error
-            && entry.Exception is ArgumentNullException
-            && entry.Message.Contains("Unhandled bridge WebSocket request dispatch failure", StringComparison.Ordinal));
+            && entry.Exception is InvalidOperationException ex
+            && ex.Message == "Unexpected send state read."
+            && entry.Message.Contains("Unhandled bridge WebSocket request dispatch failure", StringComparison.Ordinal)
+            && entry.Message.Contains("req_send_failure", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -368,6 +376,64 @@ public class WebSocketBridgeTransportTests
         }
 
         throw new JsonException("The bridge stream completed before an item was available.");
+    }
+
+    private sealed class ThrowingStateWebSocket : WebSocket
+    {
+        private readonly Func<Exception> _stateExceptionFactory;
+
+        public ThrowingStateWebSocket(Func<Exception> stateExceptionFactory)
+        {
+            _stateExceptionFactory = stateExceptionFactory;
+        }
+
+        public override WebSocketCloseStatus? CloseStatus => null;
+
+        public override string? CloseStatusDescription => null;
+
+        public override WebSocketState State => throw _stateExceptionFactory();
+
+        public override string? SubProtocol => null;
+
+        public override void Abort()
+        {
+        }
+
+        public override Task CloseAsync(
+            WebSocketCloseStatus closeStatus,
+            string? statusDescription,
+            CancellationToken cancellationToken)
+        {
+            return Task.CompletedTask;
+        }
+
+        public override Task CloseOutputAsync(
+            WebSocketCloseStatus closeStatus,
+            string? statusDescription,
+            CancellationToken cancellationToken)
+        {
+            return Task.CompletedTask;
+        }
+
+        public override void Dispose()
+        {
+        }
+
+        public override Task<WebSocketReceiveResult> ReceiveAsync(
+            ArraySegment<byte> buffer,
+            CancellationToken cancellationToken)
+        {
+            throw new NotSupportedException();
+        }
+
+        public override Task SendAsync(
+            ArraySegment<byte> buffer,
+            WebSocketMessageType messageType,
+            bool endOfMessage,
+            CancellationToken cancellationToken)
+        {
+            throw new NotSupportedException();
+        }
     }
 
     private sealed class CapturingLogger<T> : ILogger<T>
