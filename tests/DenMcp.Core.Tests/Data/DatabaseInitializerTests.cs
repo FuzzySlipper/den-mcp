@@ -102,6 +102,78 @@ public class DatabaseInitializerTests : IDisposable
     }
 
     [Fact]
+    public async Task InitializeAsync_MigratesDesktopSessionEventsForSplitReconnectAndUtcDefault()
+    {
+        await using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                CREATE TABLE projects (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    root_path TEXT,
+                    description TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                INSERT INTO projects (id, name) VALUES ('proj', 'Project');
+                CREATE TABLE desktop_session_events (
+                    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id            TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    task_id               INTEGER,
+                    workspace_id          TEXT,
+                    source_instance_id    TEXT NOT NULL,
+                    session_id            TEXT NOT NULL,
+                    event_type            TEXT NOT NULL CHECK (event_type IN ('created', 'reconnect')),
+                    payload               TEXT CHECK (length(payload) <= 10240),
+                    requested_by          TEXT,
+                    reason                TEXT CHECK (reason IS NULL OR length(reason) <= 2000),
+                    observed_at           TEXT NOT NULL,
+                    created_at            TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                INSERT INTO desktop_session_events (
+                    project_id, source_instance_id, session_id, event_type, observed_at, created_at
+                ) VALUES (
+                    'proj', 'desktop-a', 'pty-old', 'reconnect', '2026-04-27T12:00:00.0000000Z', '2026-04-27 12:00:00'
+                );
+                """;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var initializer = new DatabaseInitializer(_dbPath, NullLogger<DatabaseInitializer>.Instance);
+        await initializer.InitializeAsync();
+
+        await using var verify = new SqliteConnection(initializer.ConnectionString);
+        await verify.OpenAsync();
+
+        await using (var checkCmd = verify.CreateCommand())
+        {
+            checkCmd.CommandText = """
+                INSERT INTO desktop_session_events (
+                    project_id, source_instance_id, session_id, event_type, observed_at
+                ) VALUES (
+                    'proj', 'desktop-a', 'pty-new', 'reconnect_requested', '2026-04-27T12:01:00.0000000Z'
+                )
+                RETURNING created_at
+                """;
+            var createdAt = Assert.IsType<string>(await checkCmd.ExecuteScalarAsync());
+            Assert.Contains('T', createdAt);
+            Assert.EndsWith("Z", createdAt);
+        }
+
+        await using (var countCmd = verify.CreateCommand())
+        {
+            countCmd.CommandText = """
+                SELECT COUNT(*)
+                FROM desktop_session_events
+                WHERE session_id = 'pty-old' AND event_type = 'reconnect'
+                """;
+            Assert.Equal(1L, await countCmd.ExecuteScalarAsync());
+        }
+    }
+
+    [Fact]
     public async Task InitializeAsync_AddsReviewRoundDiffMetadataColumnsToExistingDatabase()
     {
         await using (var conn = new SqliteConnection($"Data Source={_dbPath}"))

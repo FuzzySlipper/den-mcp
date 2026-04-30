@@ -28,6 +28,9 @@ import type {
   DesktopDiffSnapshot,
   DesktopDiffSnapshotLatestResult,
   DesktopSessionSnapshot,
+  DesktopSessionEvent,
+  AppendDesktopSessionEventRequest,
+  ListDesktopSessionEventsOptions,
 } from './types';
 
 async function get<T>(url: string): Promise<T> {
@@ -513,7 +516,34 @@ export function listDesktopSessionSnapshots(projectId: string, opts: ListDesktop
   return get(`/api/projects/${esc(projectId)}/desktop/session-snapshots${q}`);
 }
 
-export type { DesktopGitSnapshot, DesktopDiffSnapshot, DesktopSessionSnapshot };
+export function listDesktopSessionEvents(projectId: string, opts: ListDesktopSessionEventsOptions = {}): Promise<DesktopSessionEvent[]> {
+  const eventTypes = Array.isArray(opts.eventTypes) ? opts.eventTypes.join(',') : opts.eventTypes;
+  const q = buildQuery({
+    taskId: opts.taskId,
+    workspaceId: opts.workspaceId,
+    sourceInstanceId: opts.sourceInstanceId,
+    sessionId: opts.sessionId,
+    eventTypes,
+    limit: opts.limit,
+  });
+  return get(`/api/projects/${esc(projectId)}/desktop/session-events${q}`);
+}
+
+export function appendDesktopSessionEvent(
+  projectId: string,
+  event: AppendDesktopSessionEventRequest,
+): Promise<DesktopSessionEvent> {
+  return post(`/api/projects/${esc(projectId)}/desktop/session-events`, event);
+}
+
+export type {
+  DesktopGitSnapshot,
+  DesktopDiffSnapshot,
+  DesktopSessionSnapshot,
+  DesktopSessionEvent,
+  AppendDesktopSessionEventRequest,
+  ListDesktopSessionEventsOptions,
+};
 
 // Legacy dispatch helpers.
 // The default dashboard intentionally does not import these; keep them available

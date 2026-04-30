@@ -712,6 +712,8 @@ public sealed class DatabaseInitializer
                                       'terminate_requested',
                                       'terminate_completed',
                                       'reconnect',
+                                      'reconnect_requested',
+                                      'reconnected',
                                       'lease_acquired',
                                       'lease_lost',
                                       'lease_conflict',
@@ -727,7 +729,7 @@ public sealed class DatabaseInitializer
             reason                TEXT
                                   CHECK (reason IS NULL OR length(reason) <= 2000),
             observed_at           TEXT NOT NULL,
-            created_at            TEXT NOT NULL DEFAULT (datetime('now'))
+            created_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
         );
 
         CREATE INDEX IF NOT EXISTS idx_desktop_session_events_project_created
@@ -1309,6 +1311,8 @@ public sealed class DatabaseInitializer
                                           'terminate_requested',
                                           'terminate_completed',
                                           'reconnect',
+                                          'reconnect_requested',
+                                          'reconnected',
                                           'lease_acquired',
                                           'lease_lost',
                                           'lease_conflict',
@@ -1324,10 +1328,11 @@ public sealed class DatabaseInitializer
                 reason                TEXT
                                       CHECK (reason IS NULL OR length(reason) <= 2000),
                 observed_at           TEXT NOT NULL,
-                created_at            TEXT NOT NULL DEFAULT (datetime('now'))
+                created_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
             )
             """;
         await eventsTableCmd.ExecuteNonQueryAsync();
+        await EnsureDesktopSessionEventsCompatibilityAsync(connection);
 
         await EnsureIndexAsync(connection, "idx_desktop_session_events_project_created",
             "CREATE INDEX IF NOT EXISTS idx_desktop_session_events_project_created ON desktop_session_events(project_id, created_at DESC, id DESC)");
@@ -1343,6 +1348,101 @@ public sealed class DatabaseInitializer
             """);
         await EnsureIndexAsync(connection, "idx_desktop_session_events_event_type_created",
             "CREATE INDEX IF NOT EXISTS idx_desktop_session_events_event_type_created ON desktop_session_events(event_type, created_at DESC, id DESC)");
+    }
+
+    private static async Task EnsureDesktopSessionEventsCompatibilityAsync(SqliteConnection connection)
+    {
+        await using var schemaCmd = connection.CreateCommand();
+        schemaCmd.CommandText = """
+            SELECT sql
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'desktop_session_events'
+            """;
+        var schema = (string?)await schemaCmd.ExecuteScalarAsync();
+        if (schema is null ||
+            (schema.Contains("'reconnect_requested'", StringComparison.Ordinal) &&
+             schema.Contains("strftime('%Y-%m-%dT%H:%M:%fZ','now')", StringComparison.Ordinal)))
+        {
+            return;
+        }
+
+        await using var migrateCmd = connection.CreateCommand();
+        migrateCmd.CommandText = """
+            BEGIN;
+
+            ALTER TABLE desktop_session_events RENAME TO desktop_session_events_old;
+
+            CREATE TABLE desktop_session_events (
+                id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id            TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                task_id               INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+                workspace_id          TEXT REFERENCES agent_workspaces(id) ON DELETE SET NULL,
+                source_instance_id    TEXT NOT NULL,
+                session_id            TEXT NOT NULL,
+                event_type            TEXT NOT NULL
+                                      CHECK (event_type IN (
+                                          'created',
+                                          'discovered',
+                                          'status_changed',
+                                          'capabilities_changed',
+                                          'attached',
+                                          'detached',
+                                          'input_sent',
+                                          'resize_requested',
+                                          'terminate_requested',
+                                          'terminate_completed',
+                                          'reconnect',
+                                          'reconnect_requested',
+                                          'reconnected',
+                                          'lease_acquired',
+                                          'lease_lost',
+                                          'lease_conflict',
+                                          'warning',
+                                          'crashed',
+                                          'exited',
+                                          'snapshot_published',
+                                          'snapshot_publish_failed'
+                                      )),
+                payload               TEXT
+                                      CHECK (length(payload) <= 10240),
+                requested_by          TEXT,
+                reason                TEXT
+                                      CHECK (reason IS NULL OR length(reason) <= 2000),
+                observed_at           TEXT NOT NULL,
+                created_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+            );
+
+            INSERT INTO desktop_session_events (
+                id, project_id, task_id, workspace_id, source_instance_id, session_id,
+                event_type, payload, requested_by, reason, observed_at, created_at
+            )
+            SELECT
+                id, project_id, task_id, workspace_id, source_instance_id, session_id,
+                event_type, payload, requested_by, reason, observed_at, created_at
+            FROM desktop_session_events_old;
+
+            DROP TABLE desktop_session_events_old;
+
+            COMMIT;
+            """;
+        try
+        {
+            await migrateCmd.ExecuteNonQueryAsync();
+        }
+        catch
+        {
+            try
+            {
+                await using var rollbackCmd = connection.CreateCommand();
+                rollbackCmd.CommandText = "ROLLBACK;";
+                await rollbackCmd.ExecuteNonQueryAsync();
+            }
+            catch (SqliteException)
+            {
+                // Preserve the original migration exception if SQLite already ended the transaction.
+            }
+            throw;
+        }
     }
 
     private static async Task EnsureBlackboardSchemaAsync(SqliteConnection connection)

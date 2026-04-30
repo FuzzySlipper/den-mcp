@@ -192,7 +192,10 @@ public enum SessionEventType
     ResizeRequested,
     TerminateRequested,
     TerminateCompleted,
+    /// <summary>Legacy v1 catch-all reconnect event retained for compatibility.</summary>
     Reconnect,
+    ReconnectRequested,
+    Reconnected,
     LeaseAcquired,
     LeaseLost,
     LeaseConflict,
@@ -216,7 +219,7 @@ public sealed class DesktopSessionEvent
     public string? WorkspaceId { get; set; }
     public required string SourceInstanceId { get; set; }
     public required string SessionId { get; set; }
-    /// <summary>Event kind, e.g. created, status_changed, crashed.</summary>
+    /// <summary>Event kind, e.g. created, status_changed, reconnect_requested, reconnected, crashed. Legacy reconnect remains accepted.</summary>
     public required string EventType { get; set; }
     /// <summary>Bounded JSON payload. Max 10 KB. Must not contain raw terminal streams or raw input text.</summary>
     public string? Payload { get; set; }

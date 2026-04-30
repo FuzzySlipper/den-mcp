@@ -23,6 +23,28 @@ export type ReviewFindingStatus = 'open' | 'claimed_fixed' | 'verified_fixed' | 
 export type ReviewPacketKind = 'review_request' | 'rereview_request' | 'review_findings';
 export type AgentWorkspaceState = 'planned' | 'active' | 'review' | 'complete' | 'failed' | 'archived';
 export type AgentWorkspaceCleanupPolicy = 'keep' | 'delete_worktree' | 'archive';
+export type DesktopSessionEventType =
+  | 'created'
+  | 'discovered'
+  | 'status_changed'
+  | 'capabilities_changed'
+  | 'attached'
+  | 'detached'
+  | 'input_sent'
+  | 'resize_requested'
+  | 'terminate_requested'
+  | 'terminate_completed'
+  | 'reconnect' // Legacy v1 catch-all; prefer reconnect_requested/reconnected for new integrations.
+  | 'reconnect_requested'
+  | 'reconnected'
+  | 'lease_acquired'
+  | 'lease_lost'
+  | 'lease_conflict'
+  | 'warning'
+  | 'crashed'
+  | 'exited'
+  | 'snapshot_published'
+  | 'snapshot_publish_failed';
 
 export interface Project {
   id: string;
@@ -419,6 +441,42 @@ export interface DesktopSessionSnapshot {
   updated_at: string;
   is_stale: boolean;
   freshness_seconds: number;
+}
+
+export interface DesktopSessionEvent {
+  id: number;
+  project_id: string;
+  task_id: number | null;
+  workspace_id: string | null;
+  source_instance_id: string;
+  session_id: string;
+  event_type: DesktopSessionEventType;
+  payload: string | null;
+  requested_by: string | null;
+  reason: string | null;
+  observed_at: string;
+  created_at: string;
+}
+
+export interface AppendDesktopSessionEventRequest {
+  task_id?: number | null;
+  workspace_id?: string | null;
+  source_instance_id: string;
+  session_id: string;
+  event_type: DesktopSessionEventType;
+  payload?: string | null;
+  requested_by?: string | null;
+  reason?: string | null;
+  observed_at?: string | null;
+}
+
+export interface ListDesktopSessionEventsOptions {
+  taskId?: number;
+  workspaceId?: string;
+  sourceInstanceId?: string;
+  sessionId?: string;
+  eventTypes?: DesktopSessionEventType[] | string;
+  limit?: number;
 }
 
 export interface Message {

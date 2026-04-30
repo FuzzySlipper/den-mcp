@@ -171,6 +171,28 @@ public class DesktopSessionEventApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task PostAcceptsSplitReconnectEventsAndLegacyReconnect()
+    {
+        foreach (var eventType in new[] { "reconnect", "reconnect_requested", "reconnected" })
+        {
+            var response = await _client.PostAsJsonAsync(
+                $"/api/projects/{ProjectId}/desktop/session-events",
+                new { source_instance_id = "desktop-reconnect", session_id = "pty-reconnect", event_type = eventType, observed_at = DateTime.UtcNow },
+                JsonOpts);
+            response.EnsureSuccessStatusCode();
+        }
+
+        var filterResponse = await _client.GetAsync(
+            $"/api/projects/{ProjectId}/desktop/session-events?sessionId=pty-reconnect&eventTypes=reconnect_requested,reconnected");
+        filterResponse.EnsureSuccessStatusCode();
+        using var filterJson = JsonDocument.Parse(await filterResponse.Content.ReadAsStringAsync());
+        var events = filterJson.RootElement.EnumerateArray().ToList();
+        Assert.Equal(2, events.Count);
+        Assert.Contains(events, e => e.GetProperty("event_type").GetString() == "reconnect_requested");
+        Assert.Contains(events, e => e.GetProperty("event_type").GetString() == "reconnected");
+    }
+
+    [Fact]
     public async Task PostAndListCrossSourceIsolation()
     {
         await _client.PostAsJsonAsync(

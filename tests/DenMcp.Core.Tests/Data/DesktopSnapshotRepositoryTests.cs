@@ -419,6 +419,75 @@ public class DesktopSnapshotRepositoryTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SessionEvent_ReconnectRequestedAndReconnectedRemainCompatibleWithLegacyReconnect()
+    {
+        await _sessionEvents.AppendAsync(new DesktopSessionEvent
+        {
+            ProjectId = "proj",
+            SessionId = "pty-reconnect",
+            SourceInstanceId = "desktop-a",
+            EventType = SessionEventType.Reconnect.ToDbValue(),
+            ObservedAt = _now.AddSeconds(-3)
+        });
+        await _sessionEvents.AppendAsync(new DesktopSessionEvent
+        {
+            ProjectId = "proj",
+            SessionId = "pty-reconnect",
+            SourceInstanceId = "desktop-a",
+            EventType = SessionEventType.ReconnectRequested.ToDbValue(),
+            ObservedAt = _now.AddSeconds(-2)
+        });
+        await _sessionEvents.AppendAsync(new DesktopSessionEvent
+        {
+            ProjectId = "proj",
+            SessionId = "pty-reconnect",
+            SourceInstanceId = "desktop-a",
+            EventType = SessionEventType.Reconnected.ToDbValue(),
+            ObservedAt = _now.AddSeconds(-1)
+        });
+
+        Assert.Equal(SessionEventType.ReconnectRequested, EnumExtensions.ParseSessionEventType("reconnect_requested"));
+        Assert.Equal(SessionEventType.Reconnected, EnumExtensions.ParseSessionEventType("reconnected"));
+
+        var events = await _sessionEvents.ListAsync(new DesktopSessionEventListOptions
+        {
+            ProjectId = "proj",
+            SessionId = "pty-reconnect",
+            EventTypes = "reconnect,reconnect_requested,reconnected",
+            Limit = 10
+        });
+        Assert.Equal(3, events.Count);
+        Assert.Contains(events, e => e.EventType == "reconnect");
+        Assert.Contains(events, e => e.EventType == "reconnect_requested");
+        Assert.Contains(events, e => e.EventType == "reconnected");
+    }
+
+    [Fact]
+    public async Task SessionEvent_DatabaseDefaultCreatedAtIsUtcIsoWhenRepositoryDoesNotSupplyIt()
+    {
+        await using var conn = await _testDb.Db.CreateConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO desktop_session_events (
+                project_id, source_instance_id, session_id, event_type, observed_at
+            ) VALUES (
+                @projectId, @sourceInstanceId, @sessionId, @eventType, @observedAt
+            )
+            RETURNING created_at
+            """;
+        cmd.Parameters.AddWithValue("@projectId", "proj");
+        cmd.Parameters.AddWithValue("@sourceInstanceId", "desktop-a");
+        cmd.Parameters.AddWithValue("@sessionId", "pty-default-created");
+        cmd.Parameters.AddWithValue("@eventType", "created");
+        cmd.Parameters.AddWithValue("@observedAt", _now.ToString("O"));
+
+        var createdAt = Assert.IsType<string>(await cmd.ExecuteScalarAsync());
+        Assert.Contains('T', createdAt);
+        Assert.EndsWith("Z", createdAt);
+        Assert.Equal(DateTimeKind.Utc, DateTime.Parse(createdAt, null, System.Globalization.DateTimeStyles.RoundtripKind).Kind);
+    }
+
+    [Fact]
     public async Task SessionEvent_ListBySourceInstanceAndTask()
     {
         await _sessionEvents.AppendAsync(new DesktopSessionEvent
