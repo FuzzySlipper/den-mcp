@@ -1,4 +1,6 @@
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CollaborationPane } from './components/CollaborationPane';
+import { useCollaborationState } from './desktop/useCollaborationState';
 import { AppShell } from './components/AppShell';
 import { ConnectionPanel } from './components/ConnectionPanel';
 import { DiagnosticsPane } from './components/DiagnosticsPane';
@@ -204,6 +206,20 @@ export function App() {
     </div>
   );
 
+  // Collaboration tab state
+  const collaborationState = useCollaborationState(
+    runtime.status?.denBaseUrl ?? null,
+    'den-mcp',
+    null,
+  );
+
+  const collaborationTab = (
+    <CollaborationPane
+      state={collaborationState}
+      actions={collaborationState}
+    />
+  );
+
   const runtimeSettingsTab = (
     <ConnectionPanel
       status={runtime.status}
@@ -219,7 +235,7 @@ export function App() {
     git: gitTab,
     compare: <StubSurface eyebrow="Compare" title="Multi-worktree compare" description="Routed surface reserved for pinned worktree panes and side-by-side terminal/output comparison without making renderer state authoritative." />,
     terminals: terminalsTab,
-    collaboration: <StubSurface eyebrow="Collaboration" title="Annotations and compiled responses" description="Routed surface reserved for Den-backed annotation sessions and compiled response review flows. No mock collaboration data is copied into production state." />,
+    collaboration: collaborationTab,
     settings: runtimeSettingsTab,
   };
 
