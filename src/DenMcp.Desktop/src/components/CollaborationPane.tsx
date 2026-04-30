@@ -169,8 +169,8 @@ interface SegmentRendererProps {
   annotations: DenCollaborationAnnotation[];
   sessionId: number;
   turnId: number;
-  onAddAnnotation: (type: DenCollaborationAnnotationType, body: string | null) => void;
-  onUpdateAnnotation: (annotation: DenCollaborationAnnotation, type: DenCollaborationAnnotationType, body: string | null) => void;
+  onAddAnnotation: (type: DenCollaborationAnnotationType, body: string | null) => Promise<void>;
+  onUpdateAnnotation: (annotation: DenCollaborationAnnotation, type: DenCollaborationAnnotationType, body: string | null) => Promise<void>;
   onDeleteAnnotation: (annotation: DenCollaborationAnnotation) => void;
 }
 
@@ -185,16 +185,28 @@ function SegmentRenderer({
   const [pendingType, setPendingType] = useState<DenCollaborationAnnotationType>('note');
   const [pendingBody, setPendingBody] = useState('');
   const [editingAnnotation, setEditingAnnotation] = useState<DenCollaborationAnnotation | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  const handleSave = useCallback(() => {
-    if (editingAnnotation) {
-      onUpdateAnnotation(editingAnnotation, pendingType, pendingBody || null);
-    } else {
-      onAddAnnotation(pendingType, pendingBody || null);
+  const handleSave = useCallback(async () => {
+    setSaveError(null);
+    setSaving(true);
+    try {
+      if (editingAnnotation) {
+        await onUpdateAnnotation(editingAnnotation, pendingType, pendingBody || null);
+      } else {
+        await onAddAnnotation(pendingType, pendingBody || null);
+      }
+      // Only clear/close the editor after async save succeeds
+      setEditing(false);
+      setEditingAnnotation(null);
+      setPendingBody('');
+    } catch (err) {
+      // Keep editor open with typed content on failure
+      setSaveError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
     }
-    setEditing(false);
-    setEditingAnnotation(null);
-    setPendingBody('');
   }, [editingAnnotation, pendingType, pendingBody, onAddAnnotation, onUpdateAnnotation]);
 
   const handleCancel = useCallback(() => {
@@ -202,6 +214,7 @@ function SegmentRenderer({
     setEditingAnnotation(null);
     setPendingBody('');
     setPendingType('note');
+    setSaveError(null);
   }, []);
 
   const handleOpenEdit = useCallback((ann: DenCollaborationAnnotation) => {
@@ -235,7 +248,7 @@ function SegmentRenderer({
       {!editing && (
         <button
           className="segment-annotate-hint"
-          onClick={() => { setEditing(true); setEditingAnnotation(null); setPendingBody(''); setPendingType('note'); }}
+          onClick={() => { setEditing(true); setEditingAnnotation(null); setPendingBody(''); setPendingType('note'); setSaveError(null); }}
           title="Annotate this segment"
         >
           + annotate
@@ -266,9 +279,10 @@ function SegmentRenderer({
               autoFocus
             />
           )}
+          {saveError && <p className="annotation-error">{saveError}</p>}
           <div className="annotation-actions">
-            <button className="annotation-cancel" onClick={handleCancel}>cancel</button>
-            <button className="annotation-save" onClick={handleSave}>save</button>
+            <button className="annotation-cancel" onClick={handleCancel} disabled={saving}>cancel</button>
+            <button className="annotation-save" onClick={handleSave} disabled={saving}>{saving ? 'saving...' : 'save'}</button>
           </div>
         </div>
       )}

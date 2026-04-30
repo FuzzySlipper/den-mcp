@@ -206,11 +206,13 @@ export function App() {
     </div>
   );
 
-  // Collaboration tab state
+  // Collaboration tab state — derive project/task context from active workspace snapshot
+  const collabProjectId = activeSnapshot?.scope.projectId ?? null;
+  const collabTaskId = activeSnapshot?.scope.taskId ?? null;
   const collaborationState = useCollaborationState(
     runtime.status?.denBaseUrl ?? null,
-    'den-mcp',
-    null,
+    collabProjectId,
+    collabTaskId,
   );
 
   const collaborationTab = (

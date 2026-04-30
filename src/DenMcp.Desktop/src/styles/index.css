@@ -770,6 +770,15 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid color-mix(i
 }
 .annotation-textarea:focus { border-color: var(--accent); }
 
+.annotation-error {
+  font-size: var(--fs-xs);
+  color: var(--st-err);
+  margin: var(--sp-1_5) 0 0;
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--st-err-bg);
+  border-radius: var(--r-1);
+}
+
 .annotation-actions {
   display: flex;
   justify-content: flex-end;
