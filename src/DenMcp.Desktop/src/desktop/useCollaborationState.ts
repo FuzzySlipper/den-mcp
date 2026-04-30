@@ -3,9 +3,7 @@ import {
   createDenCollaborationApi,
   type DenCollaborationAnnotation,
   type DenCollaborationAnnotationType,
-  type DenCollaborationSegment,
   type DenCollaborationSession,
-  type DenCollaborationSessionStatus,
   type DenCollaborationTurn,
   type DenCollaborationApi,
 } from './denCollaborationApi.ts';
@@ -159,6 +157,7 @@ export function useCollaborationState(
       if (mountedRef.current) {
         setError(err instanceof Error ? err.message : String(err));
       }
+      throw err;
     }
   }, [selectedSessionId, selectedTurn]);
 
@@ -177,6 +176,7 @@ export function useCollaborationState(
       }
     } catch (err) {
       if (mountedRef.current) setError(err instanceof Error ? err.message : String(err));
+      throw err;
     }
   }, [selectedSessionId]);
 
@@ -190,6 +190,7 @@ export function useCollaborationState(
       }
     } catch (err) {
       if (mountedRef.current) setError(err instanceof Error ? err.message : String(err));
+      throw err;
     }
   }, [selectedSessionId]);
 
