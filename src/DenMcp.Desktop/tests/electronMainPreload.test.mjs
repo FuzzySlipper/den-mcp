@@ -326,6 +326,21 @@ test('event subscription channel names follow the den-desktop:event prefix conve
   }
 });
 
+test('built Electron dev launch uses sandbox-compatible preload and relative Vite asset URLs', async () => {
+  const packageJsonPath = resolve(__dirname, '../package.json');
+  const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8'));
+  const electronBuildScript = packageJson.scripts['electron:build'];
+  assert.match(electronBuildScript, /--format=cjs --outfile=electron-dist\/preload\.cjs/);
+  assert.doesNotMatch(electronBuildScript, /preload\.mjs/);
+
+  const mainSource = await readFile(resolve(__dirname, '../src/electron/main.ts'), 'utf8');
+  assert.match(mainSource, /preload: path\.resolve\(__dirname, '\.\/preload\.cjs'\)/);
+  assert.doesNotMatch(mainSource, /preload\.mjs/);
+
+  const viteConfig = await readFile(resolve(__dirname, '../vite.config.ts'), 'utf8');
+  assert.match(viteConfig, /base:\s*'\.\/'/);
+});
+
 test('sidecar launch config builder produces safe command line without leaking auth token in args', async () => {
   // The buildDevSidecarLaunchConfig function is tested in sidecarProtocol.test.mjs,
   // but this test verifies the Electron-specific integration concern: the auth token

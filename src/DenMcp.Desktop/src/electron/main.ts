@@ -298,7 +298,7 @@ function createWindow(): BrowserWindow {
     minHeight: 720,
     title: 'Den Operator',
     webPreferences: {
-      preload: path.resolve(__dirname, './preload.mjs'),
+      preload: path.resolve(__dirname, './preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
