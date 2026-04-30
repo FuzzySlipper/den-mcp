@@ -197,9 +197,9 @@ export function App() {
     <div className="terminals-tab tab-stack">
       <section className="tab-intro panel surface-panel">
         <p className="eyebrow">Terminals</p>
-        <h2>Embedded terminals</h2>
+        <h2>Session overview and attach workflow</h2>
         <p className="muted">
-          Create app-owned direct PTY sessions for synced workspaces, attach with xterm.js, and keep controls behind OperatorSession capabilities.
+          Browse direct PTY, tmux-backed, and observed-only sessions; attach inline only when raw-stream capabilities are reported by the sidecar.
         </p>
       </section>
       <SessionPane snapshots={runtime.sessionSnapshots} workspaces={runtime.snapshots} />

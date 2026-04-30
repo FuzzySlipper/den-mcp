@@ -401,16 +401,31 @@ export interface TerminalSessionSummary {
   backend: string;
   status: string;
   current_command?: string | null;
+  agent_identity?: string | null;
+  role?: string | null;
   project_id?: string | null;
   task_id?: number | null;
   workspace_id?: string | null;
+  cwd?: string | null;
+  source_instance_id?: string | null;
+  source_display_name?: string | null;
   can_read_activity?: boolean;
   can_send_input?: boolean;
+  can_resize?: boolean;
   can_terminate?: boolean;
   can_attach?: boolean;
+  can_detach?: boolean;
+  can_reconnect?: boolean;
+  can_stream_terminal?: boolean;
   can_open_external_attach?: boolean;
   persistence_kind?: string | null;
   ownership_kind?: string | null;
+  created_at?: string | null;
+  last_observed_at?: string | null;
+  last_activity_at?: string | null;
+  exited_at?: string | null;
+  exit_code?: number | null;
+  warnings?: string[];
 }
 
 export interface TerminalCreateSessionRequest {
@@ -427,7 +442,7 @@ export interface TerminalListSessionsRequest { kind?: string | null; backend?: s
 export interface TerminalListSessionsResponse { sessions: TerminalSessionSummary[]; count: number; }
 export interface TerminalViewport { cols: number; rows: number; }
 export interface TerminalAttachRequest { session_id: string; mode?: string; viewport?: TerminalViewport | null; client_id?: string | null; replay?: { after_cursor?: string | null; max_bytes?: number; max_chunks?: number } | null; }
-export interface TerminalAttachResponse { stream_id: string; session_id: string; attached_at?: string; start_cursor?: string; replay_available_from?: string; replay_gap?: boolean; capabilities?: Record<string, boolean>; limits?: { ack_after_bytes?: number; output_chunk_max_bytes?: number; input_chunk_max_bytes?: number; heartbeat_interval_ms?: number }; }
+export interface TerminalAttachResponse { stream_id: string; session_id: string; attached_at?: string; start_cursor?: string; replay_available_from?: string; replay_gap?: boolean; capabilities?: Record<string, boolean>; limits?: { ack_after_bytes?: number; output_chunk_max_bytes?: number; input_chunk_max_bytes?: number; heartbeat_interval_ms?: number }; external_attach?: { available?: boolean; command?: string | null; description?: string | null } | null; }
 export interface TerminalDetachRequest { stream_id: string; session_id: string; reason?: string | null; }
 export interface TerminalDetachResponse { detached: boolean; backend_preserved: boolean; }
 export interface TerminalSendInputRequest { session_id: string; stream_id?: string | null; input_id?: string | null; encoding?: string; data: string; byte_count?: number; }

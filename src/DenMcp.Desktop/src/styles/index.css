@@ -425,9 +425,10 @@ kbd { border: var(--bw) solid var(--bd-default); border-bottom-color: var(--bd-s
 .pill, .status-pill, .count-pill, .publish-pill, .chip { display: inline-flex; align-items: center; gap: var(--sp-1); border-radius: 999px; padding: 0.28rem 0.62rem; font-family: var(--font-mono); font-size: var(--fs-3xs); font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; background: var(--bg-panel-2); color: var(--fg-secondary); border: var(--bw) solid var(--bd-default); }
 .chip.accent { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 35%, transparent); background: var(--accent-bg); }
 .status-connected, .status-ok, .status-ready, .status-running, .publish-published, .pill.ok { color: var(--st-ok); border-color: color-mix(in oklab, var(--st-ok) 45%, transparent); background: var(--st-ok-bg); }
-.status-unknown, .status-observed, .pill.idle { color: var(--st-info); border-color: color-mix(in oklab, var(--st-info) 40%, transparent); background: var(--st-info-bg); }
-.status-degraded, .status-path_not_visible, .status-not_git_repository, .status-stopped, .publish-queued, .pill.warn { color: var(--st-warn); border-color: color-mix(in oklab, var(--st-warn) 45%, transparent); background: var(--st-warn-bg); }
-.status-offline, .status-misconfigured, .status-git_error, .status-failed, .publish-failed, .pill.err { color: var(--st-err); border-color: color-mix(in oklab, var(--st-err) 45%, transparent); background: var(--st-err-bg); }
+.status-unknown, .status-observed, .status-info, .pill.idle { color: var(--st-info); border-color: color-mix(in oklab, var(--st-info) 40%, transparent); background: var(--st-info-bg); }
+.status-degraded, .status-path_not_visible, .status-not_git_repository, .status-stopped, .status-warn, .publish-queued, .pill.warn { color: var(--st-warn); border-color: color-mix(in oklab, var(--st-warn) 45%, transparent); background: var(--st-warn-bg); }
+.status-idle, .status-stale, .status-detached, .status-source_offline, .status-exited { color: var(--st-idle); border-color: color-mix(in oklab, var(--st-idle) 45%, transparent); background: var(--st-idle-bg); }
+.status-offline, .status-misconfigured, .status-git_error, .status-failed, .status-err, .publish-failed, .pill.err { color: var(--st-err); border-color: color-mix(in oklab, var(--st-err) 45%, transparent); background: var(--st-err-bg); }
 
 .content-grid, .operator-grid, .git-workbench-grid { display: grid; grid-template-columns: minmax(360px, 0.9fr) minmax(420px, 1.1fr); gap: var(--sp-4); }
 .operator-grid { grid-template-columns: minmax(320px, 0.8fr) minmax(460px, 1.2fr); }
@@ -925,50 +926,60 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid color-mix(i
   .desktop-shell { min-width: 0; min-height: 100vh; height: auto; }
   .shell-main { grid-template-columns: 1fr; }
   .left-rail { display: none; }
-  .content-grid, .operator-grid, .git-workbench-grid, .settings-form, .settings-grid { grid-template-columns: 1fr; }
-  .git-workbench-grid .diff-panel { position: static; }
+  .content-grid, .operator-grid, .git-workbench-grid, .terminal-workbench-grid, .terminal-create-strip, .settings-form, .settings-grid { grid-template-columns: 1fr; }
+  .git-workbench-grid .diff-panel, .terminal-attach-panel { position: static; }
   .titlebar { grid-template-columns: 1fr auto; }
   .titlebar-center { display: none; }
   .tabbar { overflow-x: auto; }
 }
 
-/* Direct PTY / xterm terminal workbench */
-.direct-terminal-workbench {
+/* Terminals tab overview / xterm attach workbench */
+.terminals-overview-panel { display: grid; gap: var(--sp-3); }
+.terminal-counts { display: flex; gap: var(--sp-2); flex-wrap: wrap; justify-content: flex-end; }
+.terminal-create-strip {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) auto;
+  gap: var(--sp-3);
+  align-items: end;
+  padding: var(--sp-3);
+  border: var(--bw) solid var(--bd-subtle);
+  border-radius: var(--r-lg);
+  background: var(--bg-input);
+}
+.terminal-create-strip label span { display: block; color: var(--fg-tertiary); font-size: var(--fs-xs); margin-bottom: var(--sp-1); }
+.terminal-workbench-grid { display: grid; grid-template-columns: minmax(420px, 0.95fr) minmax(520px, 1.05fr); gap: var(--sp-4); align-items: start; }
+.terminal-session-list { display: grid; gap: var(--sp-3); min-width: 0; }
+.terminal-session-card {
   display: grid;
   gap: var(--sp-2);
-  margin: var(--sp-3) 0;
-  padding: var(--sp-3);
-  border: var(--bw) solid var(--bd-default);
-  border-radius: var(--r-lg);
-  background: color-mix(in srgb, var(--bg-panel) 84%, #020617 16%);
-}
-.direct-terminal-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-2);
-  align-items: center;
-}
-.direct-terminal-toolbar select,
-.direct-terminal-toolbar button {
-  border: var(--bw) solid var(--bd-default);
-  border-radius: var(--r-md);
-  background: var(--bg-input);
+  text-align: left;
   color: var(--fg-primary);
-  font: inherit;
-  font-size: var(--fs-xs);
-  padding: var(--sp-1) var(--sp-2);
-}
-.direct-terminal-toolbar select {
-  min-width: min(360px, 100%);
-}
-.direct-terminal-toolbar button {
+  border: var(--bw) solid var(--bd-subtle);
+  border-radius: var(--r-xl);
+  background: linear-gradient(180deg, var(--bg-input), color-mix(in oklab, var(--bg-input) 78%, black 22%));
+  padding: var(--sp-4);
   cursor: pointer;
 }
-.direct-terminal-toolbar button:disabled,
-.direct-terminal-toolbar select:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+.terminal-session-card:hover { border-color: var(--bd-default); background: color-mix(in oklab, var(--bg-input) 84%, var(--bg-hover)); }
+.terminal-session-card.active { border-color: color-mix(in oklab, var(--accent) 72%, transparent); box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 20%, transparent), var(--shadow-md); }
+.terminal-session-card.calm { opacity: 0.9; }
+.terminal-card-topline { display: flex; justify-content: space-between; gap: var(--sp-3); align-items: flex-start; }
+.terminal-card-topline h3 { margin: 0; }
+.terminal-card-meta { margin: var(--sp-1) 0; }
+.terminal-capability-row { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.terminal-command-line { margin: 0; color: var(--fg-tertiary); font-family: var(--font-mono); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.terminal-warning-list { margin-top: var(--sp-1); }
+.terminal-card-activity { margin-top: var(--sp-1); }
+.terminal-card-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-2); }
+.terminal-card-actions button { padding: 0.45rem 0.65rem !important; font-size: var(--fs-xs); }
+.terminal-card-actions button:disabled { cursor: not-allowed; }
+.terminal-attach-panel { position: sticky; top: 0; display: grid; gap: var(--sp-3); min-width: 0; }
+.terminal-selected-meta { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); color: var(--fg-tertiary); }
+.terminal-selected-meta strong { color: var(--fg-primary); }
+.external-attach-box { display: grid; gap: var(--sp-2); border: var(--bw) solid var(--bd-default); border-radius: var(--r-lg); background: var(--bg-input); padding: var(--sp-3); }
+.external-attach-box p { margin: var(--sp-1) 0 0; color: var(--fg-tertiary); }
+.external-attach-box code { display: block; overflow-x: auto; border: var(--bw) solid var(--bd-subtle); border-radius: var(--r-md); padding: var(--sp-2); color: var(--accent); background: color-mix(in oklab, var(--bg-app) 85%, black 15%); font-family: var(--font-mono); }
+.calm-state { background: color-mix(in oklab, var(--bg-input) 88%, transparent); }
 .terminal-state-line {
   display: flex;
   flex-wrap: wrap;

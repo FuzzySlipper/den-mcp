@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { KeyboardEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
@@ -26,7 +26,13 @@ import {
   TerminalSessionSummary,
   TerminalStatusEvent,
 } from '../desktop/tauriApi';
-import { capabilitySummary, isSessionIdle, phaseLabel, recentActivityItems, sessionKey, sessionTitle } from '../sessionView';
+import {
+  buildTerminalSessionOverview,
+  canAttachInline,
+  relativeActivityLabel,
+  terminalStatusLabel,
+  type TerminalOverviewSession,
+} from '../terminalSessionView';
 
 interface Props {
   snapshots: LocalSessionSnapshot[];
@@ -41,43 +47,29 @@ interface TerminalAttachState {
   unackedBytes: number;
   status: string;
   message: string | null;
+  canSendInput: boolean;
+  canResize: boolean;
+  canDetach: boolean;
+  canTerminate: boolean;
+}
+
+interface ExternalAttachState {
+  sessionId: string;
+  command: string | null;
+  description: string | null;
+  copied: boolean;
 }
 
 export function SessionPane({ snapshots, workspaces = [] }: Props) {
-  const sorted = [...snapshots].sort((a, b) => b.request.observed_at.localeCompare(a.request.observed_at));
-
-  return (
-    <section className="panel session-panel">
-      <div className="panel-heading">
-        <div>
-          <p className="eyebrow">Terminal/session control</p>
-          <h2>Operator sessions</h2>
-        </div>
-        <span className="count-pill">{snapshots.length}</span>
-      </div>
-      <p className="muted">
-        Direct PTY sessions are app-owned by the .NET sidecar and rendered locally with xterm.js. Raw terminal bytes stay on the local bridge.
-      </p>
-      <DirectTerminalWorkbench workspaces={workspaces} />
-      {sorted.length === 0 ? (
-        <div className="empty-state">
-          <strong>No published session snapshots observed yet.</strong>
-          <p>Create a direct PTY below or run Pi/sub-agent work under a synced project to populate this list.</p>
-        </div>
-      ) : (
-        <div className="session-card-list">
-          {sorted.slice(0, 12).map((snapshot) => <SessionCard key={sessionKey(snapshot)} snapshot={snapshot} />)}
-        </div>
-      )}
-    </section>
-  );
+  return <TerminalOverviewWorkbench snapshots={snapshots} workspaces={workspaces} />;
 }
 
-function DirectTerminalWorkbench({ workspaces }: { workspaces: LocalGitSnapshot[] }) {
+function TerminalOverviewWorkbench({ snapshots, workspaces = [] }: Props) {
   const [sessions, setSessions] = useState<TerminalSessionSummary[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [selectedWorkspaceKey, setSelectedWorkspaceKey] = useState<string>('');
   const [attach, setAttach] = useState<TerminalAttachState | null>(null);
+  const [externalAttach, setExternalAttach] = useState<ExternalAttachState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const terminalHostRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -96,10 +88,21 @@ function DirectTerminalWorkbench({ workspaces }: { workspaces: LocalGitSnapshot[
     if (!selectedWorkspaceKey && scopes.length > 0) setSelectedWorkspaceKey(scopes[0].key);
   }, [scopes, selectedWorkspaceKey]);
 
+  const overview = useMemo(() => buildTerminalSessionOverview(sessions, snapshots), [sessions, snapshots]);
+  const selectedOverview = overview.find((session) => session.sessionId === selectedSessionId) ?? overview[0] ?? null;
+  const selectedScope = scopes.find((scope) => scope.key === selectedWorkspaceKey)?.snapshot ?? scopes[0]?.snapshot ?? null;
+
+  useEffect(() => {
+    if (!selectedSessionId && overview.length > 0) {
+      setSelectedSessionId(overview[0].sessionId);
+    } else if (selectedSessionId && overview.length > 0 && !overview.some((session) => session.sessionId === selectedSessionId)) {
+      setSelectedSessionId(overview[0].sessionId);
+    }
+  }, [overview, selectedSessionId]);
+
   const refreshSessions = useCallback(async () => {
-    const response = await terminalListSessions({ kind: 'terminal' });
+    const response = await terminalListSessions();
     setSessions(response.sessions);
-    setSelectedSessionId((current) => current ?? response.sessions.find((session) => session.backend === 'direct_pty')?.session_id ?? null);
   }, []);
 
   useEffect(() => {
@@ -136,6 +139,7 @@ function DirectTerminalWorkbench({ workspaces }: { workspaces: LocalGitSnapshot[
 
     void onTerminalStatus((event: TerminalStatusEvent) => {
       setAttach((prev) => prev && prev.sessionId === event.session_id ? { ...prev, status: event.status ?? prev.status } : prev);
+      void refreshSessions().catch(() => undefined);
     }).then((dispose) => { if (disposed) dispose(); else disposers.push(dispose); }).catch((err) => setError(errorMessage(err)));
 
     void onTerminalLifecycle((event: TerminalLifecycleEvent) => {
@@ -145,6 +149,7 @@ function DirectTerminalWorkbench({ workspaces }: { workspaces: LocalGitSnapshot[
         lastCursor: event.stream_cursor ?? prev.lastCursor,
         message: event.message ?? event.reason ?? (event.replay_gap ? 'replay gap detected' : prev.message),
       } : prev);
+      void refreshSessions().catch(() => undefined);
     }).then((dispose) => { if (disposed) dispose(); else disposers.push(dispose); }).catch((err) => setError(errorMessage(err)));
 
     void onTerminalBackpressure((event: TerminalBackpressureEvent) => {
@@ -161,10 +166,7 @@ function DirectTerminalWorkbench({ workspaces }: { workspaces: LocalGitSnapshot[
     }).then((dispose) => { if (disposed) dispose(); else disposers.push(dispose); }).catch((err) => setError(errorMessage(err)));
 
     return () => { disposed = true; disposers.forEach((dispose) => dispose()); };
-  }, []);
-
-  const selectedSession = sessions.find((session) => session.session_id === selectedSessionId) ?? null;
-  const selectedScope = scopes.find((scope) => scope.key === selectedWorkspaceKey)?.snapshot ?? scopes[0]?.snapshot ?? null;
+  }, [refreshSessions]);
 
   const ensureTerminal = useCallback(() => {
     if (terminalRef.current || !terminalHostRef.current) return terminalRef.current;
@@ -174,7 +176,7 @@ function DirectTerminalWorkbench({ workspaces }: { workspaces: LocalGitSnapshot[
     terminal.open(terminalHostRef.current);
     terminal.onData((data) => {
       const current = attachRef.current;
-      if (!current || current.status === 'exited' || current.status === 'failed') return;
+      if (!current || !current.canSendInput || current.status === 'exited' || current.status === 'failed') return;
       void terminalSendInput({ session_id: current.sessionId, stream_id: current.streamId, data, byte_count: new TextEncoder().encode(data).length })
         .catch((err) => setError(errorMessage(err)));
     });
@@ -185,16 +187,26 @@ function DirectTerminalWorkbench({ workspaces }: { workspaces: LocalGitSnapshot[
   }, []);
 
   const attachToSession = useCallback(async (sessionId: string, reconnect = false) => {
+    const target = overview.find((session) => session.sessionId === sessionId);
+    if (target && !canAttachInline(target)) {
+      setSelectedSessionId(sessionId);
+      setError('This session is read-only or does not expose a raw terminal stream.');
+      return;
+    }
+    setSelectedSessionId(sessionId);
+    setExternalAttach(null);
     setError(null);
     const terminal = ensureTerminal();
     if (!terminal) return;
+    terminal.clear();
     fitRef.current?.fit();
     const viewport = { cols: terminal.cols || 120, rows: terminal.rows || 32 };
+    const previous = attachRef.current;
     let response: TerminalAttachResponse;
-    if (reconnect && attachRef.current?.lastCursor) {
-      response = await terminalReconnect({ session_id: sessionId, previous_stream_id: attachRef.current.streamId, last_seen_cursor: attachRef.current.lastCursor, viewport });
+    if (reconnect && previous?.lastCursor && previous.sessionId === sessionId) {
+      response = await terminalReconnect({ session_id: sessionId, previous_stream_id: previous.streamId, last_seen_cursor: previous.lastCursor, viewport });
     } else {
-      response = await terminalAttach({ session_id: sessionId, mode: 'terminal_stream', viewport, replay: { after_cursor: attachRef.current?.lastCursor ?? null, max_bytes: 262144, max_chunks: 200 }, client_id: 'den-desktop-renderer' });
+      response = await terminalAttach({ session_id: sessionId, mode: 'terminal_stream', viewport, replay: { after_cursor: previous?.sessionId === sessionId ? previous.lastCursor : null, max_bytes: 262144, max_chunks: 200 }, client_id: 'den-desktop-renderer' });
     }
     setAttach({
       sessionId,
@@ -204,9 +216,31 @@ function DirectTerminalWorkbench({ workspaces }: { workspaces: LocalGitSnapshot[
       unackedBytes: 0,
       status: 'attached',
       message: response.replay_gap ? 'replay gap detected; showing latest bounded tail' : null,
+      canSendInput: response.capabilities?.can_send_input ?? target?.capabilities.canSendInput ?? false,
+      canResize: response.capabilities?.can_resize ?? target?.capabilities.canResize ?? false,
+      canDetach: response.capabilities?.can_detach ?? target?.capabilities.canDetach ?? false,
+      canTerminate: response.capabilities?.can_terminate ?? target?.capabilities.canTerminate ?? false,
     });
+    await refreshSessions();
     terminal.focus();
-  }, [ensureTerminal]);
+  }, [ensureTerminal, overview, refreshSessions]);
+
+  const requestExternalAttach = useCallback(async (session: TerminalOverviewSession) => {
+    setSelectedSessionId(session.sessionId);
+    setExternalAttach(null);
+    setError(null);
+    try {
+      const response = await terminalAttach({ session_id: session.sessionId, mode: 'external_attach_info', client_id: 'den-desktop-renderer' });
+      setExternalAttach({
+        sessionId: session.sessionId,
+        command: response.external_attach?.command ?? null,
+        description: response.external_attach?.description ?? 'External attach information was requested from the sidecar.',
+        copied: false,
+      });
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }, []);
 
   const createDirectPty = useCallback(async () => {
     if (!selectedScope) {
@@ -232,13 +266,20 @@ function DirectTerminalWorkbench({ workspaces }: { workspaces: LocalGitSnapshot[
     if (!current) return;
     await terminalDetach({ session_id: current.sessionId, stream_id: current.streamId, reason: 'operator_detached' });
     setAttach(null);
-  }, []);
+    await refreshSessions();
+  }, [refreshSessions]);
 
-  const terminateCurrent = useCallback(async () => {
+  const terminateSession = useCallback(async (sessionId: string) => {
     const current = attachRef.current;
-    if (!current) return;
-    await terminalTerminate({ session_id: current.sessionId, stream_id: current.streamId, mode: 'graceful', reason: 'operator_requested', requested_by: 'desktop_renderer' });
-  }, []);
+    await terminalTerminate({ session_id: sessionId, stream_id: current?.sessionId === sessionId ? current.streamId : null, mode: 'graceful', reason: 'operator_requested', requested_by: 'desktop_renderer' });
+    await refreshSessions();
+  }, [refreshSessions]);
+
+  const copyExternalCommand = useCallback(async () => {
+    if (!externalAttach?.command || typeof navigator === 'undefined' || !navigator.clipboard) return;
+    await navigator.clipboard.writeText(externalAttach.command);
+    setExternalAttach((current) => current ? { ...current, copied: true } : current);
+  }, [externalAttach]);
 
   useEffect(() => {
     if (!terminalHostRef.current) return;
@@ -246,7 +287,7 @@ function DirectTerminalWorkbench({ workspaces }: { workspaces: LocalGitSnapshot[
       if (!fitRef.current || !terminalRef.current) return;
       fitRef.current.fit();
       const current = attachRef.current;
-      if (!current) return;
+      if (!current || !current.canResize) return;
       void terminalResize({ session_id: current.sessionId, stream_id: current.streamId, cols: terminalRef.current.cols, rows: terminalRef.current.rows }).catch(() => undefined);
     });
     observer.observe(terminalHostRef.current);
@@ -256,73 +297,200 @@ function DirectTerminalWorkbench({ workspaces }: { workspaces: LocalGitSnapshot[
   useEffect(() => () => { terminalRef.current?.dispose(); }, []);
 
   return (
-    <div className="direct-terminal-workbench">
-      <div className="direct-terminal-toolbar">
-        <select value={selectedWorkspaceKey} onChange={(event) => setSelectedWorkspaceKey(event.target.value)} aria-label="Direct terminal workspace">
-          {scopes.length === 0 ? <option value="">No synced git workspace</option> : scopes.map((scope) => <option key={scope.key} value={scope.key}>{scope.label}</option>)}
-        </select>
+    <section className="panel session-panel terminals-overview-panel">
+      <div className="panel-heading">
+        <div>
+          <p className="eyebrow">Terminal/session control</p>
+          <h2>Operator sessions</h2>
+        </div>
+        <div className="terminal-counts">
+          <span className="count-pill">{overview.length} sessions</span>
+          <span className="count-pill">{overview.filter((session) => canAttachInline(session)).length} raw streams</span>
+        </div>
+      </div>
+      <p className="muted">
+        Overview-first control surface for direct PTY, tmux-backed, and observed-only sessions. Controls stay disabled unless the sidecar reports the matching OperatorSession capability.
+      </p>
+
+      <div className="terminal-create-strip">
+        <label>
+          <span>New direct PTY workspace</span>
+          <select value={selectedWorkspaceKey} onChange={(event) => setSelectedWorkspaceKey(event.target.value)} aria-label="Direct terminal workspace">
+            {scopes.length === 0 ? <option value="">No synced git workspace</option> : scopes.map((scope) => <option key={scope.key} value={scope.key}>{scope.label}</option>)}
+          </select>
+        </label>
         <button type="button" onClick={() => void createDirectPty()} disabled={!selectedScope}>New direct PTY</button>
-        <select value={selectedSessionId ?? ''} onChange={(event) => setSelectedSessionId(event.target.value || null)} aria-label="Operator session">
-          <option value="">Select session…</option>
-          {sessions.map((session) => <option key={session.session_id} value={session.session_id}>{session.display_name ?? session.title ?? session.session_id} · {session.backend} · {session.status}</option>)}
-        </select>
-        <button type="button" onClick={() => selectedSession && void attachToSession(selectedSession.session_id)} disabled={!selectedSession || !selectedSession.can_attach}>Attach</button>
-        <button type="button" onClick={() => attach && void attachToSession(attach.sessionId, true)} disabled={!attach}>Reconnect</button>
-        <button type="button" onClick={() => void detachCurrent()} disabled={!attach}>Detach</button>
-        <button type="button" onClick={() => void terminateCurrent()} disabled={!attach}>Terminate</button>
       </div>
-      <div className="terminal-state-line">
-        <span>{attach ? `stream ${attach.streamId.slice(0, 16)} · ${attach.status}` : 'no attached terminal stream'}</span>
-        {attach?.message ? <strong>{attach.message}</strong> : null}
-        {error ? <strong className="terminal-error">{error}</strong> : null}
+
+      <div className="terminal-workbench-grid">
+        <div className="terminal-session-list" aria-label="Known operator sessions">
+          {overview.length === 0 ? (
+            <div className="empty-state">
+              <strong>No known sessions observed yet.</strong>
+              <p>Create a direct PTY or run Pi/sub-agent work under a synced project to populate this list.</p>
+            </div>
+          ) : overview.map((session) => (
+            <TerminalSessionCard
+              key={session.key}
+              session={session}
+              active={session.sessionId === selectedOverview?.sessionId}
+              attached={attach?.sessionId === session.sessionId}
+              onSelect={() => setSelectedSessionId(session.sessionId)}
+              onAttach={() => void attachToSession(session.sessionId)}
+              onReconnect={() => void attachToSession(session.sessionId, true)}
+              onDetach={() => void detachCurrent()}
+              onTerminate={() => void terminateSession(session.sessionId).catch((err) => setError(errorMessage(err)))}
+              onExternalAttach={() => void requestExternalAttach(session)}
+            />
+          ))}
+        </div>
+
+        <aside className="terminal-attach-panel panel surface-panel" aria-live="polite">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">Inline attach</p>
+              <h2>{selectedOverview?.displayName ?? 'No session selected'}</h2>
+            </div>
+            {selectedOverview ? <span className={`status-pill status-${selectedOverview.statusTone}`}>{terminalStatusLabel(selectedOverview.status)}</span> : null}
+          </div>
+
+          {selectedOverview ? (
+            <div className="terminal-selected-meta">
+              <span>project <strong>{selectedOverview.projectId ?? '—'}</strong></span>
+              <span>task <strong>{selectedOverview.taskId ? `#${selectedOverview.taskId}` : '—'}</strong></span>
+              <span>workspace <strong>{selectedOverview.workspaceId ?? '—'}</strong></span>
+              <span>backend <strong>{selectedOverview.backend}</strong></span>
+              <span>last activity <strong>{relativeActivityLabel(selectedOverview.lastActivityAt ?? selectedOverview.lastObservedAt)}</strong></span>
+              <span>authority <strong>{selectedOverview.authority === 'local' ? 'local sidecar' : 'observed only'}</strong></span>
+            </div>
+          ) : null}
+
+          <div className="terminal-state-line">
+            <span>{attach ? `stream ${attach.streamId.slice(0, 16)} · ${attach.status}` : 'no attached terminal stream'}</span>
+            {attach?.message ? <strong>{attach.message}</strong> : null}
+            {error ? <strong className="terminal-error">{error}</strong> : null}
+          </div>
+
+          {externalAttach ? (
+            <div className="external-attach-box">
+              <div>
+                <strong>External attach command</strong>
+                <p>{externalAttach.description ?? 'Copy this opaque command into a trusted terminal.'}</p>
+              </div>
+              {externalAttach.command ? <code>{externalAttach.command}</code> : <span className="muted">No external command returned for this session.</span>}
+              <button type="button" className="secondary" onClick={() => void copyExternalCommand()} disabled={!externalAttach.command}>{externalAttach.copied ? 'Copied' : 'Copy command'}</button>
+            </div>
+          ) : null}
+
+          {selectedOverview && !canAttachInline(selectedOverview) ? (
+            <div className="empty-state calm-state">
+              <strong>{selectedOverview.readOnly ? 'Read-only observed session' : 'No raw terminal stream'}</strong>
+              <p>
+                {selectedOverview.readOnly
+                  ? 'This Pi artifact/session observation is preserved for context and structured activity, but direct PTY controls are intentionally unavailable.'
+                  : 'The sidecar did not report both can_attach and can_stream_terminal, so inline xterm attach remains disabled.'}
+              </p>
+            </div>
+          ) : null}
+
+          <div className="xterm-shell" ref={terminalHostRef} />
+        </aside>
       </div>
-      <div className="xterm-shell" ref={terminalHostRef} />
-    </div>
+    </section>
   );
 }
 
-function SessionCard({ snapshot }: { snapshot: LocalSessionSnapshot }) {
-  const activity = recentActivityItems(snapshot);
-  const idle = isSessionIdle(snapshot);
+function TerminalSessionCard({
+  session,
+  active,
+  attached,
+  onSelect,
+  onAttach,
+  onReconnect,
+  onDetach,
+  onTerminate,
+  onExternalAttach,
+}: {
+  session: TerminalOverviewSession;
+  active: boolean;
+  attached: boolean;
+  onSelect: () => void;
+  onAttach: () => void;
+  onReconnect: () => void;
+  onDetach: () => void;
+  onTerminate: () => void;
+  onExternalAttach: () => void;
+}) {
+  const inlineAttach = canAttachInline(session);
+  const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    if (inlineAttach) onAttach();
+    else onSelect();
+  };
+  const stop = (event: MouseEvent<HTMLButtonElement>) => event.stopPropagation();
+
   return (
-    <article className={`session-card ${idle ? 'session-idle' : ''}`}>
-      <div className="snapshot-topline">
+    <article
+      className={`terminal-session-card ${active ? 'active' : ''} ${session.stale ? 'calm' : ''}`}
+      role="button"
+      tabIndex={0}
+      onClick={() => { inlineAttach ? onAttach() : onSelect(); }}
+      onKeyDown={handleKeyDown}
+      aria-pressed={active}
+      aria-label={`${session.displayName}, ${terminalStatusLabel(session.status)}, ${inlineAttach ? 'attachable' : 'read only'}`}
+    >
+      <div className="terminal-card-topline">
         <div>
-          <h3>{sessionTitle(snapshot)}</h3>
-          <p className="path-line">{snapshot.request.cwd ?? snapshot.artifactRoot ?? 'session root unknown'}</p>
+          <h3>{session.displayName}</h3>
+          <p className="path-line">{session.cwd ?? 'session root unknown'}</p>
         </div>
         <div className="pill-stack">
-          <span className={`status-pill status-${snapshot.request.status ?? snapshot.request.current_phase ?? 'observed'}`}>{phaseLabel(snapshot.request.status ?? snapshot.request.current_phase)}</span>
-          <span className={`publish-pill publish-${snapshot.lastPublishStatus}`}>{snapshot.lastPublishStatus}</span>
+          {attached ? <span className="chip accent">attached</span> : null}
+          {session.readOnly ? <span className="chip">read-only</span> : null}
+          <span className={`status-pill status-${session.statusTone}`}>{terminalStatusLabel(session.status)}</span>
         </div>
       </div>
 
-      <div className="snapshot-meta">
-        <span>project <strong>{snapshot.projectId}</strong></span>
-        <span>workspace <strong>{snapshot.request.workspace_id ?? '—'}</strong></span>
-        <span>backend <strong>{snapshot.request.backend ?? '—'}</strong></span>
-        <span>command <strong>{snapshot.request.current_command ?? '—'}</strong></span>
-        <span>capabilities <strong>{capabilitySummary(snapshot)}</strong></span>
-        <span>observed <strong>{new Date(snapshot.request.observed_at).toLocaleTimeString()}</strong></span>
+      <div className="snapshot-meta terminal-card-meta">
+        <span>project <strong>{session.projectId ?? '—'}</strong></span>
+        <span>task <strong>{session.taskId ? `#${session.taskId}` : '—'}</strong></span>
+        <span>workspace <strong>{session.workspaceId ?? '—'}</strong></span>
+        <span>backend <strong>{session.backend}</strong></span>
+        <span>kind <strong>{session.kind}</strong></span>
+        <span>last activity <strong>{relativeActivityLabel(session.lastActivityAt ?? session.lastObservedAt)}</strong></span>
       </div>
 
-      {snapshot.request.warnings.length > 0 && (
-        <ul className="warning-list">
-          {snapshot.request.warnings.map((warning, index) => <li key={`${warning}:${index}`}>{warning}</li>)}
-        </ul>
-      )}
-      {snapshot.lastPublishError && <p className="error-note">{snapshot.lastPublishError}</p>}
+      <div className="terminal-capability-row">
+        {session.capabilityLabels.map((label) => <span key={label} className="chip">{label}</span>)}
+      </div>
 
-      {activity.length > 0 && (
-        <ol className="activity-list">
-          {activity.map((item, index) => (
+      {session.currentCommand ? <p className="terminal-command-line">{session.currentCommand}</p> : null}
+
+      {session.warnings.length > 0 ? (
+        <ul className="warning-list terminal-warning-list">
+          {session.warnings.map((warning, index) => <li key={`${warning}:${index}`}>{warning}</li>)}
+        </ul>
+      ) : null}
+
+      {session.recentActivity.length > 0 ? (
+        <ol className="activity-list terminal-card-activity">
+          {session.recentActivity.slice(0, 2).map((item, index) => (
             <li key={`${item.timestamp ?? index}:${item.summary ?? item.tool ?? item.kind}`}>
               <span>{item.kind ?? item.role ?? 'activity'}</span>
               <p>{item.tool ? `${item.tool}: ` : ''}{item.summary ?? 'activity observed'}</p>
             </li>
           ))}
         </ol>
-      )}
+      ) : null}
+
+      <div className="terminal-card-actions">
+        <button type="button" onClick={(event) => { stop(event); onAttach(); }} disabled={!inlineAttach}>Attach inline</button>
+        <button type="button" className="secondary" onClick={(event) => { stop(event); onReconnect(); }} disabled={!attached || !session.capabilities.canReconnect}>Reconnect</button>
+        <button type="button" className="secondary" onClick={(event) => { stop(event); onDetach(); }} disabled={!attached || !session.capabilities.canDetach}>Detach</button>
+        <button type="button" className="secondary" onClick={(event) => { stop(event); onTerminate(); }} disabled={!session.capabilities.canTerminate}>Terminate</button>
+        <button type="button" className="secondary" onClick={(event) => { stop(event); onExternalAttach(); }} disabled={!session.capabilities.canOpenExternalAttach}>External attach</button>
+      </div>
     </article>
   );
 }

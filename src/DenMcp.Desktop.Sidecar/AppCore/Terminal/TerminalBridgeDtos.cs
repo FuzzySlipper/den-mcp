@@ -475,17 +475,38 @@ public sealed record TerminalSessionSummary
     [JsonPropertyName("workspace_id")]
     public string? WorkspaceId { get; init; }
 
+    [JsonPropertyName("cwd")]
+    public string? Cwd { get; init; }
+
+    [JsonPropertyName("source_instance_id")]
+    public string? SourceInstanceId { get; init; }
+
+    [JsonPropertyName("source_display_name")]
+    public string? SourceDisplayName { get; init; }
+
     [JsonPropertyName("can_read_activity")]
     public bool CanReadActivity { get; init; }
 
     [JsonPropertyName("can_send_input")]
     public bool CanSendInput { get; init; }
 
+    [JsonPropertyName("can_resize")]
+    public bool CanResize { get; init; }
+
     [JsonPropertyName("can_terminate")]
     public bool CanTerminate { get; init; }
 
     [JsonPropertyName("can_attach")]
     public bool CanAttach { get; init; }
+
+    [JsonPropertyName("can_detach")]
+    public bool CanDetach { get; init; }
+
+    [JsonPropertyName("can_reconnect")]
+    public bool CanReconnect { get; init; }
+
+    [JsonPropertyName("can_stream_terminal")]
+    public bool CanStreamTerminal { get; init; }
 
     [JsonPropertyName("can_open_external_attach")]
     public bool CanOpenExternalAttach { get; init; }
@@ -499,6 +520,9 @@ public sealed record TerminalSessionSummary
     [JsonPropertyName("created_at")]
     public string? CreatedAt { get; init; }
 
+    [JsonPropertyName("last_observed_at")]
+    public string? LastObservedAt { get; init; }
+
     [JsonPropertyName("last_activity_at")]
     public string? LastActivityAt { get; init; }
 
@@ -507,6 +531,9 @@ public sealed record TerminalSessionSummary
 
     [JsonPropertyName("exit_code")]
     public int? ExitCode { get; init; }
+
+    [JsonPropertyName("warnings")]
+    public IReadOnlyList<string> Warnings { get; init; } = [];
 }
 
 // ── Session status/capability changed event ───────────────────────────────

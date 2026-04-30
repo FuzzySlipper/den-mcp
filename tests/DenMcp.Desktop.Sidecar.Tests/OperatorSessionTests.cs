@@ -855,9 +855,16 @@ public class TerminalBridgeDtosSerializationTests
                     Kind = "terminal",
                     Backend = "direct_pty",
                     Status = "running",
+                    Cwd = "/work/den-mcp",
+                    SourceInstanceId = "desktop-1",
                     CanReadActivity = true,
                     CanSendInput = true,
+                    CanResize = true,
                     CanAttach = true,
+                    CanDetach = true,
+                    CanReconnect = true,
+                    CanStreamTerminal = true,
+                    Warnings = ["watching"],
                 },
             ],
             Count = 1,
@@ -866,6 +873,9 @@ public class TerminalBridgeDtosSerializationTests
         var json = BridgeJson.Serialize(response);
         Assert.Contains("pty:test-1", json, StringComparison.Ordinal);
         Assert.Contains("direct_pty", json, StringComparison.Ordinal);
+        Assert.Contains("\"can_stream_terminal\":true", json, StringComparison.Ordinal);
+        Assert.Contains("/work/den-mcp", json, StringComparison.Ordinal);
+        Assert.Contains("watching", json, StringComparison.Ordinal);
     }
 
     [Fact]
