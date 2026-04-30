@@ -31,6 +31,7 @@ import { sidecarCommands, sidecarEvents } from './sidecarProtocol.ts';
 import { createDenDesktopSidecarApi, type DenDesktopSidecarApi } from './preloadSidecarApi.ts';
 import { createSidecarBridgeTransport } from './sidecarBridgeConnection.ts';
 import { resolveRendererLoadTarget } from './rendererLoadMode.ts';
+import { assertAllowedSidecarCallMethod, assertAllowedSidecarSubscriptionEvent } from './ipcAllowList.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -207,36 +208,38 @@ async function connectBridge(): Promise<void> {
 function setupIpcBridge(): void {
   // Command dispatch: renderer calls 'den-desktop:sidecar-call' with method name + args
   ipcMain.handle(IPC_SIDECAR_CALL, async (_event, method: string, ...args: unknown[]) => {
+    const allowedMethod = assertAllowedSidecarCallMethod(method);
     if (!sidecarApi) {
       throw new Error('Sidecar bridge is not connected.');
     }
 
-    const apiMethod = (sidecarApi as any)[method];
+    const apiMethod = sidecarApi[allowedMethod];
     if (typeof apiMethod !== 'function') {
-      throw new Error(`Unknown sidecar method '${method}'.`);
+      throw new Error(`Allowed sidecar method '${allowedMethod}' is unavailable.`);
     }
 
-    return await apiMethod(...args);
+    return await (apiMethod as (...methodArgs: unknown[]) => Promise<unknown>)(...args);
   });
 
   // Event subscription: renderer requests subscription to an event channel.
   // The returned subscriptionId is used by the renderer to unsubscribe later.
   ipcMain.handle(IPC_SIDECAR_SUBSCRIBE, async (_event, eventName: string) => {
+    const allowedEventName = assertAllowedSidecarSubscriptionEvent(eventName);
     if (!sidecarApi) {
       throw new Error('Sidecar bridge is not connected.');
     }
 
-    const subscriptionMethod = `on${eventName.charAt(0).toUpperCase()}${eventName.slice(1)}`;
-    const apiMethod = (sidecarApi as any)[subscriptionMethod];
+    const subscriptionMethod = `on${allowedEventName.charAt(0).toUpperCase()}${allowedEventName.slice(1)}` as keyof DenDesktopSidecarApi;
+    const apiMethod = sidecarApi[subscriptionMethod];
     if (typeof apiMethod !== 'function') {
-      throw new Error(`Unknown sidecar event subscription '${eventName}'.`);
+      throw new Error(`Allowed sidecar event subscription '${allowedEventName}' is unavailable.`);
     }
 
-    const subscriptionId = `${eventName}:${Date.now().toString(36)}`;
+    const subscriptionId = `${allowedEventName}:${Date.now().toString(36)}`;
 
-    const unsubscribe = apiMethod((payload: unknown) => {
+    const unsubscribe = (apiMethod as (listener: (payload: unknown) => void) => () => void)((payload: unknown) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send(`den-desktop:event:${eventName}`, payload);
+        mainWindow.webContents.send(`den-desktop:event:${allowedEventName}`, payload);
       }
     });
 

@@ -267,6 +267,29 @@ test('preload API does not expose raw token or sidecar URL in method arguments o
   }, /read only|cannot assign|extensible/i);
 });
 
+test('main process sidecar IPC allow-list accepts known methods and rejects unknown methods', async () => {
+  const {
+    allowedSidecarCallMethods,
+    allowedSidecarSubscriptionEvents,
+    assertAllowedSidecarCallMethod,
+    assertAllowedSidecarSubscriptionEvent,
+  } = await import('../src/electron/ipcAllowList.ts');
+
+  assert.ok(allowedSidecarCallMethods.includes('getHealth'));
+  assert.ok(allowedSidecarCallMethods.includes('terminalAttach'));
+  assert.ok(!allowedSidecarCallMethods.includes('dispatch'));
+  assert.ok(!allowedSidecarCallMethods.includes('then'));
+  assert.equal(assertAllowedSidecarCallMethod('getHealth'), 'getHealth');
+  assert.throws(() => assertAllowedSidecarCallMethod('dispatch'), /Unknown sidecar method 'dispatch'/);
+  assert.throws(() => assertAllowedSidecarCallMethod('__proto__'), /Unknown sidecar method '__proto__'/);
+  assert.throws(() => assertAllowedSidecarCallMethod(42), /Unknown sidecar method '42'/);
+
+  assert.ok(allowedSidecarSubscriptionEvents.includes('terminalOutput'));
+  assert.ok(!allowedSidecarSubscriptionEvents.includes('dispatch'));
+  assert.equal(assertAllowedSidecarSubscriptionEvent('terminalOutput'), 'terminalOutput');
+  assert.throws(() => assertAllowedSidecarSubscriptionEvent('dispatch'), /Unknown sidecar event subscription 'dispatch'/);
+});
+
 test('main process IPC bridge channel names are deterministic and scoped', () => {
   // Verify the IPC channel names used in the main/preload contract
   const expectedChannels = [
