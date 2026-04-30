@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Den.Bridge.Abstractions;
 using Den.Bridge.Protocol;
 using DenMcp.Desktop.Sidecar;
@@ -112,6 +113,52 @@ public class DesktopSidecarBridgeTests
         Assert.Equal(DesktopSidecarProtocol.SessionSnapshotEvent, fixture.Frames.SessionSnapshotEvent.Event);
         Assert.Contains(DesktopSidecarProtocol.GetOperatorStatusCommand, json, StringComparison.Ordinal);
         Assert.Contains(DesktopSidecarProtocol.OperatorStatusEvent, json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SchemaBundle_TerminalResponseSchemasHavePropertyDefinitions()
+    {
+        using var provider = DesktopSidecarBridge.CreateServiceProvider(DesktopSidecarFixtures.CreateFixtureOptions());
+        var bundle = DesktopSidecarBridge.CreateSchemaBundle(provider);
+
+        // All terminal command response schemas must define properties (not empty objects)
+        var terminalResponseSuffixes = new[]
+        {
+            DesktopSidecarProtocol.TerminalListSessionsCommand + ".response",
+            DesktopSidecarProtocol.TerminalReadActivityCommand + ".response",
+            DesktopSidecarProtocol.TerminalAttachCommand + ".response",
+            DesktopSidecarProtocol.TerminalDetachCommand + ".response",
+            DesktopSidecarProtocol.TerminalSendInputCommand + ".response",
+            DesktopSidecarProtocol.TerminalResizeCommand + ".response",
+            DesktopSidecarProtocol.TerminalTerminateCommand + ".response",
+            DesktopSidecarProtocol.TerminalReconnectCommand + ".response",
+            DesktopSidecarProtocol.TerminalAckOutputCommand + ".response",
+        };
+
+        foreach (var key in terminalResponseSuffixes)
+        {
+            Assert.True(bundle.Definitions.ContainsKey(key), $"Schema definition '{key}' is missing");
+            var schema = bundle.Definitions[key];
+            Assert.True(schema.TryGetProperty("properties", out var properties),
+                $"Schema '{key}' is missing 'properties' definition");
+            Assert.NotEqual(JsonValueKind.Null, properties.ValueKind);
+        }
+
+        // Terminal event payload schemas must also have properties
+        var terminalEventPayloads = new[]
+        {
+            DesktopSidecarProtocol.TerminalSessionStatusEvent + ".payload",
+            DesktopSidecarProtocol.TerminalSessionListEvent + ".payload",
+        };
+
+        foreach (var key in terminalEventPayloads)
+        {
+            Assert.True(bundle.Definitions.ContainsKey(key), $"Schema definition '{key}' is missing");
+            var schema = bundle.Definitions[key];
+            Assert.True(schema.TryGetProperty("properties", out var properties),
+                $"Schema '{key}' is missing 'properties' definition");
+            Assert.NotEqual(JsonValueKind.Null, properties.ValueKind);
+        }
     }
 
     private static BridgeRequestFrame Request(string requestId, string command)

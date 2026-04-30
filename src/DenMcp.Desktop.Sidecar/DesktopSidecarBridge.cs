@@ -151,61 +151,42 @@ public static class DesktopSidecarBridge
             Schema(DesktopSidecarProtocol.TerminalListSessionsCommand + ".request", """
                 {"type":"object","additionalProperties":false,"properties":{"kind":{"type":["string","null"]},"backend":{"type":["string","null"]},"status":{"type":["string","null"]}}}
                 """),
-            Schema(DesktopSidecarProtocol.TerminalListSessionsCommand + ".response", """
-                {"type":"object","additionalProperties":false}
-                """),
+            Schema(DesktopSidecarProtocol.TerminalListSessionsCommand + ".response", TerminalListSessionsResponseSchema),
             Schema(DesktopSidecarProtocol.TerminalReadActivityCommand + ".request", """
                 {"type":"object","additionalProperties":false,"required":["session_id"],"properties":{"session_id":{"type":"string"},"after_cursor":{"type":["string","null"]},"limit":{"type":"integer"}}}
                 """),
-            Schema(DesktopSidecarProtocol.TerminalReadActivityCommand + ".response", """
-                {"type":"object","additionalProperties":false}
-                """),
+            Schema(DesktopSidecarProtocol.TerminalReadActivityCommand + ".response", TerminalReadActivityResponseSchema),
             Schema(DesktopSidecarProtocol.TerminalAttachCommand + ".request", """
                 {"type":"object","additionalProperties":false,"required":["session_id"],"properties":{"session_id":{"type":"string"},"mode":{"type":"string"},"client_id":{"type":["string","null"]}}}
                 """),
-            Schema(DesktopSidecarProtocol.TerminalAttachCommand + ".response", """
-                {"type":"object","additionalProperties":false}
-                """),
+            Schema(DesktopSidecarProtocol.TerminalAttachCommand + ".response", TerminalAttachResponseSchema),
             Schema(DesktopSidecarProtocol.TerminalDetachCommand + ".request", """
                 {"type":"object","additionalProperties":false,"required":["stream_id","session_id"],"properties":{"stream_id":{"type":"string"},"session_id":{"type":"string"},"reason":{"type":["string","null"]}}}
                 """),
-            Schema(DesktopSidecarProtocol.TerminalDetachCommand + ".response", """
-                {"type":"object","additionalProperties":false}
-                """),
+            Schema(DesktopSidecarProtocol.TerminalDetachCommand + ".response", TerminalDetachResponseSchema),
             Schema(DesktopSidecarProtocol.TerminalSendInputCommand + ".request", """
                 {"type":"object","additionalProperties":false,"required":["session_id","data"],"properties":{"session_id":{"type":"string"},"stream_id":{"type":["string","null"]},"input_id":{"type":["string","null"]},"encoding":{"type":"string"},"data":{"type":"string"},"byte_count":{"type":"integer"},"expected_lease_generation":{"type":["integer","null"]}}}
                 """),
-            Schema(DesktopSidecarProtocol.TerminalSendInputCommand + ".response", """
-                {"type":"object","additionalProperties":false}
-                """),
+            Schema(DesktopSidecarProtocol.TerminalSendInputCommand + ".response", TerminalSendInputResponseSchema),
             Schema(DesktopSidecarProtocol.TerminalResizeCommand + ".request", """
                 {"type":"object","additionalProperties":false,"required":["session_id","cols","rows"],"properties":{"session_id":{"type":"string"},"stream_id":{"type":["string","null"]},"cols":{"type":"integer"},"rows":{"type":"integer"}}}
                 """),
-            Schema(DesktopSidecarProtocol.TerminalResizeCommand + ".response", """
-                {"type":"object","additionalProperties":false}
-                """),
+            Schema(DesktopSidecarProtocol.TerminalResizeCommand + ".response", TerminalResizeResponseSchema),
             Schema(DesktopSidecarProtocol.TerminalTerminateCommand + ".request", """
                 {"type":"object","additionalProperties":false,"required":["session_id"],"properties":{"session_id":{"type":"string"},"stream_id":{"type":["string","null"]},"mode":{"type":"string"},"reason":{"type":["string","null"]},"expected_lease_generation":{"type":["integer","null"]},"requested_by":{"type":["string","null"]}}}
                 """),
-            Schema(DesktopSidecarProtocol.TerminalTerminateCommand + ".response", """
-                {"type":"object","additionalProperties":false}
-                """),
+            Schema(DesktopSidecarProtocol.TerminalTerminateCommand + ".response", TerminalTerminateResponseSchema),
             Schema(DesktopSidecarProtocol.TerminalReconnectCommand + ".request", """
                 {"type":"object","additionalProperties":false,"required":["session_id"],"properties":{"session_id":{"type":"string"},"previous_stream_id":{"type":["string","null"]},"last_seen_cursor":{"type":["string","null"]},"viewport":{"type":["object","null"]}}}
                 """),
+            Schema(DesktopSidecarProtocol.TerminalReconnectCommand + ".response", TerminalAttachResponseSchema),
             Schema(DesktopSidecarProtocol.TerminalAckOutputCommand + ".request", """
                 {"type":"object","additionalProperties":false,"required":["session_id"],"properties":{"session_id":{"type":"string"},"stream_id":{"type":["string","null"]},"ack_cursor":{"type":["string","null"]},"received_bytes":{"type":"integer"}}}
                 """),
-            Schema(DesktopSidecarProtocol.TerminalAckOutputCommand + ".response", """
-                {"type":"object","additionalProperties":false}
-                """),
+            Schema(DesktopSidecarProtocol.TerminalAckOutputCommand + ".response", TerminalAckOutputResponseSchema),
             // Terminal protocol event schemas
-            Schema(DesktopSidecarProtocol.TerminalSessionStatusEvent + ".payload", """
-                {"type":"object","additionalProperties":false}
-                """),
-            Schema(DesktopSidecarProtocol.TerminalSessionListEvent + ".payload", """
-                {"type":"object","additionalProperties":false}
-                """),
+            Schema(DesktopSidecarProtocol.TerminalSessionStatusEvent + ".payload", TerminalSessionEventPayloadSchema),
+            Schema(DesktopSidecarProtocol.TerminalSessionListEvent + ".payload", TerminalListSessionsResponseSchema),
         };
     }
 
@@ -227,6 +208,44 @@ public static class DesktopSidecarBridge
 
     private const string OperatorStatusSchema = """
         {"type":"object","additionalProperties":false,"required":["phase","denConnection","sourceInstanceId","denBaseUrl","observerStatuses","diagnostics","projectCount","workspaceCount","localSnapshotCount","localSessionSnapshotCount"],"properties":{"phase":{"type":"string"},"denConnection":{"type":"object","additionalProperties":false,"required":["state"],"properties":{"state":{"type":"string"},"message":{"type":["string","null"]},"lastSuccessAt":{"type":["string","null"]},"lastFailureAt":{"type":["string","null"]},"nextRetryAt":{"type":["string","null"]}}},"sourceInstanceId":{"type":"string"},"denBaseUrl":{"type":"string"},"lastSyncAt":{"type":["string","null"]},"lastPublishAt":{"type":["string","null"]},"observerStatuses":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["kind","state","scopesScanned","warningCount"],"properties":{"kind":{"type":"string"},"state":{"type":"string"},"scopesScanned":{"type":"integer"},"warningCount":{"type":"integer"},"lastRunAt":{"type":["string","null"]},"nextRunAt":{"type":["string","null"]}}}},"diagnostics":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["level","source","message","observedAt"],"properties":{"level":{"type":"string"},"source":{"type":"string"},"message":{"type":"string"},"observedAt":{"type":"string"}}}},"projectCount":{"type":"integer"},"workspaceCount":{"type":"integer"},"localSnapshotCount":{"type":"integer"},"localSessionSnapshotCount":{"type":"integer"}}}
+        """;
+
+    // ── Terminal response/event schemas (task #1010, matching DTOs from TerminalBridgeDtos.cs) ──
+
+    private const string TerminalListSessionsResponseSchema = """
+        {"type":"object","additionalProperties":false,"required":["sessions","count"],"properties":{"sessions":{"type":"array","items":{"type":"object","additionalProperties":true,"required":["session_id"],"properties":{"session_id":{"type":"string"},"title":{"type":["string","null"]},"display_name":{"type":["string","null"]},"kind":{"type":"string"},"backend":{"type":"string"},"status":{"type":"string"},"can_read_activity":{"type":"boolean"},"can_send_input":{"type":"boolean"},"can_terminate":{"type":"boolean"},"can_attach":{"type":"boolean"}}}},"count":{"type":"integer"}}}
+        """;
+
+    private const string TerminalReadActivityResponseSchema = """
+        {"type":"object","additionalProperties":false,"required":["session_id","items","truncated"],"properties":{"session_id":{"type":"string"},"items":{"type":"array","items":{"type":"object","additionalProperties":true,"properties":{"kind":{"type":["string","null"]},"role":{"type":["string","null"]},"tool":{"type":["string","null"]},"summary":{"type":["string","null"]},"timestamp":{"type":["string","null"]}}}},"next_cursor":{"type":["string","null"]},"truncated":{"type":"boolean"}}}
+        """;
+
+    private const string TerminalAttachResponseSchema = """
+        {"type":"object","additionalProperties":false,"required":["stream_id","session_id"],"properties":{"stream_id":{"type":"string"},"session_id":{"type":"string"},"attached_at":{"type":"string"},"start_cursor":{"type":"string"},"replay_available_from":{"type":"string"},"replay_gap":{"type":"boolean"},"capabilities":{"type":"object","additionalProperties":false,"required":["can_send_input","can_resize","can_detach","can_terminate","can_stream_terminal"],"properties":{"can_send_input":{"type":"boolean"},"can_resize":{"type":"boolean"},"can_detach":{"type":"boolean"},"can_terminate":{"type":"boolean"},"can_stream_terminal":{"type":"boolean"}}},"viewport_limits":{"type":["object","null"],"additionalProperties":false,"properties":{"min_cols":{"type":"integer"},"max_cols":{"type":"integer"},"min_rows":{"type":"integer"},"max_rows":{"type":"integer"}}},"limits":{"type":"object","additionalProperties":false,"properties":{"output_chunk_max_bytes":{"type":"integer"},"input_chunk_max_bytes":{"type":"integer"},"session_replay_max_bytes":{"type":"integer"},"subscriber_queue_max_bytes":{"type":"integer"},"ack_after_bytes":{"type":"integer"},"heartbeat_interval_ms":{"type":"integer"}}}}}
+        """;
+
+    private const string TerminalDetachResponseSchema = """
+        {"type":"object","additionalProperties":false,"required":["detached","backend_preserved"],"properties":{"detached":{"type":"boolean"},"backend_preserved":{"type":"boolean"}}}
+        """;
+
+    private const string TerminalSendInputResponseSchema = """
+        {"type":"object","additionalProperties":false,"required":["accepted","written_bytes"],"properties":{"accepted":{"type":"boolean"},"input_id":{"type":["string","null"]},"written_bytes":{"type":"integer"}}}
+        """;
+
+    private const string TerminalResizeResponseSchema = """
+        {"type":"object","additionalProperties":false,"required":["accepted","cols","rows"],"properties":{"accepted":{"type":"boolean"},"cols":{"type":"integer"},"rows":{"type":"integer"}}}
+        """;
+
+    private const string TerminalTerminateResponseSchema = """
+        {"type":"object","additionalProperties":false,"required":["accepted","mode"],"properties":{"accepted":{"type":"boolean"},"mode":{"type":"string"},"terminal_event_id":{"type":["string","null"]}}}
+        """;
+
+    private const string TerminalAckOutputResponseSchema = """
+        {"type":"object","additionalProperties":false,"required":["accepted"],"properties":{"accepted":{"type":"boolean"}}}
+        """;
+
+    private const string TerminalSessionEventPayloadSchema = """
+        {"type":"object","additionalProperties":false,"required":["terminal_protocol_version","session_id"],"properties":{"terminal_protocol_version":{"type":"string"},"session_id":{"type":"string"},"status":{"type":["string","null"]},"capabilities":{"type":["object","null"],"additionalProperties":false,"properties":{"can_send_input":{"type":"boolean"},"can_resize":{"type":"boolean"},"can_detach":{"type":"boolean"},"can_terminate":{"type":"boolean"},"can_stream_terminal":{"type":"boolean"}}},"warnings":{"type":"array","items":{"type":"string"}},"observed_at":{"type":["string","null"]}}}
         """;
 
     private static BridgeNamedSchema Schema(string name, string schema)

@@ -685,6 +685,82 @@ public class TerminalBridgeDtosSerializationTests
         Assert.Contains("pty:test-1", json, StringComparison.Ordinal);
         Assert.Contains("direct_pty", json, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void TerminalAttachResponse_RoundTripsFullPayload()
+    {
+        var response = new TerminalAttachResponse
+        {
+            StreamId = "stream_01h",
+            SessionId = "pty:test-1",
+            AttachedAt = "2026-04-29T00:00:00.000Z",
+            StartCursor = "cur_000000000001",
+            ReplayAvailableFrom = "cur_000000000001",
+            ReplayGap = false,
+            Capabilities = new TerminalAttachCapabilities
+            {
+                CanSendInput = true,
+                CanResize = true,
+                CanDetach = false,
+                CanTerminate = true,
+                CanStreamTerminal = true,
+            },
+            ViewportLimits = new TerminalViewportLimits { MinCols = 1, MaxCols = 500, MinRows = 1, MaxRows = 500 },
+            Limits = new TerminalStreamLimits
+            {
+                OutputChunkMaxBytes = 65536,
+                InputChunkMaxBytes = 16384,
+                SessionReplayMaxBytes = 1048576,
+                SubscriberQueueMaxBytes = 262144,
+                AckAfterBytes = 262144,
+                HeartbeatIntervalMs = 5000,
+            },
+        };
+
+        var json = BridgeJson.Serialize(response);
+        Assert.Contains("stream_01h", json, StringComparison.Ordinal);
+        Assert.Contains("viewport_limits", json, StringComparison.Ordinal);
+        Assert.Contains("\"max_cols\":500", json, StringComparison.Ordinal);
+        Assert.Contains("\"min_rows\":1", json, StringComparison.Ordinal);
+        Assert.Contains("capabilities", json, StringComparison.Ordinal);
+        Assert.Contains("\"can_send_input\":true", json, StringComparison.Ordinal);
+        Assert.Contains("limits", json, StringComparison.Ordinal);
+        Assert.Contains("\"heartbeat_interval_ms\":5000", json, StringComparison.Ordinal);
+
+        // Roundtrip: deserialize back
+        var deserialized = BridgeJson.Deserialize<TerminalAttachResponse>(json);
+        Assert.NotNull(deserialized);
+        Assert.Equal(response.StreamId, deserialized!.StreamId);
+        Assert.Equal(response.SessionId, deserialized.SessionId);
+        Assert.Equal(response.Capabilities.CanSendInput, deserialized.Capabilities.CanSendInput);
+        Assert.Equal(response.Capabilities.CanStreamTerminal, deserialized.Capabilities.CanStreamTerminal);
+        Assert.NotNull(deserialized.ViewportLimits);
+        Assert.Equal(500, deserialized.ViewportLimits!.MaxCols);
+        Assert.NotNull(deserialized.Limits);
+        Assert.Equal(5000, deserialized.Limits.HeartbeatIntervalMs);
+    }
+
+    [Fact]
+    public void TerminalReconnect_ReturnsAttachResponse()
+    {
+        // Reconnect handler returns TerminalAttachResponse (same schema)
+        var attachResponse = new TerminalAttachResponse
+        {
+            StreamId = "reconnect_stream",
+            SessionId = "pty:reconnect-1",
+            AttachedAt = "2026-04-29T00:00:00.000Z",
+            StartCursor = "cur_000000000005",
+            Capabilities = new TerminalAttachCapabilities { CanSendInput = true, CanStreamTerminal = true },
+            Limits = new TerminalStreamLimits(),
+        };
+
+        var json = BridgeJson.Serialize(attachResponse);
+        Assert.Contains("reconnect_stream", json, StringComparison.Ordinal);
+
+        var deserialized = BridgeJson.Deserialize<TerminalAttachResponse>(json);
+        Assert.NotNull(deserialized);
+        Assert.Equal(attachResponse.StreamId, deserialized!.StreamId);
+    }
 }
 
 public class TerminalProtocolConformanceFixtureTests
