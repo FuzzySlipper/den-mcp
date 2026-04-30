@@ -131,6 +131,78 @@ public class CollaborationDeliveryTests
     }
 
     [Fact]
+    public async Task DeliveryService_LiveControllableSession_SendsViaTerminalService()
+    {
+        using var provider = DesktopSidecarBridge.CreateServiceProvider(DesktopSidecarFixtures.CreateFixtureOptions());
+        var registry = new OperatorSessionRegistry();
+        var runner = new FakeTmuxCommandRunner();
+        var service = CreateDeliveryService(provider, registry, runner);
+        var identity = TmuxSessionNaming.FromSessionName("den-collab-agent");
+        registry.Register(new OperatorSession
+        {
+            SessionId = identity.SessionId,
+            ProjectId = "test",
+            Kind = OperatorSessionKind.Agent,
+            Backend = OperatorSessionBackend.Tmux,
+            BackendRef = identity.BackendRef,
+            Status = OperatorSessionStatus.Running,
+            Capabilities = OperatorSessionCapabilities.FullControl() with { CanDeliverCompiledResponse = true },
+            CreatedAt = DateTime.UtcNow,
+            SourceInstanceId = "test",
+        });
+
+        var response = await service.DeliverAsync(new CollaborationSendCompiledResponseRequest
+        {
+            SessionId = 1,
+            CompiledText = "Please handle this annotated reply.",
+            TargetSessionId = identity.SessionId,
+            PostToDen = false,
+        }, CancellationToken.None);
+
+        Assert.Equal(CollaborationDeliveryStatus.Delivered, response.Delivery.Status);
+        Assert.True(response.Delivery.CanDeliver);
+        var sendKeys = Assert.Single(runner.Calls, call => call.Args.Count > 0 && call.Args[0] == "send-keys");
+        Assert.Equal("den-collab-agent", sendKeys.Args[2]);
+        var payload = sendKeys.Args[^1];
+        Assert.Contains("[compiled-collaboration-response]", payload);
+        Assert.Contains("Please handle this annotated reply.", payload);
+    }
+
+    [Fact]
+    public async Task DeliveryService_SessionWithoutDeliverCapability_ReturnsCapabilityDenied()
+    {
+        using var provider = DesktopSidecarBridge.CreateServiceProvider(DesktopSidecarFixtures.CreateFixtureOptions());
+        var registry = new OperatorSessionRegistry();
+        var runner = new FakeTmuxCommandRunner();
+        var service = CreateDeliveryService(provider, registry, runner);
+        var identity = TmuxSessionNaming.FromSessionName("den-no-deliver");
+        registry.Register(new OperatorSession
+        {
+            SessionId = identity.SessionId,
+            ProjectId = "test",
+            Kind = OperatorSessionKind.Agent,
+            Backend = OperatorSessionBackend.Tmux,
+            BackendRef = identity.BackendRef,
+            Status = OperatorSessionStatus.Running,
+            Capabilities = OperatorSessionCapabilities.FullControl(),
+            CreatedAt = DateTime.UtcNow,
+            SourceInstanceId = "test",
+        });
+
+        var response = await service.DeliverAsync(new CollaborationSendCompiledResponseRequest
+        {
+            SessionId = 1,
+            CompiledText = "Test compiled response text",
+            TargetSessionId = identity.SessionId,
+            PostToDen = false,
+        }, CancellationToken.None);
+
+        Assert.Equal(CollaborationDeliveryStatus.CapabilityDenied, response.Delivery.Status);
+        Assert.Contains("can_deliver_compiled_response", response.Delivery.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(runner.Calls);
+    }
+
+    [Fact]
     public async Task DeliveryService_SessionWithoutSendInputCapability_ReturnsCapabilityDenied()
     {
         using var provider = DesktopSidecarBridge.CreateServiceProvider(DesktopSidecarFixtures.CreateFixtureOptions());
@@ -160,6 +232,39 @@ public class CollaborationDeliveryTests
         Assert.Equal(CollaborationDeliveryStatus.CapabilityDenied, response.Delivery.Status);
         Assert.Equal("observe-only-session", response.Delivery.TargetSessionId);
         Assert.False(response.Delivery.CanDeliver);
+    }
+
+    private static CollaborationResponseDeliveryService CreateDeliveryService(
+        ServiceProvider provider,
+        OperatorSessionRegistry registry,
+        FakeTmuxCommandRunner runner)
+    {
+        var options = DesktopSidecarFixtures.CreateFixtureOptions();
+        var settings = new OperatorSettingsService(OperatorSettingsStorage.ForPath(Path.Combine(Path.GetTempPath(), "den-tests", Guid.NewGuid().ToString("N"), "settings.json")));
+        var events = new OperatorRuntimeBridgeEventSink(new DesktopSidecarRuntimeState(options));
+        var den = new DenHttpClient();
+        var tmux = new TmuxOperatorSessionService(
+            runner,
+            registry,
+            events,
+            settings,
+            den,
+            () => new DateTimeOffset(2026, 4, 29, 12, 0, 0, TimeSpan.Zero));
+        var direct = new DirectPtyOperatorSessionService(
+            new FakeDirectPtyBackend(),
+            registry,
+            events,
+            settings,
+            den,
+            () => new DateTimeOffset(2026, 4, 29, 12, 0, 0, TimeSpan.Zero));
+        var terminals = new TerminalOperatorSessionService(registry, tmux, direct);
+        return new CollaborationResponseDeliveryService(
+            registry,
+            den,
+            provider.GetRequiredService<OperatorRuntimeService>(),
+            terminals,
+            events,
+            () => new DateTimeOffset(2026, 4, 29, 12, 0, 0, TimeSpan.Zero));
     }
 
     [Fact]

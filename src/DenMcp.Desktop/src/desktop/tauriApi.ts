@@ -446,6 +446,7 @@ export interface TerminalSessionSummary {
   can_reconnect?: boolean;
   can_stream_terminal?: boolean;
   can_open_external_attach?: boolean;
+  can_deliver_compiled_response?: boolean;
   persistence_kind?: string | null;
   ownership_kind?: string | null;
   created_at?: string | null;

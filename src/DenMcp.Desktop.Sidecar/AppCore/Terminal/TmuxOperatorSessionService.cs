@@ -524,6 +524,7 @@ public sealed class TmuxOperatorSessionService
     {
         return OperatorSessionCapabilities.FullControl() with
         {
+            CanDeliverCompiledResponse = true,
             RequiresConfirmation = true,
             LeaseRequired = false,
             Constraints = "{\"backend_kind\":\"persistent_terminal\",\"persistence_kind\":\"tmux\",\"ownership_kind\":\"backend_persistent\",\"raw_stream_scope\":\"local_bridge_only\",\"tmux_capture_replay\":\"viewport_rows_limit_and_resize_window\",\"external_attach_command\":\"display_copy_only\",\"backpressure_contract\":\"snapshot_capture_ack_validated_live_stream_enforcement_deferred_to_909_911\"}",
@@ -565,6 +566,7 @@ public sealed class TmuxOperatorSessionService
                 session.Capabilities.CanOpenExternalAttach,
                 session.Capabilities.CanReadActivity,
                 session.Capabilities.CanStreamTerminal,
+                session.Capabilities.CanDeliverCompiledResponse,
                 persistence_kind = "tmux",
                 ownership_kind = "backend_persistent",
                 raw_stream_scope = "local_bridge_only",
@@ -765,6 +767,7 @@ public static class TerminalSessionSummaryProjection
             CanReconnect = session.Capabilities.CanReconnect,
             CanStreamTerminal = session.Capabilities.CanStreamTerminal,
             CanOpenExternalAttach = session.Capabilities.CanOpenExternalAttach,
+            CanDeliverCompiledResponse = session.Capabilities.CanDeliverCompiledResponse,
             PersistenceKind = string.Equals(session.Backend, OperatorSessionBackend.Tmux, StringComparison.Ordinal) ? "tmux" : "process_owned",
             OwnershipKind = string.Equals(session.Backend, OperatorSessionBackend.Tmux, StringComparison.Ordinal) ? "backend_persistent" : "sidecar_owned",
             CreatedAt = Format(session.CreatedAt),

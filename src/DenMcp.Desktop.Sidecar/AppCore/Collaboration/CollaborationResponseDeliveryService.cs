@@ -25,6 +25,7 @@ public sealed class CollaborationResponseDeliveryService
     private readonly OperatorSessionRegistry _registry;
     private readonly DenHttpClient _den;
     private readonly OperatorRuntimeService _runtime;
+    private readonly TerminalOperatorSessionService _terminals;
     private readonly IOperatorRuntimeEventSink _events;
     private readonly Func<DateTimeOffset> _now;
 
@@ -32,12 +33,14 @@ public sealed class CollaborationResponseDeliveryService
         OperatorSessionRegistry registry,
         DenHttpClient den,
         OperatorRuntimeService runtime,
+        TerminalOperatorSessionService terminals,
         IOperatorRuntimeEventSink events,
         Func<DateTimeOffset>? now = null)
     {
         _registry = registry;
         _den = den;
         _runtime = runtime;
+        _terminals = terminals;
         _events = events;
         _now = now ?? (() => DateTimeOffset.UtcNow);
     }
@@ -195,9 +198,15 @@ public sealed class CollaborationResponseDeliveryService
                 projectId, requestedBy, cancellationToken).ConfigureAwait(false);
         }
 
-        // Check can_send_input capability (required for delivery).
-        if (!session.Capabilities.CanSendInput)
+        // Check compiled-response authority plus terminal input capability.
+        // Renderer button visibility is not authority; app-core re-checks the
+        // live OperatorSession capability state at execution time.
+        if (!session.Capabilities.CanDeliverCompiledResponse || !session.Capabilities.CanSendInput)
         {
+            var reason = session.Capabilities.Reason
+                ?? (!session.Capabilities.CanDeliverCompiledResponse
+                    ? "Session does not have can_deliver_compiled_response capability."
+                    : "Session does not have can_send_input capability.");
             return await RecordDeliveryResultAsync(
                 request.SessionId, compiledText, denPost,
                 new CollaborationDeliveryRecord
@@ -206,7 +215,7 @@ public sealed class CollaborationResponseDeliveryService
                     TargetSessionId = targetSessionId,
                     TargetSessionStatus = session.Status,
                     CanDeliver = false,
-                    Reason = session.Capabilities.Reason ?? "Session does not have can_send_input capability.",
+                    Reason = reason,
                 },
                 projectId, requestedBy, cancellationToken).ConfigureAwait(false);
         }
@@ -268,36 +277,28 @@ public sealed class CollaborationResponseDeliveryService
             },
             cancellationToken).ConfigureAwait(false);
 
-        // For tmux backends, use send-keys.
-        // The TerminalOperatorSessionService handles the actual delivery
-        // through its backend-specific implementation.
-        // We use a simple marker-delimited send so the agent can recognize
-        // it as a compiled collaboration response.
+        // Delegate through the backend-neutral terminal service instead of
+        // hardcoding tmux/direct-PTY details here.  The terminal service routes
+        // to the current OperatorSession backend and re-validates backend
+        // support before writing input.
         var deliveryPayload = $"[compiled-collaboration-response]\n{compiledText}\n[/compiled-collaboration-response]\n";
-
-        if (string.Equals(session.Backend, OperatorSessionBackend.Tmux, StringComparison.Ordinal))
+        var textBytes = Encoding.UTF8.GetBytes(deliveryPayload);
+        var limits = new TerminalStreamLimits();
+        if (textBytes.Length > limits.InputChunkMaxBytes)
         {
-            var textBytes = Encoding.UTF8.GetBytes(deliveryPayload);
-            if (textBytes.Length > new TerminalStreamLimits().InputChunkMaxBytes)
-            {
-                throw new InvalidOperationException(
-                    $"Compiled response ({textBytes.Length} bytes) exceeds the {new TerminalStreamLimits().InputChunkMaxBytes} byte per-command input limit.");
-            }
-
-            // Use tmux send-keys for tmux-backed sessions.
-            // We go through the registry + tmux command runner path rather
-            // than the bridge command path to stay within the app-core service layer.
-            throw new DeliveryBackendNotAvailableException(
-                "Direct tmux send-keys delivery requires the TmuxOperatorSessionService to be injected. " +
-                "The bridge command handler routes through the terminal protocol for live delivery.");
+            throw new InvalidOperationException(
+                $"Compiled response ({textBytes.Length} bytes) exceeds the {limits.InputChunkMaxBytes} byte per-command input limit.");
         }
 
-        // For other backends, we cannot deliver directly — this is expected.
-        // The bridge command handler uses the terminal send_input protocol path
-        // which is backend-aware. This service method is the authority check layer.
-        throw new DeliveryBackendNotAvailableException(
-            $"Live delivery to backend '{session.Backend}' is not yet implemented. " +
-            "The compiled response has been posted to Den.");
+        await _terminals.SendInputAsync(new TerminalSendInputRequest
+        {
+            SessionId = session.SessionId,
+            InputId = $"collab_{Guid.NewGuid():N}",
+            Encoding = "utf8",
+            Data = deliveryPayload,
+            ByteCount = textBytes.Length,
+            ExpectedLeaseGeneration = session.LeaseGeneration,
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<CollaborationSessionData?> LoadSessionAsync(

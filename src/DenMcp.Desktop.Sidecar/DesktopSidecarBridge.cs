@@ -316,7 +316,7 @@ public static class DesktopSidecarBridge
         """;
 
     private const string TerminalListSessionsResponseSchema = """
-        {"type":"object","additionalProperties":false,"required":["sessions","count"],"properties":{"sessions":{"type":"array","items":{"type":"object","additionalProperties":true,"required":["session_id"],"properties":{"session_id":{"type":"string"},"title":{"type":["string","null"]},"display_name":{"type":["string","null"]},"kind":{"type":"string"},"backend":{"type":"string"},"status":{"type":"string"},"can_read_activity":{"type":"boolean"},"can_send_input":{"type":"boolean"},"can_terminate":{"type":"boolean"},"can_attach":{"type":"boolean"},"can_open_external_attach":{"type":"boolean"},"persistence_kind":{"type":["string","null"]},"ownership_kind":{"type":["string","null"]}}}},"count":{"type":"integer"}}}
+        {"type":"object","additionalProperties":false,"required":["sessions","count"],"properties":{"sessions":{"type":"array","items":{"type":"object","additionalProperties":true,"required":["session_id"],"properties":{"session_id":{"type":"string"},"title":{"type":["string","null"]},"display_name":{"type":["string","null"]},"kind":{"type":"string"},"backend":{"type":"string"},"status":{"type":"string"},"can_read_activity":{"type":"boolean"},"can_send_input":{"type":"boolean"},"can_terminate":{"type":"boolean"},"can_attach":{"type":"boolean"},"can_open_external_attach":{"type":"boolean"},"can_deliver_compiled_response":{"type":"boolean"},"persistence_kind":{"type":["string","null"]},"ownership_kind":{"type":["string","null"]}}}},"count":{"type":"integer"}}}
         """;
 
     private const string TerminalReadActivityResponseSchema = """

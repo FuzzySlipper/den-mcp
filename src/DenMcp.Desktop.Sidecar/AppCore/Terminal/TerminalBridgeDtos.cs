@@ -536,6 +536,9 @@ public sealed record TerminalSessionSummary
     [JsonPropertyName("can_open_external_attach")]
     public bool CanOpenExternalAttach { get; init; }
 
+    [JsonPropertyName("can_deliver_compiled_response")]
+    public bool CanDeliverCompiledResponse { get; init; }
+
     [JsonPropertyName("persistence_kind")]
     public string? PersistenceKind { get; init; }
 
