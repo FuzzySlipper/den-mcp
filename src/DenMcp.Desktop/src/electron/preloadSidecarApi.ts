@@ -11,7 +11,7 @@ import type {
   SaveOperatorSettingsRequest,
 } from '../desktop/tauriApi.ts';
 import type { SidecarBridgeClient } from './sidecarProtocol.ts';
-import { createSidecarBridgeFacade, type SidecarHealthResponse, type SidecarCapabilitiesResponse, type ConsoleCommandDefinition, type ConsoleCommandRunRequest, type ConsoleCommandRunResponse, type ConsoleCommandListResponse, type TerminalAckOutputRequest, type TerminalAttachRequest, type TerminalCreateSessionRequest, type TerminalDetachRequest, type TerminalListSessionsRequest, type TerminalReadActivityRequest, type TerminalReconnectRequest, type TerminalResizeRequest, type TerminalResponse, type TerminalEventPayload, type TerminalSendInputRequest, type TerminalTerminateRequest, type AppAgentBuildContextRequest, type AppAgentCancelRequest, type AppAgentInvokeToolRequest, type AppAgentListToolsRequest, type AppAgentResponse } from './sidecarProtocol.ts';
+import { createSidecarBridgeFacade, type SidecarHealthResponse, type SidecarCapabilitiesResponse, type ConsoleCommandDefinition, type ConsoleCommandRunRequest, type ConsoleCommandRunResponse, type ConsoleCommandListResponse, type TerminalAckOutputRequest, type TerminalAttachRequest, type TerminalCreateSessionRequest, type TerminalDetachRequest, type TerminalListSessionsRequest, type TerminalReadActivityRequest, type TerminalReconnectRequest, type TerminalResizeRequest, type TerminalResponse, type TerminalEventPayload, type TerminalSendInputRequest, type TerminalTerminateRequest, type AppAgentBuildContextRequest, type AppAgentCancelRequest, type AppAgentInvokeToolRequest, type AppAgentListToolsRequest, type AppAgentResponse, type TasksDashboardSnapshotRequest, type TasksDashboardSnapshot } from './sidecarProtocol.ts';
 
 export interface ShellAppearanceSettings {
   theme: string;
@@ -41,6 +41,7 @@ export interface DenDesktopSidecarApi {
   appAgentListTools(request?: AppAgentListToolsRequest): Promise<AppAgentResponse>;
   appAgentInvokeTool(request: AppAgentInvokeToolRequest): Promise<AppAgentResponse>;
   appAgentCancelRequest(request: AppAgentCancelRequest): Promise<AppAgentResponse>;
+  tasksGetDashboardSnapshot(request: TasksDashboardSnapshotRequest): Promise<TasksDashboardSnapshot>;
   terminalCreateSession(request: TerminalCreateSessionRequest): Promise<TerminalResponse>;
   terminalListSessions(request?: TerminalListSessionsRequest): Promise<TerminalResponse>;
   terminalReadActivity(request: TerminalReadActivityRequest): Promise<TerminalResponse>;
@@ -94,6 +95,7 @@ export function createDenDesktopSidecarApi(
     appAgentListTools: (request?: AppAgentListToolsRequest) => facade.appAgentListTools(request ?? {}),
     appAgentInvokeTool: (request: AppAgentInvokeToolRequest) => facade.appAgentInvokeTool(request),
     appAgentCancelRequest: (request: AppAgentCancelRequest) => facade.appAgentCancelRequest(request),
+    tasksGetDashboardSnapshot: (request: TasksDashboardSnapshotRequest) => facade.tasksGetDashboardSnapshot(request),
     terminalCreateSession: (request: TerminalCreateSessionRequest) => facade.terminalCreateSession(request),
     terminalListSessions: (request?: TerminalListSessionsRequest) => facade.terminalListSessions(request ?? {}),
     terminalReadActivity: (request: TerminalReadActivityRequest) => facade.terminalReadActivity(request),

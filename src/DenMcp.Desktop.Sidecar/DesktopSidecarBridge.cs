@@ -38,6 +38,7 @@ public static class DesktopSidecarBridge
         services.AddSingleton<AppAgentAuditService>();
         services.AddSingleton<AppAgentContextBuilder>();
         services.AddSingleton<AppAgentService>();
+        services.AddSingleton<TasksDashboardProjectionService>();
         services.AddBridgeHost(
             ConfigureRegistry,
             host =>
@@ -47,7 +48,7 @@ public static class DesktopSidecarBridge
                 host.SchemaVersion = DesktopSidecarProtocol.SchemaVersion;
                 host.SchemaBundleId = DesktopSidecarProtocol.SchemaBundleId;
                 host.SupportedTransports = new[] { WebSocketBridgeTransportNames.LoopbackWebSocket };
-                host.FeatureFlags = new[] { "operator_runtime", "typed_runtime_bridge", "tmux_operator_sessions", "direct_pty_operator_sessions", "app_agent_bridge_foundation" };
+                host.FeatureFlags = new[] { "operator_runtime", "typed_runtime_bridge", "tmux_operator_sessions", "direct_pty_operator_sessions", "app_agent_bridge_foundation", "tasks_dashboard_projection" };
             });
 
         return services.BuildServiceProvider(validateScopes: true);
@@ -118,6 +119,9 @@ public static class DesktopSidecarBridge
                 config => { config.SupportsCancellation = true; config.SupportsProgress = true; })
             .RegisterCommand<AppAgentCancelRequest, AppAgentCancelResponse, AppAgentCancelRequestHandler>(
                 DesktopSidecarProtocol.AppAgentCancelRequestCommand)
+            .RegisterCommand<TasksDashboardSnapshotRequest, TasksDashboardSnapshot, TasksDashboardSnapshotHandler>(
+                DesktopSidecarProtocol.TasksGetDashboardSnapshotCommand,
+                config => { config.SupportsCancellation = true; })
             .RegisterEvent<OperatorStatus>(DesktopSidecarProtocol.OperatorStatusEvent)
             .RegisterEvent<IReadOnlyList<LocalGitSnapshot>>(DesktopSidecarProtocol.GitSnapshotEvent)
             .RegisterEvent<IReadOnlyList<LocalSessionSnapshot>>(DesktopSidecarProtocol.SessionSnapshotEvent)
@@ -252,6 +256,8 @@ public static class DesktopSidecarBridge
             Schema(DesktopSidecarProtocol.AppAgentInvokeToolCommand + ".response", AppAgentInvokeToolResponseSchema),
             Schema(DesktopSidecarProtocol.AppAgentCancelRequestCommand + ".request", AppAgentCancelRequestSchema),
             Schema(DesktopSidecarProtocol.AppAgentCancelRequestCommand + ".response", AppAgentCancelResponseSchema),
+            Schema(DesktopSidecarProtocol.TasksGetDashboardSnapshotCommand + ".request", TasksDashboardSnapshotRequestSchema),
+            Schema(DesktopSidecarProtocol.TasksGetDashboardSnapshotCommand + ".response", TasksDashboardSnapshotResponseSchema),
             Schema(DesktopSidecarProtocol.AppAgentRunStateEvent + ".payload", AppAgentRunStateEventSchema),
             Schema(DesktopSidecarProtocol.AppAgentToolCallStateEvent + ".payload", AppAgentToolCallStateEventSchema),
             // Terminal protocol event schemas
@@ -422,6 +428,14 @@ public static class DesktopSidecarBridge
 
     private const string AppAgentCancelResponseSchema = """
         {"type":"object","additionalProperties":false,"required":["request_id","accepted","status"],"properties":{"request_id":{"type":"string"},"accepted":{"type":"boolean"},"status":{"type":"string"}}}
+        """;
+
+    private const string TasksDashboardSnapshotRequestSchema = """
+        {"type":"object","additionalProperties":false,"required":["project_id"],"properties":{"project_id":{"type":"string"},"parent_task_id":{"type":["integer","null"]},"focused_task_id":{"type":["integer","null"]},"include_done":{"type":"boolean"}}}
+        """;
+
+    private const string TasksDashboardSnapshotResponseSchema = """
+        {"type":"object","additionalProperties":true,"required":["snapshot_id","project_id","generated_at","header","tasks","waves","lanes","freshness"],"properties":{"snapshot_id":{"type":"string"},"project_id":{"type":"string"},"parent_task_id":{"type":["integer","null"]},"focused_task_id":{"type":["integer","null"]},"generated_at":{"type":"string"},"header":{"type":"object","additionalProperties":true,"required":["state","task_count","completion_percent"],"properties":{"state":{"type":"string"},"task_count":{"type":"integer"},"completion_percent":{"type":"integer"},"total_tokens":{"type":["integer","null"]},"total_cost":{"type":["number","null"]}}},"tasks":{"type":"array","items":{"type":"object","additionalProperties":true,"required":["id","project_id","title","status","computed_state","dependencies","packets","review","run_summary","agent_lifecycle","session_chips"],"properties":{"id":{"type":"integer"},"project_id":{"type":"string"},"title":{"type":"string"},"status":{"type":"string"},"computed_state":{"type":"string"},"dependencies":{"type":"array","items":{"type":"object","additionalProperties":true}},"packets":{"type":"array","items":{"type":"object","additionalProperties":true}},"review":{"type":"object","additionalProperties":true},"run_summary":{"type":"object","additionalProperties":true},"agent_lifecycle":{"type":"object","additionalProperties":true},"session_chips":{"type":"array","items":{"type":"object","additionalProperties":true}}}}},"waves":{"type":"array","items":{"type":"object","additionalProperties":true}},"lanes":{"type":"array","items":{"type":"object","additionalProperties":true}},"freshness":{"type":"object","additionalProperties":false,"required":["source","is_partial","warnings","errors"],"properties":{"source":{"type":"string"},"generated_at":{"type":["string","null"]},"is_partial":{"type":"boolean"},"warnings":{"type":"array","items":{"type":"string"}},"errors":{"type":"array","items":{"type":"string"}}}}}}
         """;
 
     private const string AppAgentRunStateEventSchema = """

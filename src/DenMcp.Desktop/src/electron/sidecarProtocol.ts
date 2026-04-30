@@ -159,6 +159,84 @@ export interface TerminalListSessionsRequest extends Record<string, JsonValue | 
 
 export type AppAgentSelection = Record<string, JsonValue>;
 
+export interface TasksDashboardSnapshotRequest extends Record<string, JsonValue | undefined> {
+  project_id: string;
+  parent_task_id?: number | null;
+  focused_task_id?: number | null;
+  include_done?: boolean;
+}
+
+export interface TasksDashboardSnapshot {
+  snapshot_id: string;
+  project_id: string;
+  parent_task_id?: number | null;
+  focused_task_id?: number | null;
+  generated_at: string;
+  header: TasksDashboardHeader;
+  tasks: TasksDashboardTaskRow[];
+  waves: TasksDashboardWave[];
+  lanes: TasksDashboardLane[];
+  freshness: TasksDashboardFreshness;
+}
+
+export interface TasksDashboardHeader {
+  state: string;
+  task_count: number;
+  done_count?: number;
+  active_count?: number;
+  review_count?: number;
+  blocked_count?: number;
+  completion_percent: number;
+  total_tokens?: number | null;
+  total_cost?: number | null;
+  currency?: string | null;
+  last_updated_at?: string | null;
+}
+
+export interface TasksDashboardTaskRow {
+  id: number;
+  project_id: string;
+  parent_id?: number | null;
+  title: string;
+  status: string;
+  computed_state: string;
+  dependencies: Array<Record<string, JsonValue>>;
+  packets: Array<Record<string, JsonValue>>;
+  review: Record<string, JsonValue>;
+  run_summary: Record<string, JsonValue>;
+  agent_lifecycle: Record<string, JsonValue>;
+  session_chips: Array<Record<string, JsonValue>>;
+}
+
+export interface TasksDashboardWave {
+  index: number;
+  label: string;
+  state: string;
+  task_ids: number[];
+  summary?: string | null;
+}
+
+export interface TasksDashboardLane {
+  lane_key: string;
+  task_id?: number | null;
+  label: string;
+  role?: string | null;
+  state: string;
+  branch?: string | null;
+  worktree_path?: string | null;
+  latest_run?: Record<string, JsonValue> | null;
+  latest_agent_event?: Record<string, JsonValue> | null;
+  session_chips: Array<Record<string, JsonValue>>;
+}
+
+export interface TasksDashboardFreshness {
+  source: string;
+  generated_at?: string | null;
+  is_partial: boolean;
+  warnings: string[];
+  errors: string[];
+}
+
 export interface AppAgentBuildContextRequest extends Record<string, JsonValue | undefined> {
   selection?: AppAgentSelection;
   agent_run_id?: string | null;
@@ -273,6 +351,12 @@ export const sidecarCommands: Record<string, BridgeCommandSpec<JsonValue, JsonVa
     command: 'den_desktop.app_agent.cancel_request',
     requestSchema: 'den_desktop.app_agent.cancel_request.request',
     responseSchema: 'den_desktop.app_agent.cancel_request.response',
+  },
+  tasksGetDashboardSnapshot: {
+    command: 'den_desktop.tasks.get_dashboard_snapshot',
+    requestSchema: 'den_desktop.tasks.get_dashboard_snapshot.request',
+    responseSchema: 'den_desktop.tasks.get_dashboard_snapshot.response',
+    supportsCancellation: true,
   },
   getHealth: {
     command: 'bridge.get_health',
@@ -416,6 +500,8 @@ export function createSidecarBridgeFacade(client: SidecarBridgeClient) {
       facade.appAgentInvokeTool(request as JsonValue) as Promise<TResponse>,
     appAgentCancelRequest: async <TResponse = AppAgentResponse>(request: AppAgentCancelRequest): Promise<TResponse> =>
       facade.appAgentCancelRequest(request as JsonValue) as Promise<TResponse>,
+    tasksGetDashboardSnapshot: async <TResponse = TasksDashboardSnapshot>(request: TasksDashboardSnapshotRequest): Promise<TResponse> =>
+      facade.tasksGetDashboardSnapshot(request as JsonValue) as Promise<TResponse>,
     terminalCreateSession: async <TResponse = TerminalResponse>(request: TerminalCreateSessionRequest): Promise<TResponse> =>
       facade.terminalCreateSession(request as JsonValue) as Promise<TResponse>,
     terminalListSessions: async <TResponse = TerminalResponse>(request: TerminalListSessionsRequest = {}): Promise<TResponse> =>

@@ -34,6 +34,7 @@ public class DesktopSidecarBridgeTests
             DesktopSidecarProtocol.RefreshNowCommand,
             DesktopSidecarProtocol.SaveAppearanceSettingsCommand,
             DesktopSidecarProtocol.SaveSettingsCommand,
+            DesktopSidecarProtocol.TasksGetDashboardSnapshotCommand,
             DesktopSidecarProtocol.TerminalAckOutputCommand,
             DesktopSidecarProtocol.TerminalAttachCommand,
             DesktopSidecarProtocol.TerminalCreateSessionCommand,
@@ -69,6 +70,8 @@ public class DesktopSidecarBridgeTests
         Assert.Contains(DesktopSidecarProtocol.ConsoleRunCommandCommand + ".response", bundle.Definitions.Keys);
         Assert.Contains(DesktopSidecarProtocol.AppAgentBuildContextCommand + ".response", bundle.Definitions.Keys);
         Assert.Contains(DesktopSidecarProtocol.AppAgentInvokeToolCommand + ".request", bundle.Definitions.Keys);
+        Assert.Contains(DesktopSidecarProtocol.TasksGetDashboardSnapshotCommand + ".request", bundle.Definitions.Keys);
+        Assert.Contains(DesktopSidecarProtocol.TasksGetDashboardSnapshotCommand + ".response", bundle.Definitions.Keys);
         Assert.Equal(sortedEvents, bundle.Events.Select(@event => @event.Event).ToArray());
         Assert.Contains(DesktopSidecarProtocol.GetOperatorStatusCommand + ".response", bundle.Definitions.Keys);
         Assert.Contains(DesktopSidecarProtocol.OperatorStatusEvent + ".payload", bundle.Definitions.Keys);

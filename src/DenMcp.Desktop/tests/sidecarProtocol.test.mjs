@@ -51,6 +51,7 @@ test('sidecar schema bundle and representative frames are compatible with the ch
     'den_desktop.operator.refresh_now',
     'den_desktop.operator.save_appearance_settings',
     'den_desktop.operator.save_settings',
+    'den_desktop.tasks.get_dashboard_snapshot',
     'den_desktop.terminal.ack_output',
     'den_desktop.terminal.attach',
     'den_desktop.terminal.create_session',
@@ -124,6 +125,18 @@ test('sidecar checked facade allow-lists health/capabilities/runtime commands an
         sent.push(frame);
         if (frame.command === 'bridge.get_health') return fixture.frames.health_response;
         if (frame.command === 'bridge.get_capabilities') return fixture.frames.capabilities_response;
+        const dashboardSnapshot = {
+          snapshot_id: 'task-dashboard:den-mcp:900:fixture',
+          project_id: 'den-mcp',
+          parent_task_id: 900,
+          focused_task_id: null,
+          generated_at: '2026-04-29T12:34:56.000Z',
+          header: { state: 'running', task_count: 1, completion_percent: 0 },
+          tasks: [],
+          waves: [],
+          lanes: [],
+          freshness: { source: 'den_http', generated_at: '2026-04-29T12:34:56.000Z', is_partial: false, warnings: [], errors: [] },
+        };
         return {
           protocol_version: fixture.schema_bundle.protocol_version,
           schema_version: fixture.schema_bundle.schema_version,
@@ -131,7 +144,9 @@ test('sidecar checked facade allow-lists health/capabilities/runtime commands an
           request_id: frame.request_id,
           result: frame.command === 'den_desktop.operator.get_status'
             ? fixture.frames.operator_status_event.payload
-            : {},
+            : frame.command === 'den_desktop.tasks.get_dashboard_snapshot'
+              ? dashboardSnapshot
+              : {},
           correlation: {},
           sent_at: '2026-04-29T12:34:56.000Z',
         };
@@ -143,6 +158,7 @@ test('sidecar checked facade allow-lists health/capabilities/runtime commands an
   const health = await facade.getHealth();
   const capabilities = await facade.getCapabilities();
   const status = await facade.getOperatorStatus();
+  const dashboard = await facade.tasksGetDashboardSnapshot({ project_id: 'den-mcp', parent_task_id: 900 });
   facade.assertOperatorStatusEvent(fixture.frames.operator_status_event);
   facade.assertGitSnapshotsEvent(fixture.frames.git_snapshot_event);
   facade.assertSessionSnapshotsEvent(fixture.frames.session_snapshot_event);
@@ -150,10 +166,12 @@ test('sidecar checked facade allow-lists health/capabilities/runtime commands an
   assert.equal(health.schema_bundle_id, fixture.schema_bundle.bundle_id);
   assert.ok(capabilities.supported_transports.includes('loopback_websocket'));
   assert.equal(status.phase, 'starting');
+  assert.equal(dashboard.project_id, 'den-mcp');
   assert.deepEqual(sent.map((frame) => frame.command), [
     'bridge.get_health',
     'bridge.get_capabilities',
     'den_desktop.operator.get_status',
+    'den_desktop.tasks.get_dashboard_snapshot',
   ]);
   assert.deepEqual(Object.keys(facade).sort(), [
     'appAgentBuildContext',
@@ -186,6 +204,7 @@ test('sidecar checked facade allow-lists health/capabilities/runtime commands an
     'refreshNow',
     'saveAppearanceSettings',
     'saveOperatorSettings',
+    'tasksGetDashboardSnapshot',
     'terminalAckOutput',
     'terminalAttach',
     'terminalCreateSession',
@@ -325,6 +344,7 @@ test('preload sidecar API exposes no generic dispatch, token, endpoint, or node 
     'refreshNow',
     'saveAppearanceSettings',
     'saveOperatorSettings',
+    'tasksGetDashboardSnapshot',
     'terminalAckOutput',
     'terminalAttach',
     'terminalCreateSession',

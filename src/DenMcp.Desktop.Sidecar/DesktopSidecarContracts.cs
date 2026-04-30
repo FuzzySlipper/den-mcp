@@ -54,6 +54,10 @@ public static class DesktopSidecarProtocol
     public const string AppAgentListToolsCommand = "den_desktop.app_agent.list_tools";
     public const string AppAgentInvokeToolCommand = "den_desktop.app_agent.invoke_tool";
     public const string AppAgentCancelRequestCommand = "den_desktop.app_agent.cancel_request";
+
+    // Tasks/orchestrator dashboard projection (task #1028)
+    public const string TasksGetDashboardSnapshotCommand = "den_desktop.tasks.get_dashboard_snapshot";
+
     public const string AppAgentRunStateEvent = "den.app_agent.run_state_changed";
     public const string AppAgentToolCallStateEvent = "den.app_agent.tool_call_state_changed";
 

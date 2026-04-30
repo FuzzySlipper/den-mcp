@@ -531,14 +531,20 @@ public sealed record DenTaskDetail
     [JsonPropertyName("dependencies")]
     public IReadOnlyList<DenTaskDependencyRecord> Dependencies { get; init; } = [];
 
+    [JsonPropertyName("subtasks")]
+    public IReadOnlyList<DenTaskRecord> Subtasks { get; init; } = [];
+
     [JsonPropertyName("recent_messages")]
     public IReadOnlyList<DenMessage> RecentMessages { get; init; } = [];
+
+    [JsonPropertyName("review_rounds")]
+    public IReadOnlyList<DenReviewRound> ReviewRounds { get; init; } = [];
 
     [JsonPropertyName("open_review_findings")]
     public IReadOnlyList<DenReviewFinding> OpenReviewFindings { get; init; } = [];
 
-    [JsonPropertyName("review_rounds")]
-    public IReadOnlyList<JsonElement> ReviewRounds { get; init; } = [];
+    [JsonPropertyName("resolved_review_findings")]
+    public IReadOnlyList<DenReviewFinding> ResolvedReviewFindings { get; init; } = [];
 }
 
 public sealed record DenTaskRecord
@@ -558,8 +564,26 @@ public sealed record DenTaskRecord
     [JsonPropertyName("priority")]
     public int Priority { get; init; }
 
+    [JsonPropertyName("assigned_to")]
+    public string? AssignedTo { get; init; }
+
+    [JsonPropertyName("parent_id")]
+    public long? ParentId { get; init; }
+
     [JsonPropertyName("tags")]
     public IReadOnlyList<string> Tags { get; init; } = [];
+
+    [JsonPropertyName("dependency_count")]
+    public int DependencyCount { get; init; }
+
+    [JsonPropertyName("subtask_count")]
+    public int SubtaskCount { get; init; }
+
+    [JsonPropertyName("created_at")]
+    public string? CreatedAt { get; init; }
+
+    [JsonPropertyName("updated_at")]
+    public string? UpdatedAt { get; init; }
 }
 
 public sealed record DenTaskDependencyRecord
@@ -595,10 +619,49 @@ public sealed record DenMessage
     public string? CreatedAt { get; init; }
 }
 
+public sealed record DenReviewRound
+{
+    [JsonPropertyName("id")]
+    public long Id { get; init; }
+
+    [JsonPropertyName("task_id")]
+    public long TaskId { get; init; }
+
+    [JsonPropertyName("round_number")]
+    public int RoundNumber { get; init; }
+
+    [JsonPropertyName("requested_by")]
+    public string? RequestedBy { get; init; }
+
+    [JsonPropertyName("branch")]
+    public string? Branch { get; init; }
+
+    [JsonPropertyName("base_branch")]
+    public string? BaseBranch { get; init; }
+
+    [JsonPropertyName("base_commit")]
+    public string? BaseCommit { get; init; }
+
+    [JsonPropertyName("head_commit")]
+    public string? HeadCommit { get; init; }
+
+    [JsonPropertyName("verdict")]
+    public string? Verdict { get; init; }
+
+    [JsonPropertyName("requested_at")]
+    public string? RequestedAt { get; init; }
+
+    [JsonPropertyName("verdict_at")]
+    public string? VerdictAt { get; init; }
+}
+
 public sealed record DenReviewFinding
 {
     [JsonPropertyName("id")]
     public long? Id { get; init; }
+
+    [JsonPropertyName("review_round_id")]
+    public long? ReviewRoundId { get; init; }
 
     [JsonPropertyName("category")]
     public string? Category { get; init; }
@@ -608,4 +671,130 @@ public sealed record DenReviewFinding
 
     [JsonPropertyName("status")]
     public string? Status { get; init; }
+}
+
+public sealed record DenSubagentRunSummary
+{
+    [JsonPropertyName("run_id")]
+    public string RunId { get; init; } = string.Empty;
+
+    [JsonPropertyName("state")]
+    public string State { get; init; } = string.Empty;
+
+    [JsonPropertyName("role")]
+    public string? Role { get; init; }
+
+    [JsonPropertyName("task_id")]
+    public long? TaskId { get; init; }
+
+    [JsonPropertyName("project_id")]
+    public string? ProjectId { get; init; }
+
+    [JsonPropertyName("backend")]
+    public string? Backend { get; init; }
+
+    [JsonPropertyName("model")]
+    public string? Model { get; init; }
+
+    [JsonPropertyName("workspace_id")]
+    public string? WorkspaceId { get; init; }
+
+    [JsonPropertyName("purpose")]
+    public string? Purpose { get; init; }
+
+    [JsonPropertyName("worktree_path")]
+    public string? WorktreePath { get; init; }
+
+    [JsonPropertyName("branch")]
+    public string? Branch { get; init; }
+
+    [JsonPropertyName("head_commit")]
+    public string? HeadCommit { get; init; }
+
+    [JsonPropertyName("final_head_commit")]
+    public string? FinalHeadCommit { get; init; }
+
+    [JsonPropertyName("started_at")]
+    public DateTime? StartedAt { get; init; }
+
+    [JsonPropertyName("ended_at")]
+    public DateTime? EndedAt { get; init; }
+
+    [JsonPropertyName("usage_summary")]
+    public DenSubagentRunUsageSummary? UsageSummary { get; init; }
+
+    [JsonPropertyName("operator_events")]
+    public IReadOnlyList<DenSubagentRunOperatorEvent> OperatorEvents { get; init; } = [];
+
+    [JsonPropertyName("duration_ms")]
+    public int? DurationMs { get; init; }
+}
+
+public sealed record DenSubagentRunUsageSummary
+{
+    [JsonPropertyName("input_tokens")]
+    public int? InputTokens { get; init; }
+
+    [JsonPropertyName("output_tokens")]
+    public int? OutputTokens { get; init; }
+
+    [JsonPropertyName("total_tokens")]
+    public int? TotalTokens { get; init; }
+
+    [JsonPropertyName("total_cost")]
+    public double? TotalCost { get; init; }
+
+    [JsonPropertyName("currency")]
+    public string? Currency { get; init; }
+
+    [JsonPropertyName("source")]
+    public string? Source { get; init; }
+}
+
+public sealed record DenSubagentRunOperatorEvent
+{
+    [JsonPropertyName("event_name")]
+    public string EventName { get; init; } = string.Empty;
+
+    [JsonPropertyName("source")]
+    public string? Source { get; init; }
+
+    [JsonPropertyName("occurred_at")]
+    public DateTime? OccurredAt { get; init; }
+
+    [JsonPropertyName("visibility")]
+    public string? Visibility { get; init; }
+}
+
+public sealed record DenAgentStreamEntry
+{
+    [JsonPropertyName("id")]
+    public long Id { get; init; }
+
+    [JsonPropertyName("stream_kind")]
+    public string? StreamKind { get; init; }
+
+    [JsonPropertyName("event_type")]
+    public string EventType { get; init; } = string.Empty;
+
+    [JsonPropertyName("project_id")]
+    public string? ProjectId { get; init; }
+
+    [JsonPropertyName("task_id")]
+    public long? TaskId { get; init; }
+
+    [JsonPropertyName("sender")]
+    public string? Sender { get; init; }
+
+    [JsonPropertyName("recipient_agent")]
+    public string? RecipientAgent { get; init; }
+
+    [JsonPropertyName("body")]
+    public string? Body { get; init; }
+
+    [JsonPropertyName("metadata")]
+    public JsonElement? Metadata { get; init; }
+
+    [JsonPropertyName("created_at")]
+    public DateTime? CreatedAt { get; init; }
 }

@@ -208,6 +208,47 @@ public sealed class DenHttpClient
         }
     }
 
+    public async Task<IReadOnlyList<DenTaskRecord>> ListTasksAsync(
+        string baseUrl,
+        string projectId,
+        long? parentId = null,
+        bool tree = false,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+
+        var query = new List<QueryParameter>();
+        if (parentId is { } id)
+        {
+            query.Add(new QueryParameter("parentId", id.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        }
+
+        if (tree)
+        {
+            query.Add(new QueryParameter("tree", "true"));
+        }
+
+        var path = $"/api/projects/{EscapePathSegment(projectId)}/tasks";
+        var response = await SendAsync(
+            () => new HttpRequestMessage(HttpMethod.Get, BuildUrl(baseUrl, path, query)),
+            "Unable to fetch Den tasks",
+            cancellationToken).ConfigureAwait(false);
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await ReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+                throw new DenHttpClientException($"Den tasks request returned HTTP {(int)response.StatusCode}: {body}");
+            }
+
+            return await ReadJsonAsync<List<DenTaskRecord>>(
+                response,
+                "Unable to parse Den tasks",
+                cancellationToken).ConfigureAwait(false);
+        }
+    }
+
     public async Task<DenTaskDetail> GetTaskDetailAsync(
         string baseUrl,
         string projectId,
@@ -272,6 +313,84 @@ public sealed class DenHttpClient
             return await ReadJsonAsync<List<DenMessage>>(
                 response,
                 "Unable to parse Den messages",
+                cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    public async Task<IReadOnlyList<DenSubagentRunSummary>> ListSubagentRunsAsync(
+        string baseUrl,
+        string projectId,
+        long? taskId = null,
+        int limit = 20,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+
+        var query = new List<QueryParameter>
+        {
+            new("limit", Math.Clamp(limit, 1, 50).ToString(System.Globalization.CultureInfo.InvariantCulture)),
+        };
+        if (taskId is { } id)
+        {
+            query.Add(new QueryParameter("taskId", id.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        }
+
+        var path = $"/api/projects/{EscapePathSegment(projectId)}/subagent-runs";
+        var response = await SendAsync(
+            () => new HttpRequestMessage(HttpMethod.Get, BuildUrl(baseUrl, path, query)),
+            "Unable to fetch Den sub-agent runs",
+            cancellationToken).ConfigureAwait(false);
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await ReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+                throw new DenHttpClientException($"Den sub-agent runs request returned HTTP {(int)response.StatusCode}: {body}");
+            }
+
+            return await ReadJsonAsync<List<DenSubagentRunSummary>>(
+                response,
+                "Unable to parse Den sub-agent runs",
+                cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    public async Task<IReadOnlyList<DenAgentStreamEntry>> ListAgentStreamAsync(
+        string baseUrl,
+        string projectId,
+        long? taskId = null,
+        int limit = 30,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+
+        var query = new List<QueryParameter>
+        {
+            new("limit", Math.Clamp(limit, 1, 100).ToString(System.Globalization.CultureInfo.InvariantCulture)),
+        };
+        if (taskId is { } id)
+        {
+            query.Add(new QueryParameter("taskId", id.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        }
+
+        var path = $"/api/projects/{EscapePathSegment(projectId)}/agent-stream";
+        var response = await SendAsync(
+            () => new HttpRequestMessage(HttpMethod.Get, BuildUrl(baseUrl, path, query)),
+            "Unable to fetch Den agent stream",
+            cancellationToken).ConfigureAwait(false);
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await ReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+                throw new DenHttpClientException($"Den agent stream request returned HTTP {(int)response.StatusCode}: {body}");
+            }
+
+            return await ReadJsonAsync<List<DenAgentStreamEntry>>(
+                response,
+                "Unable to parse Den agent stream",
                 cancellationToken).ConfigureAwait(false);
         }
     }
