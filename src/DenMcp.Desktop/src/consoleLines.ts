@@ -89,7 +89,7 @@ export function buildConsoleLines(sources: ConsoleSources, maxLines = 40, nowMs 
   for (const observer of sources.observerStatuses) {
     if (observer.warningCount > 0) {
       const msg = `${observer.kind}: ${observer.warningCount} warning${observer.warningCount === 1 ? '' : 's'} (${observer.scopesScanned} scopes)`;
-      addIfUnique(lines, seenMessages, { ts: lastRunTs(observer.lastRunAt, now), level: 'warn', message: msg });
+      addIfUnique(lines, seenMessages, { ts: formatTimestamp(observer.lastRunAt ?? now), level: 'warn', message: msg });
     }
   }
 
@@ -145,7 +145,7 @@ export function buildConsoleLines(sources: ConsoleSources, maxLines = 40, nowMs 
     if (seenMessages.has(producedMessage)) continue;
     seenMessages.add(producedMessage);
     lines.push({
-      ts: formatAge(entry.observedAt, nowMs),
+      ts: formatTimestamp(entry.observedAt),
       level: entry.level,
       message: producedMessage,
     });
@@ -176,10 +176,6 @@ function formatAge(isoString: string, nowMs: number): string {
 
 function parseAgeMs(isoString: string, nowMs: number): number {
   return Math.max(0, nowMs - Date.parse(isoString));
-}
-
-function lastRunTs(lastRunAt: string | null, fallbackIso: string): string {
-  return lastRunAt ?? fallbackIso;
 }
 
 function levelFromConnectionState(state: string): string {

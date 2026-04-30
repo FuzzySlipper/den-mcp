@@ -40,6 +40,10 @@ function makeObserver(overrides = {}) {
   };
 }
 
+function expectedTimestamp(isoString) {
+  return new Date(isoString).toLocaleTimeString();
+}
+
 const nowMs = Date.parse('2026-04-29T12:05:00.000Z');
 
 test('buildConsoleLines returns empty lines when no sources', () => {
@@ -65,6 +69,7 @@ test('buildConsoleLines includes diagnostic entries', () => {
   }, 40, nowMs);
 
   assert.ok(lines.length >= 1);
+  assert.equal(lines[0].ts, expectedTimestamp(diag.observedAt));
   assert.equal(lines[0].level, 'info');
   assert.match(lines[0].message, /test entry/);
 });
@@ -79,7 +84,9 @@ test('buildConsoleLines includes observer warnings', () => {
     lastSyncAt: null,
   }, 40, nowMs);
 
-  assert.ok(lines.some((l) => l.level === 'warn' && l.message.includes('git')));
+  const line = lines.find((l) => l.level === 'warn' && l.message.includes('git'));
+  assert.ok(line);
+  assert.equal(line.ts, expectedTimestamp(observer.lastRunAt));
   assert.ok(lines.some((l) => l.message.includes('3 warnings')));
 });
 
