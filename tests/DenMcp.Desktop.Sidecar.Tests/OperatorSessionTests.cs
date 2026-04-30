@@ -725,7 +725,38 @@ public class TerminalBridgeHandlerTests
         Assert.NotNull(response.ExternalAttach);
         Assert.True(response.ExternalAttach!.Available);
         Assert.Contains("tmux attach-session", response.ExternalAttach.Command, StringComparison.Ordinal);
+        Assert.Contains("Display/copy-only", response.ExternalAttach.Description, StringComparison.Ordinal);
+        Assert.Contains("must not auto-execute", response.ExternalAttach.Description, StringComparison.Ordinal);
         Assert.DoesNotContain(runner.Calls, call => call.Args[0] == "capture-pane");
+    }
+
+    [Fact]
+    public async Task TmuxAttachTerminalStream_AppliesViewportBeforeCaptureReplay()
+    {
+        var runner = new FakeTmuxCommandRunner();
+        var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
+        var service = CreateTmuxService(runner, registry);
+        var session = await service.CreateAsync(new TerminalCreateSessionRequest { ProjectId = "den-mcp", Title = "Viewport" }, CancellationToken.None);
+
+        var response = await service.AttachAsync(new TerminalAttachRequest
+        {
+            SessionId = session.SessionId,
+            Mode = "terminal_stream",
+            Viewport = new TerminalViewport { Cols = 132, Rows = 43 },
+        }, CancellationToken.None);
+
+        Assert.Equal(session.SessionId, response.SessionId);
+        var resizeIndex = runner.Calls.FindIndex(call => call.Args[0] == "resize-window");
+        var captureIndex = runner.Calls.FindIndex(call => call.Args[0] == "capture-pane");
+        Assert.InRange(resizeIndex, 0, int.MaxValue);
+        Assert.InRange(captureIndex, 0, int.MaxValue);
+        Assert.True(resizeIndex < captureIndex);
+        Assert.Contains(runner.Calls[resizeIndex].Args, arg => arg == "-x");
+        Assert.Contains("132", runner.Calls[resizeIndex].Args);
+        Assert.Contains("43", runner.Calls[resizeIndex].Args);
+        Assert.Contains("-43", runner.Calls[captureIndex].Args);
+        Assert.Contains("tmux_capture_replay", registry.Get(session.SessionId)!.Capabilities.Constraints, StringComparison.Ordinal);
+        Assert.Contains("display_copy_only", registry.Get(session.SessionId)!.Capabilities.Constraints, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1046,7 +1077,16 @@ public class TerminalBridgeDtosSerializationTests
         var json = BridgeJson.Serialize(request);
         Assert.Contains("pty:test-1", json, StringComparison.Ordinal);
         Assert.Contains("terminal_stream", json, StringComparison.Ordinal);
+        Assert.Contains("\"viewport\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"replay\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"max_bytes\":65536", json, StringComparison.Ordinal);
         Assert.Contains("120", json, StringComparison.Ordinal);
+
+        var deserialized = BridgeJson.Deserialize<TerminalAttachRequest>(json);
+        Assert.NotNull(deserialized);
+        Assert.Equal(120, deserialized!.Viewport!.Cols);
+        Assert.Equal(65536, deserialized.Replay!.MaxBytes);
+        Assert.Equal(20, deserialized.Replay.MaxChunks);
     }
 
     [Fact]

@@ -110,7 +110,11 @@ public sealed record TerminalExternalAttachInfo
     [JsonPropertyName("available")]
     public bool Available { get; init; }
 
-    /// <summary>Operator-facing command text; renderer treats this as opaque display/copy text.</summary>
+    /// <summary>
+    /// Operator-facing command text only. Renderers may display/copy this opaque string,
+    /// but must not auto-execute it; a future attach button must use a typed app-core
+    /// command instead of running this text through a shell.
+    /// </summary>
     [JsonPropertyName("command")]
     public string? Command { get; init; }
 

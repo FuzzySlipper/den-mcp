@@ -139,6 +139,11 @@ public sealed class TmuxOperatorSessionService
     {
         ArgumentNullException.ThrowIfNull(request);
         var session = RequireTmuxSession(request.SessionId, s => s.Capabilities.CanAttach, "attach");
+        if (request.Viewport is not null)
+        {
+            ValidateViewport(request.Viewport);
+        }
+
         var streamId = $"stream_{Guid.NewGuid():N}";
         lock (_lock)
         {
@@ -163,7 +168,7 @@ public sealed class TmuxOperatorSessionService
                 {
                     Available = true,
                     Command = TmuxSessionNaming.ExternalAttachCommand(TmuxNameFromSession(session) ?? session.SessionId),
-                    Description = "Attach from an external terminal. This preserves the tmux-backed OperatorSession after Den Desktop exits.",
+                    Description = "Display/copy-only tmux attach command text. Den Desktop must not auto-execute this string; any future attach action must route through a typed app-core command.",
                 }
                 : null,
         };
@@ -257,11 +262,7 @@ public sealed class TmuxOperatorSessionService
         }
 
         var target = TmuxNameFromSession(session) ?? throw Invalid("tmux backend reference is missing a session name.");
-        var result = await _tmux.RunAsync(["resize-window", "-t", target, "-x", request.Cols.ToString(), "-y", request.Rows.ToString()], cancellationToken).ConfigureAwait(false);
-        if (!result.Succeeded)
-        {
-            throw BackendUnavailable("resize", result.Stderr);
-        }
+        await ResizeTmuxWindowAsync(target, new TerminalViewport { Cols = request.Cols, Rows = request.Rows }, cancellationToken).ConfigureAwait(false);
 
         await PublishSessionEventsAsync(session, "session.resize_requested", new { cols = request.Cols, rows = request.Rows }, null, null, cancellationToken).ConfigureAwait(false);
         return new TerminalResizeResponse { Accepted = true, Cols = request.Cols, Rows = request.Rows };
@@ -376,13 +377,38 @@ public sealed class TmuxOperatorSessionService
     private async Task<byte[]> CaptureAsync(OperatorSession session, TerminalViewport? viewport, CancellationToken cancellationToken)
     {
         var target = TmuxNameFromSession(session) ?? throw Invalid("tmux backend reference is missing a session name.");
-        var result = await _tmux.RunAsync(["capture-pane", "-p", "-e", "-J", "-S", "-200", "-t", target], cancellationToken).ConfigureAwait(false);
+        var replayRows = 200;
+        if (viewport is not null)
+        {
+            ValidateViewport(viewport);
+            replayRows = viewport.Rows;
+            await ResizeTmuxWindowAsync(target, viewport, cancellationToken).ConfigureAwait(false);
+        }
+
+        var result = await _tmux.RunAsync(["capture-pane", "-p", "-e", "-J", "-S", $"-{replayRows}", "-t", target], cancellationToken).ConfigureAwait(false);
         if (!result.Succeeded)
         {
             throw BackendUnavailable("capture", result.Stderr);
         }
 
         return Encoding.UTF8.GetBytes(result.Stdout);
+    }
+
+    private async Task ResizeTmuxWindowAsync(string target, TerminalViewport viewport, CancellationToken cancellationToken)
+    {
+        var result = await _tmux.RunAsync(["resize-window", "-t", target, "-x", viewport.Cols.ToString(), "-y", viewport.Rows.ToString()], cancellationToken).ConfigureAwait(false);
+        if (!result.Succeeded)
+        {
+            throw BackendUnavailable("resize", result.Stderr);
+        }
+    }
+
+    private static void ValidateViewport(TerminalViewport viewport)
+    {
+        if (viewport.Cols is < 1 or > 500 || viewport.Rows is < 1 or > 500)
+        {
+            throw Invalid("Terminal viewport cols/rows must be within 1..500.");
+        }
     }
 
     private async ValueTask PublishOutputChunksAsync(string streamId, string sessionId, IReadOnlyList<TerminalOutputChunk> chunks, CancellationToken cancellationToken)
@@ -518,7 +544,7 @@ public sealed class TmuxOperatorSessionService
         {
             RequiresConfirmation = true,
             LeaseRequired = false,
-            Constraints = "{\"backend_kind\":\"persistent_terminal\",\"persistence_kind\":\"tmux\",\"ownership_kind\":\"backend_persistent\",\"raw_stream_scope\":\"local_bridge_only\",\"backpressure_contract\":\"snapshot_capture_ack_validated_live_stream_enforcement_deferred_to_909_911\"}",
+            Constraints = "{\"backend_kind\":\"persistent_terminal\",\"persistence_kind\":\"tmux\",\"ownership_kind\":\"backend_persistent\",\"raw_stream_scope\":\"local_bridge_only\",\"tmux_capture_replay\":\"viewport_rows_limit_and_resize_window\",\"external_attach_command\":\"display_copy_only\",\"backpressure_contract\":\"snapshot_capture_ack_validated_live_stream_enforcement_deferred_to_909_911\"}",
         };
     }
 

@@ -94,6 +94,7 @@ export interface TerminalCreateSessionRequest extends Record<string, JsonValue |
 }
 
 export interface TerminalAttachRequest extends Record<string, JsonValue | undefined> {
+  terminal_protocol_version?: string;
   session_id: string;
   mode?: 'terminal_stream' | 'activity_only' | 'external_attach_info' | string;
   client_id?: string | null;

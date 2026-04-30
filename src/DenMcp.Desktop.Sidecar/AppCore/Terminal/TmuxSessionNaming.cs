@@ -76,6 +76,10 @@ public static partial class TmuxSessionNaming
         return sessionName.StartsWith(SessionPrefix + "-", StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Builds opaque display/copy text for operators who want to attach from an
+    /// external terminal. Den Desktop must not execute this string directly.
+    /// </summary>
     public static string ExternalAttachCommand(string sessionName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionName);

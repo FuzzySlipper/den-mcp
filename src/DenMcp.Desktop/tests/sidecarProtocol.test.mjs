@@ -218,6 +218,51 @@ test('sidecar checked facade allow-lists health/capabilities/runtime commands an
   ].sort());
 });
 
+test('terminal attach facade accepts typed viewport and replay fields and rejects unknown replay fields', async () => {
+  const fixture = await readFixture();
+  const sent = [];
+  const client = createCheckedBridgeClient({
+    bundle: fixture.schema_bundle,
+    commands: sidecarCommands,
+    events: sidecarEvents,
+    requestIdFactory: () => `req_terminal_${sent.length + 1}`,
+    now: () => '2026-04-29T12:34:56.000Z',
+    transport: {
+      async send(frame) {
+        sent.push(frame);
+        return {
+          protocol_version: fixture.schema_bundle.protocol_version,
+          schema_version: fixture.schema_bundle.schema_version,
+          frame_type: 'response',
+          request_id: frame.request_id,
+          result: { stream_id: 'stream_fixture', session_id: frame.payload.session_id },
+          correlation: {},
+          sent_at: '2026-04-29T12:34:56.000Z',
+        };
+      },
+    },
+  });
+  const facade = createSidecarBridgeFacade(client);
+
+  await facade.terminalAttach({
+    terminal_protocol_version: '1.0',
+    session_id: 'tmux-session:test',
+    mode: 'terminal_stream',
+    client_id: 'client-1',
+    viewport: { cols: 132, rows: 43 },
+    replay: { after_cursor: 'cur_000000000010', max_bytes: 65536, max_chunks: 20 },
+  });
+
+  assert.equal(sent[0].command, 'den_desktop.terminal.attach');
+  assert.deepEqual(sent[0].payload.viewport, { cols: 132, rows: 43 });
+  assert.deepEqual(sent[0].payload.replay, { after_cursor: 'cur_000000000010', max_bytes: 65536, max_chunks: 20 });
+
+  await assert.rejects(
+    () => facade.terminalAttach({ session_id: 'tmux-session:test', replay: { after_cursor: null, unexpected: true } }),
+    /den_desktop\.terminal\.attach\.request\.replay has unexpected property 'unexpected'/,
+  );
+});
+
 test('app-agent helper DTOs use typed commands and events without generic dispatch', async () => {
   const fixture = await readFixture();
   const sent = [];

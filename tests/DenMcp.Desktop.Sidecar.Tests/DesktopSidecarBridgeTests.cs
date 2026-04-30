@@ -189,6 +189,27 @@ public class DesktopSidecarBridgeTests
     }
 
     [Fact]
+    public void SchemaBundle_TerminalAttachRequestIncludesViewportAndReplayContract()
+    {
+        using var provider = DesktopSidecarBridge.CreateServiceProvider(DesktopSidecarFixtures.CreateFixtureOptions());
+        var bundle = DesktopSidecarBridge.CreateSchemaBundle(provider);
+        var schema = bundle.Definitions[DesktopSidecarProtocol.TerminalAttachCommand + ".request"];
+        var properties = schema.GetProperty("properties");
+
+        Assert.True(properties.TryGetProperty("terminal_protocol_version", out _));
+        Assert.True(properties.TryGetProperty("viewport", out var viewport));
+        Assert.True(properties.TryGetProperty("replay", out var replay));
+        Assert.False(schema.GetProperty("additionalProperties").GetBoolean());
+        Assert.False(viewport.GetProperty("additionalProperties").GetBoolean());
+        Assert.True(viewport.GetProperty("properties").TryGetProperty("cols", out _));
+        Assert.True(viewport.GetProperty("properties").TryGetProperty("rows", out _));
+        Assert.False(replay.GetProperty("additionalProperties").GetBoolean());
+        Assert.True(replay.GetProperty("properties").TryGetProperty("after_cursor", out _));
+        Assert.True(replay.GetProperty("properties").TryGetProperty("max_bytes", out _));
+        Assert.True(replay.GetProperty("properties").TryGetProperty("max_chunks", out _));
+    }
+
+    [Fact]
     public void SchemaBundle_TerminalResponseSchemasHavePropertyDefinitions()
     {
         using var provider = DesktopSidecarBridge.CreateServiceProvider(DesktopSidecarFixtures.CreateFixtureOptions());

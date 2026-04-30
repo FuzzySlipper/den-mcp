@@ -35,6 +35,12 @@ cargo check
 
 Structured console commands run through the typed sidecar bridge and return structured `ConsoleCommandLine` output in the final `consoleRunCommand` response. The sidecar command handler also reports progress frames, but the current renderer/preload API is intentionally batch-only: `BridgeClientTransport.send()` exposes the final response and does not yet provide a per-request progress subscription callback. A real-time ConsoleDock renderer should first add that typed progress subscription to the Electron/preload bridge, then append in-flight command lines before reconciling with the final response.
 
+## Terminal attach contract notes
+
+The `den_desktop.terminal.attach` request accepts typed `viewport` and `replay` fields. The direct PTY backend uses both for replay from its output buffer. The tmux backend now applies `viewport` to the tmux window before `capture-pane` replay and limits the capture start to the requested row count; tmux replay is still snapshot-based rather than a live per-cursor history.
+
+`TerminalExternalAttachInfo.command` is display/copy-only operator text. The renderer must never auto-execute that string or pass it to a generic shell runner. If the UI later adds an attach button, it must call a typed app-core command that owns validation/audit instead of executing the displayed command text.
+
 ## Boundaries
 
 - Den remains the durable source of truth for tasks, messages, reviews, runs, and published snapshots.
