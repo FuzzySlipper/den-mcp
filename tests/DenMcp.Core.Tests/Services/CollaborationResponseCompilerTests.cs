@@ -194,6 +194,25 @@ public sealed class CollaborationResponseCompilerTests
     }
 
     [Fact]
+    public void Compile_CodeBlockSnippet_StripsStoredFenceTextForUsefulPreview()
+    {
+        var raw = "```js\nconsole.log('legacy text included fences');\n```";
+        var segments = new List<CollaborationSegment>
+        {
+            MakeSegment(1, 1, CollaborationSegmentType.CodeBlock, raw)
+        };
+        var annotations = new List<CollaborationAnnotation>
+        {
+            MakeAnnotation(1, CollaborationAnnotationType.Note, "optimize this")
+        };
+
+        var result = CollaborationResponseCompiler.Compile(segments, annotations);
+
+        Assert.Contains("[code block: console.log('legacy text included fences');]", result);
+        Assert.DoesNotContain("[code block: ```js]", result);
+    }
+
+    [Fact]
     public void Compile_HeadingSnippet_ShowsText()
     {
         var annotations = new List<CollaborationAnnotation>

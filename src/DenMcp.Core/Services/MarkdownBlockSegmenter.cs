@@ -184,6 +184,22 @@ public static class MarkdownBlockSegmenter
             return Regex.Replace(raw.Trim(), "^#{1,6}\\s+", string.Empty).Trim();
         if (type == CollaborationSegmentType.BlockQuote)
             return string.Join('\n', raw.Split('\n').Select(line => line.TrimStart().TrimStart('>').TrimStart()));
+        if (type == CollaborationSegmentType.CodeBlock)
+            return ExtractCodeBlockText(raw);
         return raw.Trim();
+    }
+
+    private static string ExtractCodeBlockText(string raw)
+    {
+        var normalized = raw.Replace("\r\n", "\n").Replace('\r', '\n');
+        var lines = normalized.Split('\n');
+        if (lines.Length == 0 || !TryFence(lines[0].TrimStart(), out var fence, out _))
+            return raw.Trim();
+
+        var end = lines.Length;
+        if (end > 1 && lines[^1].TrimStart().StartsWith(fence, StringComparison.Ordinal))
+            end--;
+
+        return string.Join('\n', lines[1..end]).Trim('\n');
     }
 }

@@ -91,16 +91,63 @@ public static class CollaborationResponseCompiler
     private static string BuildSnippet(CollaborationSegment segment)
     {
         if (segment.SegmentType == CollaborationSegmentType.CodeBlock)
-        {
-            var text = segment.Text ?? segment.RawMarkdown;
-            var firstLine = text.Split('\n')[0];
-            var truncated = firstLine.Length > 50 ? firstLine[..50] + "..." : firstLine;
-            return $"[code block: {truncated}]";
-        }
+            return BuildCodeBlockSnippet(segment);
 
         var rawText = segment.Text ?? segment.RawMarkdown;
         var snippet = rawText.Length > 80 ? rawText[..80] + "..." : rawText;
         return snippet;
+    }
+
+    private static string BuildCodeBlockSnippet(CollaborationSegment segment)
+    {
+        var text = segment.Text;
+        if (string.IsNullOrWhiteSpace(text) || StartsWithFence(text))
+            text = ExtractFencedCodeContent(segment.RawMarkdown);
+
+        var firstLine = text
+            .Replace("\r\n", "\n")
+            .Replace('\r', '\n')
+            .Split('\n')
+            .FirstOrDefault(line => !string.IsNullOrWhiteSpace(line))
+            ?.Trim() ?? "(empty)";
+
+        var truncated = firstLine.Length > 50 ? firstLine[..50] + "..." : firstLine;
+        return $"[code block: {truncated}]";
+    }
+
+    private static string ExtractFencedCodeContent(string rawMarkdown)
+    {
+        var normalized = rawMarkdown.Replace("\r\n", "\n").Replace('\r', '\n');
+        var lines = normalized.Split('\n');
+        if (lines.Length == 0 || !TryGetFence(lines[0], out var fence))
+            return rawMarkdown.Trim();
+
+        var end = lines.Length;
+        if (end > 1 && lines[^1].TrimStart().StartsWith(fence, StringComparison.Ordinal))
+            end--;
+
+        return string.Join('\n', lines[1..end]).Trim('\n');
+    }
+
+    private static bool StartsWithFence(string text) => TryGetFence(text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n')[0], out _);
+
+    private static bool TryGetFence(string line, out string fence)
+    {
+        var trimmedStart = line.TrimStart();
+        if (trimmedStart.StartsWith("```", StringComparison.Ordinal))
+        {
+            fence = "```";
+            return true;
+        }
+
+        if (trimmedStart.StartsWith("~~~", StringComparison.Ordinal))
+        {
+            fence = "~~~";
+            return true;
+        }
+
+        fence = string.Empty;
+        return false;
     }
 
     private static string BuildSegmentReference(CollaborationSegment segment)

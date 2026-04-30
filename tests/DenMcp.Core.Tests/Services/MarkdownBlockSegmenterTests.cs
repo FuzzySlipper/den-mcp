@@ -80,6 +80,8 @@ public sealed class MarkdownBlockSegmenterTests
         Assert.Equal(CollaborationSegmentType.CodeBlock, seg.SegmentType);
         Assert.Equal("csharp", seg.CodeLanguage);
         Assert.Contains("var x = 42", seg.RawMarkdown);
+        Assert.Equal("var x = 42;\nConsole.WriteLine(x);", seg.Text);
+        Assert.DoesNotContain("```", seg.Text);
     }
 
     [Fact]
@@ -98,10 +100,13 @@ public sealed class MarkdownBlockSegmenterTests
         Assert.Contains("plain code", seg.RawMarkdown);
     }
 
-    [Fact]
-    public void Segment_List_UnorderedDash()
+    [Theory]
+    [InlineData("-")]
+    [InlineData("*")]
+    [InlineData("+")]
+    public void Segment_List_UnorderedPrefixes(string prefix)
     {
-        var md = "- item one\n- item two\n- item three";
+        var md = $"{prefix} item one\n{prefix} item two\n{prefix} item three";
         var segments = MarkdownBlockSegmenter.Segment(md, V1);
 
         var seg = Assert.Single(segments);
@@ -262,9 +267,10 @@ public sealed class MarkdownBlockSegmenterTests
         Assert.Equal("# Heading", segments[0].RawMarkdown);
         // Paragraph
         Assert.Equal("Paragraph with **bold** and *italic*.", segments[1].RawMarkdown);
-        // Code block - exact markdown preserved
+        // Code block - exact markdown preserved for hash identity, while Text is useful code content.
         Assert.StartsWith("```json", segments[2].RawMarkdown);
         Assert.EndsWith("```", segments[2].RawMarkdown.TrimEnd());
+        Assert.Equal("{\"key\": \"value\"}", segments[2].Text);
     }
 
     [Fact]

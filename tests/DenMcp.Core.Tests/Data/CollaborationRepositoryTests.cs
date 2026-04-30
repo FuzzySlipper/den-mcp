@@ -1,6 +1,7 @@
 using System.Text.Json;
 using DenMcp.Core.Data;
 using DenMcp.Core.Models;
+using DenMcp.Core.Services;
 
 namespace DenMcp.Core.Tests.Data;
 
@@ -23,6 +24,12 @@ public sealed class CollaborationRepositoryTests : IAsyncLifetime
     }
 
     public Task DisposeAsync() => _testDb.DisposeAsync();
+
+    [Fact]
+    public void SegmenterVersion_DelegatesToMarkdownBlockSegmenterDefault()
+    {
+        Assert.Equal(MarkdownBlockSegmenter.DefaultSegmenterVersion, CollaborationRepository.SegmenterVersion);
+    }
 
     [Fact]
     public async Task CreateSession_PersistsImmutableSourceSnapshotAndDeterministicSegments()
