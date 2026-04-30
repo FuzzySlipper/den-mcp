@@ -931,3 +931,69 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid color-mix(i
   .titlebar-center { display: none; }
   .tabbar { overflow-x: auto; }
 }
+
+/* Direct PTY / xterm terminal workbench */
+.direct-terminal-workbench {
+  display: grid;
+  gap: var(--sp-2);
+  margin: var(--sp-3) 0;
+  padding: var(--sp-3);
+  border: var(--bw) solid var(--bd-default);
+  border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--bg-panel) 84%, #020617 16%);
+}
+.direct-terminal-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+}
+.direct-terminal-toolbar select,
+.direct-terminal-toolbar button {
+  border: var(--bw) solid var(--bd-default);
+  border-radius: var(--r-md);
+  background: var(--bg-input);
+  color: var(--fg-primary);
+  font: inherit;
+  font-size: var(--fs-xs);
+  padding: var(--sp-1) var(--sp-2);
+}
+.direct-terminal-toolbar select {
+  min-width: min(360px, 100%);
+}
+.direct-terminal-toolbar button {
+  cursor: pointer;
+}
+.direct-terminal-toolbar button:disabled,
+.direct-terminal-toolbar select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.terminal-state-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+  color: var(--fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+}
+.terminal-state-line strong {
+  color: var(--st-warn);
+  font-weight: 600;
+}
+.terminal-state-line .terminal-error {
+  color: var(--st-err);
+}
+.xterm-shell {
+  min-height: 320px;
+  height: min(48vh, 520px);
+  overflow: hidden;
+  border: var(--bw) solid var(--bd-subtle);
+  border-radius: var(--r-md);
+  background: #08111f;
+}
+.xterm-shell .xterm {
+  height: 100%;
+  padding: var(--sp-2);
+}

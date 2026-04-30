@@ -215,12 +215,20 @@ public class OperatorRuntimeServiceTests
             settingsService,
             den,
             () => new DateTimeOffset(2026, 4, 29, 12, 0, 0, TimeSpan.Zero));
+        var direct = new DirectPtyOperatorSessionService(
+            new FakeDirectPtyBackend(),
+            registry,
+            events,
+            settingsService,
+            den,
+            () => new DateTimeOffset(2026, 4, 29, 12, 0, 0, TimeSpan.Zero));
+        var terminals = new TerminalOperatorSessionService(registry, tmux, direct);
         var runtime = new OperatorRuntimeService(
             settingsService,
             den,
             new GitSnapshotBuilder(git),
             new PiSessionSnapshotBuilder(name => name == "PI_SUBAGENT_RUNS_DIR" ? Path.Combine(temp.Path, "runs") : null, () => "2026-04-29T12:00:00.000Z"),
-            tmux,
+            terminals,
             events,
             registry,
             () => new DateTimeOffset(2026, 4, 29, 12, 0, 0, TimeSpan.Zero));

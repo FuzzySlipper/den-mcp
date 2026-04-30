@@ -251,7 +251,7 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
     private readonly DenHttpClient _den;
     private readonly GitSnapshotBuilder _git;
     private readonly PiSessionSnapshotBuilder _sessions;
-    private readonly TmuxOperatorSessionService _tmuxSessions;
+    private readonly TerminalOperatorSessionService _terminalSessions;
     private readonly IOperatorRuntimeEventSink _events;
     private readonly OperatorSessionRegistry _operatorSessions;
     private readonly Func<DateTimeOffset> _now;
@@ -272,7 +272,7 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
         DenHttpClient den,
         GitSnapshotBuilder git,
         PiSessionSnapshotBuilder sessions,
-        TmuxOperatorSessionService tmuxSessions,
+        TerminalOperatorSessionService terminalSessions,
         IOperatorRuntimeEventSink events,
         OperatorSessionRegistry operatorSessions,
         Func<DateTimeOffset>? now = null)
@@ -281,7 +281,7 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
         _den = den;
         _git = git;
         _sessions = sessions;
-        _tmuxSessions = tmuxSessions;
+        _terminalSessions = terminalSessions;
         _events = events;
         _operatorSessions = operatorSessions;
         _now = now ?? (() => DateTimeOffset.UtcNow);
@@ -609,10 +609,10 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
             }
         }
 
-        await _tmuxSessions.RediscoverAsync(cancellationToken).ConfigureAwait(false);
+        await _terminalSessions.RediscoverAsync(cancellationToken).ConfigureAwait(false);
 
         var sessionResult = _sessions.ScanPiSessionSnapshots(settings, projects);
-        var sessionSnapshots = sessionResult.Snapshots.Concat(_tmuxSessions.BuildSnapshotListForDen()).ToList();
+        var sessionSnapshots = sessionResult.Snapshots.Concat(_terminalSessions.BuildSnapshotListForDen()).ToList();
         var sessionPublishSuccesses = 0;
         for (var index = 0; index < sessionSnapshots.Count; index++)
         {
@@ -646,7 +646,12 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
         // (task #1010: observe-only OperatorSession records from Pi artifacts).
         foreach (var session in sessionSnapshots)
         {
-            _operatorSessions.RegisterFromPiSnapshot(session);
+            if (string.Equals(session.Request.Backend, OperatorSessionBackend.PiArtifact, StringComparison.Ordinal)
+                || string.Equals(session.Request.Kind, OperatorSessionKind.ArtifactObserver, StringComparison.Ordinal)
+                || session.ArtifactRoot is not null)
+            {
+                _operatorSessions.RegisterFromPiSnapshot(session);
+            }
         }
 
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);

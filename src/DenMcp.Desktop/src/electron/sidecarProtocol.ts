@@ -98,6 +98,7 @@ export interface TerminalAttachRequest extends Record<string, JsonValue | undefi
   mode?: 'terminal_stream' | 'activity_only' | 'external_attach_info' | string;
   client_id?: string | null;
   viewport?: { cols: number; rows: number } | null;
+  replay?: { after_cursor?: string | null; max_bytes?: number; max_chunks?: number } | null;
 }
 
 export interface TerminalDetachRequest extends Record<string, JsonValue | undefined> {
@@ -185,6 +186,7 @@ export interface AppAgentCancelRequest extends Record<string, JsonValue | undefi
 }
 
 export type TerminalResponse = Record<string, JsonValue>;
+export type TerminalEventPayload = Record<string, JsonValue>;
 export type AppAgentResponse = Record<string, JsonValue>;
 
 export const sidecarCommands: Record<string, BridgeCommandSpec<JsonValue, JsonValue>> = {
@@ -346,6 +348,26 @@ export const sidecarEvents: Record<string, BridgeEventSpec<JsonValue>> = {
     event: 'den.terminal.output',
     payloadSchema: 'den.terminal.output.payload',
   },
+  terminalReplayComplete: {
+    event: 'den.terminal.replay_complete',
+    payloadSchema: 'den.terminal.replay_complete.payload',
+  },
+  terminalExit: {
+    event: 'den.terminal.exit',
+    payloadSchema: 'den.terminal.exit.payload',
+  },
+  terminalError: {
+    event: 'den.terminal.error',
+    payloadSchema: 'den.terminal.error.payload',
+  },
+  terminalHeartbeat: {
+    event: 'den.terminal.heartbeat',
+    payloadSchema: 'den.terminal.heartbeat.payload',
+  },
+  terminalBackpressure: {
+    event: 'den.terminal.backpressure',
+    payloadSchema: 'den.terminal.backpressure.payload',
+  },
   terminalSessionStatus: {
     event: 'den.terminal.session_status_changed',
     payloadSchema: 'den.terminal.session_status_changed.payload',
@@ -425,6 +447,21 @@ export function createSidecarBridgeFacade(client: SidecarBridgeClient) {
     },
     assertTerminalOutputEvent(frame: BridgeEventFrame): void {
       client.assertEvent('terminalOutput', frame);
+    },
+    assertTerminalReplayCompleteEvent(frame: BridgeEventFrame): void {
+      client.assertEvent('terminalReplayComplete', frame);
+    },
+    assertTerminalExitEvent(frame: BridgeEventFrame): void {
+      client.assertEvent('terminalExit', frame);
+    },
+    assertTerminalErrorEvent(frame: BridgeEventFrame): void {
+      client.assertEvent('terminalError', frame);
+    },
+    assertTerminalHeartbeatEvent(frame: BridgeEventFrame): void {
+      client.assertEvent('terminalHeartbeat', frame);
+    },
+    assertTerminalBackpressureEvent(frame: BridgeEventFrame): void {
+      client.assertEvent('terminalBackpressure', frame);
     },
     assertTerminalSessionStatusEvent(frame: BridgeEventFrame): void {
       client.assertEvent('terminalSessionStatus', frame);

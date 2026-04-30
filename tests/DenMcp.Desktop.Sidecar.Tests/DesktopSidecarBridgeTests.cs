@@ -51,7 +51,12 @@ public class DesktopSidecarBridgeTests
 
         var sortedEvents = new[]
         {
+            DesktopSidecarProtocol.TerminalBackpressureEvent,
+            DesktopSidecarProtocol.TerminalErrorEvent,
+            DesktopSidecarProtocol.TerminalExitEvent,
+            DesktopSidecarProtocol.TerminalHeartbeatEvent,
             DesktopSidecarProtocol.TerminalOutputEvent,
+            DesktopSidecarProtocol.TerminalReplayCompleteEvent,
             DesktopSidecarProtocol.TerminalSessionListEvent,
             DesktopSidecarProtocol.TerminalSessionStatusEvent,
             DesktopSidecarProtocol.AppAgentRunStateEvent,

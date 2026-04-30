@@ -538,7 +538,7 @@ public class TerminalBridgeHandlerTests
     {
         var runner = new FakeTmuxCommandRunner();
         var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
-        var handler = new TerminalCreateSessionHandler(CreateTmuxService(runner, registry));
+        var handler = new TerminalCreateSessionHandler(CreateTerminalService(runner, registry));
 
         var result = await handler.HandleAsync(
             new TerminalCreateSessionRequest
@@ -577,6 +577,65 @@ public class TerminalBridgeHandlerTests
         Assert.True(response.ExternalAttach!.Available);
         Assert.Contains("tmux attach-session", response.ExternalAttach.Command, StringComparison.Ordinal);
         Assert.DoesNotContain(runner.Calls, call => call.Args[0] == "capture-pane");
+    }
+
+    [Fact]
+    public async Task DirectPtyService_CreateAttachInputResizeExit_UsesBackendNeutralProtocol()
+    {
+        var backend = new FakeDirectPtyBackend();
+        var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
+        var options = DesktopSidecarFixtures.CreateFixtureOptions();
+        var settings = new OperatorSettingsService(OperatorSettingsStorage.ForPath(Path.Combine(Path.GetTempPath(), "den-tests", Guid.NewGuid().ToString("N"), "settings.json")));
+        var events = new OperatorRuntimeBridgeEventSink(new DesktopSidecarRuntimeState(options));
+        var service = new DirectPtyOperatorSessionService(
+            backend,
+            registry,
+            events,
+            settings,
+            new DenHttpClient(),
+            () => new DateTimeOffset(2026, 4, 29, 12, 0, 0, TimeSpan.Zero));
+
+        var session = await service.CreateAsync(new TerminalCreateSessionRequest
+        {
+            ProjectId = "den-mcp",
+            Title = "Direct",
+            Cwd = "/tmp/work",
+            Backend = OperatorSessionBackend.DirectPty,
+        }, CancellationToken.None);
+        var attach = await service.AttachAsync(new TerminalAttachRequest
+        {
+            SessionId = session.SessionId,
+            Viewport = new TerminalViewport { Cols = 100, Rows = 30 },
+            Replay = new TerminalReplaySpec { AfterCursor = null, MaxChunks = 20 },
+        }, CancellationToken.None);
+
+        Assert.StartsWith("pty:", session.SessionId, StringComparison.Ordinal);
+        Assert.Equal(OperatorSessionBackend.DirectPty, session.Backend);
+        Assert.True(session.Capabilities.CanStreamTerminal);
+        Assert.Equal(session.SessionId, attach.SessionId);
+        Assert.Equal(100, backend.Processes[0].Resizes[0].Cols);
+
+        await service.SendInputAsync(new TerminalSendInputRequest
+        {
+            SessionId = session.SessionId,
+            StreamId = attach.StreamId,
+            InputId = "in_test",
+            Data = "echo ok\n",
+            ByteCount = 8,
+        }, CancellationToken.None);
+        Assert.Equal("echo ok\n", Encoding.UTF8.GetString(backend.Processes[0].Writes[0]));
+
+        await service.ResizeAsync(new TerminalResizeRequest { SessionId = session.SessionId, StreamId = attach.StreamId, Cols = 120, Rows = 40 }, CancellationToken.None);
+        Assert.Contains(backend.Processes[0].Resizes, resize => resize is { Cols: 120, Rows: 40 });
+
+        backend.Processes[0].EmitOutput(Encoding.UTF8.GetBytes("hello\n"));
+        await Task.Delay(50);
+        Assert.Contains(events.PublishedFrames, frame => frame.Event == DesktopSidecarProtocol.TerminalOutputEvent);
+
+        await service.TerminateAsync(new TerminalTerminateRequest { SessionId = session.SessionId, StreamId = attach.StreamId, Mode = "kill" }, CancellationToken.None);
+        await Task.Delay(50);
+        Assert.Equal(OperatorSessionStatus.Exited, registry.Get(session.SessionId)!.Status);
+        Assert.Contains(events.PublishedFrames, frame => frame.Event == DesktopSidecarProtocol.TerminalExitEvent);
     }
 
     [Fact]
@@ -622,6 +681,29 @@ public class TerminalBridgeHandlerTests
             settings,
             new DenHttpClient(),
             () => new DateTimeOffset(2026, 4, 29, 12, 0, 0, TimeSpan.Zero));
+    }
+
+    private static TerminalOperatorSessionService CreateTerminalService(FakeTmuxCommandRunner runner, OperatorSessionRegistry registry)
+    {
+        var options = DesktopSidecarFixtures.CreateFixtureOptions();
+        var settings = new OperatorSettingsService(OperatorSettingsStorage.ForPath(Path.Combine(Path.GetTempPath(), "den-tests", Guid.NewGuid().ToString("N"), "settings.json")));
+        var events = new OperatorRuntimeBridgeEventSink(new DesktopSidecarRuntimeState(options));
+        var den = new DenHttpClient();
+        var tmux = new TmuxOperatorSessionService(
+            runner,
+            registry,
+            events,
+            settings,
+            den,
+            () => new DateTimeOffset(2026, 4, 29, 12, 0, 0, TimeSpan.Zero));
+        var direct = new DirectPtyOperatorSessionService(
+            new FakeDirectPtyBackend(),
+            registry,
+            events,
+            settings,
+            den,
+            () => new DateTimeOffset(2026, 4, 29, 12, 0, 0, TimeSpan.Zero));
+        return new TerminalOperatorSessionService(registry, tmux, direct);
     }
 
     private static BridgeRequestContext TestContext()
@@ -922,3 +1004,57 @@ public sealed class FakeTmuxCommandRunner : ITmuxCommandRunner
 }
 
 public sealed record FakeTmuxCall(IReadOnlyList<string> Args);
+
+public sealed class FakeDirectPtyBackend : IDirectPtyBackend
+{
+    public List<DirectPtyStartInfo> Starts { get; } = [];
+    public List<FakeDirectPtyProcess> Processes { get; } = [];
+
+    public Task<IDirectPtyProcess> SpawnAsync(DirectPtyStartInfo startInfo, CancellationToken cancellationToken = default)
+    {
+        Starts.Add(startInfo);
+        var process = new FakeDirectPtyProcess(startInfo.SessionId);
+        Processes.Add(process);
+        return Task.FromResult<IDirectPtyProcess>(process);
+    }
+}
+
+public sealed class FakeDirectPtyProcess : IDirectPtyProcess
+{
+    public FakeDirectPtyProcess(string sessionId)
+    {
+        SessionId = sessionId;
+    }
+
+    public string SessionId { get; }
+    public int? ProcessId => 1234;
+    public bool HasExited { get; private set; }
+    public int? ExitCode { get; private set; }
+    public List<byte[]> Writes { get; } = [];
+    public List<(int Cols, int Rows)> Resizes { get; } = [];
+    public event EventHandler<byte[]>? OutputReceived;
+    public event EventHandler<DirectPtyExitedEventArgs>? Exited;
+
+    public Task WriteAsync(byte[] bytes, CancellationToken cancellationToken = default)
+    {
+        Writes.Add(bytes);
+        return Task.CompletedTask;
+    }
+
+    public void Resize(int cols, int rows)
+    {
+        Resizes.Add((cols, rows));
+    }
+
+    public Task TerminateAsync(string mode, CancellationToken cancellationToken = default)
+    {
+        HasExited = true;
+        ExitCode = 0;
+        Exited?.Invoke(this, new DirectPtyExitedEventArgs(0, "process_exited"));
+        return Task.CompletedTask;
+    }
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+    public void EmitOutput(byte[] bytes) => OutputReceived?.Invoke(this, bytes);
+}

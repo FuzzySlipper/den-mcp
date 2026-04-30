@@ -46,6 +46,20 @@ interface DenDesktopSidecarRuntimeApi {
   getLatestDiffSnapshot(request: LatestDiffSnapshotRequest): Promise<DesktopDiffSnapshotLatestResult>;
   consoleListCommands(): Promise<ConsoleCommandListResponse>;
   consoleRunCommand(request: ConsoleCommandRunRequest): Promise<ConsoleCommandRunResponse>;
+  terminalCreateSession(request: TerminalCreateSessionRequest): Promise<TerminalCreateSessionResponse>;
+  terminalListSessions(request?: TerminalListSessionsRequest): Promise<TerminalListSessionsResponse>;
+  terminalAttach(request: TerminalAttachRequest): Promise<TerminalAttachResponse>;
+  terminalDetach(request: TerminalDetachRequest): Promise<TerminalDetachResponse>;
+  terminalSendInput(request: TerminalSendInputRequest): Promise<TerminalSendInputResponse>;
+  terminalResize(request: TerminalResizeRequest): Promise<TerminalResizeResponse>;
+  terminalTerminate(request: TerminalTerminateRequest): Promise<TerminalTerminateResponse>;
+  terminalReconnect(request: TerminalReconnectRequest): Promise<TerminalAttachResponse>;
+  terminalAckOutput(request: TerminalAckOutputRequest): Promise<TerminalAckOutputResponse>;
+  onTerminalOutput(listener: (event: TerminalOutputEvent) => void): () => void;
+  onTerminalStatus(listener: (event: TerminalStatusEvent) => void): () => void;
+  onTerminalLifecycle(listener: (event: TerminalLifecycleEvent) => void): () => void;
+  onTerminalBackpressure(listener: (event: TerminalBackpressureEvent) => void): () => void;
+  onTerminalSessionList(listener: (event: TerminalListSessionsResponse) => void): () => void;
   onOperatorStatus(listener: (status: OperatorStatus) => void): () => void;
   onGitSnapshots(listener: (snapshots: LocalGitSnapshot[]) => void): () => void;
   onSessionSnapshots(listener: (snapshots: LocalSessionSnapshot[]) => void): () => void;
@@ -375,4 +389,100 @@ export async function consoleListCommands(): Promise<ConsoleCommandListResponse>
 
 export async function consoleRunCommand(request: ConsoleCommandRunRequest): Promise<ConsoleCommandRunResponse> {
   return callSidecar('consoleRunCommand', () => sidecarApi().consoleRunCommand(request));
+}
+
+// ── Terminal stream/control protocol (#945/#911) ──
+
+export interface TerminalSessionSummary {
+  session_id: string;
+  title?: string | null;
+  display_name?: string | null;
+  kind: string;
+  backend: string;
+  status: string;
+  current_command?: string | null;
+  project_id?: string | null;
+  task_id?: number | null;
+  workspace_id?: string | null;
+  can_read_activity?: boolean;
+  can_send_input?: boolean;
+  can_terminate?: boolean;
+  can_attach?: boolean;
+  can_open_external_attach?: boolean;
+  persistence_kind?: string | null;
+  ownership_kind?: string | null;
+}
+
+export interface TerminalCreateSessionRequest {
+  project_id: string;
+  task_id?: number | null;
+  workspace_id?: string | null;
+  title?: string | null;
+  cwd?: string | null;
+  backend?: string;
+}
+
+export interface TerminalCreateSessionResponse { session: TerminalSessionSummary; }
+export interface TerminalListSessionsRequest { kind?: string | null; backend?: string | null; status?: string | null; }
+export interface TerminalListSessionsResponse { sessions: TerminalSessionSummary[]; count: number; }
+export interface TerminalViewport { cols: number; rows: number; }
+export interface TerminalAttachRequest { session_id: string; mode?: string; viewport?: TerminalViewport | null; client_id?: string | null; replay?: { after_cursor?: string | null; max_bytes?: number; max_chunks?: number } | null; }
+export interface TerminalAttachResponse { stream_id: string; session_id: string; attached_at?: string; start_cursor?: string; replay_available_from?: string; replay_gap?: boolean; capabilities?: Record<string, boolean>; limits?: { ack_after_bytes?: number; output_chunk_max_bytes?: number; input_chunk_max_bytes?: number; heartbeat_interval_ms?: number }; }
+export interface TerminalDetachRequest { stream_id: string; session_id: string; reason?: string | null; }
+export interface TerminalDetachResponse { detached: boolean; backend_preserved: boolean; }
+export interface TerminalSendInputRequest { session_id: string; stream_id?: string | null; input_id?: string | null; encoding?: string; data: string; byte_count?: number; }
+export interface TerminalSendInputResponse { accepted: boolean; input_id?: string | null; written_bytes: number; }
+export interface TerminalResizeRequest { session_id: string; stream_id?: string | null; cols: number; rows: number; }
+export interface TerminalResizeResponse { accepted: boolean; cols: number; rows: number; }
+export interface TerminalTerminateRequest { session_id: string; stream_id?: string | null; mode?: string; reason?: string | null; requested_by?: string | null; }
+export interface TerminalTerminateResponse { accepted: boolean; mode: string; terminal_event_id?: string | null; }
+export interface TerminalReconnectRequest { session_id: string; previous_stream_id?: string | null; last_seen_cursor?: string | null; viewport?: TerminalViewport | null; }
+export interface TerminalAckOutputRequest { session_id: string; stream_id?: string | null; ack_cursor?: string | null; received_bytes?: number; }
+export interface TerminalAckOutputResponse { accepted: boolean; }
+export interface TerminalOutputEvent { stream_id: string; session_id: string; stream_cursor: string; terminal_sequence: number; encoding: string; data: string; byte_count: number; origin?: string | null; truncated?: boolean; }
+export interface TerminalStatusEvent { session_id: string; status?: string | null; warnings?: string[]; observed_at?: string | null; capabilities?: Record<string, boolean> | null; }
+export interface TerminalLifecycleEvent { event?: string; session_id: string; stream_id?: string | null; exit_code?: number | null; reason?: string; code?: string; message?: string; stream_cursor?: string | null; replay_gap?: boolean; }
+export interface TerminalBackpressureEvent { session_id: string; stream_id?: string | null; state: string; queue_bytes: number; dropped_bytes: number; next_action?: string | null; }
+
+export async function terminalCreateSession(request: TerminalCreateSessionRequest): Promise<TerminalCreateSessionResponse> {
+  return callSidecar('terminalCreateSession', () => sidecarApi().terminalCreateSession(request));
+}
+export async function terminalListSessions(request: TerminalListSessionsRequest = {}): Promise<TerminalListSessionsResponse> {
+  return callSidecar('terminalListSessions', () => sidecarApi().terminalListSessions(request));
+}
+export async function terminalAttach(request: TerminalAttachRequest): Promise<TerminalAttachResponse> {
+  return callSidecar('terminalAttach', () => sidecarApi().terminalAttach(request));
+}
+export async function terminalDetach(request: TerminalDetachRequest): Promise<TerminalDetachResponse> {
+  return callSidecar('terminalDetach', () => sidecarApi().terminalDetach(request));
+}
+export async function terminalSendInput(request: TerminalSendInputRequest): Promise<TerminalSendInputResponse> {
+  return callSidecar('terminalSendInput', () => sidecarApi().terminalSendInput(request));
+}
+export async function terminalResize(request: TerminalResizeRequest): Promise<TerminalResizeResponse> {
+  return callSidecar('terminalResize', () => sidecarApi().terminalResize(request));
+}
+export async function terminalTerminate(request: TerminalTerminateRequest): Promise<TerminalTerminateResponse> {
+  return callSidecar('terminalTerminate', () => sidecarApi().terminalTerminate(request));
+}
+export async function terminalReconnect(request: TerminalReconnectRequest): Promise<TerminalAttachResponse> {
+  return callSidecar('terminalReconnect', () => sidecarApi().terminalReconnect(request));
+}
+export async function terminalAckOutput(request: TerminalAckOutputRequest): Promise<TerminalAckOutputResponse> {
+  return callSidecar('terminalAckOutput', () => sidecarApi().terminalAckOutput(request));
+}
+export function onTerminalOutput(callback: (event: TerminalOutputEvent) => void): Promise<() => void> {
+  return listenSidecar('terminal output', () => sidecarApi().onTerminalOutput(callback));
+}
+export function onTerminalStatus(callback: (event: TerminalStatusEvent) => void): Promise<() => void> {
+  return listenSidecar('terminal status', () => sidecarApi().onTerminalStatus(callback));
+}
+export function onTerminalLifecycle(callback: (event: TerminalLifecycleEvent) => void): Promise<() => void> {
+  return listenSidecar('terminal lifecycle', () => sidecarApi().onTerminalLifecycle(callback));
+}
+export function onTerminalBackpressure(callback: (event: TerminalBackpressureEvent) => void): Promise<() => void> {
+  return listenSidecar('terminal backpressure', () => sidecarApi().onTerminalBackpressure(callback));
+}
+export function onTerminalSessionList(callback: (event: TerminalListSessionsResponse) => void): Promise<() => void> {
+  return listenSidecar('terminal session list', () => sidecarApi().onTerminalSessionList(callback));
 }

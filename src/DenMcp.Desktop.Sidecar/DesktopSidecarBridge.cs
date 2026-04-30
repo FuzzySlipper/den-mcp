@@ -26,6 +26,9 @@ public static class DesktopSidecarBridge
         services.AddSingleton<OperatorSessionLeaseStore>();
         services.AddSingleton<ITmuxCommandRunner, SystemTmuxCommandRunner>();
         services.AddSingleton<TmuxOperatorSessionService>();
+        services.AddSingleton<IDirectPtyBackend, PortaDirectPtyBackend>();
+        services.AddSingleton<DirectPtyOperatorSessionService>();
+        services.AddSingleton<TerminalOperatorSessionService>();
         services.AddSingleton<DesktopSidecarRuntimeState>();
         services.AddSingleton<OperatorRuntimeBridgeEventSink>();
         services.AddSingleton<IOperatorRuntimeEventSink>(sp => sp.GetRequiredService<OperatorRuntimeBridgeEventSink>());
@@ -44,7 +47,7 @@ public static class DesktopSidecarBridge
                 host.SchemaVersion = DesktopSidecarProtocol.SchemaVersion;
                 host.SchemaBundleId = DesktopSidecarProtocol.SchemaBundleId;
                 host.SupportedTransports = new[] { WebSocketBridgeTransportNames.LoopbackWebSocket };
-                host.FeatureFlags = new[] { "operator_runtime", "typed_runtime_bridge", "tmux_operator_sessions", "app_agent_bridge_foundation" };
+                host.FeatureFlags = new[] { "operator_runtime", "typed_runtime_bridge", "tmux_operator_sessions", "direct_pty_operator_sessions", "app_agent_bridge_foundation" };
             });
 
         return services.BuildServiceProvider(validateScopes: true);
@@ -120,6 +123,11 @@ public static class DesktopSidecarBridge
             .RegisterEvent<IReadOnlyList<LocalSessionSnapshot>>(DesktopSidecarProtocol.SessionSnapshotEvent)
             // Terminal protocol events (task #1010/#909, dot-convention names per R945-4)
             .RegisterEvent<TerminalOutputEvent>(DesktopSidecarProtocol.TerminalOutputEvent)
+            .RegisterEvent<TerminalReplayCompleteEvent>(DesktopSidecarProtocol.TerminalReplayCompleteEvent)
+            .RegisterEvent<TerminalExitEvent>(DesktopSidecarProtocol.TerminalExitEvent)
+            .RegisterEvent<TerminalProtocolErrorEvent>(DesktopSidecarProtocol.TerminalErrorEvent)
+            .RegisterEvent<TerminalHeartbeatEvent>(DesktopSidecarProtocol.TerminalHeartbeatEvent)
+            .RegisterEvent<TerminalBackpressureEvent>(DesktopSidecarProtocol.TerminalBackpressureEvent)
             .RegisterEvent<TerminalSessionEvent>(DesktopSidecarProtocol.TerminalSessionStatusEvent)
             .RegisterEvent<TerminalListSessionsResponse>(DesktopSidecarProtocol.TerminalSessionListEvent)
             .RegisterEvent<AppAgentRunStateEvent>(DesktopSidecarProtocol.AppAgentRunStateEvent)
@@ -200,7 +208,7 @@ public static class DesktopSidecarBridge
                 """),
             Schema(DesktopSidecarProtocol.TerminalReadActivityCommand + ".response", TerminalReadActivityResponseSchema),
             Schema(DesktopSidecarProtocol.TerminalAttachCommand + ".request", """
-                {"type":"object","additionalProperties":false,"required":["session_id"],"properties":{"session_id":{"type":"string"},"mode":{"type":"string"},"client_id":{"type":["string","null"]}}}
+                {"type":"object","additionalProperties":false,"required":["session_id"],"properties":{"terminal_protocol_version":{"type":"string"},"session_id":{"type":"string"},"mode":{"type":"string"},"client_id":{"type":["string","null"]},"viewport":{"type":["object","null"],"additionalProperties":false,"properties":{"cols":{"type":"integer"},"rows":{"type":"integer"}}},"replay":{"type":["object","null"],"additionalProperties":false,"properties":{"after_cursor":{"type":["string","null"]},"max_bytes":{"type":"integer"},"max_chunks":{"type":"integer"}}}}}
                 """),
             Schema(DesktopSidecarProtocol.TerminalAttachCommand + ".response", TerminalAttachResponseSchema),
             Schema(DesktopSidecarProtocol.TerminalDetachCommand + ".request", """
@@ -248,6 +256,11 @@ public static class DesktopSidecarBridge
             Schema(DesktopSidecarProtocol.AppAgentToolCallStateEvent + ".payload", AppAgentToolCallStateEventSchema),
             // Terminal protocol event schemas
             Schema(DesktopSidecarProtocol.TerminalOutputEvent + ".payload", TerminalOutputEventPayloadSchema),
+            Schema(DesktopSidecarProtocol.TerminalReplayCompleteEvent + ".payload", TerminalReplayCompleteEventPayloadSchema),
+            Schema(DesktopSidecarProtocol.TerminalExitEvent + ".payload", TerminalExitEventPayloadSchema),
+            Schema(DesktopSidecarProtocol.TerminalErrorEvent + ".payload", TerminalErrorEventPayloadSchema),
+            Schema(DesktopSidecarProtocol.TerminalHeartbeatEvent + ".payload", TerminalHeartbeatEventPayloadSchema),
+            Schema(DesktopSidecarProtocol.TerminalBackpressureEvent + ".payload", TerminalBackpressureEventPayloadSchema),
             Schema(DesktopSidecarProtocol.TerminalSessionStatusEvent + ".payload", TerminalSessionEventPayloadSchema),
             Schema(DesktopSidecarProtocol.TerminalSessionListEvent + ".payload", TerminalListSessionsResponseSchema),
         };
@@ -321,6 +334,26 @@ public static class DesktopSidecarBridge
 
     private const string TerminalOutputEventPayloadSchema = """
         {"type":"object","additionalProperties":false,"required":["terminal_protocol_version","stream_id","session_id","terminal_sequence","stream_cursor","chunk_id","encoding","data","byte_count"],"properties":{"terminal_protocol_version":{"type":"string"},"stream_id":{"type":"string"},"session_id":{"type":"string"},"terminal_sequence":{"type":"integer"},"stream_cursor":{"type":"string"},"chunk_id":{"type":"string"},"origin":{"type":["string","null"]},"encoding":{"type":"string"},"data":{"type":"string"},"byte_count":{"type":"integer"},"cols":{"type":["integer","null"]},"rows":{"type":["integer","null"]},"emitted_at":{"type":"string"},"truncated":{"type":"boolean"},"redacted":{"type":"boolean"}}}
+        """;
+
+    private const string TerminalReplayCompleteEventPayloadSchema = """
+        {"type":"object","additionalProperties":false,"required":["stream_id","session_id","replay_gap","dropped_bytes_before_start"],"properties":{"stream_id":{"type":"string"},"session_id":{"type":"string"},"from_cursor":{"type":["string","null"]},"to_cursor":{"type":["string","null"]},"replay_gap":{"type":"boolean"},"dropped_bytes_before_start":{"type":"integer"}}}
+        """;
+
+    private const string TerminalExitEventPayloadSchema = """
+        {"type":"object","additionalProperties":false,"required":["session_id","reason","exited_at"],"properties":{"session_id":{"type":"string"},"stream_id":{"type":["string","null"]},"exit_code":{"type":["integer","null"]},"exit_signal":{"type":["integer","null"]},"reason":{"type":"string"},"exited_at":{"type":"string"}}}
+        """;
+
+    private const string TerminalErrorEventPayloadSchema = """
+        {"type":"object","additionalProperties":false,"required":["session_id","code","message","retryable","details"],"properties":{"session_id":{"type":"string"},"stream_id":{"type":["string","null"]},"code":{"type":"string"},"message":{"type":"string"},"retryable":{"type":"boolean"},"details":{"type":"object","additionalProperties":{"type":"string"}}}}
+        """;
+
+    private const string TerminalHeartbeatEventPayloadSchema = """
+        {"type":"object","additionalProperties":false,"required":["session_id","backend_status","queue_bytes","paused"],"properties":{"session_id":{"type":"string"},"stream_id":{"type":["string","null"]},"stream_cursor":{"type":["string","null"]},"backend_status":{"type":"string"},"last_activity_at":{"type":["string","null"]},"queue_bytes":{"type":"integer"},"paused":{"type":"boolean"}}}
+        """;
+
+    private const string TerminalBackpressureEventPayloadSchema = """
+        {"type":"object","additionalProperties":false,"required":["session_id","state","queue_bytes","dropped_bytes"],"properties":{"session_id":{"type":"string"},"stream_id":{"type":["string","null"]},"state":{"type":"string"},"queue_bytes":{"type":"integer"},"dropped_bytes":{"type":"integer"},"next_action":{"type":["string","null"]}}}
         """;
 
     private const string TerminalSessionEventPayloadSchema = """

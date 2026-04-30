@@ -580,6 +580,114 @@ public sealed record TerminalSessionEvent
     public string? ObservedAt { get; init; }
 }
 
+public sealed record TerminalReplayCompleteEvent
+{
+    [JsonPropertyName("stream_id")]
+    public required string StreamId { get; init; }
+
+    [JsonPropertyName("session_id")]
+    public required string SessionId { get; init; }
+
+    [JsonPropertyName("from_cursor")]
+    public string? FromCursor { get; init; }
+
+    [JsonPropertyName("to_cursor")]
+    public string? ToCursor { get; init; }
+
+    [JsonPropertyName("replay_gap")]
+    public bool ReplayGap { get; init; }
+
+    [JsonPropertyName("dropped_bytes_before_start")]
+    public long DroppedBytesBeforeStart { get; init; }
+}
+
+public sealed record TerminalExitEvent
+{
+    [JsonPropertyName("session_id")]
+    public required string SessionId { get; init; }
+
+    [JsonPropertyName("stream_id")]
+    public string? StreamId { get; init; }
+
+    [JsonPropertyName("exit_code")]
+    public int? ExitCode { get; init; }
+
+    [JsonPropertyName("exit_signal")]
+    public int? ExitSignal { get; init; }
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; init; } = "process_exited";
+
+    [JsonPropertyName("exited_at")]
+    public string ExitedAt { get; init; } = string.Empty;
+}
+
+public sealed record TerminalProtocolErrorEvent
+{
+    [JsonPropertyName("session_id")]
+    public required string SessionId { get; init; }
+
+    [JsonPropertyName("stream_id")]
+    public string? StreamId { get; init; }
+
+    [JsonPropertyName("code")]
+    public required string Code { get; init; }
+
+    [JsonPropertyName("message")]
+    public required string Message { get; init; }
+
+    [JsonPropertyName("retryable")]
+    public bool Retryable { get; init; }
+
+    [JsonPropertyName("details")]
+    public IReadOnlyDictionary<string, string> Details { get; init; } = new Dictionary<string, string>();
+}
+
+public sealed record TerminalHeartbeatEvent
+{
+    [JsonPropertyName("session_id")]
+    public required string SessionId { get; init; }
+
+    [JsonPropertyName("stream_id")]
+    public string? StreamId { get; init; }
+
+    [JsonPropertyName("stream_cursor")]
+    public string? StreamCursor { get; init; }
+
+    [JsonPropertyName("backend_status")]
+    public string BackendStatus { get; init; } = "running";
+
+    [JsonPropertyName("last_activity_at")]
+    public string? LastActivityAt { get; init; }
+
+    [JsonPropertyName("queue_bytes")]
+    public int QueueBytes { get; init; }
+
+    [JsonPropertyName("paused")]
+    public bool Paused { get; init; }
+}
+
+public sealed record TerminalBackpressureEvent
+{
+    [JsonPropertyName("session_id")]
+    public required string SessionId { get; init; }
+
+    [JsonPropertyName("stream_id")]
+    public string? StreamId { get; init; }
+
+    [JsonPropertyName("state")]
+    public string State { get; init; } = "normal";
+
+    [JsonPropertyName("queue_bytes")]
+    public int QueueBytes { get; init; }
+
+    [JsonPropertyName("dropped_bytes")]
+    public long DroppedBytes { get; init; }
+
+    [JsonPropertyName("next_action")]
+    public string? NextAction { get; init; }
+}
+
 // ── Error DTO ─────────────────────────────────────────────────────────────
 
 public sealed record TerminalErrorResult

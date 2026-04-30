@@ -4,16 +4,16 @@ using Den.Bridge.Protocol;
 namespace DenMcp.Desktop.Sidecar;
 
 /// <summary>
-/// Bridge command handler for creating tmux-backed OperatorSessions.
+/// Bridge command handler for creating backend-neutral terminal OperatorSessions.
 /// </summary>
 public sealed class TerminalCreateSessionHandler
     : IBridgeCommandHandler<TerminalCreateSessionRequest, TerminalCreateSessionResponse>
 {
-    private readonly TmuxOperatorSessionService _tmux;
+    private readonly TerminalOperatorSessionService _terminals;
 
-    public TerminalCreateSessionHandler(TmuxOperatorSessionService tmux)
+    public TerminalCreateSessionHandler(TerminalOperatorSessionService terminals)
     {
-        _tmux = tmux;
+        _terminals = terminals;
     }
 
     public async ValueTask<TerminalCreateSessionResponse?> HandleAsync(
@@ -21,7 +21,7 @@ public sealed class TerminalCreateSessionHandler
         BridgeRequestContext context,
         CancellationToken cancellationToken)
     {
-        var session = await _tmux.CreateAsync(request, cancellationToken).ConfigureAwait(false);
+        var session = await _terminals.CreateAsync(request, cancellationToken).ConfigureAwait(false);
         return new TerminalCreateSessionResponse
         {
             Session = TerminalSessionSummaryProjection.FromSession(session),
@@ -136,111 +136,111 @@ public sealed class TerminalReadActivityHandler
 public sealed class TerminalAttachHandler
     : IBridgeCommandHandler<TerminalAttachRequest, TerminalAttachResponse>
 {
-    private readonly TmuxOperatorSessionService _tmux;
+    private readonly TerminalOperatorSessionService _terminals;
 
-    public TerminalAttachHandler(TmuxOperatorSessionService tmux) => _tmux = tmux;
+    public TerminalAttachHandler(TerminalOperatorSessionService terminals) => _terminals = terminals;
 
     public async ValueTask<TerminalAttachResponse?> HandleAsync(
         TerminalAttachRequest request,
         BridgeRequestContext context,
         CancellationToken cancellationToken)
     {
-        return await _tmux.AttachAsync(request, cancellationToken).ConfigureAwait(false);
+        return await _terminals.AttachAsync(request, cancellationToken).ConfigureAwait(false);
     }
 }
 
 public sealed class TerminalDetachHandler
     : IBridgeCommandHandler<TerminalDetachRequest, TerminalDetachResponse>
 {
-    private readonly TmuxOperatorSessionService _tmux;
+    private readonly TerminalOperatorSessionService _terminals;
 
-    public TerminalDetachHandler(TmuxOperatorSessionService tmux) => _tmux = tmux;
+    public TerminalDetachHandler(TerminalOperatorSessionService terminals) => _terminals = terminals;
 
     public async ValueTask<TerminalDetachResponse?> HandleAsync(
         TerminalDetachRequest request,
         BridgeRequestContext context,
         CancellationToken cancellationToken)
     {
-        return await _tmux.DetachAsync(request, cancellationToken).ConfigureAwait(false);
+        return await _terminals.DetachAsync(request, cancellationToken).ConfigureAwait(false);
     }
 }
 
 public sealed class TerminalSendInputHandler
     : IBridgeCommandHandler<TerminalSendInputRequest, TerminalSendInputResponse>
 {
-    private readonly TmuxOperatorSessionService _tmux;
+    private readonly TerminalOperatorSessionService _terminals;
 
-    public TerminalSendInputHandler(TmuxOperatorSessionService tmux) => _tmux = tmux;
+    public TerminalSendInputHandler(TerminalOperatorSessionService terminals) => _terminals = terminals;
 
     public async ValueTask<TerminalSendInputResponse?> HandleAsync(
         TerminalSendInputRequest request,
         BridgeRequestContext context,
         CancellationToken cancellationToken)
     {
-        return await _tmux.SendInputAsync(request, cancellationToken).ConfigureAwait(false);
+        return await _terminals.SendInputAsync(request, cancellationToken).ConfigureAwait(false);
     }
 }
 
 public sealed class TerminalResizeHandler
     : IBridgeCommandHandler<TerminalResizeRequest, TerminalResizeResponse>
 {
-    private readonly TmuxOperatorSessionService _tmux;
+    private readonly TerminalOperatorSessionService _terminals;
 
-    public TerminalResizeHandler(TmuxOperatorSessionService tmux) => _tmux = tmux;
+    public TerminalResizeHandler(TerminalOperatorSessionService terminals) => _terminals = terminals;
 
     public async ValueTask<TerminalResizeResponse?> HandleAsync(
         TerminalResizeRequest request,
         BridgeRequestContext context,
         CancellationToken cancellationToken)
     {
-        return await _tmux.ResizeAsync(request, cancellationToken).ConfigureAwait(false);
+        return await _terminals.ResizeAsync(request, cancellationToken).ConfigureAwait(false);
     }
 }
 
 public sealed class TerminalTerminateHandler
     : IBridgeCommandHandler<TerminalTerminateRequest, TerminalTerminateResponse>
 {
-    private readonly TmuxOperatorSessionService _tmux;
+    private readonly TerminalOperatorSessionService _terminals;
 
-    public TerminalTerminateHandler(TmuxOperatorSessionService tmux) => _tmux = tmux;
+    public TerminalTerminateHandler(TerminalOperatorSessionService terminals) => _terminals = terminals;
 
     public async ValueTask<TerminalTerminateResponse?> HandleAsync(
         TerminalTerminateRequest request,
         BridgeRequestContext context,
         CancellationToken cancellationToken)
     {
-        return await _tmux.TerminateAsync(request, cancellationToken).ConfigureAwait(false);
+        return await _terminals.TerminateAsync(request, cancellationToken).ConfigureAwait(false);
     }
 }
 
 public sealed class TerminalReconnectHandler
     : IBridgeCommandHandler<TerminalReconnectRequest, TerminalAttachResponse>
 {
-    private readonly TmuxOperatorSessionService _tmux;
+    private readonly TerminalOperatorSessionService _terminals;
 
-    public TerminalReconnectHandler(TmuxOperatorSessionService tmux) => _tmux = tmux;
+    public TerminalReconnectHandler(TerminalOperatorSessionService terminals) => _terminals = terminals;
 
     public async ValueTask<TerminalAttachResponse?> HandleAsync(
         TerminalReconnectRequest request,
         BridgeRequestContext context,
         CancellationToken cancellationToken)
     {
-        return await _tmux.ReconnectAsync(request, cancellationToken).ConfigureAwait(false);
+        return await _terminals.ReconnectAsync(request, cancellationToken).ConfigureAwait(false);
     }
 }
 
 public sealed class TerminalAckOutputHandler
     : IBridgeCommandHandler<TerminalAckOutputRequest, TerminalAckOutputResponse>
 {
-    private readonly TmuxOperatorSessionService _tmux;
+    private readonly TerminalOperatorSessionService _terminals;
 
-    public TerminalAckOutputHandler(TmuxOperatorSessionService tmux) => _tmux = tmux;
+    public TerminalAckOutputHandler(TerminalOperatorSessionService terminals) => _terminals = terminals;
 
     public async ValueTask<TerminalAckOutputResponse?> HandleAsync(
         TerminalAckOutputRequest request,
         BridgeRequestContext context,
         CancellationToken cancellationToken)
     {
-        return await _tmux.AckOutputAsync(request, cancellationToken).ConfigureAwait(false);
+        return await _terminals.AckOutputAsync(request, cancellationToken).ConfigureAwait(false);
     }
 }

@@ -197,12 +197,12 @@ export function App() {
     <div className="terminals-tab tab-stack">
       <section className="tab-intro panel surface-panel">
         <p className="eyebrow">Terminals</p>
-        <h2>Observed Pi sessions</h2>
+        <h2>Embedded terminals</h2>
         <p className="muted">
-          Read-only session cards from existing Pi artifact snapshots. Attach, input, and terminal control remain deferred to later backend-neutral terminal tasks.
+          Create app-owned direct PTY sessions for synced workspaces, attach with xterm.js, and keep controls behind OperatorSession capabilities.
         </p>
       </section>
-      <SessionPane snapshots={runtime.sessionSnapshots} />
+      <SessionPane snapshots={runtime.sessionSnapshots} workspaces={runtime.snapshots} />
     </div>
   );
 

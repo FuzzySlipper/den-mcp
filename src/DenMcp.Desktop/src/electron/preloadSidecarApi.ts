@@ -11,7 +11,7 @@ import type {
   SaveOperatorSettingsRequest,
 } from '../desktop/tauriApi.ts';
 import type { SidecarBridgeClient } from './sidecarProtocol.ts';
-import { createSidecarBridgeFacade, type SidecarHealthResponse, type SidecarCapabilitiesResponse, type ConsoleCommandDefinition, type ConsoleCommandRunRequest, type ConsoleCommandRunResponse, type ConsoleCommandListResponse, type TerminalAckOutputRequest, type TerminalAttachRequest, type TerminalCreateSessionRequest, type TerminalDetachRequest, type TerminalListSessionsRequest, type TerminalReadActivityRequest, type TerminalReconnectRequest, type TerminalResizeRequest, type TerminalResponse, type TerminalSendInputRequest, type TerminalTerminateRequest, type AppAgentBuildContextRequest, type AppAgentCancelRequest, type AppAgentInvokeToolRequest, type AppAgentListToolsRequest, type AppAgentResponse } from './sidecarProtocol.ts';
+import { createSidecarBridgeFacade, type SidecarHealthResponse, type SidecarCapabilitiesResponse, type ConsoleCommandDefinition, type ConsoleCommandRunRequest, type ConsoleCommandRunResponse, type ConsoleCommandListResponse, type TerminalAckOutputRequest, type TerminalAttachRequest, type TerminalCreateSessionRequest, type TerminalDetachRequest, type TerminalListSessionsRequest, type TerminalReadActivityRequest, type TerminalReconnectRequest, type TerminalResizeRequest, type TerminalResponse, type TerminalEventPayload, type TerminalSendInputRequest, type TerminalTerminateRequest, type AppAgentBuildContextRequest, type AppAgentCancelRequest, type AppAgentInvokeToolRequest, type AppAgentListToolsRequest, type AppAgentResponse } from './sidecarProtocol.ts';
 
 export interface ShellAppearanceSettings {
   theme: string;
@@ -51,6 +51,11 @@ export interface DenDesktopSidecarApi {
   terminalTerminate(request: TerminalTerminateRequest): Promise<TerminalResponse>;
   terminalReconnect(request: TerminalReconnectRequest): Promise<TerminalResponse>;
   terminalAckOutput(request: TerminalAckOutputRequest): Promise<TerminalResponse>;
+  onTerminalOutput(listener: (event: TerminalEventPayload) => void): () => void;
+  onTerminalStatus(listener: (event: TerminalEventPayload) => void): () => void;
+  onTerminalLifecycle(listener: (event: TerminalEventPayload) => void): () => void;
+  onTerminalBackpressure(listener: (event: TerminalEventPayload) => void): () => void;
+  onTerminalSessionList(listener: (event: TerminalResponse) => void): () => void;
   onAppAgentRunState(listener: (event: AppAgentResponse) => void): () => void;
   onAppAgentToolCallState(listener: (event: AppAgentResponse) => void): () => void;
   onOperatorStatus(listener: (status: OperatorStatus) => void): () => void;
@@ -99,6 +104,51 @@ export function createDenDesktopSidecarApi(
     terminalTerminate: (request: TerminalTerminateRequest) => facade.terminalTerminate(request),
     terminalReconnect: (request: TerminalReconnectRequest) => facade.terminalReconnect(request),
     terminalAckOutput: (request: TerminalAckOutputRequest) => facade.terminalAckOutput(request),
+    onTerminalOutput(listener: (event: TerminalEventPayload) => void) {
+      return events.subscribe((frame) => {
+        if (frame.event !== 'den.terminal.output') return;
+        facade.assertTerminalOutputEvent(frame);
+        listener(frame.payload as unknown as TerminalEventPayload);
+      });
+    },
+    onTerminalStatus(listener: (event: TerminalEventPayload) => void) {
+      return events.subscribe((frame) => {
+        if (frame.event !== 'den.terminal.session_status_changed') return;
+        facade.assertTerminalSessionStatusEvent(frame);
+        listener(frame.payload as unknown as TerminalEventPayload);
+      });
+    },
+    onTerminalLifecycle(listener: (event: TerminalEventPayload) => void) {
+      return events.subscribe((frame) => {
+        if (frame.event === 'den.terminal.exit') {
+          facade.assertTerminalExitEvent(frame);
+          listener({ ...(frame.payload as unknown as TerminalEventPayload), event: frame.event });
+        } else if (frame.event === 'den.terminal.error') {
+          facade.assertTerminalErrorEvent(frame);
+          listener({ ...(frame.payload as unknown as TerminalEventPayload), event: frame.event });
+        } else if (frame.event === 'den.terminal.heartbeat') {
+          facade.assertTerminalHeartbeatEvent(frame);
+          listener({ ...(frame.payload as unknown as TerminalEventPayload), event: frame.event });
+        } else if (frame.event === 'den.terminal.replay_complete') {
+          facade.assertTerminalReplayCompleteEvent(frame);
+          listener({ ...(frame.payload as unknown as TerminalEventPayload), event: frame.event });
+        }
+      });
+    },
+    onTerminalBackpressure(listener: (event: TerminalEventPayload) => void) {
+      return events.subscribe((frame) => {
+        if (frame.event !== 'den.terminal.backpressure') return;
+        facade.assertTerminalBackpressureEvent(frame);
+        listener(frame.payload as unknown as TerminalEventPayload);
+      });
+    },
+    onTerminalSessionList(listener: (event: TerminalResponse) => void) {
+      return events.subscribe((frame) => {
+        if (frame.event !== 'den.terminal.session_list_updated') return;
+        facade.assertTerminalSessionListEvent(frame);
+        listener(frame.payload as unknown as TerminalResponse);
+      });
+    },
     onAppAgentRunState(listener: (event: AppAgentResponse) => void) {
       return events.subscribe((frame) => {
         if (frame.event !== 'den.app_agent.run_state_changed') return;
