@@ -6,6 +6,9 @@ import {
   formatImplementationPacketMessage,
   buildImplementationPacketMeta,
   findDuplicateImplementationPacketMessage,
+  detectIncompleteCoderPrompt,
+  formatPacketMissingNoticeMessage,
+  buildPacketMissingNoticeMeta,
   REQUIRED_FIELDS,
 } from '../../pi-dev/lib/den-implementation-packet.ts';
 import { buildSubagentRunMetadata } from '../../pi-dev/lib/den-subagent-pipeline.ts';
@@ -682,4 +685,165 @@ test('old spread order (packetMeta first) loses branch/head_commit to null runMe
     'old spread order clobbers branch with null — confirms the bug existed');
   assert.equal(buggyMerged.head_commit, null,
     'old spread order clobbers head_commit with null — confirms the bug existed');
+});
+
+// ---------------------------------------------------------------------------
+// Incomplete prompt detection
+// ---------------------------------------------------------------------------
+
+test('detectIncompleteCoderPrompt returns true for #908-style incomplete output', () => {
+  // This is the exact style of output that caused the #908 issue.
+  assert.equal(
+    detectIncompleteCoderPrompt('Now post the implementation packet to the Den task thread:'),
+    true,
+    'Should detect "Now post the implementation packet to the Den task thread:"'
+  );
+
+  assert.equal(
+    detectIncompleteCoderPrompt('now post the implementation packet'),
+    true,
+    'Should detect lowercase "now post the implementation packet"'
+  );
+
+  assert.equal(
+    detectIncompleteCoderPrompt('Post the implementation packet to the task thread.'),
+    true,
+    'Should detect "Post the implementation packet to the task thread."'
+  );
+
+  assert.equal(
+    detectIncompleteCoderPrompt("Let's post the implementation packet now."),
+    true,
+    'Should detect "Let\'s post the implementation packet now."'
+  );
+
+  assert.equal(
+    detectIncompleteCoderPrompt('I\'ll now post the implementation packet.'),
+    true,
+    'Should detect "I\'ll now post the implementation packet."'
+  );
+
+  assert.equal(
+    detectIncompleteCoderPrompt('Next, let\'s post the implementation packet.'),
+    true,
+    'Should detect "Next, let\'s post the implementation packet."'
+  );
+});
+
+test('detectIncompleteCoderPrompt returns false for complete packets', () => {
+  assert.equal(
+    detectIncompleteCoderPrompt(COMPLETE_CODER_OUTPUT),
+    false,
+    'Should not flag complete output as incomplete'
+  );
+
+  assert.equal(
+    detectIncompleteCoderPrompt(MINIMAL_COMPLETE_OUTPUT),
+    false,
+    'Should not flag minimal complete output as incomplete'
+  );
+});
+
+test('detectIncompleteCoderPrompt returns false for empty output', () => {
+  assert.equal(
+    detectIncompleteCoderPrompt(''),
+    false,
+    'Should not flag empty output as incomplete prompt'
+  );
+});
+
+test('detectIncompleteCoderPrompt returns false for partial output without prompt pattern', () => {
+  assert.equal(
+    detectIncompleteCoderPrompt(PARTIAL_CODER_OUTPUT),
+    false,
+    'Should not flag partial output without prompt pattern'
+  );
+});
+
+test('extractImplementationPacket sets incomplete_prompt_detected for #908-style output', () => {
+  const result = extractImplementationPacket('Now post the implementation packet to the Den task thread:');
+  assert.equal(result.incomplete_prompt_detected, true,
+    'Should detect incomplete prompt in extraction result');
+  assert.equal(result.completeness, 'partial',
+    'Should still be partial completeness');
+  assert.ok(result.missing_fields.length > 0,
+    'Should still report missing fields');
+});
+
+test('extractImplementationPacket sets incomplete_prompt_detected false for complete output', () => {
+  const result = extractImplementationPacket(COMPLETE_CODER_OUTPUT);
+  assert.equal(result.incomplete_prompt_detected, false,
+    'Should not flag complete output as incomplete prompt');
+});
+
+test('validatePacket sets incomplete_prompt_detected to false', () => {
+  const result = validatePacket({ branch: 'main' });
+  assert.equal(result.incomplete_prompt_detected, false,
+    'validatePacket should set incomplete_prompt_detected to false');
+});
+
+test('formatPacketMissingNoticeMessage produces notice with missing fields', () => {
+  const extraction = extractImplementationPacket('Now post the implementation packet to the Den task thread:');
+  const msg = formatPacketMissingNoticeMessage(
+    {
+      run_id: 'run-908',
+      role: 'coder',
+      task_id: 908,
+      branch: 'task/908-fix',
+      head_commit: 'abc123def',
+      final_output: 'Now post the implementation packet to the Den task thread:',
+    },
+    extraction,
+  );
+
+  assert.ok(msg.includes('# Implementation Packet Missing'),
+    'Should have packet missing title');
+  assert.ok(msg.includes('⚠️'),
+    'Should have warning emoji');
+  assert.ok(msg.includes('did not produce a complete implementation packet'),
+    'Should explain the issue');
+  assert.ok(msg.includes('Missing fields:'),
+    'Should list missing fields');
+  assert.ok(msg.includes('task/908-fix'),
+    'Should include branch from run context');
+  assert.ok(msg.includes('abc123def'),
+    'Should include head_commit from run context');
+  assert.ok(msg.includes('Now post the implementation packet'),
+    'Should include truncated coder output');
+  assert.ok(msg.includes('## Next steps'),
+    'Should include next steps section');
+});
+
+test('buildPacketMissingNoticeMeta produces correct metadata', () => {
+  const extraction = extractImplementationPacket('Now post the implementation packet to the Den task thread:');
+  const meta = buildPacketMissingNoticeMeta(
+    {
+      run_id: 'run-908',
+      role: 'coder',
+      task_id: 908,
+      branch: 'task/908-fix',
+      head_commit: 'abc123def',
+      purpose: 'implementation',
+    },
+    extraction,
+  );
+
+  assert.equal(meta.type, 'implementation_packet_missing',
+    'Should have implementation_packet_missing type');
+  assert.equal(meta.prepared_by, 'coder_run',
+    'Should have coder_run prepared_by');
+  assert.equal(meta.packet_completeness, 'missing',
+    'Should be missing completeness');
+  assert.equal(meta.run_id, 'run-908',
+    'Should have correct run_id');
+  assert.equal(meta.task_id, 908,
+    'Should have correct task_id');
+  assert.equal(meta.branch, 'task/908-fix',
+    'Should have correct branch');
+  assert.equal(meta.head_commit, 'abc123def',
+    'Should have correct head_commit');
+  assert.equal(meta.incomplete_prompt_detected, true,
+    'Should flag incomplete_prompt_detected');
+  assert.ok(meta.packet_missing_fields.length > 0,
+    'Should list missing fields');
 });

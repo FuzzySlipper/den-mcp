@@ -62,6 +62,23 @@ export interface ImplementationPacketMeta {
   purpose: string | null;
 }
 
+/** Metadata carried alongside a packet-missing notice. */
+export interface PacketMissingNoticeMeta {
+  type: "implementation_packet_missing";
+  prepared_by: "coder_run";
+  workflow: "expanded_isolation_with_context";
+  version: 1;
+  packet_completeness: "missing";
+  packet_missing_fields: RequiredField[];
+  run_id: string;
+  role: string;
+  task_id: number | null;
+  branch: string | null;
+  head_commit: string | null;
+  purpose: string | null;
+  incomplete_prompt_detected: true;
+}
+
 export type ImplementationPacketDuplicateCandidate = Pick<
   ImplementationPacketMeta,
   "run_id" | "task_id" | "branch" | "head_commit"
@@ -75,6 +92,8 @@ export interface ExtractionResult {
   packet: ImplementationPacket;
   missing_fields: RequiredField[];
   completeness: "complete" | "partial";
+  /** True when the output appears to be an incomplete coder prompt without actual packet content. */
+  incomplete_prompt_detected: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -135,6 +154,124 @@ const SECTION_PATTERNS: Array<{
     isList: true,
   },
 ];
+
+// ---------------------------------------------------------------------------
+// Incomplete prompt detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Patterns that indicate the coder output is an incomplete prompt/instruction
+ * to post an implementation packet, rather than the actual packet content.
+ *
+ * This prevents posting misleading partial packets when the coder run ends with
+ * text like "Now post the implementation packet to the Den task thread:" but
+ * does not include the required packet fields.
+ */
+const INCOMPLETE_PROMPT_PATTERNS: RegExp[] = [
+  /^\s*now\s+post\s+(?:the\s+)?implementation\s+packet\b/im,
+  /^\s*post\s+(?:the\s+)?implementation\s+packet\b/im,
+  /^\s*(?:let(?:'s|\s+me|\s+us)\s+)?(?:now\s+)?post\s+(?:the\s+)?(?:implementation\s+)?packet\b/im,
+  /^\s*i(?:'ll|\s+will)\s+(?:now\s+)?post\s+(?:the\s+)?(?:implementation\s+)?packet\b/im,
+  /^\s*(?:next|finally),?\s+(?:let(?:'s|\s+me)?\s+)?post\s+(?:the\s+)?(?:implementation\s+)?packet\b/im,
+];
+
+/**
+ * Detect when a coder's final output appears to be an incomplete prompt
+ * for posting an implementation packet rather than the actual packet content.
+ *
+ * Returns true when the output starts with or primarily consists of an
+ * instruction to post the packet, but lacks the structured section headings
+ * that would indicate actual packet content.
+ */
+export function detectIncompleteCoderPrompt(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+
+  // Check if the text matches known incomplete prompt patterns.
+  const matchesPattern = INCOMPLETE_PROMPT_PATTERNS.some((p) => p.test(trimmed));
+  if (!matchesPattern) return false;
+
+  // If the text has substantial structured content beyond the prompt pattern,
+  // it's likely a complete packet that happens to start with a heading.
+  // Check for at least 3 of the required section headings.
+  const foundHeadings = REQUIRED_FIELDS.filter((field) => {
+    const section = SECTION_PATTERNS.find((s) => s.field === field);
+    if (!section) return false;
+    return section.headings.some((h) => h.test(trimmed));
+  });
+
+  // If we found most required headings, this is likely a real packet.
+  return foundHeadings.length < 3;
+}
+
+/**
+ * Format a "packet missing" notice message for posting to the Den task thread
+ * when the coder's final output does not contain a usable implementation packet.
+ */
+export function formatPacketMissingNoticeMessage(
+  result: { run_id: string; role: string; task_id?: number; branch?: string; head_commit?: string; final_branch?: string; final_head_commit?: string; purpose?: string; final_output?: string },
+  extraction: ExtractionResult,
+): string {
+  const lines: string[] = [
+    "# Implementation Packet Missing",
+    "",
+    "⚠️ **Coder sub-agent did not produce a complete implementation packet.**",
+    "",
+    "The coder run completed successfully but its final output does not contain the required implementation packet fields.",
+    "",
+  ];
+
+  const branch = result.final_branch ?? result.branch ?? extraction.packet.branch;
+  const headCommit = result.final_head_commit ?? result.head_commit ?? extraction.packet.head_commit;
+  if (branch) {
+    lines.push(`**Branch:** \`${branch}\``, "");
+  }
+  if (headCommit) {
+    lines.push(`**Head commit:** \`${headCommit}\``, "");
+  }
+
+  lines.push(
+    `**Missing fields:** ${extraction.missing_fields.join(", ")}`,
+    "",
+    "## Coder final output (truncated)",
+    "",
+    "```",
+    (result.final_output ?? "").slice(0, 500),
+    "```",
+    "",
+    "## Next steps",
+    "",
+    "The conductor should either:",
+    "1. Manually post a complete implementation packet for this run, or",
+    "2. Trigger a rerun or fix the coder output.",
+  );
+
+  return lines.join("\n");
+}
+
+/**
+ * Build metadata for a packet-missing notice.
+ */
+export function buildPacketMissingNoticeMeta(
+  result: { run_id: string; role: string; task_id?: number; branch?: string; head_commit?: string; final_branch?: string; final_head_commit?: string; purpose?: string },
+  extraction: ExtractionResult,
+): PacketMissingNoticeMeta {
+  return {
+    type: "implementation_packet_missing",
+    prepared_by: "coder_run",
+    workflow: "expanded_isolation_with_context",
+    version: 1,
+    packet_completeness: "missing",
+    packet_missing_fields: extraction.missing_fields,
+    run_id: result.run_id,
+    role: result.role,
+    task_id: result.task_id ?? null,
+    branch: extraction.packet.branch ?? result.final_branch ?? result.branch ?? null,
+    head_commit: extraction.packet.head_commit ?? result.final_head_commit ?? result.head_commit ?? null,
+    purpose: result.purpose ?? null,
+    incomplete_prompt_detected: true,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Extraction
@@ -228,7 +365,15 @@ export function extractImplementationPacket(text: string): ExtractionResult {
     if (commit && isSafeCommitValue(commit)) packet.head_commit = commit;
   }
 
-  return validatePacket(packet);
+  const result = validatePacket(packet);
+
+  // Detect incomplete coder prompts that should not be posted as real packets.
+  // When the output is just an instruction like "Now post the implementation
+  // packet to the Den task thread:" without actual structured content, we
+  // flag it so callers can post a packet_missing notice instead.
+  result.incomplete_prompt_detected = detectIncompleteCoderPrompt(text);
+
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -254,6 +399,7 @@ export function validatePacket(packet: ImplementationPacket): ExtractionResult {
     packet,
     missing_fields,
     completeness: missing_fields.length === 0 ? "complete" : "partial",
+    incomplete_prompt_detected: false,
   };
 }
 
