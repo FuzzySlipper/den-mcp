@@ -14,7 +14,8 @@ public sealed record OperatorSettingsStorage
     {
         get
         {
-            var directory = Path.GetDirectoryName(SettingsPath);
+            var settingsPath = Path.GetFullPath(SettingsPath);
+            var directory = Path.GetDirectoryName(settingsPath);
             return !string.IsNullOrWhiteSpace(directory)
                 ? Path.Combine(directory, AppearanceSettingsFileName)
                 : DefaultAppearanceSettingsPath();
@@ -205,6 +206,8 @@ public sealed class OperatorSettingsService
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
+            // Match Load(): malformed/unreadable settings recover silently to defaults so a bad
+            // local settings file cannot prevent Den Desktop from starting.
             return OperatorAppearanceSettings.CreateDefault();
         }
     }

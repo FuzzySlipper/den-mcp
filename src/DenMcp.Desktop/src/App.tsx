@@ -8,13 +8,14 @@ import { DiffPane } from './components/DiffPane';
 import { GitSnapshotPane } from './components/GitSnapshotPane';
 import { SessionPane } from './components/SessionPane';
 import { WorkspaceSummaryPane } from './components/WorkspaceSummaryPane';
-import { DesktopDiffSnapshotLatestResult, getLatestDiffSnapshot, GitFileStatus, LocalGitSnapshot } from './desktop/tauriApi';
+import { getLatestDiffSnapshot } from './desktop/tauriApi';
+import type { DesktopDiffSnapshotLatestResult, GitFileStatus, LocalGitSnapshot, ShellAppearanceSettings } from './desktop/tauriApi';
 import { useOperatorRuntime } from './desktop/useOperatorRuntime';
 import { applyShellDataAttributes, defaultShellState, loadShellState, nextConsoleMode, parseShellState, saveShellState, ShellState, ShellTabId } from './shellState';
 import { snapshotKey } from './snapshotView';
 import './styles/index.css';
 
-function bridgeAppearanceToShellState(appearance: Record<string, string> | null, fallback: ShellState): ShellState {
+function bridgeAppearanceToShellState(appearance: ShellAppearanceSettings | null, fallback: ShellState): ShellState {
   if (!appearance) return fallback;
   return parseShellState({
     theme: appearance.theme,
@@ -40,7 +41,7 @@ export function App() {
     if (runtime.appearanceSettings && !bridgeAppliedRef.current) {
       bridgeAppliedRef.current = true;
       setShellState((current) => {
-        const bridge = bridgeAppearanceToShellState(runtime.appearanceSettings as unknown as Record<string, string>, current);
+        const bridge = bridgeAppearanceToShellState(runtime.appearanceSettings, current);
         return bridge;
       });
     }

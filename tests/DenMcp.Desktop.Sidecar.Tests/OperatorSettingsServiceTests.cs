@@ -140,6 +140,37 @@ public class OperatorSettingsServiceTests
     }
 
     [Fact]
+    public void AppearanceSettingsPath_ForPathNestedSettingsPathUsesSiblingAppearanceFile()
+    {
+        var settingsPath = Path.Combine(Path.GetTempPath(), "den-mcp-settings-tests", Guid.NewGuid().ToString("N"), "custom-settings.json");
+        var storage = OperatorSettingsStorage.ForPath(settingsPath);
+
+        Assert.Equal(
+            Path.Combine(Path.GetDirectoryName(Path.GetFullPath(settingsPath))!, OperatorSettingsStorage.AppearanceSettingsFileName),
+            storage.AppearanceSettingsPath);
+    }
+
+    [Fact]
+    public void AppearanceSettingsPath_ForPathBareFileNameUsesResolvedCurrentDirectory()
+    {
+        var storage = OperatorSettingsStorage.ForPath("settings.json");
+
+        Assert.Equal(
+            Path.Combine(Directory.GetCurrentDirectory(), OperatorSettingsStorage.AppearanceSettingsFileName),
+            storage.AppearanceSettingsPath);
+    }
+
+    [Fact]
+    public void AppearanceSettingsPath_DirectRelativeSettingsPathIsResolvedBeforeDerivingSiblingPath()
+    {
+        var storage = new OperatorSettingsStorage { SettingsPath = "settings.json" };
+
+        Assert.Equal(
+            Path.Combine(Directory.GetCurrentDirectory(), OperatorSettingsStorage.AppearanceSettingsFileName),
+            storage.AppearanceSettingsPath);
+    }
+
+    [Fact]
     public void LoadAppearance_MissingFileFallsBackToDefaultsAndPersistsFile()
     {
         var path = TempSettingsPath();
@@ -205,7 +236,7 @@ public class OperatorSettingsServiceTests
     }
 
     [Fact]
-    public void SaveAppearance_MalformedFileFallsBackToDefaults()
+    public void LoadAppearance_MalformedFileFallsBackToDefaultsLikeOperatorSettingsAndLeavesFileForInspection()
     {
         var path = TempSettingsPath();
         var service = Service(path);
@@ -217,6 +248,7 @@ public class OperatorSettingsServiceTests
 
         Assert.Equal(OperatorAppearanceSettings.DefaultTheme, settings.Theme);
         Assert.Equal(OperatorAppearanceSettings.DefaultDensity, settings.Density);
+        Assert.Equal("{not valid json", File.ReadAllText(appearancePath));
     }
 
     [Fact]

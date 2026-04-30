@@ -109,6 +109,55 @@ public class DesktopSidecarBridgeTests
     }
 
     [Fact]
+    public async Task CommandRouter_RoundTripsAppearanceSettingsThroughBridgeHandlers()
+    {
+        var configPath = Path.Combine(
+            Path.GetTempPath(),
+            "den-mcp-sidecar-bridge-tests",
+            Guid.NewGuid().ToString("N"));
+        var options = DesktopSidecarFixtures.CreateFixtureOptions() with { ConfigPath = configPath };
+
+        try
+        {
+            using var provider = DesktopSidecarBridge.CreateServiceProvider(options);
+            var router = provider.GetRequiredService<IBridgeCommandRouter>();
+            var settingsService = provider.GetRequiredService<OperatorSettingsService>();
+
+            var initialResponse = await router.DispatchAsync(Request("req_get_appearance_initial", DesktopSidecarProtocol.GetAppearanceSettingsCommand));
+            var saveResponse = await router.DispatchAsync(Request(
+                "req_save_appearance",
+                DesktopSidecarProtocol.SaveAppearanceSettingsCommand,
+                JsonSerializer.Deserialize<JsonElement>("""
+                    {"theme":"graphite-dark","accent":"violet","density":"compact","bodyFont":"mono","railMode":"collapsed","consoleMode":"half","activeTab":"git"}
+                    """)));
+            var loadedResponse = await router.DispatchAsync(Request("req_get_appearance_loaded", DesktopSidecarProtocol.GetAppearanceSettingsCommand));
+
+            Assert.Null(initialResponse.Error);
+            Assert.Equal(OperatorAppearanceSettings.DefaultTheme, initialResponse.Result!.Value.GetProperty("theme").GetString());
+
+            Assert.Null(saveResponse.Error);
+            Assert.Equal("graphite-dark", saveResponse.Result!.Value.GetProperty("theme").GetString());
+            Assert.Equal("violet", saveResponse.Result.Value.GetProperty("accent").GetString());
+            Assert.Equal("compact", saveResponse.Result.Value.GetProperty("density").GetString());
+            Assert.Equal("mono", saveResponse.Result.Value.GetProperty("bodyFont").GetString());
+            Assert.Equal("collapsed", saveResponse.Result.Value.GetProperty("railMode").GetString());
+            Assert.Equal("half", saveResponse.Result.Value.GetProperty("consoleMode").GetString());
+            Assert.Equal("git", saveResponse.Result.Value.GetProperty("activeTab").GetString());
+
+            Assert.Null(loadedResponse.Error);
+            Assert.Equal(saveResponse.Result.Value.GetRawText(), loadedResponse.Result!.Value.GetRawText());
+            Assert.True(File.Exists(settingsService.AppearanceSettingsPath));
+        }
+        finally
+        {
+            if (Directory.Exists(configPath))
+            {
+                Directory.Delete(configPath, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void ReadySentinel_SerializesSingleBootstrapLineWithCompatibilityMetadata()
     {
         var options = DesktopSidecarFixtures.CreateFixtureOptions() with { Port = 0, EndpointPath = "/bridge" };
@@ -189,12 +238,17 @@ public class DesktopSidecarBridgeTests
 
     private static BridgeRequestFrame Request(string requestId, string command)
     {
+        return Request(requestId, command, BridgeJson.EmptyObject());
+    }
+
+    private static BridgeRequestFrame Request(string requestId, string command, JsonElement payload)
+    {
         return new BridgeRequestFrame
         {
             SchemaVersion = DesktopSidecarProtocol.SchemaVersion,
             RequestId = requestId,
             Command = command,
-            Payload = BridgeJson.EmptyObject(),
+            Payload = payload,
             SentAt = new DateTimeOffset(2026, 4, 29, 12, 34, 56, TimeSpan.Zero),
         };
     }
