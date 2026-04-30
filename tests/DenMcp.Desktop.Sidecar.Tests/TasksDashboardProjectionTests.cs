@@ -130,5 +130,194 @@ public class TasksDashboardProjectionTests
         }
     }
 
+    [Fact]
+    public async Task Projection_EmptyTaskList_ReturnsEmptySnapshotNoErrors()
+    {
+        var handler = new RecordingHandler(MessagesEmpty());
+        var service = CreateService(handler);
+
+        var snapshot = await service.GetSnapshotAsync(new TasksDashboardSnapshotRequest
+        {
+            ProjectId = "den-mcp",
+        }, CancellationToken.None);
+
+        Assert.Empty(snapshot.Tasks);
+        Assert.Equal(0, snapshot.Header.TaskCount);
+        Assert.Equal(0, snapshot.Header.CompletionPercent);
+        Assert.False(snapshot.Freshness.IsPartial);
+        Assert.Empty(snapshot.Freshness.Errors);
+        Assert.Empty(snapshot.Lanes);
+        Assert.Empty(snapshot.Waves);
+    }
+
+    [Fact]
+    public async Task Projection_FocusedTaskWithoutParent_LoadsFocusedTask()
+    {
+        var handler = new RecordingHandler(
+            MessagesEmpty(),
+            Detail(42, "Focused task", "in_progress", "[]", "[]"),
+            Detail(42, "Focused task", "in_progress", "[]", "[]"),
+            MessagesEmpty(), RunsEmpty(), StreamEmpty());
+        var service = CreateService(handler);
+
+        var snapshot = await service.GetSnapshotAsync(new TasksDashboardSnapshotRequest
+        {
+            ProjectId = "den-mcp",
+            FocusedTaskId = 42,
+        }, CancellationToken.None);
+
+        Assert.Single(snapshot.Tasks);
+        Assert.Equal(42, snapshot.Tasks[0].Id);
+        Assert.False(snapshot.Freshness.IsPartial);
+        Assert.Empty(snapshot.Freshness.Errors);
+    }
+
+    [Fact]
+    public async Task Projection_TasksWithNoPacketsRunsStream_ReturnsCalmRows()
+    {
+        var handler = new RecordingHandler(
+            JsonResponse("[{\"id\":1001,\"project_id\":\"den-mcp\",\"title\":\"Plain task\",\"status\":\"planned\",\"priority\":3,\"assigned_to\":null,\"parent_id\":900,\"tags\":[],\"dependency_count\":0,\"subtask_count\":0,\"created_at\":\"2026-04-30T00:00:00\",\"updated_at\":\"2026-04-30T01:00:00\"}]"),
+            Detail(900, "Roadmap", "in_progress", "[]", "[]"),
+            Detail(900, "Roadmap", "in_progress", "[]", "[]"), MessagesEmpty(), RunsEmpty(), StreamEmpty(),
+            Detail(1001, "Plain task", "planned", "[]", "[]"), MessagesEmpty(), RunsEmpty(), StreamEmpty());
+        var service = CreateService(handler);
+
+        var snapshot = await service.GetSnapshotAsync(new TasksDashboardSnapshotRequest
+        {
+            ProjectId = "den-mcp",
+            ParentTaskId = 900,
+        }, CancellationToken.None);
+
+        Assert.Equal(2, snapshot.Tasks.Count);
+        var task1001 = snapshot.Tasks.Single(t => t.Id == 1001);
+        Assert.Empty(task1001.Packets);
+        Assert.Equal(0, task1001.RunSummary.RunCount);
+        Assert.Null(task1001.RunSummary.LatestRun);
+        Assert.Equal("none", task1001.AgentLifecycle.State);
+        Assert.Null(task1001.AgentLifecycle.LatestEvent);
+        Assert.False(snapshot.Freshness.IsPartial);
+        Assert.Empty(snapshot.Freshness.Errors);
+    }
+
+    [Fact]
+    public async Task Projection_ListTasksApiFailure_ReturnsPartialSnapshot()
+    {
+        var handler = new RecordingHandler(
+            JsonResponse("{\"error\":\"internal\"}", HttpStatusCode.InternalServerError),
+            Detail(900, "Roadmap", "in_progress", "[]", "[]"),
+            Detail(900, "Roadmap", "in_progress", "[]", "[]"), MessagesEmpty(), RunsEmpty(), StreamEmpty());
+        var service = CreateService(handler);
+
+        var snapshot = await service.GetSnapshotAsync(new TasksDashboardSnapshotRequest
+        {
+            ProjectId = "den-mcp",
+            ParentTaskId = 900,
+        }, CancellationToken.None);
+
+        Assert.True(snapshot.Freshness.IsPartial);
+        Assert.Contains(snapshot.Freshness.Errors, error => error.Contains("task list", StringComparison.Ordinal));
+        Assert.Single(snapshot.Tasks);
+        Assert.Equal(900, snapshot.Tasks[0].Id);
+    }
+
+    [Fact]
+    public async Task Projection_PartialDetailFailure_OtherTasksStillProject()
+    {
+        var handler = new RecordingHandler(
+            JsonResponse("""
+                [
+                  {"id":1001,"project_id":"den-mcp","title":"Good task","status":"in_progress","priority":2,"assigned_to":"pi","parent_id":null,"tags":["desktop"],"dependency_count":0,"subtask_count":0,"created_at":"2026-04-30T00:00:00","updated_at":"2026-04-30T01:00:00"},
+                  {"id":1002,"project_id":"den-mcp","title":"Broken task","status":"in_progress","priority":3,"assigned_to":"pi","parent_id":null,"tags":["desktop"],"dependency_count":0,"subtask_count":0,"created_at":"2026-04-30T00:00:00","updated_at":"2026-04-30T01:05:00"}
+                ]
+                """),
+            Detail(1001, "Good task", "in_progress", "[]", "[]"), Messages(), RunsEmpty(), StreamEmpty(),
+            JsonResponse("{\"error\":\"internal\"}", HttpStatusCode.InternalServerError),
+            MessagesEmpty(), RunsEmpty(), StreamEmpty());
+        var service = CreateService(handler);
+
+        var snapshot = await service.GetSnapshotAsync(new TasksDashboardSnapshotRequest
+        {
+            ProjectId = "den-mcp",
+        }, CancellationToken.None);
+
+        Assert.Equal(2, snapshot.Tasks.Count);
+        Assert.True(snapshot.Freshness.IsPartial);
+        Assert.Contains(snapshot.Freshness.Errors, error => error.Contains("task detail 1002", StringComparison.Ordinal));
+
+        var good = snapshot.Tasks.Single(t => t.Id == 1001);
+        Assert.NotEmpty(good.Packets);
+
+        var broken = snapshot.Tasks.Single(t => t.Id == 1002);
+        Assert.Empty(broken.Packets);
+    }
+
+    [Fact]
+    public async Task Projection_TransportFailure_ReturnsPartialSnapshot()
+    {
+        var handler = new TransportFailingHandler();
+        var service = CreateService(handler);
+
+        var snapshot = await service.GetSnapshotAsync(new TasksDashboardSnapshotRequest
+        {
+            ProjectId = "den-mcp",
+        }, CancellationToken.None);
+
+        Assert.Empty(snapshot.Tasks);
+        Assert.True(snapshot.Freshness.IsPartial);
+        Assert.Contains(snapshot.Freshness.Errors, error => error.Contains("task list", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Projection_MultipleFailuresAcrossCalls_AccumulatesAllErrors()
+    {
+        var handler = new RecordingHandler(
+            JsonResponse("""
+                [
+                  {"id":1001,"project_id":"den-mcp","title":"Task A","status":"in_progress","priority":2,"assigned_to":"pi","parent_id":null,"tags":[],"dependency_count":0,"subtask_count":0,"created_at":"2026-04-30T00:00:00","updated_at":"2026-04-30T01:00:00"},
+                  {"id":1002,"project_id":"den-mcp","title":"Task B","status":"in_progress","priority":3,"assigned_to":"pi","parent_id":null,"tags":[],"dependency_count":0,"subtask_count":0,"created_at":"2026-04-30T00:00:00","updated_at":"2026-04-30T01:05:00"}
+                ]
+                """),
+            Detail(1001, "Task A", "in_progress", "[]", "[]"),
+            JsonResponse("{\"error\":\"timeout\"}", HttpStatusCode.InternalServerError),
+            RunsEmpty(), StreamEmpty(),
+            Detail(1002, "Task B", "in_progress", "[]", "[]"),
+            MessagesEmpty(),
+            JsonResponse("{\"error\":\"timeout\"}", HttpStatusCode.InternalServerError),
+            StreamEmpty());
+        var service = CreateService(handler);
+
+        var snapshot = await service.GetSnapshotAsync(new TasksDashboardSnapshotRequest
+        {
+            ProjectId = "den-mcp",
+        }, CancellationToken.None);
+
+        Assert.Equal(2, snapshot.Tasks.Count);
+        Assert.True(snapshot.Freshness.IsPartial);
+        Assert.Equal(2, snapshot.Freshness.Errors.Count);
+        Assert.Contains(snapshot.Freshness.Errors, error => error.Contains("task-thread messages for 1001", StringComparison.Ordinal));
+        Assert.Contains(snapshot.Freshness.Errors, error => error.Contains("sub-agent runs for 1002", StringComparison.Ordinal));
+    }
+
+    private static TasksDashboardProjectionService CreateService(HttpMessageHandler handler)
+    {
+        return new TasksDashboardProjectionService(
+            new DenHttpClient(new HttpClient(handler)),
+            new OperatorSessionRegistry(() => new DateTime(2026, 4, 30, 2, 0, 0, DateTimeKind.Utc)),
+            _ => Task.FromResult(OperatorSettings.CreateDefault(() => "desktop-fixture") with { DenBaseUrl = "http://den.test" }),
+            () => new DateTimeOffset(2026, 4, 30, 3, 0, 0, TimeSpan.Zero));
+    }
+
+    private sealed class TransportFailingHandler : HttpMessageHandler
+    {
+        public List<RecordedRequest> Requests { get; } = [];
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
+            Requests.Add(new RecordedRequest(request.Method.Method, request.RequestUri?.AbsoluteUri ?? string.Empty, body));
+            throw new HttpRequestException("Connection refused");
+        }
+    }
+
     private sealed record RecordedRequest(string Method, string Uri, string? Body);
 }
