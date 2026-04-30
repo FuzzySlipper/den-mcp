@@ -3,6 +3,13 @@ import { recentActivityItems, type RecentActivityItem } from './sessionView.ts';
 
 export type TerminalOverviewAuthority = 'local' | 'observed';
 export type TerminalStatusTone = 'ok' | 'running' | 'idle' | 'warn' | 'err' | 'info';
+export type TerminalSessionRefreshUrgency = 'immediate' | 'coalesced';
+
+export interface TerminalSessionRefreshEvent {
+  kind: 'status' | 'lifecycle';
+  status?: string | null;
+  event?: string | null;
+}
 
 export interface TerminalOverviewCapabilities {
   canAttach: boolean;
@@ -43,6 +50,18 @@ export interface TerminalOverviewSession {
 }
 
 const STALE_AFTER_MS = 120_000;
+const IMMEDIATE_REFRESH_LIFECYCLE_EVENTS = new Set(['den.terminal.exit', 'den.terminal.error']);
+const IMMEDIATE_REFRESH_STATUSES = new Set(['exited', 'failed', 'crashed', 'detached', 'terminated']);
+
+export function terminalSessionRefreshUrgency(event: TerminalSessionRefreshEvent): TerminalSessionRefreshUrgency {
+  if (event.kind === 'lifecycle') {
+    return event.event && IMMEDIATE_REFRESH_LIFECYCLE_EVENTS.has(event.event) ? 'immediate' : 'coalesced';
+  }
+
+  const status = event.status?.toLowerCase();
+  if (status && IMMEDIATE_REFRESH_STATUSES.has(status)) return 'immediate';
+  return 'coalesced';
+}
 
 export function buildTerminalSessionOverview(
   sessions: TerminalSessionSummary[],

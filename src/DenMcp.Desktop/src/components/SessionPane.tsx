@@ -30,6 +30,7 @@ import {
   buildTerminalSessionOverview,
   canAttachInline,
   relativeActivityLabel,
+  terminalSessionRefreshUrgency,
   terminalStatusLabel,
   type TerminalOverviewSession,
 } from '../terminalSessionView';
@@ -60,6 +61,8 @@ interface ExternalAttachState {
   copied: boolean;
 }
 
+const TERMINAL_EVENT_SESSION_REFRESH_DELAY_MS = 750;
+
 export function SessionPane({ snapshots, workspaces = [] }: Props) {
   return <TerminalOverviewWorkbench snapshots={snapshots} workspaces={workspaces} />;
 }
@@ -75,6 +78,7 @@ function TerminalOverviewWorkbench({ snapshots, workspaces = [] }: Props) {
   const terminalRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const attachRef = useRef<TerminalAttachState | null>(null);
+  const scheduledSessionRefreshRef = useRef<number | null>(null);
 
   useEffect(() => { attachRef.current = attach; }, [attach]);
 
@@ -104,6 +108,32 @@ function TerminalOverviewWorkbench({ snapshots, workspaces = [] }: Props) {
     const response = await terminalListSessions();
     setSessions(response.sessions);
   }, []);
+
+  const clearScheduledSessionRefresh = useCallback(() => {
+    if (scheduledSessionRefreshRef.current === null) return;
+    window.clearTimeout(scheduledSessionRefreshRef.current);
+    scheduledSessionRefreshRef.current = null;
+  }, []);
+
+  const refreshSessionsNow = useCallback(async () => {
+    clearScheduledSessionRefresh();
+    await refreshSessions();
+  }, [clearScheduledSessionRefresh, refreshSessions]);
+
+  const requestSessionRefresh = useCallback((urgency: 'immediate' | 'coalesced') => {
+    if (urgency === 'immediate') {
+      void refreshSessionsNow().catch(() => undefined);
+      return;
+    }
+
+    clearScheduledSessionRefresh();
+    scheduledSessionRefreshRef.current = window.setTimeout(() => {
+      scheduledSessionRefreshRef.current = null;
+      void refreshSessions().catch(() => undefined);
+    }, TERMINAL_EVENT_SESSION_REFRESH_DELAY_MS);
+  }, [clearScheduledSessionRefresh, refreshSessions, refreshSessionsNow]);
+
+  useEffect(() => () => clearScheduledSessionRefresh(), [clearScheduledSessionRefresh]);
 
   useEffect(() => {
     void refreshSessions().catch((err) => setError(errorMessage(err)));
@@ -139,7 +169,7 @@ function TerminalOverviewWorkbench({ snapshots, workspaces = [] }: Props) {
 
     void onTerminalStatus((event: TerminalStatusEvent) => {
       setAttach((prev) => prev && prev.sessionId === event.session_id ? { ...prev, status: event.status ?? prev.status } : prev);
-      void refreshSessions().catch(() => undefined);
+      requestSessionRefresh(terminalSessionRefreshUrgency({ kind: 'status', status: event.status }));
     }).then((dispose) => { if (disposed) dispose(); else disposers.push(dispose); }).catch((err) => setError(errorMessage(err)));
 
     void onTerminalLifecycle((event: TerminalLifecycleEvent) => {
@@ -149,7 +179,7 @@ function TerminalOverviewWorkbench({ snapshots, workspaces = [] }: Props) {
         lastCursor: event.stream_cursor ?? prev.lastCursor,
         message: event.message ?? event.reason ?? (event.replay_gap ? 'replay gap detected' : prev.message),
       } : prev);
-      void refreshSessions().catch(() => undefined);
+      requestSessionRefresh(terminalSessionRefreshUrgency({ kind: 'lifecycle', event: event.event }));
     }).then((dispose) => { if (disposed) dispose(); else disposers.push(dispose); }).catch((err) => setError(errorMessage(err)));
 
     void onTerminalBackpressure((event: TerminalBackpressureEvent) => {
@@ -166,7 +196,7 @@ function TerminalOverviewWorkbench({ snapshots, workspaces = [] }: Props) {
     }).then((dispose) => { if (disposed) dispose(); else disposers.push(dispose); }).catch((err) => setError(errorMessage(err)));
 
     return () => { disposed = true; disposers.forEach((dispose) => dispose()); };
-  }, [refreshSessions]);
+  }, [requestSessionRefresh]);
 
   const ensureTerminal = useCallback(() => {
     if (terminalRef.current || !terminalHostRef.current) return terminalRef.current;
@@ -221,9 +251,9 @@ function TerminalOverviewWorkbench({ snapshots, workspaces = [] }: Props) {
       canDetach: response.capabilities?.can_detach ?? target?.capabilities.canDetach ?? false,
       canTerminate: response.capabilities?.can_terminate ?? target?.capabilities.canTerminate ?? false,
     });
-    await refreshSessions();
+    await refreshSessionsNow();
     terminal.focus();
-  }, [ensureTerminal, overview, refreshSessions]);
+  }, [ensureTerminal, overview, refreshSessionsNow]);
 
   const requestExternalAttach = useCallback(async (session: TerminalOverviewSession) => {
     setSelectedSessionId(session.sessionId);
@@ -256,24 +286,24 @@ function TerminalOverviewWorkbench({ snapshots, workspaces = [] }: Props) {
       title: `${selectedScope.scope.projectId}${selectedScope.scope.taskId ? ` #${selectedScope.scope.taskId}` : ''}`,
       backend: 'direct_pty',
     });
-    await refreshSessions();
+    await refreshSessionsNow();
     setSelectedSessionId(response.session.session_id);
     await attachToSession(response.session.session_id);
-  }, [attachToSession, refreshSessions, selectedScope]);
+  }, [attachToSession, refreshSessionsNow, selectedScope]);
 
   const detachCurrent = useCallback(async () => {
     const current = attachRef.current;
     if (!current) return;
     await terminalDetach({ session_id: current.sessionId, stream_id: current.streamId, reason: 'operator_detached' });
     setAttach(null);
-    await refreshSessions();
-  }, [refreshSessions]);
+    await refreshSessionsNow();
+  }, [refreshSessionsNow]);
 
   const terminateSession = useCallback(async (sessionId: string) => {
     const current = attachRef.current;
     await terminalTerminate({ session_id: sessionId, stream_id: current?.sessionId === sessionId ? current.streamId : null, mode: 'graceful', reason: 'operator_requested', requested_by: 'desktop_renderer' });
-    await refreshSessions();
-  }, [refreshSessions]);
+    await refreshSessionsNow();
+  }, [refreshSessionsNow]);
 
   const copyExternalCommand = useCallback(async () => {
     if (!externalAttach?.command || typeof navigator === 'undefined' || !navigator.clipboard) return;

@@ -4,6 +4,7 @@ import {
   buildTerminalSessionOverview,
   canAttachInline,
   relativeActivityLabel,
+  terminalSessionRefreshUrgency,
   terminalStatusLabel,
 } from '../src/terminalSessionView.ts';
 
@@ -100,4 +101,14 @@ test('stale/source offline labels are calm and relative activity is readable', (
   assert.equal(rows[0].statusTone, 'idle');
   assert.equal(terminalStatusLabel('source_offline'), 'source offline');
   assert.equal(relativeActivityLabel('2026-04-30T00:00:00.000Z', Date.parse('2026-04-30T00:05:00.000Z')), '5m ago');
+});
+
+test('terminal event refresh urgency favors boundary changes over noisy activity', () => {
+  assert.equal(terminalSessionRefreshUrgency({ kind: 'status', status: 'running' }), 'coalesced');
+  assert.equal(terminalSessionRefreshUrgency({ kind: 'lifecycle', event: 'den.terminal.heartbeat' }), 'coalesced');
+  assert.equal(terminalSessionRefreshUrgency({ kind: 'lifecycle', event: 'den.terminal.replay_complete' }), 'coalesced');
+
+  assert.equal(terminalSessionRefreshUrgency({ kind: 'status', status: 'detached' }), 'immediate');
+  assert.equal(terminalSessionRefreshUrgency({ kind: 'status', status: 'exited' }), 'immediate');
+  assert.equal(terminalSessionRefreshUrgency({ kind: 'lifecycle', event: 'den.terminal.exit' }), 'immediate');
 });
