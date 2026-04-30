@@ -430,8 +430,7 @@ kbd { border: var(--bw) solid var(--bd-default); border-bottom-color: var(--bd-s
 .status-idle, .status-stale, .status-detached, .status-source_offline, .status-exited { color: var(--st-idle); border-color: color-mix(in oklab, var(--st-idle) 45%, transparent); background: var(--st-idle-bg); }
 .status-offline, .status-misconfigured, .status-git_error, .status-failed, .status-err, .publish-failed, .pill.err { color: var(--st-err); border-color: color-mix(in oklab, var(--st-err) 45%, transparent); background: var(--st-err-bg); }
 
-.content-grid, .operator-grid, .git-workbench-grid { display: grid; grid-template-columns: minmax(360px, 0.9fr) minmax(420px, 1.1fr); gap: var(--sp-4); }
-.operator-grid { grid-template-columns: minmax(320px, 0.8fr) minmax(460px, 1.2fr); }
+.content-grid, .git-workbench-grid { display: grid; grid-template-columns: minmax(360px, 0.9fr) minmax(420px, 1.1fr); gap: var(--sp-4); }
 .git-workbench-grid { align-items: start; grid-template-columns: minmax(380px, 0.95fr) minmax(480px, 1.05fr); }
 .tab-intro p { max-width: 760px; }
 .connection-actions { margin-top: var(--sp-4); }
@@ -926,7 +925,7 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid color-mix(i
   .desktop-shell { min-width: 0; min-height: 100vh; height: auto; }
   .shell-main { grid-template-columns: 1fr; }
   .left-rail { display: none; }
-  .content-grid, .operator-grid, .git-workbench-grid, .terminal-workbench-grid, .terminal-create-strip, .settings-form, .settings-grid { grid-template-columns: 1fr; }
+  .content-grid, .git-workbench-grid, .terminal-workbench-grid, .terminal-create-strip, .settings-form, .settings-grid { grid-template-columns: 1fr; }
   .git-workbench-grid .diff-panel, .terminal-attach-panel { position: static; }
   .titlebar { grid-template-columns: 1fr auto; }
   .titlebar-center { display: none; }
