@@ -489,6 +489,43 @@ test('sidecar supervisor recognizes ready sentinel split across stdout chunks', 
   assert.equal(supervisor.snapshot().ready.port, 54321);
 });
 
+test('sidecar supervisor resets partial stdout buffer on process error', () => {
+  const fakeProcess = createFakeProcess(4444);
+  const supervisor = new SidecarSupervisor({
+    launchConfig: buildDevSidecarLaunchConfig({
+      projectPath: '../DenMcp.Desktop.Sidecar/DenMcp.Desktop.Sidecar.csproj',
+      configPath: '/tmp/den-desktop/config',
+      authToken: 'secret-token',
+      port: 0,
+    }),
+    launcher: {
+      launch() {
+        return fakeProcess;
+      },
+    },
+    now: () => '2026-04-29T12:34:56.000Z',
+  });
+  const readyLine = `${DEN_DESKTOP_READY_PREFIX}${JSON.stringify({
+    port: 54321,
+    endpoint_path: '/bridge',
+    protocol_version: '1.0',
+    schema_version: 'den-desktop@2026-04-29',
+    schema_bundle_id: 'den-desktop.sidecar@2026-04-29',
+    app_id: 'den-desktop',
+    app_version: '0.1.0-test',
+  })}`;
+
+  supervisor.start();
+  fakeProcess.emitStdout(readyLine.slice(0, 17));
+  fakeProcess.emitError(new Error('spawn failed after partial stdout'));
+  assert.equal(supervisor.snapshot().state, 'crashed');
+  assert.equal(supervisor.snapshot().last_error, 'spawn failed after partial stdout');
+
+  fakeProcess.emitStdout(`${readyLine.slice(17)}\n`);
+  assert.equal(supervisor.snapshot().state, 'crashed');
+  assert.equal(supervisor.snapshot().ready, undefined);
+});
+
 test('sidecar supervisor starts, observes readiness, reconnects, stops, and can restart after crash', async () => {
   const launched = [];
   const connections = [];
@@ -560,6 +597,9 @@ function createFakeProcess(pid) {
     },
     emitExit(code, signal) {
       for (const listener of listeners.exit) listener(code, signal);
+    },
+    emitError(error) {
+      for (const listener of listeners.error) listener(error);
     },
   };
 }

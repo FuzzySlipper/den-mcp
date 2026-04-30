@@ -202,6 +202,7 @@ export class SidecarSupervisor<TConnection = unknown> {
   }
 
   private handleProcessError(error: Error): void {
+    this.resetStdoutLineBuffer();
     this.lastError = error.message;
     this.state = this.stopping ? 'stopped' : 'crashed';
     this.emit();
