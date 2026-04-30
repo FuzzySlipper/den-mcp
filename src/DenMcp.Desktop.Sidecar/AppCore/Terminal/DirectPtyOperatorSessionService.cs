@@ -346,6 +346,7 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
         }
 
         var chunks = BufferFor(sessionId).Append(bytes, "live", cols, rows);
+        EnsurePublishableOutputChunks(chunks);
         DirectPtyStreamState[] streams;
         lock (_lock)
         {
@@ -461,6 +462,7 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
 
     private async ValueTask PublishOutputChunksAsync(string streamId, string sessionId, IReadOnlyList<TerminalOutputChunk> chunks, CancellationToken cancellationToken, string? originOverride = null)
     {
+        EnsurePublishableOutputChunks(chunks);
         foreach (var chunk in chunks)
         {
             await _events.PublishAsync(DesktopSidecarProtocol.TerminalOutputEvent, new TerminalOutputEvent
@@ -480,6 +482,23 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
                 Redacted = chunk.Redacted,
             }, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    private void EnsurePublishableOutputChunks(IReadOnlyList<TerminalOutputChunk> chunks)
+    {
+        var maxBytes = EffectiveOutputChunkMaxBytes();
+        var oversized = chunks.FirstOrDefault(chunk => chunk.ByteCount > maxBytes || chunk.Data.Length > maxBytes);
+        if (oversized is not null)
+        {
+            throw new InvalidOperationException($"Terminal output chunk '{oversized.ChunkId}' exceeds the configured {nameof(TerminalStreamLimits.OutputChunkMaxBytes)} limit ({maxBytes} bytes).");
+        }
+    }
+
+    private int EffectiveOutputChunkMaxBytes()
+    {
+        return _limits.OutputChunkMaxBytes > 0
+            ? _limits.OutputChunkMaxBytes
+            : OperatorSessionActivityBuffer.DefaultOutputChunkMaxBytes;
     }
 
     private async ValueTask PublishBackpressureAsync(string sessionId, string streamId, int queueBytes, CancellationToken cancellationToken)

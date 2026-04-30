@@ -819,6 +819,65 @@ public class TerminalBridgeHandlerTests
     }
 
     [Fact]
+    public async Task DirectPtyService_SplitsOversizedBackendOutputForLiveAndReplay()
+    {
+        var backend = new FakeDirectPtyBackend();
+        var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
+        var events = new OperatorRuntimeBridgeEventSink(new DesktopSidecarRuntimeState(DesktopSidecarFixtures.CreateFixtureOptions()));
+        await using var service = CreateDirectPtyService(
+            backend,
+            registry,
+            events,
+            new TerminalStreamLimits
+            {
+                OutputChunkMaxBytes = 4,
+                AckAfterBytes = 1024,
+                AckAfterMillis = 5000,
+                HeartbeatIntervalMs = 5000,
+            });
+
+        var session = await service.CreateAsync(new TerminalCreateSessionRequest
+        {
+            ProjectId = string.Empty,
+            Title = "Oversized direct output",
+            Backend = OperatorSessionBackend.DirectPty,
+        }, CancellationToken.None);
+        var attach = await service.AttachAsync(new TerminalAttachRequest { SessionId = session.SessionId }, CancellationToken.None);
+
+        var liveStart = events.PublishedFrames.Count;
+        backend.Processes[0].EmitOutput(Encoding.UTF8.GetBytes("abcdefghij"));
+        var liveEvents = await WaitForTerminalOutputEventsAsync(events, attach.StreamId, expectedCount: 3, startIndex: liveStart);
+
+        Assert.All(liveEvents, output => Assert.True(output.ByteCount <= 4));
+        Assert.Equal([1L, 2L, 3L], liveEvents.Select(output => output.TerminalSequence).ToArray());
+        Assert.Equal(["cur_000000000001", "cur_000000000002", "cur_000000000003"], liveEvents.Select(output => output.StreamCursor).ToArray());
+        Assert.Equal(["chunk_000000000001", "chunk_000000000002", "chunk_000000000003"], liveEvents.Select(output => output.ChunkId).ToArray());
+        Assert.Equal(["abcd", "efgh", "ij"], liveEvents.Select(output => Encoding.UTF8.GetString(Convert.FromBase64String(output.Data))).ToArray());
+        Assert.Equal([true, true, false], liveEvents.Select(output => output.Truncated).ToArray());
+        Assert.All(liveEvents, output => Assert.Equal("live", output.Origin));
+
+        await service.DetachAsync(new TerminalDetachRequest { SessionId = session.SessionId, StreamId = attach.StreamId }, CancellationToken.None);
+
+        var replayStart = events.PublishedFrames.Count;
+        var reconnect = await service.ReconnectAsync(new TerminalReconnectRequest
+        {
+            SessionId = session.SessionId,
+            LastSeenCursor = "cur_000000000001",
+        }, CancellationToken.None);
+        var replayEvents = await WaitForTerminalOutputEventsAsync(events, reconnect.StreamId, expectedCount: 2, startIndex: replayStart);
+
+        Assert.False(reconnect.ReplayGap);
+        Assert.Equal("cur_000000000001", reconnect.ReplayAvailableFrom);
+        Assert.Equal("cur_000000000003", reconnect.StartCursor);
+        Assert.All(replayEvents, output => Assert.True(output.ByteCount <= 4));
+        Assert.Equal([2L, 3L], replayEvents.Select(output => output.TerminalSequence).ToArray());
+        Assert.Equal(["cur_000000000002", "cur_000000000003"], replayEvents.Select(output => output.StreamCursor).ToArray());
+        Assert.Equal(["efgh", "ij"], replayEvents.Select(output => Encoding.UTF8.GetString(Convert.FromBase64String(output.Data))).ToArray());
+        Assert.Equal([true, false], replayEvents.Select(output => output.Truncated).ToArray());
+        Assert.All(replayEvents, output => Assert.Equal("replay", output.Origin));
+    }
+
+    [Fact]
     public async Task DirectPtyService_AttachPublishesHeartbeatUntilDetached()
     {
         var backend = new FakeDirectPtyBackend();
@@ -1502,6 +1561,32 @@ public class TerminalBridgeHandlerTests
         }
 
         throw new TimeoutException($"Timed out waiting for {expectedCount} activity item(s) on {sessionId}.");
+    }
+
+    private static async Task<IReadOnlyList<TerminalOutputEvent>> WaitForTerminalOutputEventsAsync(
+        OperatorRuntimeBridgeEventSink events,
+        string streamId,
+        int expectedCount,
+        int timeoutMs = 1000,
+        int startIndex = 0)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddMilliseconds(timeoutMs);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var outputs = events.PublishedFrames.Skip(startIndex)
+                .Where(frame => frame.Event == DesktopSidecarProtocol.TerminalOutputEvent
+                    && string.Equals(frame.Payload.GetProperty("stream_id").GetString(), streamId, StringComparison.Ordinal))
+                .Select(frame => JsonSerializer.Deserialize<TerminalOutputEvent>(frame.Payload.GetRawText())!)
+                .ToList();
+            if (outputs.Count >= expectedCount)
+            {
+                return outputs.Take(expectedCount).ToList();
+            }
+
+            await Task.Delay(10);
+        }
+
+        throw new TimeoutException($"Timed out waiting for {expectedCount} terminal output event(s) on {streamId}.");
     }
 
     private static async Task<BridgeEventFrame> WaitForPublishedFrameAsync(

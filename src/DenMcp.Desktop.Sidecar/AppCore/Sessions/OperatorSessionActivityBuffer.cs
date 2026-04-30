@@ -53,9 +53,9 @@ public sealed class OperatorSessionActivityBuffer
             return [];
         }
 
-        var chunks = SplitOversized(data, origin, cols, rows);
         lock (_lock)
         {
+            var chunks = SplitOversizedLocked(data, origin, cols, rows);
             foreach (var chunk in chunks)
             {
                 _chunks.AddLast(chunk);
@@ -113,7 +113,7 @@ public sealed class OperatorSessionActivityBuffer
         }
     }
 
-    private List<TerminalOutputChunk> SplitOversized(byte[] data, string? origin, int? cols, int? rows)
+    private List<TerminalOutputChunk> SplitOversizedLocked(byte[] data, string? origin, int? cols, int? rows)
     {
         var chunks = new List<TerminalOutputChunk>();
         var offset = 0;
@@ -124,15 +124,9 @@ public sealed class OperatorSessionActivityBuffer
             var chunkData = new byte[chunkSize];
             Buffer.BlockCopy(data, offset, chunkData, 0, chunkSize);
 
-            long sequence;
-            lock (_lock)
-            {
-                sequence = ++_nextSequence;
-            }
-
             chunks.Add(new TerminalOutputChunk
             {
-                Sequence = sequence,
+                Sequence = ++_nextSequence,
                 Data = chunkData,
                 ByteCount = chunkSize,
                 Origin = origin,
