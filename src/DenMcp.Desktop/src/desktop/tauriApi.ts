@@ -1,4 +1,4 @@
-import type { TasksDashboardSnapshot, TasksDashboardSnapshotRequest } from '../electron/sidecarProtocol.ts';
+import type { AppAgentBuildContextRequest, AppAgentCancelRequest, AppAgentInvokeToolRequest, AppAgentListToolsRequest, AppAgentResponse, TasksDashboardSnapshot, TasksDashboardSnapshotRequest } from '../electron/sidecarProtocol.ts';
 
 const DEFAULT_INVOKE_TIMEOUT_MS = 12_000;
 const LISTEN_TIMEOUT_MS = 5_000;
@@ -59,11 +59,17 @@ interface DenDesktopSidecarRuntimeApi {
   terminalReconnect(request: TerminalReconnectRequest): Promise<TerminalAttachResponse>;
   terminalAckOutput(request: TerminalAckOutputRequest): Promise<TerminalAckOutputResponse>;
   tasksGetDashboardSnapshot(request: TasksDashboardSnapshotRequest): Promise<TasksDashboardSnapshot>;
+  appAgentBuildContext(request?: AppAgentBuildContextRequest): Promise<AppAgentResponse>;
+  appAgentListTools(request?: AppAgentListToolsRequest): Promise<AppAgentResponse>;
+  appAgentInvokeTool(request: AppAgentInvokeToolRequest): Promise<AppAgentResponse>;
+  appAgentCancelRequest(request: AppAgentCancelRequest): Promise<AppAgentResponse>;
   onTerminalOutput(listener: (event: TerminalOutputEvent) => void): () => void;
   onTerminalStatus(listener: (event: TerminalStatusEvent) => void): () => void;
   onTerminalLifecycle(listener: (event: TerminalLifecycleEvent) => void): () => void;
   onTerminalBackpressure(listener: (event: TerminalBackpressureEvent) => void): () => void;
   onTerminalSessionList(listener: (event: TerminalListSessionsResponse) => void): () => void;
+  onAppAgentRunState(listener: (event: AppAgentResponse) => void): () => void;
+  onAppAgentToolCallState(listener: (event: AppAgentResponse) => void): () => void;
   onOperatorStatus(listener: (status: OperatorStatus) => void): () => void;
   onGitSnapshots(listener: (snapshots: LocalGitSnapshot[]) => void): () => void;
   onSessionSnapshots(listener: (snapshots: LocalSessionSnapshot[]) => void): () => void;
@@ -529,6 +535,225 @@ export function onTerminalBackpressure(callback: (event: TerminalBackpressureEve
 }
 export function onTerminalSessionList(callback: (event: TerminalListSessionsResponse) => void): Promise<() => void> {
   return listenSidecar('terminal session list', () => sidecarApi().onTerminalSessionList(callback));
+}
+
+// ── App agent types (task #1023/#908) ──
+
+export interface AppAgentSelection {
+  project_id?: string | null;
+  task_id?: number | null;
+  workspace_id?: string | null;
+  current_route?: string | null;
+  current_tab?: string | null;
+  session_id?: string | null;
+  selected_file_path?: string | null;
+  selected_diff_range?: string | null;
+}
+
+export interface AppAgentToolDefinition {
+  name: string;
+  display_name: string;
+  category: string;
+  description: string;
+  enabled: boolean;
+  disabled_reason?: string | null;
+  requires_explicit_target: boolean;
+  destructive: boolean;
+  requires_confirmation: boolean;
+  cancellable: boolean;
+  audit_event_type: string;
+  capabilities: string[];
+}
+
+export interface AppAgentDisabledTool {
+  name: string;
+  reason: string;
+}
+
+export interface AppAgentTaskDependencySummary {
+  task_id: number;
+  title?: string | null;
+  status?: string | null;
+}
+
+export interface AppAgentReviewFindingSummary {
+  id?: number | null;
+  category?: string | null;
+  summary?: string | null;
+  status?: string | null;
+}
+
+export interface AppAgentDenMessageSummary {
+  id: number;
+  sender: string;
+  intent?: string | null;
+  metadata_type?: string | null;
+  content_summary: string;
+  created_at?: string | null;
+}
+
+export interface AppAgentTaskSummary {
+  id: number;
+  project_id: string;
+  title: string;
+  status: string;
+  priority: number;
+  tags: string[];
+  dependencies: AppAgentTaskDependencySummary[];
+  recent_messages: AppAgentDenMessageSummary[];
+  open_review_findings: AppAgentReviewFindingSummary[];
+  review_state: string;
+}
+
+export interface AppAgentGitSnapshot {
+  snapshots: LocalGitSnapshot[];
+  selected_snapshot: LocalGitSnapshot | null;
+}
+
+export interface AppAgentSessionCapabilities {
+  can_read_activity: boolean;
+  can_attach: boolean;
+  can_send_input: boolean;
+  can_terminate: boolean;
+  can_kill: boolean;
+  reason?: string | null;
+}
+
+export interface AppAgentSessionSummary {
+  session_id: string;
+  title?: string | null;
+  display_name?: string | null;
+  kind: string;
+  backend: string;
+  status: string;
+  project_id?: string | null;
+  task_id?: number | null;
+  workspace_id?: string | null;
+  current_command?: string | null;
+  capabilities: AppAgentSessionCapabilities;
+  warnings: string[];
+  last_activity_summary?: string | null;
+}
+
+export interface AppAgentCommandSummary {
+  name: string;
+  display_name: string;
+  description: string;
+  needs_target: boolean;
+}
+
+export interface AppAgentTerminalExcerpt {
+  session_id: string;
+  items: unknown[];
+  next_cursor?: string | null;
+  truncated: boolean;
+  source: string;
+  raw_terminal_bytes_persisted: boolean;
+}
+
+export interface AppAgentCollaborationState {
+  active_session_id?: string | null;
+  annotated_source_ref?: string | null;
+  compiled_response_draft_ref?: string | null;
+  summary: string;
+}
+
+export interface AppAgentAuthorityHints {
+  allowed_tools: AppAgentToolDefinition[];
+  disabled_tools: AppAgentDisabledTool[];
+  cancel_available: boolean;
+  stop_available: boolean;
+  sandbox_scope: string;
+}
+
+export interface AppAgentAuditCorrelation {
+  agent_run_id: string;
+  operator_session_id?: string | null;
+  trace_id: string;
+  parent_request_id?: string | null;
+  task_id?: number | null;
+  project_id?: string | null;
+}
+
+export interface AppAgentContextPacket {
+  context_version: number;
+  selection: AppAgentSelection;
+  task_summary: AppAgentTaskSummary | null;
+  git_snapshot: AppAgentGitSnapshot;
+  session_summaries: AppAgentSessionSummary[];
+  command_summaries: AppAgentCommandSummary[];
+  terminal_excerpts: AppAgentTerminalExcerpt[];
+  collaboration_state: AppAgentCollaborationState;
+  authority: AppAgentAuthorityHints;
+  audit: AppAgentAuditCorrelation;
+  warnings: string[];
+  built_at: string;
+}
+
+export interface AppAgentBuildContextResponse {
+  context: AppAgentContextPacket;
+}
+
+export interface AppAgentListToolsResponse {
+  tools: AppAgentToolDefinition[];
+}
+
+export interface AppAgentInvokeToolResponse {
+  tool_name: string;
+  tool_call_id: string;
+  status: string;
+  result: unknown;
+  audit: AppAgentAuditCorrelation;
+}
+
+export interface AppAgentCancelResponse {
+  request_id: string;
+  accepted: boolean;
+  status: string;
+}
+
+export interface AppAgentRunStateEvent {
+  agent_run_id: string;
+  request_id?: string | null;
+  status: string;
+  tool_name?: string | null;
+  message?: string | null;
+  observed_at: string;
+}
+
+export interface AppAgentToolCallStateEvent {
+  tool_call_id: string;
+  agent_run_id: string;
+  tool_name: string;
+  status: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  cancellable: boolean;
+  target_summary?: string | null;
+}
+
+export async function appAgentBuildContext(request?: AppAgentBuildContextRequest): Promise<AppAgentBuildContextResponse> {
+  return callSidecar('appAgentBuildContext', () => sidecarApi().appAgentBuildContext(request)) as unknown as Promise<AppAgentBuildContextResponse>;
+}
+
+export async function appAgentListTools(request?: AppAgentListToolsRequest): Promise<AppAgentListToolsResponse> {
+  return callSidecar('appAgentListTools', () => sidecarApi().appAgentListTools(request)) as unknown as Promise<AppAgentListToolsResponse>;
+}
+
+export async function appAgentInvokeTool(request: AppAgentInvokeToolRequest): Promise<AppAgentInvokeToolResponse> {
+  return callSidecar('appAgentInvokeTool', () => sidecarApi().appAgentInvokeTool(request)) as unknown as Promise<AppAgentInvokeToolResponse>;
+}
+
+export async function appAgentCancelRequest(request: AppAgentCancelRequest): Promise<AppAgentCancelResponse> {
+  return callSidecar('appAgentCancelRequest', () => sidecarApi().appAgentCancelRequest(request)) as unknown as Promise<AppAgentCancelResponse>;
+}
+
+export function onAppAgentRunState(callback: (event: AppAgentRunStateEvent) => void): Promise<() => void> {
+  return listenSidecar('app agent run state', () => sidecarApi().onAppAgentRunState((event: unknown) => callback(event as AppAgentRunStateEvent)));
+}
+
+export function onAppAgentToolCallState(callback: (event: AppAgentToolCallStateEvent) => void): Promise<() => void> {
+  return listenSidecar('app agent tool call state', () => sidecarApi().onAppAgentToolCallState((event: unknown) => callback(event as AppAgentToolCallStateEvent)));
 }
 
 // ── Tasks dashboard snapshot (#1028/#1029) ──

@@ -1,4 +1,5 @@
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AgentPane } from './components/AgentPane';
 import { CollaborationPane } from './components/CollaborationPane';
 import { TasksDashboardPane } from './components/TasksDashboardPane';
 import { useCollaborationState } from './desktop/useCollaborationState';
@@ -233,8 +234,20 @@ export function App() {
     />
   );
 
+  const agentSelection = useMemo(() => {
+    if (!activeSnapshot) return null;
+    return {
+      project_id: activeSnapshot.scope.projectId,
+      task_id: activeSnapshot.scope.taskId,
+      workspace_id: activeSnapshot.scope.workspaceId,
+      current_tab: shellState.activeTab,
+      selected_file_path: selectedFile?.path ?? null,
+    };
+  }, [activeSnapshot, shellState.activeTab, selectedFile]);
+
   const tabContent: Record<ShellTabId, ReactNode> = {
     operator: operatorTab,
+    agent: <AgentPane selection={agentSelection} />,
     tasks: <TasksDashboardPane projectId={activeSnapshot?.scope.projectId ?? null} parentTaskId={activeSnapshot?.scope.taskId ?? null} />,
     git: gitTab,
     compare: <StubSurface eyebrow="Compare" title="Multi-worktree compare" description="Routed surface reserved for pinned worktree panes and side-by-side terminal/output comparison without making renderer state authoritative." />,
