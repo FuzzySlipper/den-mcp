@@ -60,6 +60,12 @@ public sealed record OperatorSession
     public DateTime? LastObservedAt { get; init; }
     public DateTime? LastActivityAt { get; init; }
     public DateTime? ExitedAt { get; init; }
+
+    /// <summary>
+    /// Registry-authoritative mutation time. OperatorSessionRegistry overwrites
+    /// this with its local clock on every register/refresh; source-observation
+    /// times are preserved separately in LastObservedAt/LastActivityAt.
+    /// </summary>
     public DateTime UpdatedAt { get; init; }
 
     /// <summary>Terminal/process exit details when known.</summary>
@@ -83,7 +89,11 @@ public sealed record OperatorSession
     /// <summary>Bounded current warnings.</summary>
     public IReadOnlyList<string> Warnings { get; init; } = [];
 
-    /// <summary>Bounded structured summaries for display; raw stream remains separate.</summary>
+    /// <summary>
+    /// Bounded structured summaries for display; raw stream remains separate.
+    /// Read cursors are content-identity cursors over this retained snapshot,
+    /// not durable raw-terminal stream cursors.
+    /// </summary>
     public IReadOnlyList<OperatorSessionActivityItem> RecentActivity { get; init; } = [];
 
     /// <summary>Local child session refs and Den run/workspace links when known.</summary>

@@ -307,6 +307,10 @@ public sealed class TmuxOperatorSessionService
     {
         cancellationToken.ThrowIfCancellationRequested();
         RequireTmuxSession(request.SessionId, s => s.Capabilities.CanStreamTerminal, "ack_output");
+        // Current tmux support is snapshot-capture based and has no long-lived
+        // per-subscriber queue to throttle. ack_output is still capability-
+        // validated so callers can use the same contract; active tmux stream
+        // backpressure belongs with the live tmux backend work in #909/#911.
         return Task.FromResult(new TerminalAckOutputResponse { Accepted = true });
     }
 
@@ -514,7 +518,7 @@ public sealed class TmuxOperatorSessionService
         {
             RequiresConfirmation = true,
             LeaseRequired = false,
-            Constraints = "{\"backend_kind\":\"persistent_terminal\",\"persistence_kind\":\"tmux\",\"ownership_kind\":\"backend_persistent\",\"raw_stream_scope\":\"local_bridge_only\"}",
+            Constraints = "{\"backend_kind\":\"persistent_terminal\",\"persistence_kind\":\"tmux\",\"ownership_kind\":\"backend_persistent\",\"raw_stream_scope\":\"local_bridge_only\",\"backpressure_contract\":\"snapshot_capture_ack_validated_live_stream_enforcement_deferred_to_909_911\"}",
         };
     }
 

@@ -428,30 +428,7 @@ public sealed class AppAgentContextBuilder
 
     public static TerminalReadActivityResponse ReadActivity(OperatorSession session, string? afterCursor, int limit)
     {
-        var boundedLimit = Math.Clamp(limit, 1, 200);
-        var allItems = session.RecentActivity;
-        var startIndex = 0;
-        if (afterCursor is not null && long.TryParse(afterCursor.Replace("cur_", string.Empty, StringComparison.Ordinal), out var afterSeq))
-        {
-            startIndex = (int)Math.Min(afterSeq, allItems.Count);
-        }
-
-        var items = allItems.Skip(startIndex).Take(boundedLimit).Select(a => new TerminalActivityItem
-        {
-            Kind = a.Kind,
-            Role = a.Role,
-            Tool = a.Tool,
-            Summary = a.Summary,
-            Timestamp = a.Timestamp,
-        }).ToList();
-
-        return new TerminalReadActivityResponse
-        {
-            SessionId = session.SessionId,
-            Items = items,
-            NextCursor = items.Count == boundedLimit ? $"cur_{startIndex + boundedLimit:D12}" : null,
-            Truncated = items.Count < allItems.Count - startIndex,
-        };
+        return OperatorSessionActivityReader.Read(session, afterCursor, limit);
     }
 
     private static LocalGitSnapshot? SelectSnapshot(IReadOnlyList<LocalGitSnapshot> snapshots, AppAgentSelection selection)

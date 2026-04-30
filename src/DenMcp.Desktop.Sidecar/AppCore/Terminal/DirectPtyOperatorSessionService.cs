@@ -712,7 +712,7 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
             CanOpenExternalAttach = false,
             RequiresConfirmation = true,
             LeaseRequired = true,
-            Constraints = "{\"backend_kind\":\"direct_pty\",\"persistence_kind\":\"process_owned\",\"ownership_kind\":\"sidecar_owned\",\"raw_stream_scope\":\"local_bridge_only\"}",
+            Constraints = "{\"backend_kind\":\"direct_pty\",\"persistence_kind\":\"process_owned\",\"ownership_kind\":\"sidecar_owned\",\"raw_stream_scope\":\"local_bridge_only\",\"backpressure_contract\":\"per_stream_unacked_bytes_throttled_until_ack\"}",
         };
     }
 

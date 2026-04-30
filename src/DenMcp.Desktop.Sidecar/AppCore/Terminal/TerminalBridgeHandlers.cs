@@ -100,36 +100,8 @@ public sealed class TerminalReadActivityHandler
                 "unsupported_capability");
         }
 
-        // Bounded activity from the session's recent activity list.
-        var afterCursor = request.AfterCursor;
-        var limit = Math.Clamp(request.Limit, 1, 200);
-        var allItems = session.RecentActivity;
-        var startIndex = 0;
-
-        if (afterCursor is not null && long.TryParse(afterCursor.Replace("cur_", ""), out var afterSeq))
-        {
-            startIndex = (int)Math.Min(afterSeq, allItems.Count);
-        }
-
-        var items = allItems.Skip(startIndex).Take(limit).Select(a => new TerminalActivityItem
-        {
-            Kind = a.Kind,
-            Role = a.Role,
-            Tool = a.Tool,
-            Summary = a.Summary,
-            Timestamp = a.Timestamp,
-        }).ToList();
-
-        var nextCursor = items.Count == limit ? $"cur_{startIndex + limit:D12}" : null;
-        var truncated = items.Count < allItems.Count - startIndex;
-
-        return ValueTask.FromResult<TerminalReadActivityResponse?>(new TerminalReadActivityResponse
-        {
-            SessionId = request.SessionId,
-            Items = items,
-            NextCursor = nextCursor,
-            Truncated = truncated,
-        });
+        return ValueTask.FromResult<TerminalReadActivityResponse?>(
+            OperatorSessionActivityReader.Read(session, request.AfterCursor, request.Limit));
     }
 }
 

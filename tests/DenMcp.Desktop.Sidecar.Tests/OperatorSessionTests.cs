@@ -38,6 +38,68 @@ public class OperatorSessionRegistryTests
     }
 
     [Fact]
+    public void Registry_RegisterUsesRegistryAuthoritativeUpdatedAt()
+    {
+        var clock = new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc);
+        var observedAt = new DateTime(2026, 4, 29, 11, 59, 0, DateTimeKind.Utc);
+        var callerUpdatedAt = new DateTime(2026, 4, 29, 10, 0, 0, DateTimeKind.Utc);
+        var registry = new OperatorSessionRegistry(() => clock);
+
+        var session = registry.Register(new OperatorSession
+        {
+            SessionId = "pty:timestamp-policy",
+            Kind = OperatorSessionKind.Terminal,
+            Backend = OperatorSessionBackend.DirectPty,
+            Status = OperatorSessionStatus.Running,
+            SourceInstanceId = "test",
+            Capabilities = OperatorSessionCapabilities.FullControl(),
+            CreatedAt = callerUpdatedAt,
+            LastObservedAt = observedAt,
+            LastActivityAt = observedAt,
+            UpdatedAt = callerUpdatedAt,
+        });
+
+        Assert.Equal(clock, session.UpdatedAt);
+        Assert.Equal(observedAt, session.LastObservedAt);
+        Assert.Equal(observedAt, session.LastActivityAt);
+    }
+
+    [Fact]
+    public void Registry_RegisterFromPiSnapshotPreservesObservedAtButUpdatesRegistryTimestamp()
+    {
+        var clock = new DateTime(2026, 4, 29, 12, 5, 0, DateTimeKind.Utc);
+        var registry = new OperatorSessionRegistry(() => clock);
+        var snapshot = new LocalSessionSnapshot
+        {
+            ProjectId = "den-mcp",
+            ArtifactRoot = "/tmp/runs/run-timestamp",
+            Request = new DesktopSessionSnapshotRequest
+            {
+                SessionId = "pi-artifact:timestamp",
+                Title = "timestamp",
+                Kind = "artifact_observer",
+                Backend = "pi_artifact",
+                CurrentPhase = "running",
+                StartedAt = "2026-04-29T11:00:00.000Z",
+                ObservedAt = "2026-04-29T12:00:00.000Z",
+                LastActivityAt = "2026-04-29T11:59:00.000Z",
+                SourceInstanceId = "desktop-test",
+                RecentActivity = JsonSerializer.SerializeToElement(new { items = Array.Empty<object>() }),
+                Capabilities = JsonSerializer.SerializeToElement(new { schema = "den_desktop_session_capabilities_v2" }),
+                ControlCapabilities = JsonSerializer.SerializeToElement(new { schema = "den_desktop_session_capabilities" }),
+                Warnings = [],
+            },
+        };
+
+        var session = registry.RegisterFromPiSnapshot(snapshot);
+
+        Assert.Equal(clock, session.UpdatedAt);
+        Assert.Equal(new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc), session.LastObservedAt);
+        Assert.Equal(new DateTime(2026, 4, 29, 11, 59, 0, DateTimeKind.Utc), session.LastActivityAt);
+        Assert.Equal(new DateTime(2026, 4, 29, 11, 0, 0, DateTimeKind.Utc), session.CreatedAt);
+    }
+
+    [Fact]
     public void Registry_ListsSessionsWithFilters()
     {
         var now = new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc);
@@ -491,6 +553,93 @@ public class TerminalBridgeHandlerTests
     }
 
     [Fact]
+    public async Task TerminalReadActivityHandler_UsesStableActivityCursorAcrossRegistryRefresh()
+    {
+        var now = new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc);
+        var registry = new OperatorSessionRegistry(() => now);
+        var session = registry.Register(new OperatorSession
+        {
+            SessionId = "pi-artifact:cursor",
+            Kind = OperatorSessionKind.ArtifactObserver,
+            Backend = OperatorSessionBackend.PiArtifact,
+            Status = OperatorSessionStatus.Running,
+            SourceInstanceId = "test",
+            Capabilities = OperatorSessionCapabilities.ObserveOnly("test", canReadActivity: true),
+            CreatedAt = now,
+            RecentActivity =
+            [
+                new OperatorSessionActivityItem { Kind = "tool", Tool = "bash", Summary = "A", Timestamp = "2026-04-29T11:59:00Z" },
+                new OperatorSessionActivityItem { Kind = "tool", Tool = "bash", Summary = "B", Timestamp = "2026-04-29T11:59:01Z" },
+            ],
+        });
+
+        var handler = new TerminalReadActivityHandler(registry);
+        var first = await handler.HandleAsync(
+            new TerminalReadActivityRequest { SessionId = session.SessionId, Limit = 1 },
+            TestContext(),
+            CancellationToken.None);
+
+        Assert.NotNull(first!.NextCursor);
+        Assert.StartsWith(OperatorSessionActivityReader.CursorPrefix, first.NextCursor, StringComparison.Ordinal);
+
+        registry.Register(session with
+        {
+            RecentActivity =
+            [
+                new OperatorSessionActivityItem { Kind = "tool", Tool = "bash", Summary = "prepended", Timestamp = "2026-04-29T11:58:59Z" },
+                session.RecentActivity[0],
+                session.RecentActivity[1],
+            ],
+        });
+
+        var next = await handler.HandleAsync(
+            new TerminalReadActivityRequest { SessionId = session.SessionId, AfterCursor = first.NextCursor, Limit = 10 },
+            TestContext(),
+            CancellationToken.None);
+
+        Assert.Single(next!.Items);
+        Assert.Equal("B", next.Items[0].Summary);
+        Assert.False(next.Truncated);
+    }
+
+    [Fact]
+    public void AppAgentReadActivity_UsesSameStableActivityCursorSemantics()
+    {
+        var now = new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc);
+        var session = new OperatorSession
+        {
+            SessionId = "agent:cursor",
+            Kind = OperatorSessionKind.Agent,
+            Backend = OperatorSessionBackend.Process,
+            Status = OperatorSessionStatus.Running,
+            SourceInstanceId = "test",
+            Capabilities = OperatorSessionCapabilities.ObserveOnly("test", canReadActivity: true),
+            CreatedAt = now,
+            RecentActivity =
+            [
+                new OperatorSessionActivityItem { Kind = "tool", Tool = "bash", Summary = "A", Timestamp = "2026-04-29T11:59:00Z" },
+                new OperatorSessionActivityItem { Kind = "tool", Tool = "bash", Summary = "B", Timestamp = "2026-04-29T11:59:01Z" },
+            ],
+        };
+
+        var first = AppAgentContextBuilder.ReadActivity(session, null, 1);
+        var refreshed = session with
+        {
+            RecentActivity =
+            [
+                new OperatorSessionActivityItem { Kind = "tool", Tool = "bash", Summary = "prepended", Timestamp = "2026-04-29T11:58:59Z" },
+                session.RecentActivity[0],
+                session.RecentActivity[1],
+            ],
+        };
+
+        var next = AppAgentContextBuilder.ReadActivity(refreshed, first.NextCursor, 10);
+
+        Assert.Single(next.Items);
+        Assert.Equal("B", next.Items[0].Summary);
+    }
+
+    [Fact]
     public async Task TerminalReadActivityHandler_ThrowsForUnknownSession()
     {
         var registry = new OperatorSessionRegistry();
@@ -688,6 +837,102 @@ public class TerminalBridgeHandlerTests
     }
 
     [Fact]
+    public async Task DirectPtyService_EmitsBackpressureUntilAckResetsUnackedBytes()
+    {
+        var backend = new FakeDirectPtyBackend();
+        var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
+        var options = DesktopSidecarFixtures.CreateFixtureOptions();
+        var settings = new OperatorSettingsService(OperatorSettingsStorage.ForPath(Path.Combine(Path.GetTempPath(), "den-tests", Guid.NewGuid().ToString("N"), "settings.json")));
+        var events = new OperatorRuntimeBridgeEventSink(new DesktopSidecarRuntimeState(options));
+        await using var service = new DirectPtyOperatorSessionService(
+            backend,
+            registry,
+            events,
+            settings,
+            new DenHttpClient(),
+            () => new DateTimeOffset(2026, 4, 29, 12, 0, 0, TimeSpan.Zero),
+            new TerminalStreamLimits { AckAfterBytes = 8, SubscriberQueueMaxBytes = 16, HeartbeatIntervalMs = 10 });
+
+        var session = await service.CreateAsync(new TerminalCreateSessionRequest
+        {
+            ProjectId = "den-mcp",
+            Title = "Backpressure",
+            Backend = OperatorSessionBackend.DirectPty,
+        }, CancellationToken.None);
+        var attach = await service.AttachAsync(new TerminalAttachRequest
+        {
+            SessionId = session.SessionId,
+            Viewport = new TerminalViewport { Cols = 80, Rows = 24 },
+        }, CancellationToken.None);
+
+        backend.Processes[0].EmitOutput(Encoding.UTF8.GetBytes("0123456789"));
+
+        var backpressureFrame = await WaitForPublishedFrameAsync(
+            events,
+            DesktopSidecarProtocol.TerminalBackpressureEvent,
+            frame => string.Equals(frame.Payload.GetProperty("stream_id").GetString(), attach.StreamId, StringComparison.Ordinal));
+        var backpressure = JsonSerializer.Deserialize<TerminalBackpressureEvent>(backpressureFrame.Payload.GetRawText());
+
+        Assert.NotNull(backpressure);
+        Assert.Equal("throttled", backpressure!.State);
+        Assert.Equal("ack_required", backpressure.NextAction);
+        Assert.True(backpressure.QueueBytes >= 10);
+
+        var pausedHeartbeatFrame = await WaitForPublishedFrameAsync(
+            events,
+            DesktopSidecarProtocol.TerminalHeartbeatEvent,
+            frame => string.Equals(frame.Payload.GetProperty("stream_id").GetString(), attach.StreamId, StringComparison.Ordinal)
+                && frame.Payload.GetProperty("paused").GetBoolean());
+        var pausedHeartbeat = JsonSerializer.Deserialize<TerminalHeartbeatEvent>(pausedHeartbeatFrame.Payload.GetRawText());
+        Assert.True(pausedHeartbeat!.Paused);
+        Assert.True(pausedHeartbeat.QueueBytes >= 10);
+
+        var frameCountBeforeAck = events.PublishedFrames.Count;
+        var ack = await service.AckOutputAsync(new TerminalAckOutputRequest
+        {
+            SessionId = session.SessionId,
+            StreamId = attach.StreamId,
+            AckCursor = pausedHeartbeat.StreamCursor,
+            ReceivedBytes = pausedHeartbeat.QueueBytes,
+        }, CancellationToken.None);
+
+        Assert.True(ack.Accepted);
+
+        var resumedHeartbeatFrame = await WaitForPublishedFrameAsync(
+            events,
+            DesktopSidecarProtocol.TerminalHeartbeatEvent,
+            frame => string.Equals(frame.Payload.GetProperty("stream_id").GetString(), attach.StreamId, StringComparison.Ordinal)
+                && !frame.Payload.GetProperty("paused").GetBoolean()
+                && frame.Payload.GetProperty("queue_bytes").GetInt32() == 0,
+            startIndex: frameCountBeforeAck);
+        var resumedHeartbeat = JsonSerializer.Deserialize<TerminalHeartbeatEvent>(resumedHeartbeatFrame.Payload.GetRawText());
+        Assert.False(resumedHeartbeat!.Paused);
+        Assert.Equal(0, resumedHeartbeat.QueueBytes);
+    }
+
+    [Fact]
+    public async Task TmuxAckOutput_IsCapabilityValidatedSnapshotContract()
+    {
+        var runner = new FakeTmuxCommandRunner();
+        var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
+        var service = CreateTmuxService(runner, registry);
+        var session = await service.CreateAsync(new TerminalCreateSessionRequest { ProjectId = "den-mcp", Title = "Tmux Ack" }, CancellationToken.None);
+        var attach = await service.AttachAsync(new TerminalAttachRequest { SessionId = session.SessionId, Mode = "terminal_stream" }, CancellationToken.None);
+
+        var ack = await service.AckOutputAsync(new TerminalAckOutputRequest
+        {
+            SessionId = session.SessionId,
+            StreamId = attach.StreamId,
+            AckCursor = attach.StartCursor,
+            ReceivedBytes = 0,
+        }, CancellationToken.None);
+
+        Assert.True(ack.Accepted);
+        Assert.Contains("backpressure_contract", registry.Get(session.SessionId)!.Capabilities.Constraints, StringComparison.Ordinal);
+        Assert.Contains("deferred_to_909_911", registry.Get(session.SessionId)!.Capabilities.Constraints, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task TmuxRediscover_RegistersExistingManagedSessionAndMarksMissingStale()
     {
         var runner = new FakeTmuxCommandRunner
@@ -759,12 +1004,13 @@ public class TerminalBridgeHandlerTests
         OperatorRuntimeBridgeEventSink events,
         string eventName,
         Func<BridgeEventFrame, bool>? predicate = null,
-        int timeoutMs = 1000)
+        int timeoutMs = 1000,
+        int startIndex = 0)
     {
         var deadline = DateTimeOffset.UtcNow.AddMilliseconds(timeoutMs);
         while (DateTimeOffset.UtcNow < deadline)
         {
-            var frame = events.PublishedFrames.FirstOrDefault(frame =>
+            var frame = events.PublishedFrames.Skip(startIndex).FirstOrDefault(frame =>
                 frame.Event == eventName && (predicate is null || predicate(frame)));
             if (frame is not null)
             {

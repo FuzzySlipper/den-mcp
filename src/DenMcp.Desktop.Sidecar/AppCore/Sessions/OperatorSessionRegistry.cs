@@ -22,6 +22,9 @@ public sealed class OperatorSessionRegistry
 
     /// <summary>
     /// Register or update a session in the local registry.
+    /// UpdatedAt and Sequence are registry-authoritative and are overwritten
+    /// with the local registry clock/sequence on every call. Source-provided
+    /// observation timestamps remain in LastObservedAt and LastActivityAt.
     /// </summary>
     public OperatorSession Register(OperatorSession session)
     {
@@ -45,7 +48,8 @@ public sealed class OperatorSessionRegistry
     /// <summary>
     /// Register or update a session from a legacy Pi artifact snapshot observation.
     /// Computes observe-only capabilities, including can_read_activity when recent activity is available.
-    /// Preserves backward-compatible snapshot fields.
+    /// Preserves backward-compatible snapshot fields. UpdatedAt remains
+    /// registry-authoritative; snapshot ObservedAt is surfaced as LastObservedAt.
     /// </summary>
     public OperatorSession RegisterFromPiSnapshot(LocalSessionSnapshot snapshot)
     {

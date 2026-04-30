@@ -155,6 +155,14 @@ public sealed record TerminalViewportLimits
     public int MaxRows { get; init; } = 500;
 }
 
+/// <summary>
+/// Stream flow-control limits. direct_pty tracks per-stream unacked bytes,
+/// emits terminal backpressure events at AckAfterBytes, reports paused
+/// heartbeats while unacked, and clears pressure on ack_output. Snapshot-only
+/// backends that cannot throttle (for example current tmux capture) must still
+/// validate ack_output and document active queue enforcement as a live-backend
+/// responsibility.
+/// </summary>
 public sealed record TerminalStreamLimits
 {
     [JsonPropertyName("output_chunk_max_bytes")]
@@ -372,7 +380,12 @@ public sealed record TerminalReadActivityRequest
     public required string SessionId { get; init; }
 
     /// <summary>
-    /// Cursor string from a previous read_activity response, or null for the latest items.
+    /// Cursor string from a previous read_activity response, or null to read
+    /// from the start of the current bounded RecentActivity snapshot. New
+    /// read-activity cursors use the act_v1_* content-identity format and
+    /// remain valid across registry refreshes while the referenced activity
+    /// item is still retained; legacy cur_N index cursors are accepted only
+    /// for backward compatibility.
     /// </summary>
     [JsonPropertyName("after_cursor")]
     public string? AfterCursor { get; init; }
@@ -389,6 +402,10 @@ public sealed record TerminalReadActivityResponse
     [JsonPropertyName("items")]
     public IReadOnlyList<TerminalActivityItem> Items { get; init; } = [];
 
+    /// <summary>
+    /// Cursor for the last returned activity item. Clients may pass it as
+    /// after_cursor on the next poll even when truncated is false.
+    /// </summary>
     [JsonPropertyName("next_cursor")]
     public string? NextCursor { get; init; }
 
