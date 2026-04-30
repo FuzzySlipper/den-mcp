@@ -276,9 +276,14 @@ test('app-agent helper DTOs use typed commands and events without generic dispat
       async send(frame) {
         sent.push(frame);
         const result = frame.command === 'den_desktop.app_agent.list_tools'
-          ? { tools: [{ name: 'get_context', display_name: 'Get Context', category: 'read', description: 'Build context.', enabled: true, requires_explicit_target: false, destructive: false, requires_confirmation: false, cancellable: true, audit_event_type: 'app_agent.context_requested', capabilities: ['context.read'] }] }
+          ? {
+              tools: [
+                { name: 'get_context', display_name: 'Get Context', category: 'read', description: 'Build context.', enabled: true, requires_explicit_target: false, destructive: false, requires_confirmation: false, cancellable: true, audit_event_type: 'app_agent.context_requested', capabilities: ['context.read'] },
+                { name: 'stop_agent_run', display_name: 'Stop Agent Run', category: 'action', description: 'Stop an app-agent run when supported by the backend.', enabled: false, disabled_reason: 'Backend adapter not implemented in this foundation slice.', requires_explicit_target: false, destructive: false, requires_confirmation: false, cancellable: true, audit_event_type: 'app_agent.stop_requested', capabilities: ['app_agent.stop'] },
+              ],
+            }
           : frame.command === 'den_desktop.app_agent.build_context'
-            ? { context: { context_version: 1, selection: {}, git_snapshot: {}, session_summaries: [], command_summaries: [], terminal_excerpts: [], collaboration_state: {}, authority: {}, audit: { agent_run_id: 'run_1', trace_id: 'tr_1' }, warnings: [], built_at: '2026-04-29T12:34:56.000Z' } }
+            ? { context: { context_version: 1, selection: {}, git_snapshot: {}, session_summaries: [], command_summaries: [], terminal_excerpts: [], collaboration_state: {}, authority: { allowed_tools: [{ name: 'get_context', display_name: 'Get Context', category: 'read', description: 'Build context.', enabled: true, requires_explicit_target: false, destructive: false, requires_confirmation: false, cancellable: true, audit_event_type: 'app_agent.context_requested', capabilities: ['context.read'] }], disabled_tools: [{ name: 'stop_agent_run', reason: 'Backend adapter not implemented in this foundation slice.' }], cancel_available: true, stop_available: false, sandbox_scope: 'trusted_desktop_app_core_v1' }, audit: { agent_run_id: 'run_1', trace_id: 'tr_1' }, warnings: [], built_at: '2026-04-29T12:34:56.000Z' } }
             : frame.command === 'den_desktop.app_agent.cancel_request'
               ? { request_id: frame.payload.request_id, accepted: true, status: 'cancel_requested' }
               : { tool_name: 'summarize_output', tool_call_id: 'tool_1', status: 'completed', result: { summary: 'hello' }, audit: { agent_run_id: 'run_1', trace_id: 'tr_1' } };
@@ -306,8 +311,8 @@ test('app-agent helper DTOs use typed commands and events without generic dispat
     selected_diff_range: 'L161-L168',
   };
 
-  await facade.appAgentListTools({ selection: explicitSelection });
-  await facade.appAgentBuildContext({
+  const toolsResponse = await facade.appAgentListTools({ selection: explicitSelection });
+  const contextResponse = await facade.appAgentBuildContext({
     selection: {
       project_id: 'den-mcp',
       task_id: null,
@@ -351,6 +356,10 @@ test('app-agent helper DTOs use typed commands and events without generic dispat
     'den_desktop.app_agent.cancel_request',
   ]);
   assert.deepEqual(sent[0].payload.selection, explicitSelection);
+  assert.equal(toolsResponse.tools.find((tool) => tool.name === 'stop_agent_run')?.enabled, false);
+  assert.equal(toolsResponse.tools.find((tool) => tool.name === 'stop_agent_run')?.disabled_reason, 'Backend adapter not implemented in this foundation slice.');
+  assert.deepEqual(contextResponse.context.authority.disabled_tools, [{ name: 'stop_agent_run', reason: 'Backend adapter not implemented in this foundation slice.' }]);
+  assert.equal(contextResponse.context.authority.stop_available, false);
   assert.equal(facade.dispatch, undefined);
 });
 

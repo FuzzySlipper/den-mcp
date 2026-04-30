@@ -331,7 +331,7 @@ public sealed record AppAgentAuthorityHints
     public bool CancelAvailable { get; init; } = true;
 
     [JsonPropertyName("stop_available")]
-    public bool StopAvailable { get; init; } = true;
+    public bool StopAvailable { get; init; }
 
     [JsonPropertyName("sandbox_scope")]
     public string SandboxScope { get; init; } = "trusted_desktop_app_core_v1";

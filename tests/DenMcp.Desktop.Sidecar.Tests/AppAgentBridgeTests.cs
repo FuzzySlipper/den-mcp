@@ -31,6 +31,12 @@ public class AppAgentBridgeTests
             "stop_agent_run",
         }, tools.Select(tool => tool.Name).ToArray());
         Assert.Contains(tools, tool => tool.Name == "run_command" && tool.Category == "action" && tool.Capabilities.Contains("console.run"));
+        var stopTool = Assert.Single(tools, tool => tool.Name == "stop_agent_run");
+        Assert.False(stopTool.Enabled);
+        Assert.Equal(AppAgentToolRegistry.StopAgentRunDisabledReason, stopTool.DisabledReason);
+        var disabled = Assert.Throws<BridgeHandlerException>(() => registry.GetRequired("stop_agent_run"));
+        Assert.Equal("app_agent.tool.disabled", disabled.Code);
+        Assert.Equal("unsupported_capability", disabled.Category);
         Assert.DoesNotContain(tools, tool => tool.Name.Contains("shell", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(tools, tool => tool.Name.Contains("dispatch", StringComparison.OrdinalIgnoreCase));
     }
@@ -78,6 +84,11 @@ public class AppAgentBridgeTests
         Assert.Equal(1, context.ContextVersion);
         Assert.Equal("den-mcp", context.Selection.ProjectId);
         Assert.Contains(context.Authority.AllowedTools, tool => tool.Name == "get_context");
+        Assert.DoesNotContain(context.Authority.AllowedTools, tool => tool.Name == "stop_agent_run");
+        var disabledStopTool = Assert.Single(context.Authority.DisabledTools, tool => tool.Name == "stop_agent_run");
+        Assert.Equal(AppAgentToolRegistry.StopAgentRunDisabledReason, disabledStopTool.Reason);
+        Assert.True(context.Authority.CancelAvailable);
+        Assert.False(context.Authority.StopAvailable);
         Assert.Contains(context.CommandSummaries, command => command.Name == "help");
         Assert.Single(context.SessionSummaries);
         Assert.Single(context.TerminalExcerpts);
@@ -129,6 +140,23 @@ public class AppAgentBridgeTests
         Assert.Null(toolsResponse.Error);
         Assert.Contains(toolsResponse.Result!.Value.GetProperty("tools").EnumerateArray(), tool =>
             tool.GetProperty("name").GetString() == "get_context");
+        Assert.Contains(toolsResponse.Result!.Value.GetProperty("tools").EnumerateArray(), tool =>
+            tool.GetProperty("name").GetString() == "stop_agent_run"
+            && !tool.GetProperty("enabled").GetBoolean()
+            && tool.GetProperty("disabled_reason").GetString() == AppAgentToolRegistry.StopAgentRunDisabledReason);
+
+        var stopResponse = await router.DispatchAsync(new BridgeRequestFrame
+        {
+            SchemaVersion = DesktopSidecarProtocol.SchemaVersion,
+            RequestId = "req_stop_tool",
+            Command = DesktopSidecarProtocol.AppAgentInvokeToolCommand,
+            Payload = JsonSerializer.Deserialize<JsonElement>("{\"tool_name\":\"stop_agent_run\",\"input\":{}}"),
+            SentAt = DateTimeOffset.Parse("2026-04-29T12:34:56.000Z"),
+        });
+        Assert.NotNull(stopResponse.Error);
+        Assert.Equal("app_agent.tool.disabled", stopResponse.Error!.Code);
+        Assert.Equal("unsupported_capability", stopResponse.Error.Category);
+        Assert.Equal(AppAgentToolRegistry.StopAgentRunDisabledReason, stopResponse.Error.Message);
 
         var invalidResponse = await router.DispatchAsync(new BridgeRequestFrame
         {

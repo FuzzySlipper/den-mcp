@@ -6,6 +6,8 @@ namespace DenMcp.Desktop.Sidecar;
 
 public sealed class AppAgentToolRegistry
 {
+    public const string StopAgentRunDisabledReason = "Backend adapter not implemented in this foundation slice.";
+
     private static readonly IReadOnlyList<AppAgentToolDefinition> ToolDefinitions =
     [
         Tool("get_context", "Get Context", "read", "Build the current app-agent context packet.", "app_agent.context_requested", ["context.read"]),
@@ -20,7 +22,7 @@ public sealed class AppAgentToolRegistry
         Tool("draft_task_update", "Draft Task Update", "draft", "Suggest task changes without applying them.", "app_agent.task_update_drafted", ["den.tasks.draft"]),
         Tool("run_command", "Run Console Command", "action", "Run an allow-listed structured console command from the command registry; no shell passthrough.", "app_agent.console_command_run", ["console.run"], requiresExplicitTarget: true),
         Tool("cancel_request", "Cancel Request", "action", "Cooperatively cancel an active app-agent bridge request.", "app_agent.cancel_requested", ["app_agent.cancel"]),
-        Tool("stop_agent_run", "Stop Agent Run", "action", "Stop an app-agent run when supported by the backend. Stub in this foundation slice.", "app_agent.stop_requested", ["app_agent.stop"], enabled: true),
+        Tool("stop_agent_run", "Stop Agent Run", "action", "Stop an app-agent run when supported by the backend.", "app_agent.stop_requested", ["app_agent.stop"], enabled: false, disabledReason: StopAgentRunDisabledReason),
     ];
 
     public IReadOnlyList<AppAgentToolDefinition> ListTools(AppAgentSelection? selection = null)
@@ -295,6 +297,7 @@ public sealed class AppAgentContextBuilder
             .Where(session => MatchesSelection(session, request.Selection))
             .Select(ToSessionSummary)
             .ToList();
+        var toolDefinitions = _tools.ListTools(request.Selection);
 
         var packet = new AppAgentContextPacket
         {
@@ -313,11 +316,13 @@ public sealed class AppAgentContextBuilder
             CollaborationState = new AppAgentCollaborationState(),
             Authority = new AppAgentAuthorityHints
             {
-                AllowedTools = _tools.ListTools(request.Selection).Where(tool => tool.Enabled).ToList(),
-                DisabledTools = _tools.ListTools(request.Selection)
+                AllowedTools = toolDefinitions.Where(tool => tool.Enabled).ToList(),
+                DisabledTools = toolDefinitions
                     .Where(tool => !tool.Enabled)
                     .Select(tool => new AppAgentDisabledTool { Name = tool.Name, Reason = tool.DisabledReason ?? "disabled" })
                     .ToList(),
+                CancelAvailable = toolDefinitions.Any(tool => tool.Name == "cancel_request" && tool.Enabled),
+                StopAvailable = toolDefinitions.Any(tool => tool.Name == "stop_agent_run" && tool.Enabled),
             },
             Audit = audit,
             Warnings = warnings,
@@ -671,8 +676,6 @@ public sealed class AppAgentService
                 return BridgeJson.ToElement(await RunCommandToolAsync(request.Input, request.Selection, cancellationToken).ConfigureAwait(false));
             case "cancel_request":
                 return BridgeJson.ToElement(Cancel(ParseCancelRequest(request.Input)));
-            case "stop_agent_run":
-                return BridgeJson.ToElement(new { accepted = false, status = "stub", message = "Stop-agent-run backend adapter is not implemented in this foundation slice." });
             default:
                 throw new BridgeHandlerException("app_agent.tool.not_found", $"App-agent tool '{toolName}' is not implemented.", "not_found");
         }
