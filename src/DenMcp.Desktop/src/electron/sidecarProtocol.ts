@@ -156,7 +156,36 @@ export interface TerminalListSessionsRequest extends Record<string, JsonValue | 
   status?: string | null;
 }
 
+export type AppAgentSelection = Record<string, JsonValue>;
+
+export interface AppAgentBuildContextRequest extends Record<string, JsonValue | undefined> {
+  selection?: AppAgentSelection;
+  agent_run_id?: string | null;
+  parent_request_id?: string | null;
+  trace_id?: string | null;
+  terminal_excerpts?: Array<Record<string, JsonValue>>;
+  message_limit?: number;
+}
+
+export interface AppAgentListToolsRequest extends Record<string, JsonValue | undefined> {
+  selection?: AppAgentSelection;
+}
+
+export interface AppAgentInvokeToolRequest extends Record<string, JsonValue | undefined> {
+  tool_name: string;
+  input?: Record<string, JsonValue>;
+  selection?: AppAgentSelection;
+  agent_run_id?: string | null;
+  trace_id?: string | null;
+}
+
+export interface AppAgentCancelRequest extends Record<string, JsonValue | undefined> {
+  request_id: string;
+  reason?: string | null;
+}
+
 export type TerminalResponse = Record<string, JsonValue>;
+export type AppAgentResponse = Record<string, JsonValue>;
 
 export const sidecarCommands: Record<string, BridgeCommandSpec<JsonValue, JsonValue>> = {
   terminalCreateSession: {
@@ -219,6 +248,29 @@ export const sidecarCommands: Record<string, BridgeCommandSpec<JsonValue, JsonVa
     requestSchema: 'den_desktop.console.run_command.request',
     responseSchema: 'den_desktop.console.run_command.response',
     supportsProgress: true,
+  },
+  appAgentBuildContext: {
+    command: 'den_desktop.app_agent.build_context',
+    requestSchema: 'den_desktop.app_agent.build_context.request',
+    responseSchema: 'den_desktop.app_agent.build_context.response',
+    supportsCancellation: true,
+  },
+  appAgentListTools: {
+    command: 'den_desktop.app_agent.list_tools',
+    requestSchema: 'den_desktop.app_agent.list_tools.request',
+    responseSchema: 'den_desktop.app_agent.list_tools.response',
+  },
+  appAgentInvokeTool: {
+    command: 'den_desktop.app_agent.invoke_tool',
+    requestSchema: 'den_desktop.app_agent.invoke_tool.request',
+    responseSchema: 'den_desktop.app_agent.invoke_tool.response',
+    supportsCancellation: true,
+    supportsProgress: true,
+  },
+  appAgentCancelRequest: {
+    command: 'den_desktop.app_agent.cancel_request',
+    requestSchema: 'den_desktop.app_agent.cancel_request.request',
+    responseSchema: 'den_desktop.app_agent.cancel_request.response',
   },
   getHealth: {
     command: 'bridge.get_health',
@@ -302,6 +354,14 @@ export const sidecarEvents: Record<string, BridgeEventSpec<JsonValue>> = {
     event: 'den.terminal.session_list_updated',
     payloadSchema: 'den.terminal.session_list_updated.payload',
   },
+  appAgentRunState: {
+    event: 'den.app_agent.run_state_changed',
+    payloadSchema: 'den.app_agent.run_state_changed.payload',
+  },
+  appAgentToolCallState: {
+    event: 'den.app_agent.tool_call_state_changed',
+    payloadSchema: 'den.app_agent.tool_call_state_changed.payload',
+  },
 };
 
 export type SidecarBridgeClient = CheckedBridgeClient<typeof sidecarCommands, typeof sidecarEvents>;
@@ -326,6 +386,14 @@ export function createSidecarBridgeFacade(client: SidecarBridgeClient) {
     consoleListCommands: async <T>(): Promise<T> => facade.consoleListCommands({}) as Promise<T>,
     consoleRunCommand: async <TRequest, TResponse>(request: TRequest): Promise<TResponse> =>
       facade.consoleRunCommand(request as JsonValue) as Promise<TResponse>,
+    appAgentBuildContext: async <TResponse = AppAgentResponse>(request: AppAgentBuildContextRequest = {}): Promise<TResponse> =>
+      facade.appAgentBuildContext(request as JsonValue) as Promise<TResponse>,
+    appAgentListTools: async <TResponse = AppAgentResponse>(request: AppAgentListToolsRequest = {}): Promise<TResponse> =>
+      facade.appAgentListTools(request as JsonValue) as Promise<TResponse>,
+    appAgentInvokeTool: async <TResponse = AppAgentResponse>(request: AppAgentInvokeToolRequest): Promise<TResponse> =>
+      facade.appAgentInvokeTool(request as JsonValue) as Promise<TResponse>,
+    appAgentCancelRequest: async <TResponse = AppAgentResponse>(request: AppAgentCancelRequest): Promise<TResponse> =>
+      facade.appAgentCancelRequest(request as JsonValue) as Promise<TResponse>,
     terminalCreateSession: async <TResponse = TerminalResponse>(request: TerminalCreateSessionRequest): Promise<TResponse> =>
       facade.terminalCreateSession(request as JsonValue) as Promise<TResponse>,
     terminalListSessions: async <TResponse = TerminalResponse>(request: TerminalListSessionsRequest = {}): Promise<TResponse> =>
@@ -363,6 +431,12 @@ export function createSidecarBridgeFacade(client: SidecarBridgeClient) {
     },
     assertTerminalSessionListEvent(frame: BridgeEventFrame): void {
       client.assertEvent('terminalSessionList', frame);
+    },
+    assertAppAgentRunStateEvent(frame: BridgeEventFrame): void {
+      client.assertEvent('appAgentRunState', frame);
+    },
+    assertAppAgentToolCallStateEvent(frame: BridgeEventFrame): void {
+      client.assertEvent('appAgentToolCallState', frame);
     },
   };
 }

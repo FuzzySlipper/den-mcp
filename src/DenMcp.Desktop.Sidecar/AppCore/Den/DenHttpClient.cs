@@ -208,6 +208,74 @@ public sealed class DenHttpClient
         }
     }
 
+    public async Task<DenTaskDetail> GetTaskDetailAsync(
+        string baseUrl,
+        string projectId,
+        long taskId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+
+        var path = $"/api/projects/{EscapePathSegment(projectId)}/tasks/{taskId}";
+        var response = await SendAsync(
+            () => new HttpRequestMessage(HttpMethod.Get, JoinUrl(baseUrl, path)),
+            $"Unable to fetch Den task {taskId}",
+            cancellationToken).ConfigureAwait(false);
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await ReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+                throw new DenHttpClientException($"Den task {taskId} returned HTTP {(int)response.StatusCode}: {body}");
+            }
+
+            return await ReadJsonAsync<DenTaskDetail>(
+                response,
+                $"Unable to parse Den task {taskId}",
+                cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    public async Task<IReadOnlyList<DenMessage>> ListMessagesAsync(
+        string baseUrl,
+        string projectId,
+        long? taskId = null,
+        int limit = 20,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+
+        var query = new List<QueryParameter>
+        {
+            new("limit", Math.Clamp(limit, 1, 100).ToString(System.Globalization.CultureInfo.InvariantCulture)),
+        };
+        if (taskId is { } id)
+        {
+            query.Add(new QueryParameter("taskId", id.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        }
+
+        var path = $"/api/projects/{EscapePathSegment(projectId)}/messages";
+        var response = await SendAsync(
+            () => new HttpRequestMessage(HttpMethod.Get, BuildUrl(baseUrl, path, query)),
+            "Unable to fetch Den messages",
+            cancellationToken).ConfigureAwait(false);
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await ReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+                throw new DenHttpClientException($"Den messages request returned HTTP {(int)response.StatusCode}: {body}");
+            }
+
+            return await ReadJsonAsync<List<DenMessage>>(
+                response,
+                "Unable to parse Den messages",
+                cancellationToken).ConfigureAwait(false);
+        }
+    }
+
     public static JsonSerializerOptions CreateJsonSerializerOptions()
     {
         return new JsonSerializerOptions(JsonSerializerDefaults.General)

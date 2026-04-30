@@ -31,6 +31,10 @@ public static class DesktopSidecarBridge
         services.AddSingleton<IOperatorRuntimeEventSink>(sp => sp.GetRequiredService<OperatorRuntimeBridgeEventSink>());
         services.AddSingleton<OperatorRuntimeService>();
         services.AddSingleton<IConsoleCommandRunner, ConsoleCommandRunner>();
+        services.AddSingleton<AppAgentToolRegistry>();
+        services.AddSingleton<AppAgentAuditService>();
+        services.AddSingleton<AppAgentContextBuilder>();
+        services.AddSingleton<AppAgentService>();
         services.AddBridgeHost(
             ConfigureRegistry,
             host =>
@@ -40,7 +44,7 @@ public static class DesktopSidecarBridge
                 host.SchemaVersion = DesktopSidecarProtocol.SchemaVersion;
                 host.SchemaBundleId = DesktopSidecarProtocol.SchemaBundleId;
                 host.SupportedTransports = new[] { WebSocketBridgeTransportNames.LoopbackWebSocket };
-                host.FeatureFlags = new[] { "operator_runtime", "typed_runtime_bridge", "tmux_operator_sessions" };
+                host.FeatureFlags = new[] { "operator_runtime", "typed_runtime_bridge", "tmux_operator_sessions", "app_agent_bridge_foundation" };
             });
 
         return services.BuildServiceProvider(validateScopes: true);
@@ -100,13 +104,26 @@ public static class DesktopSidecarBridge
             .RegisterCommand<ConsoleCommandRunRequest, ConsoleCommandRunResponse, ConsoleRunCommandHandler>(
                 DesktopSidecarProtocol.ConsoleRunCommandCommand,
                 config => { config.SupportsProgress = true; })
+            // App-agent context/tool bridge foundation (task #1023)
+            .RegisterCommand<AppAgentBuildContextRequest, AppAgentBuildContextResponse, AppAgentBuildContextHandler>(
+                DesktopSidecarProtocol.AppAgentBuildContextCommand,
+                config => { config.SupportsCancellation = true; })
+            .RegisterCommand<AppAgentListToolsRequest, AppAgentListToolsResponse, AppAgentListToolsHandler>(
+                DesktopSidecarProtocol.AppAgentListToolsCommand)
+            .RegisterCommand<AppAgentInvokeToolRequest, AppAgentInvokeToolResponse, AppAgentInvokeToolHandler>(
+                DesktopSidecarProtocol.AppAgentInvokeToolCommand,
+                config => { config.SupportsCancellation = true; config.SupportsProgress = true; })
+            .RegisterCommand<AppAgentCancelRequest, AppAgentCancelResponse, AppAgentCancelRequestHandler>(
+                DesktopSidecarProtocol.AppAgentCancelRequestCommand)
             .RegisterEvent<OperatorStatus>(DesktopSidecarProtocol.OperatorStatusEvent)
             .RegisterEvent<IReadOnlyList<LocalGitSnapshot>>(DesktopSidecarProtocol.GitSnapshotEvent)
             .RegisterEvent<IReadOnlyList<LocalSessionSnapshot>>(DesktopSidecarProtocol.SessionSnapshotEvent)
             // Terminal protocol events (task #1010/#909, dot-convention names per R945-4)
             .RegisterEvent<TerminalOutputEvent>(DesktopSidecarProtocol.TerminalOutputEvent)
             .RegisterEvent<TerminalSessionEvent>(DesktopSidecarProtocol.TerminalSessionStatusEvent)
-            .RegisterEvent<TerminalListSessionsResponse>(DesktopSidecarProtocol.TerminalSessionListEvent);
+            .RegisterEvent<TerminalListSessionsResponse>(DesktopSidecarProtocol.TerminalSessionListEvent)
+            .RegisterEvent<AppAgentRunStateEvent>(DesktopSidecarProtocol.AppAgentRunStateEvent)
+            .RegisterEvent<AppAgentToolCallStateEvent>(DesktopSidecarProtocol.AppAgentToolCallStateEvent);
     }
 
     public static BridgeSchemaBundle CreateSchemaBundle(IServiceProvider serviceProvider)
@@ -215,6 +232,20 @@ public static class DesktopSidecarBridge
             Schema(DesktopSidecarProtocol.ConsoleListCommandsCommand + ".response", ConsoleCommandListResponseSchema),
             Schema(DesktopSidecarProtocol.ConsoleRunCommandCommand + ".request", ConsoleCommandRunRequestSchema),
             Schema(DesktopSidecarProtocol.ConsoleRunCommandCommand + ".response", ConsoleCommandRunResponseSchema),
+            // App-agent context/tool bridge schemas (task #1023)
+            Schema("app_agent_selection", AppAgentSelectionSchema),
+            Schema("app_agent_tool_definition", AppAgentToolDefinitionSchema),
+            Schema("app_agent_audit_correlation", AppAgentAuditCorrelationSchema),
+            Schema(DesktopSidecarProtocol.AppAgentBuildContextCommand + ".request", AppAgentBuildContextRequestSchema),
+            Schema(DesktopSidecarProtocol.AppAgentBuildContextCommand + ".response", AppAgentBuildContextResponseSchema),
+            Schema(DesktopSidecarProtocol.AppAgentListToolsCommand + ".request", AppAgentListToolsRequestSchema),
+            Schema(DesktopSidecarProtocol.AppAgentListToolsCommand + ".response", AppAgentListToolsResponseSchema),
+            Schema(DesktopSidecarProtocol.AppAgentInvokeToolCommand + ".request", AppAgentInvokeToolRequestSchema),
+            Schema(DesktopSidecarProtocol.AppAgentInvokeToolCommand + ".response", AppAgentInvokeToolResponseSchema),
+            Schema(DesktopSidecarProtocol.AppAgentCancelRequestCommand + ".request", AppAgentCancelRequestSchema),
+            Schema(DesktopSidecarProtocol.AppAgentCancelRequestCommand + ".response", AppAgentCancelResponseSchema),
+            Schema(DesktopSidecarProtocol.AppAgentRunStateEvent + ".payload", AppAgentRunStateEventSchema),
+            Schema(DesktopSidecarProtocol.AppAgentToolCallStateEvent + ".payload", AppAgentToolCallStateEventSchema),
             // Terminal protocol event schemas
             Schema(DesktopSidecarProtocol.TerminalOutputEvent + ".payload", TerminalOutputEventPayloadSchema),
             Schema(DesktopSidecarProtocol.TerminalSessionStatusEvent + ".payload", TerminalSessionEventPayloadSchema),
@@ -314,6 +345,58 @@ public static class DesktopSidecarBridge
 
     private const string ConsoleCommandDefinitionSchema = """
         {"type":"object","additionalProperties":false,"required":["name","displayName","description"],"properties":{"name":{"type":"string"},"displayName":{"type":"string"},"description":{"type":"string"},"needsTarget":{"type":"boolean"}}}
+        """;
+
+    private const string AppAgentSelectionSchema = """
+        {"type":"object","additionalProperties":false,"properties":{"project_id":{"type":["string","null"]},"task_id":{"type":["integer","null"]},"workspace_id":{"type":["string","null"]},"current_route":{"type":["string","null"]},"current_tab":{"type":["string","null"]},"session_id":{"type":["string","null"]},"selected_file_path":{"type":["string","null"]},"selected_diff_range":{"type":["string","null"]}}}
+        """;
+
+    private const string AppAgentToolDefinitionSchema = """
+        {"type":"object","additionalProperties":false,"required":["name","display_name","category","description","enabled","requires_explicit_target","destructive","requires_confirmation","cancellable","audit_event_type","capabilities"],"properties":{"name":{"type":"string"},"display_name":{"type":"string"},"category":{"type":"string"},"description":{"type":"string"},"enabled":{"type":"boolean"},"disabled_reason":{"type":["string","null"]},"requires_explicit_target":{"type":"boolean"},"destructive":{"type":"boolean"},"requires_confirmation":{"type":"boolean"},"cancellable":{"type":"boolean"},"audit_event_type":{"type":"string"},"capabilities":{"type":"array","items":{"type":"string"}}}}
+        """;
+
+    private const string AppAgentAuditCorrelationSchema = """
+        {"type":"object","additionalProperties":false,"required":["agent_run_id","trace_id"],"properties":{"agent_run_id":{"type":"string"},"operator_session_id":{"type":["string","null"]},"trace_id":{"type":"string"},"parent_request_id":{"type":["string","null"]},"task_id":{"type":["integer","null"]},"project_id":{"type":["string","null"]}}}
+        """;
+
+    private const string AppAgentBuildContextRequestSchema = """
+        {"type":"object","additionalProperties":false,"properties":{"selection":{"$ref":"app_agent_selection"},"agent_run_id":{"type":["string","null"]},"parent_request_id":{"type":["string","null"]},"trace_id":{"type":["string","null"]},"terminal_excerpts":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["session_id"],"properties":{"session_id":{"type":"string"},"after_cursor":{"type":["string","null"]},"limit":{"type":"integer"}}}},"message_limit":{"type":"integer"}}}
+        """;
+
+    private const string AppAgentBuildContextResponseSchema = """
+        {"type":"object","additionalProperties":false,"required":["context"],"properties":{"context":{"type":"object","additionalProperties":true,"required":["context_version","selection","git_snapshot","session_summaries","command_summaries","terminal_excerpts","collaboration_state","authority","audit","warnings","built_at"],"properties":{"context_version":{"type":"integer"},"selection":{"$ref":"app_agent_selection"},"git_snapshot":{"type":"object","additionalProperties":true},"session_summaries":{"type":"array","items":{"type":"object","additionalProperties":true}},"command_summaries":{"type":"array","items":{"type":"object","additionalProperties":true}},"terminal_excerpts":{"type":"array","items":{"type":"object","additionalProperties":true}},"collaboration_state":{"type":"object","additionalProperties":true},"authority":{"type":"object","additionalProperties":true},"audit":{"$ref":"app_agent_audit_correlation"},"warnings":{"type":"array","items":{"type":"string"}},"built_at":{"type":"string"}}}}}
+        """;
+
+    private const string AppAgentListToolsRequestSchema = """
+        {"type":"object","additionalProperties":false,"properties":{"selection":{"$ref":"app_agent_selection"}}}
+        """;
+
+    private const string AppAgentListToolsResponseSchema = """
+        {"type":"object","additionalProperties":false,"required":["tools"],"properties":{"tools":{"type":"array","items":{"$ref":"app_agent_tool_definition"}}}}
+        """;
+
+    private const string AppAgentInvokeToolRequestSchema = """
+        {"type":"object","additionalProperties":false,"required":["tool_name"],"properties":{"tool_name":{"type":"string"},"input":{"type":"object","additionalProperties":true},"selection":{"$ref":"app_agent_selection"},"agent_run_id":{"type":["string","null"]},"trace_id":{"type":["string","null"]}}}
+        """;
+
+    private const string AppAgentInvokeToolResponseSchema = """
+        {"type":"object","additionalProperties":false,"required":["tool_name","tool_call_id","status","result","audit"],"properties":{"tool_name":{"type":"string"},"tool_call_id":{"type":"string"},"status":{"type":"string"},"result":{},"audit":{"$ref":"app_agent_audit_correlation"}}}
+        """;
+
+    private const string AppAgentCancelRequestSchema = """
+        {"type":"object","additionalProperties":false,"required":["request_id"],"properties":{"request_id":{"type":"string"},"reason":{"type":["string","null"]}}}
+        """;
+
+    private const string AppAgentCancelResponseSchema = """
+        {"type":"object","additionalProperties":false,"required":["request_id","accepted","status"],"properties":{"request_id":{"type":"string"},"accepted":{"type":"boolean"},"status":{"type":"string"}}}
+        """;
+
+    private const string AppAgentRunStateEventSchema = """
+        {"type":"object","additionalProperties":false,"required":["agent_run_id","status","observed_at"],"properties":{"agent_run_id":{"type":"string"},"request_id":{"type":["string","null"]},"status":{"type":"string"},"tool_name":{"type":["string","null"]},"message":{"type":["string","null"]},"observed_at":{"type":"string"}}}
+        """;
+
+    private const string AppAgentToolCallStateEventSchema = """
+        {"type":"object","additionalProperties":false,"required":["tool_call_id","agent_run_id","tool_name","status","cancellable"],"properties":{"tool_call_id":{"type":"string"},"agent_run_id":{"type":"string"},"tool_name":{"type":"string"},"status":{"type":"string"},"started_at":{"type":["string","null"]},"completed_at":{"type":["string","null"]},"cancellable":{"type":"boolean"},"target_summary":{"type":["string","null"]}}}
         """;
 
     private static BridgeNamedSchema Schema(string name, string schema)

@@ -49,6 +49,14 @@ public static class DesktopSidecarProtocol
     public const string ConsoleListCommandsCommand = "den_desktop.console.list_commands";
     public const string ConsoleRunCommandCommand = "den_desktop.console.run_command";
 
+    // App-agent context/tool bridge foundation (task #1023)
+    public const string AppAgentBuildContextCommand = "den_desktop.app_agent.build_context";
+    public const string AppAgentListToolsCommand = "den_desktop.app_agent.list_tools";
+    public const string AppAgentInvokeToolCommand = "den_desktop.app_agent.invoke_tool";
+    public const string AppAgentCancelRequestCommand = "den_desktop.app_agent.cancel_request";
+    public const string AppAgentRunStateEvent = "den.app_agent.run_state_changed";
+    public const string AppAgentToolCallStateEvent = "den.app_agent.tool_call_state_changed";
+
     public const string ReadySentinelPrefix = "DEN_DESKTOP_BRIDGE_READY ";
 }
 

@@ -11,7 +11,7 @@ import type {
   SaveOperatorSettingsRequest,
 } from '../desktop/tauriApi.ts';
 import type { SidecarBridgeClient } from './sidecarProtocol.ts';
-import { createSidecarBridgeFacade, type SidecarHealthResponse, type SidecarCapabilitiesResponse, type ConsoleCommandDefinition, type ConsoleCommandRunRequest, type ConsoleCommandRunResponse, type ConsoleCommandListResponse, type TerminalAckOutputRequest, type TerminalAttachRequest, type TerminalCreateSessionRequest, type TerminalDetachRequest, type TerminalListSessionsRequest, type TerminalReadActivityRequest, type TerminalReconnectRequest, type TerminalResizeRequest, type TerminalResponse, type TerminalSendInputRequest, type TerminalTerminateRequest } from './sidecarProtocol.ts';
+import { createSidecarBridgeFacade, type SidecarHealthResponse, type SidecarCapabilitiesResponse, type ConsoleCommandDefinition, type ConsoleCommandRunRequest, type ConsoleCommandRunResponse, type ConsoleCommandListResponse, type TerminalAckOutputRequest, type TerminalAttachRequest, type TerminalCreateSessionRequest, type TerminalDetachRequest, type TerminalListSessionsRequest, type TerminalReadActivityRequest, type TerminalReconnectRequest, type TerminalResizeRequest, type TerminalResponse, type TerminalSendInputRequest, type TerminalTerminateRequest, type AppAgentBuildContextRequest, type AppAgentCancelRequest, type AppAgentInvokeToolRequest, type AppAgentListToolsRequest, type AppAgentResponse } from './sidecarProtocol.ts';
 
 export interface ShellAppearanceSettings {
   theme: string;
@@ -37,6 +37,10 @@ export interface DenDesktopSidecarApi {
   getLatestDiffSnapshot(request: LatestDiffSnapshotRequest): Promise<DesktopDiffSnapshotLatestResult>;
   consoleListCommands(): Promise<ConsoleCommandListResponse>;
   consoleRunCommand(request: ConsoleCommandRunRequest): Promise<ConsoleCommandRunResponse>;
+  appAgentBuildContext(request?: AppAgentBuildContextRequest): Promise<AppAgentResponse>;
+  appAgentListTools(request?: AppAgentListToolsRequest): Promise<AppAgentResponse>;
+  appAgentInvokeTool(request: AppAgentInvokeToolRequest): Promise<AppAgentResponse>;
+  appAgentCancelRequest(request: AppAgentCancelRequest): Promise<AppAgentResponse>;
   terminalCreateSession(request: TerminalCreateSessionRequest): Promise<TerminalResponse>;
   terminalListSessions(request?: TerminalListSessionsRequest): Promise<TerminalResponse>;
   terminalReadActivity(request: TerminalReadActivityRequest): Promise<TerminalResponse>;
@@ -47,6 +51,8 @@ export interface DenDesktopSidecarApi {
   terminalTerminate(request: TerminalTerminateRequest): Promise<TerminalResponse>;
   terminalReconnect(request: TerminalReconnectRequest): Promise<TerminalResponse>;
   terminalAckOutput(request: TerminalAckOutputRequest): Promise<TerminalResponse>;
+  onAppAgentRunState(listener: (event: AppAgentResponse) => void): () => void;
+  onAppAgentToolCallState(listener: (event: AppAgentResponse) => void): () => void;
   onOperatorStatus(listener: (status: OperatorStatus) => void): () => void;
   onGitSnapshots(listener: (snapshots: LocalGitSnapshot[]) => void): () => void;
   onSessionSnapshots(listener: (snapshots: LocalSessionSnapshot[]) => void): () => void;
@@ -79,6 +85,10 @@ export function createDenDesktopSidecarApi(
     consoleListCommands: () => facade.consoleListCommands<ConsoleCommandListResponse>(),
     consoleRunCommand: (request: ConsoleCommandRunRequest) =>
       facade.consoleRunCommand<ConsoleCommandRunRequest, ConsoleCommandRunResponse>(request),
+    appAgentBuildContext: (request?: AppAgentBuildContextRequest) => facade.appAgentBuildContext(request ?? {}),
+    appAgentListTools: (request?: AppAgentListToolsRequest) => facade.appAgentListTools(request ?? {}),
+    appAgentInvokeTool: (request: AppAgentInvokeToolRequest) => facade.appAgentInvokeTool(request),
+    appAgentCancelRequest: (request: AppAgentCancelRequest) => facade.appAgentCancelRequest(request),
     terminalCreateSession: (request: TerminalCreateSessionRequest) => facade.terminalCreateSession(request),
     terminalListSessions: (request?: TerminalListSessionsRequest) => facade.terminalListSessions(request ?? {}),
     terminalReadActivity: (request: TerminalReadActivityRequest) => facade.terminalReadActivity(request),
@@ -89,6 +99,20 @@ export function createDenDesktopSidecarApi(
     terminalTerminate: (request: TerminalTerminateRequest) => facade.terminalTerminate(request),
     terminalReconnect: (request: TerminalReconnectRequest) => facade.terminalReconnect(request),
     terminalAckOutput: (request: TerminalAckOutputRequest) => facade.terminalAckOutput(request),
+    onAppAgentRunState(listener: (event: AppAgentResponse) => void) {
+      return events.subscribe((frame) => {
+        if (frame.event !== 'den.app_agent.run_state_changed') return;
+        facade.assertAppAgentRunStateEvent(frame);
+        listener(frame.payload as unknown as AppAgentResponse);
+      });
+    },
+    onAppAgentToolCallState(listener: (event: AppAgentResponse) => void) {
+      return events.subscribe((frame) => {
+        if (frame.event !== 'den.app_agent.tool_call_state_changed') return;
+        facade.assertAppAgentToolCallStateEvent(frame);
+        listener(frame.payload as unknown as AppAgentResponse);
+      });
+    },
     onOperatorStatus(listener: (status: OperatorStatus) => void) {
       return events.subscribe((frame) => {
         if (frame.event !== 'den://operator-status') return;

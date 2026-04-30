@@ -36,6 +36,10 @@ test('sidecar schema bundle and representative frames are compatible with the ch
   assert.deepEqual(bundle.commands.map((command) => command.command), [
     'bridge.get_capabilities',
     'bridge.get_health',
+    'den_desktop.app_agent.build_context',
+    'den_desktop.app_agent.cancel_request',
+    'den_desktop.app_agent.invoke_tool',
+    'den_desktop.app_agent.list_tools',
     'den_desktop.console.list_commands',
     'den_desktop.console.run_command',
     'den_desktop.operator.get_appearance_settings',
@@ -59,6 +63,8 @@ test('sidecar schema bundle and representative frames are compatible with the ch
     'den_desktop.terminal.terminate',
   ]);
   assert.deepEqual(bundle.events.map((event) => event.event), [
+    'den.app_agent.run_state_changed',
+    'den.app_agent.tool_call_state_changed',
     'den.terminal.output',
     'den.terminal.session_list_updated',
     'den.terminal.session_status_changed',
@@ -145,6 +151,12 @@ test('sidecar checked facade allow-lists health/capabilities/runtime commands an
     'den_desktop.operator.get_status',
   ]);
   assert.deepEqual(Object.keys(facade).sort(), [
+    'appAgentBuildContext',
+    'appAgentCancelRequest',
+    'appAgentInvokeTool',
+    'appAgentListTools',
+    'assertAppAgentRunStateEvent',
+    'assertAppAgentToolCallStateEvent',
     'assertGitSnapshotsEvent',
     'assertOperatorStatusEvent',
     'assertSessionSnapshotsEvent',
@@ -175,6 +187,71 @@ test('sidecar checked facade allow-lists health/capabilities/runtime commands an
     'terminalSendInput',
     'terminalTerminate',
   ].sort());
+});
+
+test('app-agent helper DTOs use typed commands and events without generic dispatch', async () => {
+  const fixture = await readFixture();
+  const sent = [];
+  const client = createCheckedBridgeClient({
+    bundle: fixture.schema_bundle,
+    commands: sidecarCommands,
+    events: sidecarEvents,
+    requestIdFactory: () => `req_app_agent_${sent.length + 1}`,
+    now: () => '2026-04-29T12:34:56.000Z',
+    transport: {
+      async send(frame) {
+        sent.push(frame);
+        const result = frame.command === 'den_desktop.app_agent.list_tools'
+          ? { tools: [{ name: 'get_context', display_name: 'Get Context', category: 'read', description: 'Build context.', enabled: true, requires_explicit_target: false, destructive: false, requires_confirmation: false, cancellable: true, audit_event_type: 'app_agent.context_requested', capabilities: ['context.read'] }] }
+          : frame.command === 'den_desktop.app_agent.build_context'
+            ? { context: { context_version: 1, selection: {}, git_snapshot: {}, session_summaries: [], command_summaries: [], terminal_excerpts: [], collaboration_state: {}, authority: {}, audit: { agent_run_id: 'run_1', trace_id: 'tr_1' }, warnings: [], built_at: '2026-04-29T12:34:56.000Z' } }
+            : frame.command === 'den_desktop.app_agent.cancel_request'
+              ? { request_id: frame.payload.request_id, accepted: true, status: 'cancel_requested' }
+              : { tool_name: 'summarize_output', tool_call_id: 'tool_1', status: 'completed', result: { summary: 'hello' }, audit: { agent_run_id: 'run_1', trace_id: 'tr_1' } };
+        return {
+          protocol_version: fixture.schema_bundle.protocol_version,
+          schema_version: fixture.schema_bundle.schema_version,
+          frame_type: 'response',
+          request_id: frame.request_id,
+          result,
+          correlation: {},
+          sent_at: '2026-04-29T12:34:56.000Z',
+        };
+      },
+    },
+  });
+  const facade = createSidecarBridgeFacade(client);
+
+  await facade.appAgentListTools({ selection: { project_id: 'den-mcp', task_id: 1023 } });
+  await facade.appAgentBuildContext({ selection: { project_id: 'den-mcp' } });
+  await facade.appAgentInvokeTool({ tool_name: 'summarize_output', input: { text: 'hello' } });
+  await facade.appAgentCancelRequest({ request_id: 'req_app_agent_3', reason: 'user_requested' });
+  facade.assertAppAgentRunStateEvent({
+    protocol_version: fixture.schema_bundle.protocol_version,
+    schema_version: fixture.schema_bundle.schema_version,
+    frame_type: 'event',
+    event_id: 'evt_app_agent_run_1',
+    sequence: 10,
+    event: 'den.app_agent.run_state_changed',
+    payload: { agent_run_id: 'run_1', status: 'complete', observed_at: '2026-04-29T12:34:56.000Z' },
+  });
+  facade.assertAppAgentToolCallStateEvent({
+    protocol_version: fixture.schema_bundle.protocol_version,
+    schema_version: fixture.schema_bundle.schema_version,
+    frame_type: 'event',
+    event_id: 'evt_app_agent_tool_1',
+    sequence: 11,
+    event: 'den.app_agent.tool_call_state_changed',
+    payload: { tool_call_id: 'tool_1', agent_run_id: 'run_1', tool_name: 'summarize_output', status: 'completed', cancellable: false },
+  });
+
+  assert.deepEqual(sent.map((frame) => frame.command), [
+    'den_desktop.app_agent.list_tools',
+    'den_desktop.app_agent.build_context',
+    'den_desktop.app_agent.invoke_tool',
+    'den_desktop.app_agent.cancel_request',
+  ]);
+  assert.equal(facade.dispatch, undefined);
 });
 
 test('preload sidecar API exposes no generic dispatch, token, endpoint, or node escape hatch', async () => {
@@ -211,6 +288,10 @@ test('preload sidecar API exposes no generic dispatch, token, endpoint, or node 
   api.onOperatorStatus((event) => events.push(event));
 
   assert.deepEqual(Object.keys(api).sort(), [
+    'appAgentBuildContext',
+    'appAgentCancelRequest',
+    'appAgentInvokeTool',
+    'appAgentListTools',
     'consoleListCommands',
     'consoleRunCommand',
     'getAppearanceSettings',
@@ -221,6 +302,8 @@ test('preload sidecar API exposes no generic dispatch, token, endpoint, or node 
     'getSettings',
     'listLocalSessionSnapshots',
     'listLocalSnapshots',
+    'onAppAgentRunState',
+    'onAppAgentToolCallState',
     'onGitSnapshots',
     'onOperatorStatus',
     'onSessionSnapshots',

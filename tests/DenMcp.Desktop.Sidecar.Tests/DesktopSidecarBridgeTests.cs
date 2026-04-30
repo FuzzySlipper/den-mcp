@@ -21,6 +21,10 @@ public class DesktopSidecarBridgeTests
         {
             DesktopSidecarProtocol.CapabilitiesCommand,
             DesktopSidecarProtocol.HealthCommand,
+            DesktopSidecarProtocol.AppAgentBuildContextCommand,
+            DesktopSidecarProtocol.AppAgentCancelRequestCommand,
+            DesktopSidecarProtocol.AppAgentInvokeToolCommand,
+            DesktopSidecarProtocol.AppAgentListToolsCommand,
             DesktopSidecarProtocol.GetAppearanceSettingsCommand,
             DesktopSidecarProtocol.GetLatestDiffSnapshotCommand,
             DesktopSidecarProtocol.GetSettingsCommand,
@@ -50,12 +54,16 @@ public class DesktopSidecarBridgeTests
             DesktopSidecarProtocol.TerminalOutputEvent,
             DesktopSidecarProtocol.TerminalSessionListEvent,
             DesktopSidecarProtocol.TerminalSessionStatusEvent,
+            DesktopSidecarProtocol.AppAgentRunStateEvent,
+            DesktopSidecarProtocol.AppAgentToolCallStateEvent,
             DesktopSidecarProtocol.GitSnapshotEvent,
             DesktopSidecarProtocol.OperatorStatusEvent,
             DesktopSidecarProtocol.SessionSnapshotEvent,
         }.OrderBy(e => e, StringComparer.Ordinal).ToArray();
         Assert.Contains(DesktopSidecarProtocol.ConsoleListCommandsCommand + ".request", bundle.Definitions.Keys);
         Assert.Contains(DesktopSidecarProtocol.ConsoleRunCommandCommand + ".response", bundle.Definitions.Keys);
+        Assert.Contains(DesktopSidecarProtocol.AppAgentBuildContextCommand + ".response", bundle.Definitions.Keys);
+        Assert.Contains(DesktopSidecarProtocol.AppAgentInvokeToolCommand + ".request", bundle.Definitions.Keys);
         Assert.Equal(sortedEvents, bundle.Events.Select(@event => @event.Event).ToArray());
         Assert.Contains(DesktopSidecarProtocol.GetOperatorStatusCommand + ".response", bundle.Definitions.Keys);
         Assert.Contains(DesktopSidecarProtocol.OperatorStatusEvent + ".payload", bundle.Definitions.Keys);
