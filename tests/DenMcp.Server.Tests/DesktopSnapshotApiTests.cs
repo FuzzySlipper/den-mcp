@@ -157,8 +157,9 @@ public class DesktopSnapshotApiTests : IAsyncLifetime
     [Fact]
     public async Task DesktopSessionSnapshots_RoundTripsNewFirstClassFields()
     {
-        var startedAt = DateTime.UtcNow.AddMinutes(-30);
-        var lastActivityAt = DateTime.UtcNow.AddSeconds(-10);
+        var startedAt = new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc);
+        var lastActivityAt = startedAt.AddMinutes(29).AddSeconds(50);
+        var exitedAt = startedAt.AddMinutes(30);
 
         var sessionResponse = await _client.PutAsJsonAsync($"/api/projects/{ProjectId}/desktop/session-snapshots", new
         {
@@ -170,9 +171,11 @@ public class DesktopSnapshotApiTests : IAsyncLifetime
             cwd = "/home/user/dev/project",
             kind = "terminal",
             backend = "direct_pty",
-            status = "running",
+            status = "exited",
             started_at = startedAt,
             last_activity_at = lastActivityAt,
+            exited_at = exitedAt,
+            exit_code = 0,
             source_display_name = "Desktop A",
             capabilities = new { can_attach = false, can_terminate = true, can_stream_terminal = true },
             source_instance_id = "desktop-a",
@@ -186,7 +189,11 @@ public class DesktopSnapshotApiTests : IAsyncLifetime
         Assert.Equal("/home/user/dev/project", sessionJson.RootElement.GetProperty("cwd").GetString());
         Assert.Equal("terminal", sessionJson.RootElement.GetProperty("kind").GetString());
         Assert.Equal("direct_pty", sessionJson.RootElement.GetProperty("backend").GetString());
-        Assert.Equal("running", sessionJson.RootElement.GetProperty("status").GetString());
+        Assert.Equal("exited", sessionJson.RootElement.GetProperty("status").GetString());
+        AssertJsonDateTime(startedAt, sessionJson.RootElement.GetProperty("started_at"));
+        AssertJsonDateTime(lastActivityAt, sessionJson.RootElement.GetProperty("last_activity_at"));
+        AssertJsonDateTime(exitedAt, sessionJson.RootElement.GetProperty("exited_at"));
+        Assert.Equal(0, sessionJson.RootElement.GetProperty("exit_code").GetInt32());
         Assert.Equal("Desktop A", sessionJson.RootElement.GetProperty("source_display_name").GetString());
 
         var caps = sessionJson.RootElement.GetProperty("capabilities");
@@ -205,7 +212,16 @@ public class DesktopSnapshotApiTests : IAsyncLifetime
         var found = sessions.First(s => s.GetProperty("session_id").GetString() == "pty-2");
         Assert.Equal("My Terminal", found.GetProperty("title").GetString());
         Assert.Equal("direct_pty", found.GetProperty("backend").GetString());
-        Assert.Equal("running", found.GetProperty("status").GetString());
+        Assert.Equal("exited", found.GetProperty("status").GetString());
+        AssertJsonDateTime(startedAt, found.GetProperty("started_at"));
+        AssertJsonDateTime(lastActivityAt, found.GetProperty("last_activity_at"));
+        AssertJsonDateTime(exitedAt, found.GetProperty("exited_at"));
+        Assert.Equal(0, found.GetProperty("exit_code").GetInt32());
+    }
+
+    private static void AssertJsonDateTime(DateTime expected, JsonElement actual)
+    {
+        Assert.Equal(expected.ToUniversalTime(), actual.GetDateTime().ToUniversalTime());
     }
 
     private sealed class SnapshotAppFactory : WebApplicationFactory<Program>
