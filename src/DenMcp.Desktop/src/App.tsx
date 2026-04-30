@@ -1,5 +1,6 @@
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CollaborationPane } from './components/CollaborationPane';
+import { TasksDashboardPane } from './components/TasksDashboardPane';
 import { useCollaborationState } from './desktop/useCollaborationState';
 import { AppShell } from './components/AppShell';
 import { ConnectionPanel } from './components/ConnectionPanel';
@@ -234,7 +235,7 @@ export function App() {
 
   const tabContent: Record<ShellTabId, ReactNode> = {
     operator: operatorTab,
-    tasks: <StubSurface eyebrow="Tasks" title="Delegated workflow dashboard" description="Routed surface reserved for normalized Den task packets, coder/reviewer lanes, and worktree execution state once bridge snapshots expose them." />,
+    tasks: <TasksDashboardPane projectId={activeSnapshot?.scope.projectId ?? null} parentTaskId={activeSnapshot?.scope.taskId ?? null} />,
     git: gitTab,
     compare: <StubSurface eyebrow="Compare" title="Multi-worktree compare" description="Routed surface reserved for pinned worktree panes and side-by-side terminal/output comparison without making renderer state authoritative." />,
     terminals: terminalsTab,

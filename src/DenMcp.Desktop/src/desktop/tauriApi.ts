@@ -1,3 +1,5 @@
+import type { TasksDashboardSnapshot, TasksDashboardSnapshotRequest } from '../electron/sidecarProtocol.ts';
+
 const DEFAULT_INVOKE_TIMEOUT_MS = 12_000;
 const LISTEN_TIMEOUT_MS = 5_000;
 
@@ -55,6 +57,7 @@ interface DenDesktopSidecarRuntimeApi {
   terminalTerminate(request: TerminalTerminateRequest): Promise<TerminalTerminateResponse>;
   terminalReconnect(request: TerminalReconnectRequest): Promise<TerminalAttachResponse>;
   terminalAckOutput(request: TerminalAckOutputRequest): Promise<TerminalAckOutputResponse>;
+  tasksGetDashboardSnapshot(request: TasksDashboardSnapshotRequest): Promise<TasksDashboardSnapshot>;
   onTerminalOutput(listener: (event: TerminalOutputEvent) => void): () => void;
   onTerminalStatus(listener: (event: TerminalStatusEvent) => void): () => void;
   onTerminalLifecycle(listener: (event: TerminalLifecycleEvent) => void): () => void;
@@ -500,4 +503,19 @@ export function onTerminalBackpressure(callback: (event: TerminalBackpressureEve
 }
 export function onTerminalSessionList(callback: (event: TerminalListSessionsResponse) => void): Promise<() => void> {
   return listenSidecar('terminal session list', () => sidecarApi().onTerminalSessionList(callback));
+}
+
+// ── Tasks dashboard snapshot (#1028/#1029) ──
+
+export interface TasksDashboardGetSnapshotRequest {
+  project_id: string;
+  parent_task_id?: number | null;
+  focused_task_id?: number | null;
+  include_done?: boolean;
+}
+
+export type TasksDashboardGetSnapshotResponse = TasksDashboardSnapshot;
+
+export async function tasksGetDashboardSnapshot(request: TasksDashboardGetSnapshotRequest): Promise<TasksDashboardGetSnapshotResponse> {
+  return callSidecar('tasksGetDashboardSnapshot', () => sidecarApi().tasksGetDashboardSnapshot(request as TasksDashboardSnapshotRequest));
 }
