@@ -646,6 +646,10 @@ function collectSchemaMatch(
 }
 
 function assertValueMatchesFormat(value: unknown, format: string, path: string): void {
+  // Format validators must own their type checks even when the schema omits
+  // `type: "string"`. Unknown formats remain annotations, but any future
+  // active string format (for example `uri` or `email`) should reject
+  // non-string values before applying its syntax check, matching date-time.
   switch (format) {
     case 'date-time':
       if (typeof value !== 'string' || !isJsonSchemaDateTime(value)) {
