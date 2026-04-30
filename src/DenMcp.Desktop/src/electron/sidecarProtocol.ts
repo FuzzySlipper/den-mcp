@@ -51,7 +51,50 @@ export interface SidecarCapabilitiesResponse {
   feature_flags: string[];
 }
 
+export interface ConsoleCommandDefinition {
+  name: string;
+  displayName: string;
+  description: string;
+  needsTarget: boolean;
+}
+
+export interface ConsoleCommandLine {
+  level: string;
+  timestamp: string;
+  source: string;
+  message: string;
+}
+
+export interface ConsoleCommandRunRequest {
+  command: string;
+  projectId?: string | null;
+  taskId?: number | null;
+  workspaceId?: string | null;
+  sessionId?: string | null;
+}
+
+export interface ConsoleCommandRunResponse {
+  command: string;
+  status: string;
+  errorMessage?: string | null;
+  lines: ConsoleCommandLine[];
+}
+
+export interface ConsoleCommandListResponse {
+  commands: ConsoleCommandDefinition[];
+}
+
 export const sidecarCommands: Record<string, BridgeCommandSpec<JsonValue, JsonValue>> = {
+  consoleListCommands: {
+    command: 'den_desktop.console.list_commands',
+    requestSchema: 'den_desktop.console.list_commands.request',
+    responseSchema: 'den_desktop.console.list_commands.response',
+  },
+  consoleRunCommand: {
+    command: 'den_desktop.console.run_command',
+    requestSchema: 'den_desktop.console.run_command.request',
+    responseSchema: 'den_desktop.console.run_command.response',
+  },
   getHealth: {
     command: 'bridge.get_health',
     requestSchema: 'bridge.get_health.request',
@@ -143,6 +186,9 @@ export function createSidecarBridgeFacade(client: SidecarBridgeClient) {
     listLocalSessionSnapshots: async <T>(): Promise<T> => facade.listLocalSessionSnapshots({}) as Promise<T>,
     getLatestDiffSnapshot: async <TRequest, TResponse>(request: TRequest): Promise<TResponse> =>
       facade.getLatestDiffSnapshot(request as JsonValue) as Promise<TResponse>,
+    consoleListCommands: async <T>(): Promise<T> => facade.consoleListCommands({}) as Promise<T>,
+    consoleRunCommand: async <TRequest, TResponse>(request: TRequest): Promise<TResponse> =>
+      facade.consoleRunCommand(request as JsonValue) as Promise<TResponse>,
     assertOperatorStatusEvent(frame: BridgeEventFrame): void {
       client.assertEvent('operatorStatus', frame);
     },

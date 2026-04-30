@@ -1,6 +1,13 @@
+import { ConsoleCommandHistoryEntry } from '../consoleLines';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { IpcHealth, initialIpcHealth, ipcHealthState } from './ipcHealth';
 import {
+  ConsoleCommandDefinition,
+  ConsoleCommandLine,
+  ConsoleCommandRunRequest,
+  ConsoleCommandRunResponse,
+  consoleListCommands,
+  consoleRunCommand as tauriConsoleRunCommand,
   getAppearanceSettings,
   getOperatorStatus,
   getSettings,
@@ -35,6 +42,9 @@ export interface RuntimeState {
   refresh: () => Promise<void>;
   saveSettings: (request: SaveOperatorSettingsRequest) => Promise<void>;
   saveAppearanceSettings: (request: Partial<ShellAppearanceSettings>) => Promise<ShellAppearanceSettings>;
+  consoleCommands: ConsoleCommandDefinition[];
+  consoleCommandHistory: ConsoleCommandHistoryEntry[];
+  runConsoleCommand: (command: string, options?: { projectId?: string | null; taskId?: number | null; workspaceId?: string | null; sessionId?: string | null }) => Promise<ConsoleCommandRunResponse>;
 }
 
 function errorMessage(err: unknown): string {
@@ -50,6 +60,8 @@ export function useOperatorRuntime(): RuntimeState {
   const [ipcHealth, setIpcHealth] = useState<IpcHealth>(() => initialIpcHealth());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [consoleCommands, setConsoleCommands] = useState<ConsoleCommandDefinition[]>([]);
+  const [consoleCommandHistory, setConsoleCommandHistory] = useState<ConsoleCommandHistoryEntry[]>([]);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -268,6 +280,51 @@ export function useOperatorRuntime(): RuntimeState {
     }
   }, [callIpc, load]);
 
+  // Load console command definitions after initial load completes
+  useEffect(() => {
+    if (loading) return;
+    void callIpc('console listCommands', () => consoleListCommands()).then((response) => {
+      if (mountedRef.current) {
+        setConsoleCommands(response.commands);
+      }
+    }).catch(() => {
+      // Console command registry is optional; don't set error state for this
+    });
+  }, [loading, callIpc]);
+
+  const runConsoleCommand = useCallback(
+    async (
+      command: string,
+      options?: { projectId?: string | null; taskId?: number | null; workspaceId?: string | null; sessionId?: string | null },
+    ): Promise<ConsoleCommandRunResponse> => {
+      const request: ConsoleCommandRunRequest = {
+        command,
+        projectId: options?.projectId ?? null,
+        taskId: options?.taskId ?? null,
+        workspaceId: options?.workspaceId ?? null,
+        sessionId: options?.sessionId ?? null,
+      };
+
+      const response = await callIpc('consoleRunCommand', () => tauriConsoleRunCommand(request));
+      const executedAt = new Date().toISOString();
+
+      setConsoleCommandHistory((prev) => {
+        const entry: ConsoleCommandHistoryEntry = {
+          command,
+          executedAt,
+          lines: response.lines,
+          status: response.status === 'success' ? 'success' : 'error',
+          errorMessage: response.errorMessage,
+        };
+        const next = [entry, ...prev];
+        return next.slice(0, 50);
+      });
+
+      return response;
+    },
+    [callIpc],
+  );
+
   const saveAppearanceCallback = useCallback(
     async (request: Partial<ShellAppearanceSettings>): Promise<ShellAppearanceSettings> => {
       if (mountedRef.current) {
@@ -310,7 +367,22 @@ export function useOperatorRuntime(): RuntimeState {
   );
 
   return useMemo(
-    () => ({ status, settings, appearanceSettings, snapshots, sessionSnapshots, ipcHealth, loading, error, refresh, saveSettings, saveAppearanceSettings: saveAppearanceCallback }),
-    [status, settings, appearanceSettings, snapshots, sessionSnapshots, ipcHealth, loading, error, refresh, saveSettings, saveAppearanceCallback],
+    () => ({
+      status,
+      settings,
+      appearanceSettings,
+      snapshots,
+      sessionSnapshots,
+      ipcHealth,
+      loading,
+      error,
+      refresh,
+      saveSettings,
+      saveAppearanceSettings: saveAppearanceCallback,
+      consoleCommands,
+      consoleCommandHistory,
+      runConsoleCommand,
+    }),
+    [status, settings, appearanceSettings, snapshots, sessionSnapshots, ipcHealth, loading, error, refresh, saveSettings, saveAppearanceCallback, consoleCommands, consoleCommandHistory, runConsoleCommand],
   );
 }

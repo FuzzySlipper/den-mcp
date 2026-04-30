@@ -1,11 +1,14 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { ShellConsoleMode, shellConsoleModes } from '../shellState';
-import { ConsoleLine } from '../consoleLines';
+import { ConsoleCommandHistoryEntry, ConsoleLine } from '../consoleLines';
 
 interface ConsoleDockProps {
   mode: ShellConsoleMode;
   onModeChange: (mode: ShellConsoleMode) => void;
   lines: ConsoleLine[];
+  onRunCommand?: (command: string) => Promise<void>;
+  consoleCommands?: { name: string; displayName: string; description: string; needsTarget: boolean }[];
+  consoleCommandHistory?: ConsoleCommandHistoryEntry[];
 }
 
 type InputMode = 'filter' | 'palette' | 'agent';
@@ -25,34 +28,138 @@ function modeGlyph(mode: ShellConsoleMode): string {
   }
 }
 
-const filterModes: InputMode[] = ['filter', 'palette', 'agent'];
-
-export function ConsoleDock({ mode, onModeChange, lines }: ConsoleDockProps) {
+export function ConsoleDock({
+  mode,
+  onModeChange,
+  lines,
+  onRunCommand,
+  consoleCommands,
+  consoleCommandHistory,
+}: ConsoleDockProps) {
   const [inputValue, setInputValue] = useState('');
+  const [runningCommand, setRunningCommand] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
   const inputMode = detectInputMode(inputValue);
 
-  const filteredLines = useMemo(() => {
-    if (inputMode === 'palette' || inputMode === 'agent') {
-      // In palette/agent mode, show full lines and rely on the mode indicator
-      return lines;
-    }
-    if (!inputValue.trim()) return lines;
-    const query = inputValue.toLowerCase();
-    return lines.filter(
-      (line) =>
-        line.message.toLowerCase().includes(query) ||
-        line.level.toLowerCase().includes(query) ||
-        line.ts.toLowerCase().includes(query),
-    );
-  }, [lines, inputValue, inputMode]);
+  // Merge diagnostic lines with command history entries for the output display
+  const displayLines = useMemo(() => {
+    const result: { kind: 'diag' | 'cmd-start' | 'cmd-line' | 'cmd-end'; data: unknown; key: string }[] = [];
 
-  // Mode indicator label for palette/agent stubs
+    // When showing command history, prepend history entries
+    if (showHistory && consoleCommandHistory && consoleCommandHistory.length > 0) {
+      for (const entry of consoleCommandHistory) {
+        result.push({
+          kind: 'cmd-start',
+          data: entry,
+          key: `cmd:${entry.executedAt}:start`,
+        });
+        for (let i = 0; i < entry.lines.length; i++) {
+          result.push({
+            kind: 'cmd-line',
+            data: entry.lines[i],
+            key: `cmd:${entry.executedAt}:${i}`,
+          });
+        }
+        result.push({
+          kind: 'cmd-end',
+          data: entry,
+          key: `cmd:${entry.executedAt}:end`,
+        });
+      }
+    } else {
+      // Show diagnostic lines filtered by input mode
+      let effectiveLines = lines;
+      if (inputMode === 'filter' && inputValue.trim()) {
+        const query = inputValue.toLowerCase();
+        effectiveLines = lines.filter(
+          (line) =>
+            line.message.toLowerCase().includes(query) ||
+            line.level.toLowerCase().includes(query) ||
+            line.ts.toLowerCase().includes(query),
+        );
+      }
+
+      for (let i = 0; i < effectiveLines.length; i++) {
+        result.push({
+          kind: 'diag',
+          data: effectiveLines[i],
+          key: `${effectiveLines[i].ts}:${i}`,
+        });
+      }
+
+      // If there are recent command history entries, show them after diagnostics
+      if (consoleCommandHistory && consoleCommandHistory.length > 0) {
+        result.push({
+          kind: 'cmd-end',
+          data: null,
+          key: 'cmd-separator',
+        });
+        const recent = consoleCommandHistory.slice(0, 3);
+        for (const entry of recent) {
+          result.push({
+            kind: 'cmd-start',
+            data: entry,
+            key: `cmd:${entry.executedAt}:start`,
+          });
+          for (let i = 0; i < Math.min(entry.lines.length, 5); i++) {
+            result.push({
+              kind: 'cmd-line',
+              data: entry.lines[i],
+              key: `cmd:${entry.executedAt}:${i}`,
+            });
+          }
+          result.push({
+            kind: 'cmd-end',
+            data: entry,
+            key: `cmd:${entry.executedAt}:end`,
+          });
+        }
+      }
+    }
+
+    return result;
+  }, [lines, inputValue, inputMode, showHistory, consoleCommandHistory]);
+
   const modeIndicator = inputMode !== 'filter'
-    ? (inputMode === 'palette' ? '[command palette]' : '[agent prompt]')
+    ? (inputMode === 'palette' ? '[command]' : '[agent prompt]')
     : null;
 
   const handleInputChange = (value: string) => {
     setInputValue(value);
+    if (showHistory && !value.startsWith('/')) {
+      setShowHistory(false);
+    }
+  };
+
+  const handleKeyDown = async (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter' && inputValue.trim() && onRunCommand) {
+      const trimmed = inputValue.trim();
+
+      // If in palette mode (/), strip the leading /
+      const command = trimmed.startsWith('/') ? trimmed.slice(1) : trimmed;
+
+      if (command) {
+        setRunningCommand(true);
+        setShowHistory(false);
+        try {
+          await onRunCommand(command);
+        } finally {
+          setRunningCommand(false);
+          setInputValue('');
+          // After running a command, show the history briefly
+          setShowHistory(true);
+        }
+      }
+    } else if (event.key === 'Escape') {
+      setInputValue('');
+      setShowHistory(false);
+    } else if (event.key === 'ArrowUp' && consoleCommandHistory && consoleCommandHistory.length > 0) {
+      event.preventDefault();
+      // Fill input with last command
+      setInputValue('/' + consoleCommandHistory[0].command);
+      setShowHistory(true);
+    }
   };
 
   return (
@@ -64,20 +171,34 @@ export function ConsoleDock({ mode, onModeChange, lines }: ConsoleDockProps) {
           {modeIndicator ? (
             <span className="console-mode-stub">{modeIndicator}</span>
           ) : null}
+          {runningCommand ? <span className="console-running" aria-label="Running command">⟳</span> : null}
           <input
-            aria-label={inputMode === 'palette' ? 'Command palette (stub)' : inputMode === 'agent' ? 'Agent prompt (stub)' : 'Filter console logs'}
+            ref={inputRef}
+            aria-label={inputMode === 'palette' ? 'Console command' : inputMode === 'agent' ? 'Agent prompt (stub)' : 'Filter console logs'}
             placeholder={
               inputMode === 'palette'
-                ? 'palette stub — type a command…'
+                ? 'type a command (help, refresh, git-status…)'
                 : inputMode === 'agent'
                   ? 'agent prompt stub — type a message…'
-                  : 'run a command, ask an agent, or filter logs…'
+                  : 'run a command (/help), ask an agent (@), or filter logs…'
             }
             value={inputValue}
             onChange={(event) => handleInputChange(event.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={runningCommand}
           />
         </div>
         <div className="console-controls">
+          {consoleCommandHistory && consoleCommandHistory.length > 0 ? (
+            <button
+              type="button"
+              className={showHistory ? 'active' : ''}
+              title="Toggle command history"
+              onClick={() => setShowHistory((prev) => !prev)}
+            >
+              ⌕
+            </button>
+          ) : null}
           {shellConsoleModes.map((option) => (
             <button
               key={option}
@@ -93,29 +214,79 @@ export function ConsoleDock({ mode, onModeChange, lines }: ConsoleDockProps) {
       </div>
       {mode !== 'collapsed' && (
         <div className="console-output" aria-live="polite">
-          {filteredLines.length === 0 ? (
+          {displayLines.length === 0 ? (
             <div className="console-line">
               <span className="ts">--:--:--</span>
               <span className="lvl info">info</span>
               <span>
-                {inputMode !== 'filter'
-                  ? `no matching lines in ${inputMode} mode`
-                  : inputValue.trim()
-                    ? `no lines match "${inputValue}"`
-                    : 'waiting for runtime diagnostics'}
+                {showHistory
+                  ? 'no command history'
+                  : inputMode !== 'filter'
+                    ? `no matching lines in ${inputMode} mode`
+                    : inputValue.trim()
+                      ? `no lines match "${inputValue}"`
+                      : 'waiting for runtime diagnostics'}
               </span>
             </div>
           ) : (
-            filteredLines.map((line, index) => (
-              <div className="console-line" key={`${line.ts}:${index}`}>
-                <span className="ts">{line.ts}</span>
-                <span className={`lvl ${line.level}`}>{line.level}</span>
-                <span>{line.message}</span>
-              </div>
-            ))
+            displayLines.map((item) => {
+              if (item.kind === 'cmd-start') {
+                const entry = item.data as ConsoleCommandHistoryEntry;
+                return (
+                  <div className="console-line console-cmd-header" key={item.key}>
+                    <span className="ts">{formatTimestampShort(entry.executedAt)}</span>
+                    <span className={`lvl ${entry.status === 'success' ? 'ok' : 'err'}`}>
+                      {entry.status === 'success' ? 'ok' : 'err'}
+                    </span>
+                    <span className="console-cmd-name">▶ {entry.command}</span>
+                    {entry.errorMessage ? (
+                      <span className="console-cmd-error">{entry.errorMessage}</span>
+                    ) : null}
+                  </div>
+                );
+              }
+
+              if (item.kind === 'cmd-line') {
+                const line = item.data as { level: string; timestamp: string; source: string; message: string };
+                return (
+                  <div className="console-line console-cmd-output" key={item.key}>
+                    <span className="ts">{formatTimestampShort(line.timestamp)}</span>
+                    <span className={`lvl ${line.level}`}>{line.level}</span>
+                    <span className="console-cmd-source">{line.source}</span>
+                    <span>{line.message}</span>
+                  </div>
+                );
+              }
+
+              if (item.kind === 'cmd-end') {
+                return (
+                  <div className="console-line console-cmd-separator" key={item.key}>
+                    <span className="ts" />
+                    <span className="lvl" />
+                    <span className="console-cmd-dash">· · ·</span>
+                  </div>
+                );
+              }
+
+              // Diagnostic line
+              const line = item.data as ConsoleLine;
+              return (
+                <div className="console-line" key={item.key}>
+                  <span className="ts">{line.ts}</span>
+                  <span className={`lvl ${line.level}`}>{line.level}</span>
+                  <span>{line.message}</span>
+                </div>
+              );
+            })
           )}
         </div>
       )}
     </section>
   );
+}
+
+function formatTimestampShort(isoString: string): string {
+  const d = new Date(isoString);
+  if (Number.isNaN(d.getTime())) return '--:--:--';
+  return d.toLocaleTimeString();
 }

@@ -11,7 +11,7 @@ import type {
   SaveOperatorSettingsRequest,
 } from '../desktop/tauriApi.ts';
 import type { SidecarBridgeClient } from './sidecarProtocol.ts';
-import { createSidecarBridgeFacade, type SidecarHealthResponse, type SidecarCapabilitiesResponse } from './sidecarProtocol.ts';
+import { createSidecarBridgeFacade, type SidecarHealthResponse, type SidecarCapabilitiesResponse, type ConsoleCommandDefinition, type ConsoleCommandRunRequest, type ConsoleCommandRunResponse, type ConsoleCommandListResponse } from './sidecarProtocol.ts';
 
 export interface ShellAppearanceSettings {
   theme: string;
@@ -35,6 +35,8 @@ export interface DenDesktopSidecarApi {
   listLocalSnapshots(): Promise<LocalSnapshotList>;
   listLocalSessionSnapshots(): Promise<LocalSessionSnapshotList>;
   getLatestDiffSnapshot(request: LatestDiffSnapshotRequest): Promise<DesktopDiffSnapshotLatestResult>;
+  consoleListCommands(): Promise<ConsoleCommandListResponse>;
+  consoleRunCommand(request: ConsoleCommandRunRequest): Promise<ConsoleCommandRunResponse>;
   onOperatorStatus(listener: (status: OperatorStatus) => void): () => void;
   onGitSnapshots(listener: (snapshots: LocalGitSnapshot[]) => void): () => void;
   onSessionSnapshots(listener: (snapshots: LocalSessionSnapshot[]) => void): () => void;
@@ -64,6 +66,9 @@ export function createDenDesktopSidecarApi(
     listLocalSessionSnapshots: () => facade.listLocalSessionSnapshots<LocalSessionSnapshotList>(),
     getLatestDiffSnapshot: (request: LatestDiffSnapshotRequest) =>
       facade.getLatestDiffSnapshot<LatestDiffSnapshotRequest, DesktopDiffSnapshotLatestResult>(request),
+    consoleListCommands: () => facade.consoleListCommands<ConsoleCommandListResponse>(),
+    consoleRunCommand: (request: ConsoleCommandRunRequest) =>
+      facade.consoleRunCommand<ConsoleCommandRunRequest, ConsoleCommandRunResponse>(request),
     onOperatorStatus(listener: (status: OperatorStatus) => void) {
       return events.subscribe((frame) => {
         if (frame.event !== 'den://operator-status') return;

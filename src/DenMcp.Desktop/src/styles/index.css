@@ -389,6 +389,17 @@ kbd { border: var(--bw) solid var(--bd-default); border-bottom-color: var(--bd-s
 .lvl.warn, .lvl.warning { color: var(--st-warn); }
 .lvl.err, .lvl.error { color: var(--st-err); }
 
+/* Console command output styles (task #914) */
+.console-running { color: var(--accent); animation: console-spin 0.8s linear infinite; font-size: var(--fs-sm); }
+@keyframes console-spin { to { transform: rotate(360deg); } }
+.console-cmd-header { grid-template-columns: 72px 52px minmax(0, 1fr); border-top: 1px solid var(--bd-subtle); padding-top: var(--sp-1); margin-top: var(--sp-1); }
+.console-cmd-name { color: var(--accent); font-weight: 600; }
+.console-cmd-error { color: var(--st-err); margin-left: var(--sp-2); }
+.console-cmd-output { padding-left: var(--sp-2); opacity: 0.9; }
+.console-cmd-source { color: var(--fg-muted); font-size: var(--fs-3xs); }
+.console-cmd-separator { grid-template-columns: 72px 52px minmax(0, 1fr); opacity: 0.35; }
+.console-cmd-dash { color: var(--fg-muted); text-align: center; letter-spacing: 2px; }
+
 .statusbar { height: var(--statusbar-h); display: flex; align-items: center; gap: var(--sp-3); padding: 0 var(--sp-3); background: var(--bg-app); color: var(--fg-muted); font-family: var(--font-mono); font-size: var(--fs-3xs); white-space: nowrap; }
 .status-segment { display: inline-flex; align-items: center; gap: var(--sp-1); }
 .status-segment.accent { color: var(--accent); }

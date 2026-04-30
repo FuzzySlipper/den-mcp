@@ -19,7 +19,7 @@ import {
 } from '../shellState';
 import { DiagnosticEntry, LocalGitSnapshot, LocalSessionSnapshot, OperatorStatus } from '../desktop/tauriApi';
 import { IpcHealth } from '../desktop/ipcHealth';
-import { buildConsoleLines } from '../consoleLines';
+import { buildConsoleLines, ConsoleCommandHistoryEntry } from '../consoleLines';
 import { ConsoleDock } from './ConsoleDock';
 
 interface AppShellProps {
@@ -31,9 +31,12 @@ interface AppShellProps {
   diagnostics: DiagnosticEntry[];
   ipcHealth: IpcHealth | null;
   children: Record<ShellTabId, ReactNode>;
+  onRunConsoleCommand?: (command: string) => Promise<void>;
+  consoleCommands?: { name: string; displayName: string; description: string; needsTarget: boolean }[];
+  consoleCommandHistory?: ConsoleCommandHistoryEntry[];
 }
 
-export function AppShell({ state, onStateChange, status, snapshots, sessionSnapshots, diagnostics, ipcHealth, children }: AppShellProps) {
+export function AppShell({ state, onStateChange, status, snapshots, sessionSnapshots, diagnostics, ipcHealth, children, onRunConsoleCommand, consoleCommands, consoleCommandHistory }: AppShellProps) {
   const setState = (patch: Partial<ShellState>) => onStateChange({ ...state, ...patch });
   const activeTab = shellTabs.some((tab) => tab.id === state.activeTab) ? state.activeTab : 'operator';
   const activeTabTitle = shellTabs.find((tab) => tab.id === activeTab)?.label ?? 'operator';
@@ -71,7 +74,14 @@ export function AppShell({ state, onStateChange, status, snapshots, sessionSnaps
           ) : children[activeTab]}
         </section>
       </div>
-      <ConsoleDock mode={state.consoleMode} onModeChange={(consoleMode) => setState({ consoleMode })} lines={consoleLines} />
+      <ConsoleDock
+        mode={state.consoleMode}
+        onModeChange={(consoleMode) => setState({ consoleMode })}
+        lines={consoleLines}
+        onRunCommand={onRunConsoleCommand}
+        consoleCommands={consoleCommands}
+        consoleCommandHistory={consoleCommandHistory}
+      />
       <StatusBar status={status} snapshots={snapshots} sessionSnapshots={sessionSnapshots} state={state} />
     </div>
   );

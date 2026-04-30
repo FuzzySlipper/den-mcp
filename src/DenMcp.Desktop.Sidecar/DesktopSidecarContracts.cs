@@ -44,6 +44,10 @@ public static class DesktopSidecarProtocol
     public const string TerminalHeartbeatEvent = "den.terminal.heartbeat";
     public const string TerminalBackpressureEvent = "den.terminal.backpressure";
 
+    // Console command protocol (task #914)
+    public const string ConsoleListCommandsCommand = "den_desktop.console.list_commands";
+    public const string ConsoleRunCommandCommand = "den_desktop.console.run_command";
+
     public const string ReadySentinelPrefix = "DEN_DESKTOP_BRIDGE_READY ";
 }
 

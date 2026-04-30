@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppShell } from './components/AppShell';
 import { ConnectionPanel } from './components/ConnectionPanel';
 import { DiagnosticsPane } from './components/DiagnosticsPane';
@@ -223,6 +223,14 @@ export function App() {
     settings: runtimeSettingsTab,
   };
 
+  const runConsoleCommand = useCallback(async (command: string) => {
+    try {
+      await runtime.runConsoleCommand(command);
+    } catch (err) {
+      // Error is already recorded in the runtime state / history
+    }
+  }, [runtime]);
+
   return (
     <AppShell
       state={shellState}
@@ -232,6 +240,9 @@ export function App() {
       sessionSnapshots={runtime.sessionSnapshots}
       diagnostics={runtime.status?.diagnostics ?? []}
       ipcHealth={runtime.ipcHealth}
+      onRunConsoleCommand={runConsoleCommand}
+      consoleCommands={runtime.consoleCommands}
+      consoleCommandHistory={runtime.consoleCommandHistory}
     >
       {tabContent}
     </AppShell>

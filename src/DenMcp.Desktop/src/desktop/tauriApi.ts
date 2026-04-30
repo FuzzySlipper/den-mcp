@@ -44,6 +44,8 @@ interface DenDesktopSidecarRuntimeApi {
   listLocalSnapshots(): Promise<LocalSnapshotList>;
   listLocalSessionSnapshots(): Promise<LocalSessionSnapshotList>;
   getLatestDiffSnapshot(request: LatestDiffSnapshotRequest): Promise<DesktopDiffSnapshotLatestResult>;
+  consoleListCommands(): Promise<ConsoleCommandListResponse>;
+  consoleRunCommand(request: ConsoleCommandRunRequest): Promise<ConsoleCommandRunResponse>;
   onOperatorStatus(listener: (status: OperatorStatus) => void): () => void;
   onGitSnapshots(listener: (snapshots: LocalGitSnapshot[]) => void): () => void;
   onSessionSnapshots(listener: (snapshots: LocalSessionSnapshot[]) => void): () => void;
@@ -330,4 +332,47 @@ export function onGitSnapshots(callback: (snapshots: LocalGitSnapshot[]) => void
 
 export function onSessionSnapshots(callback: (snapshots: LocalSessionSnapshot[]) => void): Promise<() => void> {
   return listenSidecar('session snapshots', () => sidecarApi().onSessionSnapshots(callback));
+}
+
+// ── Console command types (task #914) ──
+
+export interface ConsoleCommandDefinition {
+  name: string;
+  displayName: string;
+  description: string;
+  needsTarget: boolean;
+}
+
+export interface ConsoleCommandLine {
+  level: string;
+  timestamp: string;
+  source: string;
+  message: string;
+}
+
+export interface ConsoleCommandRunRequest {
+  command: string;
+  projectId?: string | null;
+  taskId?: number | null;
+  workspaceId?: string | null;
+  sessionId?: string | null;
+}
+
+export interface ConsoleCommandRunResponse {
+  command: string;
+  status: string;
+  errorMessage?: string | null;
+  lines: ConsoleCommandLine[];
+}
+
+export interface ConsoleCommandListResponse {
+  commands: ConsoleCommandDefinition[];
+}
+
+export async function consoleListCommands(): Promise<ConsoleCommandListResponse> {
+  return callSidecar('consoleListCommands', () => sidecarApi().consoleListCommands());
+}
+
+export async function consoleRunCommand(request: ConsoleCommandRunRequest): Promise<ConsoleCommandRunResponse> {
+  return callSidecar('consoleRunCommand', () => sidecarApi().consoleRunCommand(request));
 }

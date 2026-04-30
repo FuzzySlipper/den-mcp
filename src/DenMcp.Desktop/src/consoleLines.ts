@@ -6,6 +6,28 @@ export interface ConsoleLine {
   message: string;
 }
 
+/**
+ * Structured command output line as returned by the sidecar console command runner.
+ * Mirrors ConsoleCommandLine from the .NET sidecar DTOs.
+ */
+export interface ConsoleCommandOutputLine {
+  level: string;
+  timestamp: string;
+  source: string;
+  message: string;
+}
+
+/**
+ * An entry in the console command history: what was run and what the structured output was.
+ */
+export interface ConsoleCommandHistoryEntry {
+  command: string;
+  executedAt: string;
+  lines: ConsoleCommandOutputLine[];
+  status: 'success' | 'error';
+  errorMessage?: string | null;
+}
+
 // Local type shapes — ipcHealth.IpcHealth and tauriApi types are all interface/type-only exports
 // that get erased at runtime. Inlining here avoids runtime import resolution failures from Node ESM.
 

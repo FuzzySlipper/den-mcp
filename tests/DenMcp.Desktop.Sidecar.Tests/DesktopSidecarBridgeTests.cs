@@ -39,6 +39,8 @@ public class DesktopSidecarBridgeTests
             DesktopSidecarProtocol.TerminalResizeCommand,
             DesktopSidecarProtocol.TerminalSendInputCommand,
             DesktopSidecarProtocol.TerminalTerminateCommand,
+            DesktopSidecarProtocol.ConsoleListCommandsCommand,
+            DesktopSidecarProtocol.ConsoleRunCommandCommand,
         }.OrderBy(c => c, StringComparer.Ordinal).ToArray();
         Assert.Equal(sortedCommands, bundle.Commands.Select(command => command.Command).ToArray());
 
@@ -50,6 +52,8 @@ public class DesktopSidecarBridgeTests
             DesktopSidecarProtocol.OperatorStatusEvent,
             DesktopSidecarProtocol.SessionSnapshotEvent,
         }.OrderBy(e => e, StringComparer.Ordinal).ToArray();
+        Assert.Contains(DesktopSidecarProtocol.ConsoleListCommandsCommand + ".request", bundle.Definitions.Keys);
+        Assert.Contains(DesktopSidecarProtocol.ConsoleRunCommandCommand + ".response", bundle.Definitions.Keys);
         Assert.Equal(sortedEvents, bundle.Events.Select(@event => @event.Event).ToArray());
         Assert.Contains(DesktopSidecarProtocol.GetOperatorStatusCommand + ".response", bundle.Definitions.Keys);
         Assert.Contains(DesktopSidecarProtocol.OperatorStatusEvent + ".payload", bundle.Definitions.Keys);

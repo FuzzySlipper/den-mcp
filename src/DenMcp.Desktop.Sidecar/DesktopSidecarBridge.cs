@@ -28,6 +28,7 @@ public static class DesktopSidecarBridge
         services.AddSingleton<OperatorRuntimeBridgeEventSink>();
         services.AddSingleton<IOperatorRuntimeEventSink>(sp => sp.GetRequiredService<OperatorRuntimeBridgeEventSink>());
         services.AddSingleton<OperatorRuntimeService>();
+        services.AddSingleton<IConsoleCommandRunner, ConsoleCommandRunner>();
         services.AddBridgeHost(
             ConfigureRegistry,
             host =>
@@ -89,6 +90,11 @@ public static class DesktopSidecarBridge
                 DesktopSidecarProtocol.TerminalReconnectCommand)
             .RegisterCommand<TerminalAckOutputRequest, TerminalAckOutputResponse, TerminalAckOutputHandler>(
                 DesktopSidecarProtocol.TerminalAckOutputCommand)
+            // Console command protocol (task #914)
+            .RegisterCommand<DesktopSidecarEmptyRequest, ConsoleCommandListResponse, ConsoleListCommandsHandler>(
+                DesktopSidecarProtocol.ConsoleListCommandsCommand)
+            .RegisterCommand<ConsoleCommandRunRequest, ConsoleCommandRunResponse, ConsoleRunCommandHandler>(
+                DesktopSidecarProtocol.ConsoleRunCommandCommand)
             .RegisterEvent<OperatorStatus>(DesktopSidecarProtocol.OperatorStatusEvent)
             .RegisterEvent<IReadOnlyList<LocalGitSnapshot>>(DesktopSidecarProtocol.GitSnapshotEvent)
             .RegisterEvent<IReadOnlyList<LocalSessionSnapshot>>(DesktopSidecarProtocol.SessionSnapshotEvent)
@@ -112,6 +118,8 @@ public static class DesktopSidecarBridge
     {
         return new[]
         {
+            Schema("console_command_definition", ConsoleCommandDefinitionSchema),
+            Schema("console_command_line", ConsoleCommandLineSchema),
             Schema(DesktopSidecarProtocol.HealthCommand + ".request", """
                 {"type":"object","additionalProperties":false}
                 """),
@@ -192,6 +200,11 @@ public static class DesktopSidecarBridge
                 {"type":"object","additionalProperties":false,"required":["session_id"],"properties":{"session_id":{"type":"string"},"stream_id":{"type":["string","null"]},"ack_cursor":{"type":["string","null"]},"received_bytes":{"type":"integer"}}}
                 """),
             Schema(DesktopSidecarProtocol.TerminalAckOutputCommand + ".response", TerminalAckOutputResponseSchema),
+            // Console command protocol schemas (task #914)
+            Schema(DesktopSidecarProtocol.ConsoleListCommandsCommand + ".request", EmptyObjectSchema),
+            Schema(DesktopSidecarProtocol.ConsoleListCommandsCommand + ".response", ConsoleCommandListResponseSchema),
+            Schema(DesktopSidecarProtocol.ConsoleRunCommandCommand + ".request", ConsoleCommandRunRequestSchema),
+            Schema(DesktopSidecarProtocol.ConsoleRunCommandCommand + ".response", ConsoleCommandRunResponseSchema),
             // Terminal protocol event schemas
             Schema(DesktopSidecarProtocol.TerminalSessionStatusEvent + ".payload", TerminalSessionEventPayloadSchema),
             Schema(DesktopSidecarProtocol.TerminalSessionListEvent + ".payload", TerminalListSessionsResponseSchema),
@@ -262,6 +275,26 @@ public static class DesktopSidecarBridge
 
     private const string TerminalSessionEventPayloadSchema = """
         {"type":"object","additionalProperties":false,"required":["terminal_protocol_version","session_id"],"properties":{"terminal_protocol_version":{"type":"string"},"session_id":{"type":"string"},"status":{"type":["string","null"]},"capabilities":{"type":["object","null"],"additionalProperties":false,"properties":{"can_send_input":{"type":"boolean"},"can_resize":{"type":"boolean"},"can_detach":{"type":"boolean"},"can_terminate":{"type":"boolean"},"can_stream_terminal":{"type":"boolean"}}},"warnings":{"type":"array","items":{"type":"string"}},"observed_at":{"type":["string","null"]}}}
+        """;
+
+    private const string ConsoleCommandListResponseSchema = """
+        {"type":"object","additionalProperties":false,"required":["commands"],"properties":{"commands":{"type":"array","items":{"$ref":"console_command_definition"}}}}
+        """;
+
+    private const string ConsoleCommandRunRequestSchema = """
+        {"type":"object","additionalProperties":false,"required":["command"],"properties":{"command":{"type":"string"},"projectId":{"type":["string","null"]},"taskId":{"type":["integer","null"]},"workspaceId":{"type":["string","null"]},"sessionId":{"type":["string","null"]}}}
+        """;
+
+    private const string ConsoleCommandRunResponseSchema = """
+        {"type":"object","additionalProperties":false,"required":["command","status","lines"],"properties":{"command":{"type":"string"},"status":{"type":"string"},"errorMessage":{"type":["string","null"]},"lines":{"type":"array","items":{"$ref":"console_command_line"}}}}
+        """;
+
+    private const string ConsoleCommandLineSchema = """
+        {"type":"object","additionalProperties":false,"required":["level","timestamp","source","message"],"properties":{"level":{"type":"string"},"timestamp":{"type":"string"},"source":{"type":"string"},"message":{"type":"string"}}}
+        """;
+
+    private const string ConsoleCommandDefinitionSchema = """
+        {"type":"object","additionalProperties":false,"required":["name","displayName","description"],"properties":{"name":{"type":"string"},"displayName":{"type":"string"},"description":{"type":"string"},"needsTarget":{"type":"boolean"}}}
         """;
 
     private static BridgeNamedSchema Schema(string name, string schema)
@@ -430,5 +463,33 @@ public sealed class SaveAppearanceSettingsHandler : IBridgeCommandHandler<SaveOp
     {
         cancellationToken.ThrowIfCancellationRequested();
         return ValueTask.FromResult<OperatorAppearanceSettings?>(_settingsService.SaveAppearance(request));
+    }
+}
+
+public sealed class ConsoleListCommandsHandler : IBridgeCommandHandler<DesktopSidecarEmptyRequest, ConsoleCommandListResponse>
+{
+    private readonly IConsoleCommandRunner _runner;
+
+    public ConsoleListCommandsHandler(IConsoleCommandRunner runner) => _runner = runner;
+
+    public ValueTask<ConsoleCommandListResponse?> HandleAsync(DesktopSidecarEmptyRequest request, BridgeRequestContext context, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult<ConsoleCommandListResponse?>(new ConsoleCommandListResponse
+        {
+            Commands = _runner.ListCommands(),
+        });
+    }
+}
+
+public sealed class ConsoleRunCommandHandler : IBridgeCommandHandler<ConsoleCommandRunRequest, ConsoleCommandRunResponse>
+{
+    private readonly IConsoleCommandRunner _runner;
+
+    public ConsoleRunCommandHandler(IConsoleCommandRunner runner) => _runner = runner;
+
+    public async ValueTask<ConsoleCommandRunResponse?> HandleAsync(ConsoleCommandRunRequest request, BridgeRequestContext context, CancellationToken cancellationToken)
+    {
+        return await _runner.RunCommandAsync(request, cancellationToken).ConfigureAwait(false);
     }
 }

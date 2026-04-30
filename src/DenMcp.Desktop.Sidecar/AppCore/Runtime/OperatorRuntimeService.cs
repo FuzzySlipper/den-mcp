@@ -698,6 +698,20 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
         }
     }
 
+    public async Task ClearDiagnosticsAsync(CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            _diagnostics.Clear();
+            _status = SyncStatus(_status);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     private void StartBackgroundLoop()
     {
         if (_loopTask is not null)
