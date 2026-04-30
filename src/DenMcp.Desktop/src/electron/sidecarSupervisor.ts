@@ -65,6 +65,7 @@ export class SidecarSupervisor<TConnection = unknown> {
   private lastError: string | null = null;
   private reconnectAttempt = 0;
   private restartTimer: ReturnType<typeof setTimeout> | null = null;
+  private stdoutLineBuffer = '';
   private stopping = false;
 
   constructor(options: SidecarSupervisorOptions<TConnection>) {
@@ -102,6 +103,7 @@ export class SidecarSupervisor<TConnection = unknown> {
     this.lastError = null;
     this.ready = undefined;
     this.reconnectAttempt = 0;
+    this.resetStdoutLineBuffer();
     const child = this.options.launcher.launch(this.options.launchConfig);
     this.process = child;
     child.stdout?.on('data', (chunk) => this.handleStdout(chunk));
@@ -133,6 +135,7 @@ export class SidecarSupervisor<TConnection = unknown> {
   async stop(signal = 'SIGTERM'): Promise<SidecarSupervisorSnapshot> {
     this.stopping = true;
     this.clearRestartTimer();
+    this.resetStdoutLineBuffer();
     this.state = 'stopping';
     this.emit();
     if (this.connection && this.options.connector?.close) {
@@ -150,15 +153,24 @@ export class SidecarSupervisor<TConnection = unknown> {
   }
 
   private handleStdout(chunk: string | Uint8Array): void {
-    for (const line of decodeChunk(chunk).split(/\r?\n/)) {
-      if (!line.trim()) {
-        continue;
-      }
+    this.stdoutLineBuffer += decodeChunk(chunk);
+    const lines = this.stdoutLineBuffer.split(/\r?\n/);
+    this.stdoutLineBuffer = lines.pop() ?? '';
 
-      const sentinel = parseReadySentinelLine(line.trim());
-      if (sentinel) {
-        void this.markReady(sentinel);
-      }
+    for (const line of lines) {
+      this.handleStdoutLine(line);
+    }
+  }
+
+  private handleStdoutLine(line: string): void {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    const sentinel = parseReadySentinelLine(trimmed);
+    if (sentinel) {
+      void this.markReady(sentinel);
     }
   }
 
@@ -199,6 +211,7 @@ export class SidecarSupervisor<TConnection = unknown> {
     this.lastExit = { code, signal };
     this.process = null;
     this.connection = null;
+    this.resetStdoutLineBuffer();
     if (this.stopping) {
       this.state = 'stopped';
       this.emit();
@@ -227,6 +240,10 @@ export class SidecarSupervisor<TConnection = unknown> {
       clearTimeout(this.restartTimer);
       this.restartTimer = null;
     }
+  }
+
+  private resetStdoutLineBuffer(): void {
+    this.stdoutLineBuffer = '';
   }
 
   private emit(): void {

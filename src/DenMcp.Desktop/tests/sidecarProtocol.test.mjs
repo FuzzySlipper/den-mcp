@@ -364,6 +364,44 @@ test('preload sidecar API exposes no generic dispatch, token, endpoint, or node 
   assert.equal(events[0].phase, 'starting');
 });
 
+test('sidecar supervisor recognizes ready sentinel split across stdout chunks', () => {
+  const fakeProcess = createFakeProcess(4343);
+  const supervisor = new SidecarSupervisor({
+    launchConfig: buildDevSidecarLaunchConfig({
+      projectPath: '../DenMcp.Desktop.Sidecar/DenMcp.Desktop.Sidecar.csproj',
+      configPath: '/tmp/den-desktop/config',
+      authToken: 'secret-token',
+      port: 0,
+    }),
+    launcher: {
+      launch() {
+        return fakeProcess;
+      },
+    },
+    now: () => '2026-04-29T12:34:56.000Z',
+  });
+  const readyLine = `${DEN_DESKTOP_READY_PREFIX}${JSON.stringify({
+    port: 54321,
+    endpoint_path: '/bridge',
+    protocol_version: '1.0',
+    schema_version: 'den-desktop@2026-04-29',
+    schema_bundle_id: 'den-desktop.sidecar@2026-04-29',
+    app_id: 'den-desktop',
+    app_version: '0.1.0-test',
+  })}`;
+
+  supervisor.start();
+  fakeProcess.emitStdout(readyLine.slice(0, 17));
+  fakeProcess.emitStdout(readyLine.slice(17, 49));
+  assert.equal(supervisor.snapshot().state, 'starting');
+  assert.equal(supervisor.snapshot().ready, undefined);
+
+  fakeProcess.emitStdout(`${readyLine.slice(49)}\n`);
+
+  assert.equal(supervisor.snapshot().state, 'ready');
+  assert.equal(supervisor.snapshot().ready.port, 54321);
+});
+
 test('sidecar supervisor starts, observes readiness, reconnects, stops, and can restart after crash', async () => {
   const launched = [];
   const connections = [];
