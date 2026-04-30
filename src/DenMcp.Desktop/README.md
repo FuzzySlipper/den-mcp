@@ -1,6 +1,6 @@
 # DenMcp.Desktop
 
-Local Tauri desktop operator app for Den.
+Local desktop operator app for Den, with an Electron dev shell and legacy Tauri configuration.
 
 This app is intentionally a sibling to `src/DenMcp.Server/ClientApp`: it bundles and runs its own local UI instead of serving or iframing Den web from the Den server.
 
@@ -11,6 +11,31 @@ cd src/DenMcp.Desktop
 npm install
 npm run ui:build
 npm run test:helpers
+```
+
+### Electron dev shell (primary)
+
+The Electron dev shell launches the .NET sidecar, connects via typed WebSocket bridge, and loads the React UI in a BrowserWindow with a secure preload boundary.
+
+```bash
+# Build UI and Electron main/preload bundles, then launch Electron
+npm run electron:dev
+```
+
+This will:
+1. Build the React UI to `dist/` via Vite.
+2. Bundle the Electron main process (`src/electron/main.ts`) and preload (`src/electron/preload.ts`) to `electron-dist/` via esbuild.
+3. Launch Electron which starts the .NET sidecar, waits for the ready sentinel, connects the typed bridge, and loads the UI.
+
+**Manual step:** the sidecar `.NET` project must be buildable (`dotnet build src/DenMcp.Desktop.Sidecar`). If `dotnet` is not on PATH, the sidecar will fail to launch.
+
+The renderer communicates with the sidecar exclusively through `window.denDesktopSidecar`, exposed by the preload via `contextBridge`. No raw token, endpoint URL, Node APIs, or shell access are available to the renderer.
+
+### Legacy Tauri configuration
+
+The `src-tauri/` directory retains the original Tauri configuration. Tauri dev commands are still present but the Electron shell is the primary development path:
+
+```bash
 npm run tauri:dev
 ```
 

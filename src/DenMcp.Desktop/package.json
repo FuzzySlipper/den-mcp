@@ -6,6 +6,8 @@
   "scripts": {
     "ui:dev": "vite --host 127.0.0.1 --port 1421",
     "ui:build": "tsc --noEmit && vite build",
+    "electron:build": "esbuild src/electron/main.ts --bundle --platform=node --format=esm --outfile=electron-dist/main.mjs --external:electron --external:ws && esbuild src/electron/preload.ts --bundle --platform=node --format=esm --outfile=electron-dist/preload.mjs --external:electron",
+    "electron:dev": "npm run ui:build && npm run electron:build && npx electron electron-dist/main.mjs",
     "test:helpers": "node --test tests/*.test.mjs",
     "sidecar:dev": "dotnet run --project ../DenMcp.Desktop.Sidecar --",
     "tauri:dev": "tauri dev",
@@ -16,13 +18,18 @@
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "ws": "^8.18.2"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.10.0",
+    "@types/node": "^22.15.3",
     "@types/react": "^19.1.15",
     "@types/react-dom": "^19.1.9",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.1.0",
+    "electron": "^41.3.0",
+    "esbuild": "^0.28.0",
     "typescript": "~5.9.3",
     "vite": "^8.0.0"
   }

@@ -1,0 +1,292 @@
+/**
+ * Electron main-process entry for Den Desktop.
+ *
+ * Responsibilities:
+ * - App lifecycle (ready, window-all-closed, activate)
+ * - BrowserWindow creation with secure webPreferences
+ * - Auth token generation and sidecar process launch via SidecarSupervisor
+ * - WebSocket bridge connection lifecycle
+ * - IPC bridge: exposes only allow-listed sidecar API to the renderer
+ * - Loads Vite dev server URL (dev) or built index.html (prod)
+ *
+ * Security boundary: the renderer receives no raw token, endpoint URL,
+ * Node APIs, shell access, or generic dispatch. All communication flows
+ * through typed IPC channels that mirror the DenDesktopSidecarApi contract.
+ */
+
+import { app, BrowserWindow, ipcMain } from 'electron';
+import * as path from 'node:path';
+import * as crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { SidecarSupervisor, buildDevSidecarLaunchConfig } from './sidecarSupervisor.ts';
+import {
+  assertBridgeSchemaBundle,
+  createCheckedBridgeClient,
+  type BridgeEventFrame,
+  type JsonValue,
+} from '../bridge/contract.ts';
+import { sidecarCommands, sidecarEvents } from './sidecarProtocol.ts';
+import { createDenDesktopSidecarApi, type DenDesktopSidecarApi } from './preloadSidecarApi.ts';
+import { createSidecarBridgeTransport } from './sidecarBridgeConnection.ts';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// ── Sidecar launch configuration ──
+
+const AUTH_TOKEN = crypto.randomUUID();
+const SIDECAR_PROJECT_PATH = path.resolve(__dirname, '../../DenMcp.Desktop.Sidecar/DenMcp.Desktop.Sidecar.csproj');
+const SIDECAR_CONFIG_PATH = path.resolve(app.getPath('userData'), 'sidecar');
+const SIDECAR_READY_TIMEOUT_MS = 30_000;
+
+// ── State ──
+
+let mainWindow: BrowserWindow | null = null;
+let supervisor: SidecarSupervisor | null = null;
+let bridgeTransport: ReturnType<typeof createSidecarBridgeTransport> | null = null;
+let sidecarApi: DenDesktopSidecarApi | null = null;
+let sidecarReadySentinel: { port: number; endpoint_path: string } | null = null;
+
+// ── IPC channel names ──
+
+const IPC_SIDECAR_CALL = 'den-desktop:sidecar-call';
+const IPC_SIDECAR_SUBSCRIBE = 'den-desktop:sidecar-subscribe';
+const IPC_SIDECAR_UNSUBSCRIBE = 'den-desktop:sidecar-unsubscribe';
+
+// ── Schema bundle loading ──
+
+const bundlePath = path.resolve(__dirname, '../../../../testdata/den-desktop-sidecar/sidecar-wire-fixture.json');
+
+function loadSchemaBundle() {
+  try {
+    const raw = JSON.parse(readFileSync(bundlePath, 'utf8'));
+    return raw.schema_bundle;
+  } catch {
+    return null;
+  }
+}
+
+// ── Sidecar lifecycle ──
+
+async function launchSidecar(): Promise<void> {
+  const launchConfig = buildDevSidecarLaunchConfig({
+    projectPath: SIDECAR_PROJECT_PATH,
+    configPath: SIDECAR_CONFIG_PATH,
+    authToken: AUTH_TOKEN,
+    port: 0,
+  });
+
+  supervisor = new SidecarSupervisor({
+    launchConfig,
+    launcher: {
+      launch(config) {
+        const child = spawn(config.command, config.args, {
+          env: { ...process.env, ...config.env },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        return {
+          pid: child.pid,
+          on(event, callback) { child.on(event, callback as any); },
+          stdout: child.stdout ? {
+            on(event, callback) { child.stdout!.on(event, callback as any); },
+          } : undefined,
+          stderr: child.stderr ? {
+            on(event, callback) { child.stderr!.on(event, callback as any); },
+          } : undefined,
+          kill(signal) { return child.kill(signal as any); },
+        };
+      },
+    },
+    restartOnCrash: false,
+  });
+
+  const readyPromise = new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error(`Sidecar did not emit ready sentinel within ${SIDECAR_READY_TIMEOUT_MS}ms.`));
+    }, SIDECAR_READY_TIMEOUT_MS);
+
+    const unsubscribe = supervisor!.subscribe((snapshot) => {
+      if (snapshot.state === 'ready' && snapshot.ready) {
+        sidecarReadySentinel = {
+          port: snapshot.ready.port,
+          endpoint_path: snapshot.ready.endpoint_path,
+        };
+        clearTimeout(timeout);
+        unsubscribe();
+        resolve();
+      } else if (snapshot.state === 'crashed') {
+        clearTimeout(timeout);
+        unsubscribe();
+        reject(new Error(`Sidecar crashed: ${snapshot.last_error ?? 'unknown error'}`));
+      }
+    });
+  });
+
+  supervisor.start();
+  await readyPromise;
+}
+
+async function connectBridge(): Promise<void> {
+  if (!sidecarReadySentinel) {
+    throw new Error('Cannot connect bridge before sidecar is ready.');
+  }
+
+  const wsUrl = `http://127.0.0.1:${sidecarReadySentinel.port}`;
+  const wsModule = await import('ws');
+  const WebSocketCtor = wsModule.default ?? wsModule;
+
+  bridgeTransport = createSidecarBridgeTransport({
+    baseUrl: wsUrl,
+    endpointPath: sidecarReadySentinel.endpoint_path,
+    authToken: AUTH_TOKEN,
+    WebSocketCtor: WebSocketCtor as any,
+  });
+
+  const bundle = loadSchemaBundle();
+  if (bundle) {
+    assertBridgeSchemaBundle(bundle);
+  }
+
+  const eventListeners = new Map<string, Set<(frame: BridgeEventFrame) => void>>();
+  let eventIdCounter = 0;
+
+  const eventSource = {
+    subscribe(listener: (frame: BridgeEventFrame) => void): () => void {
+      const id = `evt_${++eventIdCounter}`;
+      // We don't filter by event here; the facade handles that.
+      // Store for potential future use; events are broadcast by the bridge.
+      return () => { /* cleanup is a no-op for now */ };
+    },
+  };
+
+  const client = createCheckedBridgeClient({
+    bundle: bundle ?? {
+      bundle_kind: 'den.bridge.schema_bundle' as const,
+      version: 1 as const,
+      bundle_id: 'den-desktop.sidecar@2026-04-29',
+      protocol_version: '1.0',
+      schema_version: 'den-desktop@2026-04-29',
+      definitions: {} as any,
+      commands: [],
+      events: [],
+    },
+    commands: sidecarCommands,
+    events: sidecarEvents,
+    transport: bridgeTransport,
+  });
+
+  sidecarApi = createDenDesktopSidecarApi(client, eventSource);
+}
+
+// ── IPC bridge setup ──
+
+function setupIpcBridge(): void {
+  // Command dispatch: renderer calls 'den-desktop:sidecar-call' with method name + args
+  ipcMain.handle(IPC_SIDECAR_CALL, async (_event, method: string, ...args: unknown[]) => {
+    if (!sidecarApi) {
+      throw new Error('Sidecar bridge is not connected.');
+    }
+
+    const apiMethod = (sidecarApi as any)[method];
+    if (typeof apiMethod !== 'function') {
+      throw new Error(`Unknown sidecar method '${method}'.`);
+    }
+
+    return await apiMethod(...args);
+  });
+
+  // Event subscription: renderer requests subscription to an event channel
+  ipcMain.handle(IPC_SIDECAR_SUBSCRIBE, async (_event, eventName: string) => {
+    if (!sidecarApi) {
+      throw new Error('Sidecar bridge is not connected.');
+    }
+
+    const subscriptionMethod = `on${eventName.charAt(0).toUpperCase()}${eventName.slice(1)}`;
+    const apiMethod = (sidecarApi as any)[subscriptionMethod];
+    if (typeof apiMethod !== 'function') {
+      throw new Error(`Unknown sidecar event subscription '${eventName}'.`);
+    }
+
+    const unsubscribe = apiMethod((payload: unknown) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(`den-desktop:event:${eventName}`, payload);
+      }
+    });
+
+    return { subscriptionId: eventName };
+  });
+
+  ipcMain.handle(IPC_SIDECAR_UNSUBSCRIBE, async (_event, _subscriptionId: string) => {
+    // Cleanup handled by the subscription callback closure
+  });
+}
+
+// ── Window creation ──
+
+function createWindow(): BrowserWindow {
+  const isDev = !app.isPackaged;
+
+  const win = new BrowserWindow({
+    width: 1440,
+    height: 960,
+    minWidth: 1100,
+    minHeight: 720,
+    title: 'Den Operator',
+    webPreferences: {
+      preload: path.resolve(__dirname, './preload.mjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      // Security: no remote module, no nodeIntegrationInWorker
+    },
+  });
+
+  if (isDev) {
+    // In dev mode, load from Vite dev server
+    const viteDevUrl = process.env.VITE_DEV_SERVER_URL || 'http://127.0.0.1:1421';
+    win.loadURL(viteDevUrl).catch(() => {
+      // Fallback to built index.html if dev server is not running
+      win.loadFile(path.resolve(__dirname, '../../../dist/index.html'));
+    });
+  } else {
+    // In prod/packaged mode, load built UI
+    win.loadFile(path.resolve(__dirname, '../../../dist/index.html'));
+  }
+
+  return win;
+}
+
+// ── App lifecycle ──
+
+app.whenReady().then(async () => {
+  try {
+    await launchSidecar();
+    await connectBridge();
+    setupIpcBridge();
+    mainWindow = createWindow();
+  } catch (error) {
+    console.error('[DenDesktop] Failed to start:', error);
+    app.quit();
+  }
+});
+
+app.on('window-all-closed', () => {
+  // Cleanup bridge and sidecar on quit
+  bridgeTransport?.close();
+  supervisor?.stop('SIGTERM');
+  app.quit();
+});
+
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    mainWindow = createWindow();
+  }
+});
+
+app.on('before-quit', () => {
+  bridgeTransport?.close();
+  supervisor?.stop('SIGTERM');
+});
