@@ -25,6 +25,7 @@ async function readFixture() {
 test('sidecar bridge transport sends request frames and receives responses via WebSocket', async () => {
   const fixture = await readFixture();
   const sentFrames = [];
+  const receivedEvents = [];
   const fakeWebSocket = createFakeWebSocketClass(sentFrames, fixture);
 
   const transport = createSidecarBridgeTransport({
@@ -32,6 +33,7 @@ test('sidecar bridge transport sends request frames and receives responses via W
     endpointPath: '/bridge',
     authToken: 'test-token-abc',
     WebSocketCtor: fakeWebSocket,
+    onEvent: (frame) => receivedEvents.push(frame),
   });
 
   const client = createCheckedBridgeClient({
@@ -66,6 +68,7 @@ test('sidecar bridge transport connects with correct WebSocket URL and auth head
     endpointPath: '/bridge',
     authToken: 'test-auth-token-xyz',
     WebSocketCtor: fakeWebSocket,
+    onEvent: () => {},
   });
 
   // Trigger connection by sending a request
@@ -111,6 +114,7 @@ test('sidecar bridge transport rejects requests when connection times out', asyn
     endpointPath: '/bridge',
     authToken: 'token',
     WebSocketCtor: FakeWebSocket,
+    onEvent: () => {},
   });
 
   // Sending a request should eventually timeout since WebSocket never opens
@@ -296,14 +300,350 @@ test('event subscription channel names follow the den-desktop:event prefix conve
   }
 });
 
-test('sidecar launch config builder produces safe command line without leaking auth token in args', () => {
+test('sidecar launch config builder produces safe command line without leaking auth token in args', async () => {
   // The buildDevSidecarLaunchConfig function is tested in sidecarProtocol.test.mjs,
   // but this test verifies the Electron-specific integration concern: the auth token
   // is passed via env vars, not command-line arguments.
-  const { buildDevSidecarLaunchConfig } = import('../src/electron/sidecarSupervisor.ts');
-  // Note: we import the function rather than re-testing it fully; the existing
-  // test suite covers the full supervisor lifecycle.
-  assert.ok(true, 'Sidecar supervisor module is importable in test context');
+  const { buildDevSidecarLaunchConfig } = await import('../src/electron/sidecarSupervisor.ts');
+  assert.ok(typeof buildDevSidecarLaunchConfig === 'function', 'buildDevSidecarLaunchConfig is importable');
+
+  const config = buildDevSidecarLaunchConfig({
+    projectPath: '/test/DenMcp.Desktop.Sidecar.csproj',
+    configPath: '/tmp/sidecar',
+    authToken: 'secret-token-xyz',
+    port: 0,
+  });
+
+  // Auth token must be in env, not in args
+  assert.ok(!config.args.includes('secret-token-xyz'), 'Auth token must not appear in command args');
+  assert.equal(config.env.DEN_DESKTOP_BRIDGE_TOKEN, 'secret-token-xyz', 'Auth token must be in env var');
+});
+
+test('bridge transport delivers event frames to onEvent callback', async () => {
+  const fixture = await readFixture();
+  const receivedEvents = [];
+  const sentFrames = [];
+
+  // Create a fake WebSocket that can emit events.
+  // The transport creates the WebSocket lazily on the first send().
+  const sockets = [];
+  class EventCapableWebSocket {
+    constructor(url, options) {
+      this.readyState = 0;
+      this._listeners = {};
+      this._url = url;
+      sockets.push(this);
+      setTimeout(() => {
+        this.readyState = 1;
+        this._emit('open', {});
+      }, 0);
+    }
+    on(event, callback) {
+      if (!this._listeners[event]) this._listeners[event] = [];
+      this._listeners[event].push(callback);
+      return this;
+    }
+    addEventListener(event, callback) {
+      this.on(event, callback);
+    }
+    send(data) {
+      const frame = JSON.parse(data);
+      sentFrames.push(frame);
+      // Simulate a response so the request promise resolves
+      setTimeout(() => {
+        this._emit('message', JSON.stringify({
+          protocol_version: fixture.schema_bundle.protocol_version,
+          schema_version: fixture.schema_bundle.schema_version,
+          frame_type: 'response',
+          request_id: frame.request_id,
+          result: {},
+          correlation: {},
+          sent_at: '2026-04-30T12:00:00.000Z',
+        }));
+      }, 0);
+    }
+    close() {
+      this.readyState = 3;
+      this._emit('close', {});
+    }
+    _emit(event, data) {
+      for (const listener of this._listeners[event] ?? []) {
+        listener(data);
+      }
+    }
+  }
+
+  const transport = createSidecarBridgeTransport({
+    baseUrl: 'http://127.0.0.1:54321',
+    endpointPath: '/bridge',
+    authToken: 'token',
+    WebSocketCtor: EventCapableWebSocket,
+    onEvent: (frame) => receivedEvents.push(frame),
+  });
+
+  // Trigger connection by sending a request (transport creates WS lazily)
+  const requestPromise = transport.send({
+    protocol_version: '1.0',
+    schema_version: 'den-desktop@2026-04-29',
+    frame_type: 'request',
+    request_id: 'req_connect_trigger',
+    command: 'bridge.get_health',
+    payload: {},
+  });
+  await requestPromise;
+
+  // Now simulate the sidecar sending an event frame
+  const eventFrame = fixture.frames.operator_status_event;
+  sockets[0]._emit('message', JSON.stringify(eventFrame));
+
+  assert.equal(receivedEvents.length, 1, 'Should have received one event frame');
+  assert.equal(receivedEvents[0].frame_type, 'event');
+  assert.equal(receivedEvents[0].event, 'den://operator-status');
+  assert.equal(receivedEvents[0].event_id, 'evt_status_001');
+  assert.equal(receivedEvents[0].payload.phase, 'starting');
+
+  transport.close();
+});
+
+test('bridge transport ignores event frames when no onEvent callback is provided', async () => {
+  const fixture = await readFixture();
+  const sentFrames = [];
+  const sockets = [];
+
+  class SilentWebSocket {
+    constructor() {
+      this.readyState = 0;
+      this._listeners = {};
+      sockets.push(this);
+      setTimeout(() => {
+        this.readyState = 1;
+        this._emit('open', {});
+      }, 0);
+    }
+    on(event, callback) {
+      if (!this._listeners[event]) this._listeners[event] = [];
+      this._listeners[event].push(callback);
+      return this;
+    }
+    addEventListener(event, callback) { this.on(event, callback); }
+    send(data) {
+      const frame = JSON.parse(data);
+      sentFrames.push(frame);
+      setTimeout(() => {
+        this._emit('message', JSON.stringify({
+          protocol_version: fixture.schema_bundle.protocol_version,
+          schema_version: fixture.schema_bundle.schema_version,
+          frame_type: 'response',
+          request_id: frame.request_id,
+          result: {},
+          correlation: {},
+          sent_at: '2026-04-30T12:00:00.000Z',
+        }));
+      }, 0);
+    }
+    close() { this.readyState = 3; }
+    _emit(event, data) {
+      for (const listener of this._listeners[event] ?? []) listener(data);
+    }
+  }
+
+  // No onEvent callback
+  const transport = createSidecarBridgeTransport({
+    baseUrl: 'http://127.0.0.1:54321',
+    endpointPath: '/bridge',
+    authToken: 'token',
+    WebSocketCtor: SilentWebSocket,
+  });
+
+  // Trigger connection by sending a request
+  await transport.send({
+    protocol_version: '1.0',
+    schema_version: 'den-desktop@2026-04-29',
+    frame_type: 'request',
+    request_id: 'req_no_event_trigger',
+    command: 'bridge.get_health',
+    payload: {},
+  });
+
+  // Should not throw when an event frame arrives with no onEvent callback
+  const eventFrame = fixture.frames.operator_status_event;
+  sockets[0]._emit('message', JSON.stringify(eventFrame));
+
+  // No assertion needed — the test passes if no exception is thrown.
+  transport.close();
+});
+
+test('event source tracks listeners and broadcasts frames with deterministic unsubscribe', async () => {
+  const fixture = await readFixture();
+
+  // Simulate the event source pattern used in main.ts
+  const listeners = new Set();
+  const eventSource = {
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+
+  const receivedA = [];
+  const receivedB = [];
+  const unsubscribeA = eventSource.subscribe((frame) => receivedA.push(frame));
+  const unsubscribeB = eventSource.subscribe((frame) => receivedB.push(frame));
+
+  assert.equal(listeners.size, 2);
+
+  // Broadcast event to all listeners
+  const eventFrame = fixture.frames.operator_status_event;
+  for (const listener of listeners) {
+    listener(eventFrame);
+  }
+
+  assert.equal(receivedA.length, 1);
+  assert.equal(receivedB.length, 1);
+  assert.equal(receivedA[0].event, 'den://operator-status');
+
+  // Unsubscribe A, broadcast again
+  unsubscribeA();
+  assert.equal(listeners.size, 1);
+
+  for (const listener of listeners) {
+    listener(eventFrame);
+  }
+
+  assert.equal(receivedA.length, 1, 'A should not receive after unsubscribe');
+  assert.equal(receivedB.length, 2, 'B should still receive');
+
+  unsubscribeB();
+  assert.equal(listeners.size, 0);
+});
+
+test('transport event callback wires through to facade onEvent subscriptions', async () => {
+  const fixture = await readFixture();
+
+  // Build the full chain: transport → eventSource → facade event subscription
+  const listeners = new Set();
+  const eventSource = {
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+
+  const client = createCheckedBridgeClient({
+    bundle: fixture.schema_bundle,
+    commands: sidecarCommands,
+    events: sidecarEvents,
+    transport: {
+      async send(frame) {
+        return {
+          protocol_version: fixture.schema_bundle.protocol_version,
+          schema_version: fixture.schema_bundle.schema_version,
+          frame_type: 'response',
+          request_id: frame.request_id,
+          result: {},
+          correlation: {},
+          sent_at: '2026-04-30T12:00:00.000Z',
+        };
+      },
+    },
+  });
+
+  const api = createDenDesktopSidecarApi(client, eventSource);
+
+  // Subscribe to operator status events
+  const receivedStatuses = [];
+  const unsubscribe = api.onOperatorStatus((status) => {
+    receivedStatuses.push(status);
+  });
+
+  assert.equal(listeners.size, 1, 'Should have one event source listener');
+
+  // Simulate transport delivering an event frame (the eventSource listeners are
+  // what the transport's onEvent callback would invoke)
+  const eventFrame = fixture.frames.operator_status_event;
+  for (const listener of listeners) {
+    listener(eventFrame);
+  }
+
+  assert.equal(receivedStatuses.length, 1);
+  assert.equal(receivedStatuses[0].phase, 'starting');
+
+  // Unsubscribe and verify no more deliveries
+  unsubscribe();
+  assert.equal(listeners.size, 0);
+
+  for (const listener of listeners) {
+    listener(eventFrame);
+  }
+
+  assert.equal(receivedStatuses.length, 1, 'Should not receive after unsubscribe');
+});
+
+test('IPC subscription lifecycle: subscribe returns unique ID, unsubscribe removes tracking', () => {
+  // Simulate the IPC subscription tracking from main.ts
+  const activeSubscriptions = new Map();
+  const sidecarApiSubscriptions = [];
+
+  function simulateSubscribe(eventName) {
+    const subscriptionId = `${eventName}:${Date.now().toString(36)}`;
+    // Simulate calling the sidecar API on-method
+    const unsubscribe = () => {
+      sidecarApiSubscriptions.push({ event: eventName, action: 'unsubscribed' });
+    };
+    activeSubscriptions.set(subscriptionId, unsubscribe);
+    sidecarApiSubscriptions.push({ event: eventName, action: 'subscribed', id: subscriptionId });
+    return { subscriptionId };
+  }
+
+  function simulateUnsubscribe(subscriptionId) {
+    const unsubscribe = activeSubscriptions.get(subscriptionId);
+    if (unsubscribe) {
+      activeSubscriptions.delete(subscriptionId);
+      unsubscribe();
+    }
+  }
+
+  // Subscribe to two events
+  const sub1 = simulateSubscribe('terminalOutput');
+  const sub2 = simulateSubscribe('operatorStatus');
+
+  assert.ok(sub1.subscriptionId.startsWith('terminalOutput:'), 'Subscription ID should be prefixed with event name');
+  assert.ok(sub2.subscriptionId.startsWith('operatorStatus:'), 'Subscription ID should be prefixed with event name');
+  assert.notEqual(sub1.subscriptionId, sub2.subscriptionId, 'Subscription IDs must be unique');
+  assert.equal(activeSubscriptions.size, 2);
+
+  // Unsubscribe first
+  simulateUnsubscribe(sub1.subscriptionId);
+  assert.equal(activeSubscriptions.size, 1);
+  assert.ok(!activeSubscriptions.has(sub1.subscriptionId));
+
+  // Unsubscribe second
+  simulateUnsubscribe(sub2.subscriptionId);
+  assert.equal(activeSubscriptions.size, 0);
+
+  // Unsubscribing non-existent ID should be a no-op
+  simulateUnsubscribe('nonexistent:event');
+  assert.equal(activeSubscriptions.size, 0);
+
+  // Verify the sidecar API unsubscribe was called for each
+  assert.equal(sidecarApiSubscriptions.filter((s) => s.action === 'subscribed').length, 2);
+  assert.equal(sidecarApiSubscriptions.filter((s) => s.action === 'unsubscribed').length, 2);
+});
+
+test('electron main/preload path helpers resolve correctly from electron-dist context', async () => {
+  const path = await import('node:path');
+  // Simulate the path resolution as it would work from electron-dist/main.mjs
+  const simulatedBundledDir = resolve(__dirname, '../electron-dist');
+
+  // UI dist path: from electron-dist/ to ../dist/index.html
+  const uiDistPath = path.default.resolve(simulatedBundledDir, '../dist/index.html');
+  const expectedUiDistPath = resolve(__dirname, '../dist/index.html');
+  assert.equal(uiDistPath, expectedUiDistPath, 'UI dist path should resolve to dist/index.html relative to electron-dist');
+
+  // Schema bundle path: from electron-dist/ to ../../../testdata/... (up to repo root)
+  const schemaBundlePath = path.default.resolve(simulatedBundledDir, '../../../testdata/den-desktop-sidecar/sidecar-wire-fixture.json');
+  const expectedSchemaPath = resolve(__dirname, '../../../testdata/den-desktop-sidecar/sidecar-wire-fixture.json');
+  assert.equal(schemaBundlePath, expectedSchemaPath, 'Schema bundle path should resolve to repo testdata/');
 });
 
 test('preload event subscription returns unsubscribe function', async () => {

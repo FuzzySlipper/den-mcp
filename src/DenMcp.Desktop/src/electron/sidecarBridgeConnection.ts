@@ -12,6 +12,7 @@
 import type {
   BridgeCancelFrame,
   BridgeClientTransport,
+  BridgeEventFrame,
   BridgeRequestFrame,
   BridgeResponseFrame,
 } from '../bridge/contract.ts';
@@ -25,6 +26,12 @@ export interface SidecarBridgeConnectionOptions {
   authToken: string;
   /** WebSocket constructor (Node `ws` package or DOM WebSocket). */
   WebSocketCtor: any;
+  /**
+   * Optional callback invoked when the transport receives an event frame
+   * (frame_type === 'event') from the sidecar. Event frames are not
+   * request/response pairs, so they bypass the pending-request map.
+   */
+  onEvent?: (frame: BridgeEventFrame) => void;
 }
 
 /**
@@ -68,6 +75,14 @@ export function createSidecarBridgeTransport(
     }
 
     const frame = parsed as Record<string, unknown>;
+
+    // Event frames carry event_id and frame_type='event', not request_id.
+    // Route them through the onEvent callback so the event source can broadcast.
+    if (frame.frame_type === 'event' && typeof frame.event_id === 'string') {
+      options.onEvent?.(parsed as BridgeEventFrame);
+      return;
+    }
+
     if (typeof frame.request_id !== 'string') {
       return;
     }

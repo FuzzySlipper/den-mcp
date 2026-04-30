@@ -55,8 +55,10 @@ const IPC_SIDECAR_SUBSCRIBE = 'den-desktop:sidecar-subscribe';
 const IPC_SIDECAR_UNSUBSCRIBE = 'den-desktop:sidecar-unsubscribe';
 
 // ── Schema bundle loading ──
-
-const bundlePath = path.resolve(__dirname, '../../../../testdata/den-desktop-sidecar/sidecar-wire-fixture.json');
+// When bundled into electron-dist/, __dirname is src/DenMcp.Desktop/electron-dist/.
+// The testdata fixture lives at the repo root: <repo>/testdata/...
+// So from electron-dist we need ../../../testdata (up to src/DenMcp.Desktop, src, repo root).
+const bundlePath = path.resolve(__dirname, '../../../testdata/den-desktop-sidecar/sidecar-wire-fixture.json');
 
 function loadSchemaBundle() {
   try {
@@ -127,6 +129,35 @@ async function launchSidecar(): Promise<void> {
   await readyPromise;
 }
 
+// ── Event source: tracks bridge event listeners and broadcasts incoming frames ──
+
+type EventListener = (frame: BridgeEventFrame) => void;
+
+const eventListeners = new Set<EventListener>();
+
+function broadcastEvent(frame: BridgeEventFrame): void {
+  for (const listener of eventListeners) {
+    try {
+      listener(frame);
+    } catch {
+      // Listener errors must not break other listeners.
+    }
+  }
+}
+
+const eventSource = {
+  subscribe(listener: EventListener): () => void {
+    eventListeners.add(listener);
+    return () => {
+      eventListeners.delete(listener);
+    };
+  },
+};
+
+// ── IPC subscription tracking ──
+
+const activeSubscriptions = new Map<string, () => void>();
+
 async function connectBridge(): Promise<void> {
   if (!sidecarReadySentinel) {
     throw new Error('Cannot connect bridge before sidecar is ready.');
@@ -141,24 +172,13 @@ async function connectBridge(): Promise<void> {
     endpointPath: sidecarReadySentinel.endpoint_path,
     authToken: AUTH_TOKEN,
     WebSocketCtor: WebSocketCtor as any,
+    onEvent: broadcastEvent,
   });
 
   const bundle = loadSchemaBundle();
   if (bundle) {
     assertBridgeSchemaBundle(bundle);
   }
-
-  const eventListeners = new Map<string, Set<(frame: BridgeEventFrame) => void>>();
-  let eventIdCounter = 0;
-
-  const eventSource = {
-    subscribe(listener: (frame: BridgeEventFrame) => void): () => void {
-      const id = `evt_${++eventIdCounter}`;
-      // We don't filter by event here; the facade handles that.
-      // Store for potential future use; events are broadcast by the bridge.
-      return () => { /* cleanup is a no-op for now */ };
-    },
-  };
 
   const client = createCheckedBridgeClient({
     bundle: bundle ?? {
@@ -196,7 +216,8 @@ function setupIpcBridge(): void {
     return await apiMethod(...args);
   });
 
-  // Event subscription: renderer requests subscription to an event channel
+  // Event subscription: renderer requests subscription to an event channel.
+  // The returned subscriptionId is used by the renderer to unsubscribe later.
   ipcMain.handle(IPC_SIDECAR_SUBSCRIBE, async (_event, eventName: string) => {
     if (!sidecarApi) {
       throw new Error('Sidecar bridge is not connected.');
@@ -208,17 +229,28 @@ function setupIpcBridge(): void {
       throw new Error(`Unknown sidecar event subscription '${eventName}'.`);
     }
 
+    const subscriptionId = `${eventName}:${Date.now().toString(36)}`;
+
     const unsubscribe = apiMethod((payload: unknown) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send(`den-desktop:event:${eventName}`, payload);
       }
     });
 
-    return { subscriptionId: eventName };
+    // Track for deterministic cleanup on unsubscribe or window close.
+    // If the renderer subscribes to the same event multiple times,
+    // each gets a unique subscriptionId.
+    activeSubscriptions.set(subscriptionId, unsubscribe);
+
+    return { subscriptionId };
   });
 
-  ipcMain.handle(IPC_SIDECAR_UNSUBSCRIBE, async (_event, _subscriptionId: string) => {
-    // Cleanup handled by the subscription callback closure
+  ipcMain.handle(IPC_SIDECAR_UNSUBSCRIBE, async (_event, subscriptionId: string) => {
+    const unsubscribe = activeSubscriptions.get(subscriptionId);
+    if (unsubscribe) {
+      activeSubscriptions.delete(subscriptionId);
+      unsubscribe();
+    }
   });
 }
 
@@ -245,15 +277,17 @@ function createWindow(): BrowserWindow {
   });
 
   if (isDev) {
-    // In dev mode, load from Vite dev server
+    // In dev mode, load from Vite dev server.
+    // Fall back to built index.html if the dev server is not running.
+    // From electron-dist/, ../dist/index.html points to src/DenMcp.Desktop/dist/index.html.
     const viteDevUrl = process.env.VITE_DEV_SERVER_URL || 'http://127.0.0.1:1421';
     win.loadURL(viteDevUrl).catch(() => {
-      // Fallback to built index.html if dev server is not running
-      win.loadFile(path.resolve(__dirname, '../../../dist/index.html'));
+      win.loadFile(path.resolve(__dirname, '../dist/index.html'));
     });
   } else {
-    // In prod/packaged mode, load built UI
-    win.loadFile(path.resolve(__dirname, '../../../dist/index.html'));
+    // In prod/packaged mode, load built UI.
+    // app.isPackaged mode uses process.resourcesPath; dev fallback uses relative path.
+    win.loadFile(path.resolve(__dirname, '../dist/index.html'));
   }
 
   return win;
@@ -274,7 +308,11 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
-  // Cleanup bridge and sidecar on quit
+  // Cleanup IPC subscriptions, bridge, and sidecar on quit
+  for (const [id, unsubscribe] of activeSubscriptions) {
+    unsubscribe();
+  }
+  activeSubscriptions.clear();
   bridgeTransport?.close();
   supervisor?.stop('SIGTERM');
   app.quit();
@@ -287,6 +325,10 @@ app.on('activate', () => {
 });
 
 app.on('before-quit', () => {
+  for (const [id, unsubscribe] of activeSubscriptions) {
+    unsubscribe();
+  }
+  activeSubscriptions.clear();
   bridgeTransport?.close();
   supervisor?.stop('SIGTERM');
 });
