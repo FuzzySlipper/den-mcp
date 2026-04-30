@@ -63,6 +63,17 @@ test('TypeScript bridge checks reject invalid date-time formatted fields', async
   );
 });
 
+test('TypeScript bridge checks reject non-string date-time values even without an explicit string type', async () => {
+  const bundle = await readJson('sample-schema-bundle.json');
+  bundle.definitions['sample.implicit_date_time'] = { format: 'date-time' };
+
+  assert.doesNotThrow(() => assertJsonMatchesSchema('2026-04-29T12:34:56Z', bundle, 'sample.implicit_date_time'));
+  assert.throws(
+    () => assertJsonMatchesSchema(1777466096000, bundle, 'sample.implicit_date_time'),
+    /sample\.implicit_date_time must match date-time format\./,
+  );
+});
+
 test('oneOf mismatch diagnostics include nested branch failures', async () => {
   const bundle = await readJson('sample-schema-bundle.json');
   bundle.definitions['sample.one_of_nested'] = {

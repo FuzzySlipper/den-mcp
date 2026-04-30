@@ -641,7 +641,7 @@ function collectSchemaMatch(
 function assertValueMatchesFormat(value: unknown, format: string, path: string): void {
   switch (format) {
     case 'date-time':
-      if (typeof value === 'string' && !isJsonSchemaDateTime(value)) {
+      if (typeof value !== 'string' || !isJsonSchemaDateTime(value)) {
         fail(`${path} must match date-time format.`);
       }
       return;
