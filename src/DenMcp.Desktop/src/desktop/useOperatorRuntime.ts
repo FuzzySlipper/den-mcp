@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { IpcHealth, initialIpcHealth, ipcHealthState } from './ipcHealth';
 import {
+  getAppearanceSettings,
   getOperatorStatus,
   getSettings,
   listLocalSessionSnapshots,
@@ -13,8 +14,10 @@ import {
   OperatorSettings,
   OperatorStatus,
   refreshNow,
+  saveAppearanceSettings,
   saveOperatorSettings,
   SaveOperatorSettingsRequest,
+  ShellAppearanceSettings,
 } from './tauriApi';
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
@@ -23,6 +26,7 @@ const WATCHDOG_INTERVAL_MS = 5_000;
 export interface RuntimeState {
   status: OperatorStatus | null;
   settings: OperatorSettings | null;
+  appearanceSettings: ShellAppearanceSettings | null;
   snapshots: LocalGitSnapshot[];
   sessionSnapshots: LocalSessionSnapshot[];
   ipcHealth: IpcHealth;
@@ -30,6 +34,7 @@ export interface RuntimeState {
   error: string | null;
   refresh: () => Promise<void>;
   saveSettings: (request: SaveOperatorSettingsRequest) => Promise<void>;
+  saveAppearanceSettings: (request: Partial<ShellAppearanceSettings>) => Promise<ShellAppearanceSettings>;
 }
 
 function errorMessage(err: unknown): string {
@@ -39,6 +44,7 @@ function errorMessage(err: unknown): string {
 export function useOperatorRuntime(): RuntimeState {
   const [status, setStatus] = useState<OperatorStatus | null>(null);
   const [settings, setSettings] = useState<OperatorSettings | null>(null);
+  const [appearanceSettings, setAppearanceSettings] = useState<ShellAppearanceSettings | null>(null);
   const [snapshots, setSnapshots] = useState<LocalGitSnapshot[]>([]);
   const [sessionSnapshots, setSessionSnapshots] = useState<LocalSessionSnapshot[]>([]);
   const [ipcHealth, setIpcHealth] = useState<IpcHealth>(() => initialIpcHealth());
@@ -117,9 +123,10 @@ export function useOperatorRuntime(): RuntimeState {
       return;
     }
 
-    const [statusResult, settingsResult, snapshotResult, sessionSnapshotResult] = await Promise.allSettled([
+    const [statusResult, settingsResult, appearanceResult, snapshotResult, sessionSnapshotResult] = await Promise.allSettled([
       callIpc('status load', getOperatorStatus),
       callIpc('settings load', getSettings),
+      callIpc('appearance load', getAppearanceSettings),
       callIpc('git snapshot load', listLocalSnapshots),
       callIpc('session snapshot load', listLocalSessionSnapshots),
     ]);
@@ -139,6 +146,12 @@ export function useOperatorRuntime(): RuntimeState {
       setSettings(settingsResult.value);
     } else {
       failures.push(errorMessage(settingsResult.reason));
+    }
+
+    if (appearanceResult.status === 'fulfilled') {
+      setAppearanceSettings(appearanceResult.value);
+    } else {
+      failures.push(errorMessage(appearanceResult.reason));
     }
 
     if (snapshotResult.status === 'fulfilled') {
@@ -255,6 +268,27 @@ export function useOperatorRuntime(): RuntimeState {
     }
   }, [callIpc, load]);
 
+  const saveAppearanceCallback = useCallback(
+    async (request: Partial<ShellAppearanceSettings>): Promise<ShellAppearanceSettings> => {
+      if (mountedRef.current) {
+        setError(null);
+      }
+      try {
+        const next = await callIpc('appearance save', () => saveAppearanceSettings(request));
+        if (mountedRef.current) {
+          setAppearanceSettings(next);
+        }
+        return next;
+      } catch (err) {
+        if (mountedRef.current) {
+          setError(errorMessage(err));
+        }
+        throw err;
+      }
+    },
+    [callIpc],
+  );
+
   const saveSettings = useCallback(
     async (request: SaveOperatorSettingsRequest) => {
       if (mountedRef.current) {
@@ -276,7 +310,7 @@ export function useOperatorRuntime(): RuntimeState {
   );
 
   return useMemo(
-    () => ({ status, settings, snapshots, sessionSnapshots, ipcHealth, loading, error, refresh, saveSettings }),
-    [status, settings, snapshots, sessionSnapshots, ipcHealth, loading, error, refresh, saveSettings],
+    () => ({ status, settings, appearanceSettings, snapshots, sessionSnapshots, ipcHealth, loading, error, refresh, saveSettings, saveAppearanceSettings: saveAppearanceCallback }),
+    [status, settings, appearanceSettings, snapshots, sessionSnapshots, ipcHealth, loading, error, refresh, saveSettings, saveAppearanceCallback],
   );
 }

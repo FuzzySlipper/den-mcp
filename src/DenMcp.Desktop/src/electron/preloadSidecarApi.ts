@@ -13,12 +13,24 @@ import type {
 import type { SidecarBridgeClient } from './sidecarProtocol.ts';
 import { createSidecarBridgeFacade, type SidecarHealthResponse, type SidecarCapabilitiesResponse } from './sidecarProtocol.ts';
 
+export interface ShellAppearanceSettings {
+  theme: string;
+  accent: string;
+  density: string;
+  bodyFont: string;
+  railMode: string;
+  consoleMode: string;
+  activeTab: string;
+}
+
 export interface DenDesktopSidecarApi {
   getHealth(): Promise<SidecarHealthResponse>;
   getCapabilities(): Promise<SidecarCapabilitiesResponse>;
   getOperatorStatus(): Promise<OperatorStatus>;
   getSettings(): Promise<OperatorSettings>;
   saveOperatorSettings(request: SaveOperatorSettingsRequest): Promise<OperatorSettings>;
+  getAppearanceSettings<T = ShellAppearanceSettings>(): Promise<T>;
+  saveAppearanceSettings<TRequest = Partial<ShellAppearanceSettings>, TResponse = ShellAppearanceSettings>(request: TRequest): Promise<TResponse>;
   refreshNow(): Promise<void>;
   listLocalSnapshots(): Promise<LocalSnapshotList>;
   listLocalSessionSnapshots(): Promise<LocalSessionSnapshotList>;
@@ -44,6 +56,9 @@ export function createDenDesktopSidecarApi(
     getSettings: () => facade.getSettings<OperatorSettings>(),
     saveOperatorSettings: (request: SaveOperatorSettingsRequest) =>
       facade.saveOperatorSettings<SaveOperatorSettingsRequest, OperatorSettings>(request),
+    getAppearanceSettings: <T>() => facade.getAppearanceSettings<T>(),
+    saveAppearanceSettings: <TRequest, TResponse>(request: TRequest) =>
+      facade.saveAppearanceSettings<TRequest, TResponse>(request),
     refreshNow: facade.refreshNow,
     listLocalSnapshots: () => facade.listLocalSnapshots<LocalSnapshotList>(),
     listLocalSessionSnapshots: () => facade.listLocalSessionSnapshots<LocalSessionSnapshotList>(),

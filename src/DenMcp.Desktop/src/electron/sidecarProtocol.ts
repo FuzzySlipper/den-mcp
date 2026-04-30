@@ -77,6 +77,16 @@ export const sidecarCommands: Record<string, BridgeCommandSpec<JsonValue, JsonVa
     requestSchema: 'den_desktop.operator.save_settings.request',
     responseSchema: 'den_desktop.operator.save_settings.response',
   },
+  getAppearanceSettings: {
+    command: 'den_desktop.operator.get_appearance_settings',
+    requestSchema: 'den_desktop.operator.get_appearance_settings.request',
+    responseSchema: 'den_desktop.operator.get_appearance_settings.response',
+  },
+  saveAppearanceSettings: {
+    command: 'den_desktop.operator.save_appearance_settings',
+    requestSchema: 'den_desktop.operator.save_appearance_settings.request',
+    responseSchema: 'den_desktop.operator.save_appearance_settings.response',
+  },
   refreshNow: {
     command: 'den_desktop.operator.refresh_now',
     requestSchema: 'den_desktop.operator.refresh_now.request',
@@ -125,6 +135,9 @@ export function createSidecarBridgeFacade(client: SidecarBridgeClient) {
     getSettings: async <T>(): Promise<T> => facade.getSettings({}) as Promise<T>,
     saveOperatorSettings: async <TRequest, TResponse>(request: TRequest): Promise<TResponse> =>
       facade.saveOperatorSettings(request as JsonValue) as Promise<TResponse>,
+    getAppearanceSettings: async <T>(): Promise<T> => facade.getAppearanceSettings({}) as Promise<T>,
+    saveAppearanceSettings: async <TRequest, TResponse>(request: TRequest): Promise<TResponse> =>
+      facade.saveAppearanceSettings(request as JsonValue) as Promise<TResponse>,
     refreshNow: async (): Promise<void> => { await facade.refreshNow({}); },
     listLocalSnapshots: async <T>(): Promise<T> => facade.listLocalSnapshots({}) as Promise<T>,
     listLocalSessionSnapshots: async <T>(): Promise<T> => facade.listLocalSessionSnapshots({}) as Promise<T>,

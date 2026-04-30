@@ -58,6 +58,10 @@ public static class DesktopSidecarBridge
                 DesktopSidecarProtocol.GetSettingsCommand)
             .RegisterCommand<SaveOperatorSettingsRequest, OperatorSettings, SaveOperatorSettingsHandler>(
                 DesktopSidecarProtocol.SaveSettingsCommand)
+            .RegisterCommand<DesktopSidecarEmptyRequest, OperatorAppearanceSettings, GetAppearanceSettingsHandler>(
+                DesktopSidecarProtocol.GetAppearanceSettingsCommand)
+            .RegisterCommand<SaveOperatorAppearanceSettingsRequest, OperatorAppearanceSettings, SaveAppearanceSettingsHandler>(
+                DesktopSidecarProtocol.SaveAppearanceSettingsCommand)
             .RegisterCommand<DesktopSidecarEmptyRequest, DesktopSidecarEmptyResponse, RefreshNowHandler>(
                 DesktopSidecarProtocol.RefreshNowCommand)
             .RegisterCommand<DesktopSidecarEmptyRequest, LocalSnapshotList, ListLocalGitSnapshotsHandler>(
@@ -126,6 +130,10 @@ public static class DesktopSidecarBridge
             Schema(DesktopSidecarProtocol.GetSettingsCommand + ".response", OperatorSettingsSchema),
             Schema(DesktopSidecarProtocol.SaveSettingsCommand + ".request", SaveOperatorSettingsSchema),
             Schema(DesktopSidecarProtocol.SaveSettingsCommand + ".response", OperatorSettingsSchema),
+            Schema(DesktopSidecarProtocol.GetAppearanceSettingsCommand + ".request", EmptyObjectSchema),
+            Schema(DesktopSidecarProtocol.GetAppearanceSettingsCommand + ".response", OperatorAppearanceSettingsSchema),
+            Schema(DesktopSidecarProtocol.SaveAppearanceSettingsCommand + ".request", SaveOperatorAppearanceSettingsSchema),
+            Schema(DesktopSidecarProtocol.SaveAppearanceSettingsCommand + ".response", OperatorAppearanceSettingsSchema),
             Schema(DesktopSidecarProtocol.RefreshNowCommand + ".request", EmptyObjectSchema),
             Schema(DesktopSidecarProtocol.RefreshNowCommand + ".response", EmptyObjectSchema),
             Schema(DesktopSidecarProtocol.ListLocalGitSnapshotsCommand + ".request", EmptyObjectSchema),
@@ -200,6 +208,14 @@ public static class DesktopSidecarBridge
 
     private const string SaveOperatorSettingsSchema = """
         {"type":"object","additionalProperties":false,"required":["denBaseUrl"],"properties":{"denBaseUrl":{"type":"string"},"sourceDisplayName":{"type":["string","null"]},"pollIntervalSeconds":{"type":"integer"},"maxChangedFiles":{"type":"integer"}}}
+        """;
+
+    private const string OperatorAppearanceSettingsSchema = """
+        {"type":"object","additionalProperties":false,"required":["theme","accent","density","bodyFont","railMode","consoleMode","activeTab"],"properties":{"theme":{"type":"string"},"accent":{"type":"string"},"density":{"type":"string"},"bodyFont":{"type":"string"},"railMode":{"type":"string"},"consoleMode":{"type":"string"},"activeTab":{"type":"string"}}}
+        """;
+
+    private const string SaveOperatorAppearanceSettingsSchema = """
+        {"type":"object","additionalProperties":false,"properties":{"theme":{"type":["string","null"]},"accent":{"type":["string","null"]},"density":{"type":["string","null"]},"bodyFont":{"type":["string","null"]},"railMode":{"type":["string","null"]},"consoleMode":{"type":["string","null"]},"activeTab":{"type":["string","null"]}}}
         """;
 
     private const string LatestDiffSnapshotRequestSchema = """
@@ -388,5 +404,31 @@ public sealed class GetLatestDiffSnapshotHandler : IBridgeCommandHandler<LatestD
     public async ValueTask<DesktopDiffSnapshotLatestResult?> HandleAsync(LatestDiffSnapshotRequest request, BridgeRequestContext context, CancellationToken cancellationToken)
     {
         return await _runtime.GetLatestDiffSnapshotAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+}
+
+public sealed class GetAppearanceSettingsHandler : IBridgeCommandHandler<DesktopSidecarEmptyRequest, OperatorAppearanceSettings>
+{
+    private readonly OperatorSettingsService _settingsService;
+
+    public GetAppearanceSettingsHandler(OperatorSettingsService settingsService) => _settingsService = settingsService;
+
+    public ValueTask<OperatorAppearanceSettings?> HandleAsync(DesktopSidecarEmptyRequest request, BridgeRequestContext context, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult<OperatorAppearanceSettings?>(_settingsService.LoadAppearance());
+    }
+}
+
+public sealed class SaveAppearanceSettingsHandler : IBridgeCommandHandler<SaveOperatorAppearanceSettingsRequest, OperatorAppearanceSettings>
+{
+    private readonly OperatorSettingsService _settingsService;
+
+    public SaveAppearanceSettingsHandler(OperatorSettingsService settingsService) => _settingsService = settingsService;
+
+    public ValueTask<OperatorAppearanceSettings?> HandleAsync(SaveOperatorAppearanceSettingsRequest request, BridgeRequestContext context, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult<OperatorAppearanceSettings?>(_settingsService.SaveAppearance(request));
     }
 }

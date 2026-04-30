@@ -130,11 +130,201 @@ public class OperatorSettingsServiceTests
         Assert.DoesNotContain("tauri", path, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void DefaultAppearanceSettingsPath_UsesSameConfigRootWithAppearanceFileName()
+    {
+        var path = OperatorSettingsStorage.DefaultAppearanceSettingsPath("/home/tester");
+
+        Assert.Equal(Path.GetFullPath("/home/tester/.config/den-desktop/appearance-settings.json"), path);
+        Assert.DoesNotContain("operator-settings", path, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void LoadAppearance_MissingFileFallsBackToDefaultsAndPersistsFile()
+    {
+        var path = TempSettingsPath();
+        var service = Service(path);
+        var appearancePath = service.AppearanceSettingsPath;
+
+        var first = service.LoadAppearance();
+        var second = service.LoadAppearance();
+
+        Assert.True(File.Exists(appearancePath));
+        Assert.Equal(OperatorAppearanceSettings.DefaultTheme, first.Theme);
+        Assert.Equal(OperatorAppearanceSettings.DefaultAccent, first.Accent);
+        Assert.Equal(OperatorAppearanceSettings.DefaultDensity, first.Density);
+        Assert.Equal(OperatorAppearanceSettings.DefaultBodyFont, first.BodyFont);
+        Assert.Equal(OperatorAppearanceSettings.DefaultRailMode, first.RailMode);
+        Assert.Equal(OperatorAppearanceSettings.DefaultConsoleMode, first.ConsoleMode);
+        Assert.Equal(OperatorAppearanceSettings.DefaultActiveTab, first.ActiveTab);
+        Assert.Equal(first, second);
+    }
+
+    [Fact]
+    public void SaveAppearance_RoundTripsNormalizedValues()
+    {
+        var path = TempSettingsPath();
+        var service = Service(path);
+
+        var saved = service.SaveAppearance(new OperatorAppearanceSettings
+        {
+            Theme = "graphite-dark",
+            Accent = "violet",
+            Density = "compact",
+            BodyFont = "mono",
+            RailMode = "collapsed",
+            ConsoleMode = "half",
+            ActiveTab = "git",
+        });
+        var loaded = service.LoadAppearance();
+
+        Assert.Equal(saved, loaded);
+        Assert.Equal("graphite-dark", loaded.Theme);
+        Assert.Equal("violet", loaded.Accent);
+        Assert.Equal("compact", loaded.Density);
+        Assert.Equal("mono", loaded.BodyFont);
+        Assert.Equal("collapsed", loaded.RailMode);
+        Assert.Equal("half", loaded.ConsoleMode);
+        Assert.Equal("git", loaded.ActiveTab);
+    }
+
+    [Fact]
+    public void SaveAppearance_RoundTripsSnakeCaseFilePath()
+    {
+        var path = TempSettingsPath();
+        var service = Service(path);
+
+        service.SaveAppearance(new OperatorAppearanceSettings());
+        var appearancePath = service.AppearanceSettingsPath;
+
+        Assert.True(File.Exists(appearancePath));
+        var json = File.ReadAllText(appearancePath);
+        Assert.Contains("\"theme\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"accent\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("theme_name", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SaveAppearance_MalformedFileFallsBackToDefaults()
+    {
+        var path = TempSettingsPath();
+        var service = Service(path);
+        var appearancePath = service.AppearanceSettingsPath;
+        Directory.CreateDirectory(Path.GetDirectoryName(appearancePath)!);
+        File.WriteAllText(appearancePath, "{not valid json");
+
+        var settings = service.LoadAppearance();
+
+        Assert.Equal(OperatorAppearanceSettings.DefaultTheme, settings.Theme);
+        Assert.Equal(OperatorAppearanceSettings.DefaultDensity, settings.Density);
+    }
+
+    [Fact]
+    public void SaveAppearanceSettingsRequest_MergesPartialUpdate()
+    {
+        var path = TempSettingsPath();
+        var service = Service(path);
+
+        // First save full set
+        service.SaveAppearance(new OperatorAppearanceSettings
+        {
+            Theme = "graphite-dark",
+            Accent = "violet",
+            Density = "compact",
+            BodyFont = "mono",
+            RailMode = "collapsed",
+            ConsoleMode = "full",
+            ActiveTab = "settings",
+        });
+
+        // Partial update: only theme and accent
+        var merged = service.SaveAppearance(new SaveOperatorAppearanceSettingsRequest
+        {
+            Theme = "amber-dark",
+            Accent = "cyan",
+        });
+
+        Assert.Equal("amber-dark", merged.Theme);
+        Assert.Equal("cyan", merged.Accent);
+        Assert.Equal("compact", merged.Density);   // Preserved from prior save
+        Assert.Equal("mono", merged.BodyFont);     // Preserved
+        Assert.Equal("collapsed", merged.RailMode); // Preserved
+        Assert.Equal("full", merged.ConsoleMode);   // Preserved
+        Assert.Equal("settings", merged.ActiveTab); // Preserved
+    }
+
+    [Fact]
+    public void SaveAppearance_NormalizesInvalidChoicesToDefaults()
+    {
+        var path = TempSettingsPath();
+        var service = Service(path);
+
+        var saved = service.SaveAppearance(new OperatorAppearanceSettings
+        {
+            Theme = "neon-rainbow",
+            Accent = "pink",
+            Density = "ultra",
+            BodyFont = "serif",
+            RailMode = "floating",
+            ConsoleMode = "maximized",
+            ActiveTab = "unknown",
+        });
+
+        Assert.Equal(OperatorAppearanceSettings.DefaultTheme, saved.Theme);
+        Assert.Equal(OperatorAppearanceSettings.DefaultAccent, saved.Accent);
+        Assert.Equal(OperatorAppearanceSettings.DefaultDensity, saved.Density);
+        Assert.Equal(OperatorAppearanceSettings.DefaultBodyFont, saved.BodyFont);
+        Assert.Equal(OperatorAppearanceSettings.DefaultRailMode, saved.RailMode);
+        Assert.Equal(OperatorAppearanceSettings.DefaultConsoleMode, saved.ConsoleMode);
+        Assert.Equal(OperatorAppearanceSettings.DefaultActiveTab, saved.ActiveTab);
+    }
+
+    [Fact]
+    public void ExistingOperatorSettingsContinueToWorkAfterAppearanceSettings()
+    {
+        var path = TempSettingsPath();
+        var service = Service(path);
+
+        // Save operator connection settings
+        var opSaved = service.Save(new OperatorSettings
+        {
+            DenBaseUrl = "http://example.com:5199",
+            SourceInstanceId = "test-source",
+            PollIntervalSeconds = 60,
+            MaxChangedFiles = 500,
+        });
+
+        // Save appearance settings
+        service.SaveAppearance(new OperatorAppearanceSettings
+        {
+            Theme = "graphite-dark",
+            Accent = "green",
+            Density = "spacious",
+        });
+
+        // Verify both are independently preserved
+        var opLoaded = service.Load();
+        var appearanceLoaded = service.LoadAppearance();
+
+        Assert.Equal("http://example.com:5199", opLoaded.DenBaseUrl);
+        Assert.Equal(60, opLoaded.PollIntervalSeconds);
+        Assert.Equal("graphite-dark", appearanceLoaded.Theme);
+        Assert.Equal("green", appearanceLoaded.Accent);
+        Assert.Equal("spacious", appearanceLoaded.Density);
+        Assert.Equal(OperatorAppearanceSettings.DefaultBodyFont, appearanceLoaded.BodyFont);
+    }
+
     private static OperatorSettingsService Service(string path, string generatedSourceInstanceId)
     {
         return new OperatorSettingsService(
             OperatorSettingsStorage.ForPath(path),
             () => generatedSourceInstanceId);
+    }
+
+    private static OperatorSettingsService Service(string path)
+    {
+        return new OperatorSettingsService(
+            OperatorSettingsStorage.ForPath(path));
     }
 
     private static string TempSettingsPath()

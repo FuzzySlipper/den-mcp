@@ -24,10 +24,22 @@ async function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs: num
   }
 }
 
+export interface ShellAppearanceSettings {
+  theme: string;
+  accent: string;
+  density: string;
+  bodyFont: string;
+  railMode: string;
+  consoleMode: string;
+  activeTab: string;
+}
+
 interface DenDesktopSidecarRuntimeApi {
   getOperatorStatus(): Promise<OperatorStatus>;
   getSettings(): Promise<OperatorSettings>;
   saveOperatorSettings(request: SaveOperatorSettingsRequest): Promise<OperatorSettings>;
+  getAppearanceSettings<T = ShellAppearanceSettings>(): Promise<T>;
+  saveAppearanceSettings<TRequest = Partial<ShellAppearanceSettings>, TResponse = ShellAppearanceSettings>(request: TRequest): Promise<TResponse>;
   refreshNow(): Promise<void>;
   listLocalSnapshots(): Promise<LocalSnapshotList>;
   listLocalSessionSnapshots(): Promise<LocalSessionSnapshotList>;
@@ -282,6 +294,14 @@ export async function getSettings(): Promise<OperatorSettings> {
 
 export async function saveOperatorSettings(request: SaveOperatorSettingsRequest): Promise<OperatorSettings> {
   return callSidecar('saveOperatorSettings', () => sidecarApi().saveOperatorSettings(request));
+}
+
+export async function getAppearanceSettings(): Promise<ShellAppearanceSettings> {
+  return callSidecar('getAppearanceSettings', () => sidecarApi().getAppearanceSettings<ShellAppearanceSettings>());
+}
+
+export async function saveAppearanceSettings(request: Partial<ShellAppearanceSettings>): Promise<ShellAppearanceSettings> {
+  return callSidecar('saveAppearanceSettings', () => sidecarApi().saveAppearanceSettings<Partial<ShellAppearanceSettings>, ShellAppearanceSettings>(request));
 }
 
 export async function refreshNow(): Promise<void> {

@@ -13,6 +13,8 @@ public static class DesktopSidecarProtocol
     public const string GetOperatorStatusCommand = "den_desktop.operator.get_status";
     public const string GetSettingsCommand = "den_desktop.operator.get_settings";
     public const string SaveSettingsCommand = "den_desktop.operator.save_settings";
+    public const string GetAppearanceSettingsCommand = "den_desktop.operator.get_appearance_settings";
+    public const string SaveAppearanceSettingsCommand = "den_desktop.operator.save_appearance_settings";
     public const string RefreshNowCommand = "den_desktop.operator.refresh_now";
     public const string ListLocalGitSnapshotsCommand = "den_desktop.operator.list_local_git_snapshots";
     public const string ListLocalSessionSnapshotsCommand = "den_desktop.operator.list_local_session_snapshots";

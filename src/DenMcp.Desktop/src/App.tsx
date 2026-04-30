@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useMemo, useState } from 'react';
+import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { AppShell } from './components/AppShell';
 import { ConnectionPanel } from './components/ConnectionPanel';
 import { DiagnosticsPane } from './components/DiagnosticsPane';
@@ -8,13 +8,41 @@ import { SessionPane } from './components/SessionPane';
 import { WorkspaceSummaryPane } from './components/WorkspaceSummaryPane';
 import { DesktopDiffSnapshotLatestResult, getLatestDiffSnapshot, GitFileStatus, LocalGitSnapshot } from './desktop/tauriApi';
 import { useOperatorRuntime } from './desktop/useOperatorRuntime';
-import { applyShellDataAttributes, loadShellState, nextConsoleMode, saveShellState, ShellState, ShellTabId } from './shellState';
+import { applyShellDataAttributes, defaultShellState, loadShellState, nextConsoleMode, parseShellState, saveShellState, ShellState, ShellTabId } from './shellState';
 import { snapshotKey } from './snapshotView';
 import './styles/index.css';
 
+function bridgeAppearanceToShellState(appearance: Record<string, string> | null, fallback: ShellState): ShellState {
+  if (!appearance) return fallback;
+  return parseShellState({
+    theme: appearance.theme,
+    accent: appearance.accent,
+    density: appearance.density,
+    bodyFont: appearance.bodyFont,
+    railMode: appearance.railMode,
+    consoleMode: appearance.consoleMode,
+    activeTab: appearance.activeTab,
+  }, fallback);
+}
+
 export function App() {
   const runtime = useOperatorRuntime();
-  const [shellState, setShellState] = useState<ShellState>(() => loadShellState(typeof window === 'undefined' ? null : window.localStorage));
+  const [shellState, setShellState] = useState<ShellState>(() => {
+    // Bootstrap from localStorage for immediate render, then bridge durable settings take over on mount.
+    return loadShellState(typeof window === 'undefined' ? null : window.localStorage);
+  });
+
+  // Once bridge appearance settings load, reconcile: durable bridge source wins over localStorage bootstrap.
+  const bridgeAppliedRef = useRef(false);
+  useEffect(() => {
+    if (runtime.appearanceSettings && !bridgeAppliedRef.current) {
+      bridgeAppliedRef.current = true;
+      setShellState((current) => {
+        const bridge = bridgeAppearanceToShellState(runtime.appearanceSettings as unknown as Record<string, string>, current);
+        return bridge;
+      });
+    }
+  }, [runtime.appearanceSettings]);
   const [activeSnapshotKey, setActiveSnapshotKey] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<GitFileStatus | null>(null);
   const [diff, setDiff] = useState<DesktopDiffSnapshotLatestResult | null>(null);
@@ -25,10 +53,23 @@ export function App() {
     if (typeof document !== 'undefined') {
       applyShellDataAttributes(document.documentElement, shellState);
     }
+    // Durable storage: save through the bridge (sidecar .NET runtime).
+    // Bootstrap/local fallback: localStorage for immediate render on next cold start.
+    runtime.saveAppearanceSettings({
+      theme: shellState.theme,
+      accent: shellState.accent,
+      density: shellState.density,
+      bodyFont: shellState.bodyFont,
+      railMode: shellState.railMode,
+      consoleMode: shellState.consoleMode,
+      activeTab: shellState.activeTab,
+    }).catch(() => {
+      // Bridge save is best-effort; localStorage bootstrap preserves the last known value.
+    });
     if (typeof window !== 'undefined') {
       saveShellState(window.localStorage, shellState);
     }
-  }, [shellState]);
+  }, [shellState, runtime.saveAppearanceSettings]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

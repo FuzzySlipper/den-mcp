@@ -36,15 +36,28 @@ test('sidecar schema bundle and representative frames are compatible with the ch
   assert.deepEqual(bundle.commands.map((command) => command.command), [
     'bridge.get_capabilities',
     'bridge.get_health',
+    'den_desktop.operator.get_appearance_settings',
     'den_desktop.operator.get_latest_diff_snapshot',
     'den_desktop.operator.get_settings',
     'den_desktop.operator.get_status',
     'den_desktop.operator.list_local_git_snapshots',
     'den_desktop.operator.list_local_session_snapshots',
     'den_desktop.operator.refresh_now',
+    'den_desktop.operator.save_appearance_settings',
     'den_desktop.operator.save_settings',
+    'den_desktop.terminal.ack_output',
+    'den_desktop.terminal.attach',
+    'den_desktop.terminal.detach',
+    'den_desktop.terminal.list_sessions',
+    'den_desktop.terminal.read_activity',
+    'den_desktop.terminal.reconnect',
+    'den_desktop.terminal.resize',
+    'den_desktop.terminal.send_input',
+    'den_desktop.terminal.terminate',
   ]);
   assert.deepEqual(bundle.events.map((event) => event.event), [
+    'den.terminal.session_list_updated',
+    'den.terminal.session_status_changed',
     'den://git-snapshot-updated',
     'den://operator-status',
     'den://session-snapshot-updated',
@@ -131,6 +144,7 @@ test('sidecar checked facade allow-lists health/capabilities/runtime commands an
     'assertGitSnapshotsEvent',
     'assertOperatorStatusEvent',
     'assertSessionSnapshotsEvent',
+    'getAppearanceSettings',
     'getCapabilities',
     'getHealth',
     'getLatestDiffSnapshot',
@@ -139,6 +153,7 @@ test('sidecar checked facade allow-lists health/capabilities/runtime commands an
     'listLocalSessionSnapshots',
     'listLocalSnapshots',
     'refreshNow',
+    'saveAppearanceSettings',
     'saveOperatorSettings',
   ].sort());
 });
@@ -177,6 +192,7 @@ test('preload sidecar API exposes no generic dispatch, token, endpoint, or node 
   api.onOperatorStatus((event) => events.push(event));
 
   assert.deepEqual(Object.keys(api).sort(), [
+    'getAppearanceSettings',
     'getCapabilities',
     'getHealth',
     'getLatestDiffSnapshot',
@@ -188,6 +204,7 @@ test('preload sidecar API exposes no generic dispatch, token, endpoint, or node 
     'onOperatorStatus',
     'onSessionSnapshots',
     'refreshNow',
+    'saveAppearanceSettings',
     'saveOperatorSettings',
   ].sort());
   assert.equal(api.dispatch, undefined);
