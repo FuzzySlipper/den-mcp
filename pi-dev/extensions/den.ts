@@ -18,7 +18,6 @@ import {
   reasoningCaptureOptionsFromConfig,
 } from "../lib/den-extension-config.ts";
 import { errorMessage, normalizeString } from "../lib/den-string-utils.ts";
-import { Type } from "typebox";
 import {
   compileResponse,
   formatSessionSummary,
@@ -521,19 +520,24 @@ export default function denExtension(pi: ExtensionAPI) {
     name: "den_collab_create_session",
     label: "Den Create Collaboration Session",
     description: "Create a Den collaboration session from markdown content with source context. Posts a session to Den so human or tooling can annotate segments.",
-    parameters: Type.Object({
-      raw_markdown: Type.String({ description: "Raw markdown content to annotate (e.g. agent response)." }),
-      project_id: Type.Optional(Type.String({ description: "Project ID. Defaults to current bound project." })),
-      task_id: Type.Optional(Type.Number({ description: "Optional Den task ID to link." })),
-      title: Type.Optional(Type.String({ description: "Optional session title." })),
-      role: Type.Optional(Type.String({ description: "Source role, e.g. assistant or user. Default: assistant." })),
-      source_kind: Type.Optional(Type.String({ description: "Source kind, e.g. den_message, pi_response, cli." })),
-      source_ref: Type.Optional(Type.String({ description: "Source reference ID." })),
-      source_uri: Type.Optional(Type.String({ description: "Source URI." })),
-      pi_run_id: Type.Optional(Type.String({ description: "Optional Pi run ID." })),
-      pi_session_id: Type.Optional(Type.String({ description: "Optional Pi session ID." })),
-      created_by: Type.Optional(Type.String({ description: "Who created the session. Defaults to bound agent." })),
-    }),
+    parameters: {
+      type: "object",
+      properties: {
+        raw_markdown: { type: "string", description: "Raw markdown content to annotate (e.g. agent response)." },
+        project_id: { type: "string", description: "Project ID. Defaults to current bound project." },
+        task_id: { type: "number", description: "Optional Den task ID to link." },
+        title: { type: "string", description: "Optional session title." },
+        role: { type: "string", description: "Source role, e.g. assistant or user. Default: assistant." },
+        source_kind: { type: "string", description: "Source kind, e.g. den_message, pi_response, cli." },
+        source_ref: { type: "string", description: "Source reference ID." },
+        source_uri: { type: "string", description: "Source URI." },
+        pi_run_id: { type: "string", description: "Optional Pi run ID." },
+        pi_session_id: { type: "string", description: "Optional Pi session ID." },
+        created_by: { type: "string", description: "Who created the session. Defaults to bound agent." },
+      },
+      required: ["raw_markdown"],
+      additionalProperties: false,
+    },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const cfg = await requireConfig(ctx);
       const result = await collabCreateSession(cfg, {
@@ -546,8 +550,15 @@ export default function denExtension(pi: ExtensionAPI) {
         source_ref: normalizeString(params.source_ref),
         source_uri: normalizeString(params.source_uri),
         pi_run_id: normalizeString(params.pi_run_id),
-        pi_session_id: normalizeString(params.pi_session_id),
+        pi_session_id: normalizeString(params.pi_session_id) ?? getPiRuntimeSessionId(ctx) ?? cfg.sessionId,
         created_by: normalizeString(params.created_by) ?? cfg.agent,
+        source_context: buildPiSourceContext(cfg, ctx, {
+          project_id: normalizeString(params.project_id) ?? cfg.projectId,
+          task_id: optionalNumber(params.task_id) ?? currentTaskId,
+          source_kind: normalizeString(params.source_kind) ?? "pi_response",
+          source_ref: normalizeString(params.source_ref),
+          source_uri: normalizeString(params.source_uri),
+        }),
       });
       return { content: [{ type: "text", text: result.text }], details: { session_id: result.session?.id ?? null } };
     },
@@ -557,12 +568,16 @@ export default function denExtension(pi: ExtensionAPI) {
     name: "den_collab_list_sessions",
     label: "Den List Collaboration Sessions",
     description: "List collaboration sessions for the current project, optionally filtered by task or status.",
-    parameters: Type.Object({
-      project_id: Type.Optional(Type.String({ description: "Project ID. Defaults to current bound project." })),
-      task_id: Type.Optional(Type.Number({ description: "Optional task ID filter." })),
-      status: Type.Optional(Type.String({ description: "Optional status filter: active, resolved, or archived." })),
-      limit: Type.Optional(Type.Number({ description: "Max results. Default 50." })),
-    }),
+    parameters: {
+      type: "object",
+      properties: {
+        project_id: { type: "string", description: "Project ID. Defaults to current bound project." },
+        task_id: { type: "number", description: "Optional task ID filter." },
+        status: { type: "string", description: "Optional status filter: active, resolved, or archived." },
+        limit: { type: "number", description: "Max results. Default 50." },
+      },
+      additionalProperties: false,
+    },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const cfg = await requireConfig(ctx);
       const projectId = normalizeString(params.project_id) ?? cfg.projectId;
@@ -587,10 +602,15 @@ export default function denExtension(pi: ExtensionAPI) {
     name: "den_collab_get_session",
     label: "Den Get Collaboration Session",
     description: "Get full collaboration session details including turns, segments, annotations, and drafts.",
-    parameters: Type.Object({
-      session_id: Type.Number({ description: "Collaboration session ID." }),
-      project_id: Type.Optional(Type.String({ description: "Project ID. Defaults to current bound project." })),
-    }),
+    parameters: {
+      type: "object",
+      properties: {
+        session_id: { type: "number", description: "Collaboration session ID." },
+        project_id: { type: "string", description: "Project ID. Defaults to current bound project." },
+      },
+      required: ["session_id"],
+      additionalProperties: false,
+    },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const cfg = await requireConfig(ctx);
       const projectId = normalizeString(params.project_id) ?? cfg.projectId;
@@ -604,15 +624,20 @@ export default function denExtension(pi: ExtensionAPI) {
     name: "den_collab_add_annotation",
     label: "Den Add Collaboration Annotation",
     description: "Add an annotation to a collaboration session segment. Types: note (comment), skip (no response needed), done (already handled), flag (needs discussion).",
-    parameters: Type.Object({
-      session_id: Type.Number({ description: "Collaboration session ID." }),
-      turn_id: Type.Number({ description: "Turn ID containing the segment." }),
-      segment_id: Type.Number({ description: "Segment ID to annotate." }),
-      annotation_type: Type.String({ description: "Annotation type: note, skip, done, or flag." }),
-      body: Type.Optional(Type.String({ description: "Optional annotation body text." })),
-      created_by: Type.Optional(Type.String({ description: "Who created the annotation. Defaults to bound agent." })),
-      project_id: Type.Optional(Type.String({ description: "Project ID. Defaults to current bound project." })),
-    }),
+    parameters: {
+      type: "object",
+      properties: {
+        session_id: { type: "number", description: "Collaboration session ID." },
+        turn_id: { type: "number", description: "Turn ID containing the segment." },
+        segment_id: { type: "number", description: "Segment ID to annotate." },
+        annotation_type: { type: "string", description: "Annotation type: note, skip, done, or flag." },
+        body: { type: "string", description: "Optional annotation body text." },
+        created_by: { type: "string", description: "Who created the annotation. Defaults to bound agent." },
+        project_id: { type: "string", description: "Project ID. Defaults to current bound project." },
+      },
+      required: ["session_id", "turn_id", "segment_id", "annotation_type"],
+      additionalProperties: false,
+    },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const cfg = await requireConfig(ctx);
       const projectId = normalizeString(params.project_id) ?? cfg.projectId;
@@ -634,15 +659,20 @@ export default function denExtension(pi: ExtensionAPI) {
     name: "den_collab_update_annotation",
     label: "Den Update Collaboration Annotation",
     description: "Update an existing annotation's type, body, or revision (optimistic concurrency).",
-    parameters: Type.Object({
-      session_id: Type.Number({ description: "Collaboration session ID." }),
-      annotation_id: Type.Number({ description: "Annotation ID to update." }),
-      expected_revision: Type.Number({ description: "Expected current revision for optimistic concurrency." }),
-      annotation_type: Type.Optional(Type.String({ description: "New annotation type." })),
-      body: Type.Optional(Type.String({ description: "New annotation body." })),
-      updated_by: Type.Optional(Type.String({ description: "Who updated the annotation. Defaults to bound agent." })),
-      project_id: Type.Optional(Type.String({ description: "Project ID. Defaults to current bound project." })),
-    }),
+    parameters: {
+      type: "object",
+      properties: {
+        session_id: { type: "number", description: "Collaboration session ID." },
+        annotation_id: { type: "number", description: "Annotation ID to update." },
+        expected_revision: { type: "number", description: "Expected current revision for optimistic concurrency." },
+        annotation_type: { type: "string", description: "New annotation type." },
+        body: { type: "string", description: "New annotation body." },
+        updated_by: { type: "string", description: "Who updated the annotation. Defaults to bound agent." },
+        project_id: { type: "string", description: "Project ID. Defaults to current bound project." },
+      },
+      required: ["session_id", "annotation_id", "expected_revision"],
+      additionalProperties: false,
+    },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const cfg = await requireConfig(ctx);
       const projectId = normalizeString(params.project_id) ?? cfg.projectId;
@@ -664,12 +694,17 @@ export default function denExtension(pi: ExtensionAPI) {
     name: "den_collab_compile_response",
     label: "Den Compile Collaboration Response",
     description: "Compile session annotations into a structured response draft and optionally save it as a Den draft. Produces the same format as the server-side CollaborationResponseCompiler.",
-    parameters: Type.Object({
-      session_id: Type.Number({ description: "Collaboration session ID." }),
-      turn_id: Type.Optional(Type.Number({ description: "Optional turn ID to scope compilation. Uses latest turn when omitted." })),
-      save_draft: Type.Optional(Type.Boolean({ description: "Save the compiled response as a draft. Default: true." })),
-      project_id: Type.Optional(Type.String({ description: "Project ID. Defaults to current bound project." })),
-    }),
+    parameters: {
+      type: "object",
+      properties: {
+        session_id: { type: "number", description: "Collaboration session ID." },
+        turn_id: { type: "number", description: "Optional turn ID to scope compilation. Uses latest turn when omitted." },
+        save_draft: { type: "boolean", description: "Save the compiled response as a draft. Default: true." },
+        project_id: { type: "string", description: "Project ID. Defaults to current bound project." },
+      },
+      required: ["session_id"],
+      additionalProperties: false,
+    },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const cfg = await requireConfig(ctx);
       const projectId = normalizeString(params.project_id) ?? cfg.projectId;
@@ -692,26 +727,41 @@ export default function denExtension(pi: ExtensionAPI) {
     name: "den_collab_add_turn",
     label: "Den Add Collaboration Turn",
     description: "Add a new annotatable turn to an existing collaboration session.",
-    parameters: Type.Object({
-      session_id: Type.Number({ description: "Collaboration session ID." }),
-      raw_markdown: Type.String({ description: "Raw markdown content for the new turn." }),
-      role: Type.Optional(Type.String({ description: "Source role. Default: assistant." })),
-      source_kind: Type.Optional(Type.String({ description: "Source kind." })),
-      source_ref: Type.Optional(Type.String({ description: "Source reference." })),
-      source_label: Type.Optional(Type.String({ description: "Source label." })),
-      source_uri: Type.Optional(Type.String({ description: "Source URI." })),
-      project_id: Type.Optional(Type.String({ description: "Project ID. Defaults to current bound project." })),
-    }),
+    parameters: {
+      type: "object",
+      properties: {
+        session_id: { type: "number", description: "Collaboration session ID." },
+        raw_markdown: { type: "string", description: "Raw markdown content for the new turn." },
+        role: { type: "string", description: "Source role. Default: assistant." },
+        source_kind: { type: "string", description: "Source kind." },
+        source_ref: { type: "string", description: "Source reference." },
+        source_label: { type: "string", description: "Source label." },
+        source_uri: { type: "string", description: "Source URI." },
+        project_id: { type: "string", description: "Project ID. Defaults to current bound project." },
+      },
+      required: ["session_id", "raw_markdown"],
+      additionalProperties: false,
+    },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const cfg = await requireConfig(ctx);
       const projectId = normalizeString(params.project_id) ?? cfg.projectId;
+      const sourceKind = normalizeString(params.source_kind);
+      const sourceContext = buildPiSourceContext(cfg, ctx, {
+        project_id: projectId,
+        task_id: currentTaskId,
+        source_kind: sourceKind,
+        source_ref: normalizeString(params.source_ref),
+        source_uri: normalizeString(params.source_uri),
+      });
+
       const turn = await collabAddTurn(cfg, projectId, params.session_id, {
         raw_markdown: params.raw_markdown,
         role: normalizeString(params.role) ?? "assistant",
-        source_kind: normalizeString(params.source_kind),
+        source_kind: sourceKind,
         source_ref: normalizeString(params.source_ref),
         source_label: normalizeString(params.source_label),
         source_uri: normalizeString(params.source_uri),
+        source_context: Object.keys(sourceContext).length > 0 ? sourceContext : undefined,
       });
       const segments = Array.isArray(turn.segments ?? turn.Segments) ? (turn.segments ?? turn.Segments) : [];
       return {
@@ -725,12 +775,17 @@ export default function denExtension(pi: ExtensionAPI) {
     name: "den_collab_update_session_status",
     label: "Den Update Session Status",
     description: "Update a collaboration session's status (active, resolved, archived) with optimistic concurrency check.",
-    parameters: Type.Object({
-      session_id: Type.Number({ description: "Collaboration session ID." }),
-      expected_status: Type.String({ description: "Expected current status for optimistic concurrency." }),
-      status: Type.String({ description: "New status: active, resolved, or archived." }),
-      project_id: Type.Optional(Type.String({ description: "Project ID. Defaults to current bound project." })),
-    }),
+    parameters: {
+      type: "object",
+      properties: {
+        session_id: { type: "number", description: "Collaboration session ID." },
+        expected_status: { type: "string", description: "Expected current status for optimistic concurrency." },
+        status: { type: "string", description: "New status: active, resolved, or archived." },
+        project_id: { type: "string", description: "Project ID. Defaults to current bound project." },
+      },
+      required: ["session_id", "expected_status", "status"],
+      additionalProperties: false,
+    },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const cfg = await requireConfig(ctx);
       const projectId = normalizeString(params.project_id) ?? cfg.projectId;
@@ -1325,35 +1380,44 @@ async function collabCreateSession(
     pi_run_id?: string;
     pi_session_id?: string;
     created_by: string;
+    source_context?: Record<string, unknown>;
   },
 ): Promise<{ session: any; text: string }> {
-  const body: any = {
+  const sourceContext = compactJsonObject({
     task_id: options.task_id,
+    pi_run_id: options.pi_run_id,
+    pi_session_id: options.pi_session_id,
+    source_kind: options.source_kind,
+    ...options.source_context,
+  });
+
+  const initialTurn: Record<string, unknown> = {
+    role: options.role,
+    source_kind: options.source_kind,
+    raw_markdown: options.raw_markdown,
+  };
+  // Only add optional turn fields if non-null
+  if (options.source_ref != null) initialTurn.source_ref = options.source_ref;
+  if (options.source_uri != null) initialTurn.source_uri = options.source_uri;
+  if (Object.keys(sourceContext).length > 0) initialTurn.source_context = sourceContext;
+
+  const body: Record<string, unknown> = {
     title: options.title,
     pi_run_id: options.pi_run_id,
     pi_session_id: options.pi_session_id,
     created_by: options.created_by,
-    initial_turn: {
-      role: options.role,
-      source_kind: options.source_kind,
-      source_ref: options.source_ref,
-      source_uri: options.source_uri,
-      source_context: {
-        taskId: options.task_id ?? null,
-        piSessionId: options.pi_session_id ?? null,
-      },
-      raw_markdown: options.raw_markdown,
-    },
+    initial_turn: initialTurn,
   };
-  // Remove undefined/null values
+  if (options.task_id != null) body.task_id = options.task_id;
+  // Remove undefined values only (keep null as explicit signal where allowed)
   for (const key of Object.keys(body)) {
-    if (body[key] === undefined || body[key] === null) delete body[key];
+    if (body[key] === undefined) delete body[key];
   }
-  for (const key of Object.keys(body.initial_turn)) {
-    if (body.initial_turn[key] === undefined || body.initial_turn[key] === null) delete body.initial_turn[key];
-  }
-  if (body.initial_turn.source_context && Object.keys(body.initial_turn.source_context).length === 0) {
-    delete body.initial_turn.source_context;
+  if (body.initial_turn && typeof body.initial_turn === "object") {
+    const turn = body.initial_turn as Record<string, unknown>;
+    for (const key of Object.keys(turn)) {
+      if (turn[key] === undefined) delete turn[key];
+    }
   }
 
   const session = await denFetch(cfg, `/api/projects/${esc(options.project_id)}/collaboration/sessions`, {
@@ -1438,18 +1502,19 @@ async function collabAddTurn(
     source_ref?: string;
     source_label?: string;
     source_uri?: string;
+    source_context?: Record<string, unknown>;
   },
 ): Promise<any> {
-  const body: any = {
+  const body: Record<string, unknown> = {
     role: options.role,
-    source_kind: options.source_kind,
-    source_ref: options.source_ref,
-    source_label: options.source_label,
-    source_uri: options.source_uri,
     raw_markdown: options.raw_markdown,
   };
-  for (const key of Object.keys(body)) {
-    if (body[key] === undefined) delete body[key];
+  if (options.source_kind !== undefined) body.source_kind = options.source_kind;
+  if (options.source_ref !== undefined) body.source_ref = options.source_ref;
+  if (options.source_label !== undefined) body.source_label = options.source_label;
+  if (options.source_uri !== undefined) body.source_uri = options.source_uri;
+  if (options.source_context !== undefined && Object.keys(options.source_context).length > 0) {
+    body.source_context = options.source_context;
   }
   return denFetch(cfg, `/api/projects/${esc(projectId)}/collaboration/sessions/${sessionId}/turns`, {
     method: "POST",
@@ -1543,6 +1608,42 @@ function optionalNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+export function buildPiSourceContext(cfg: DenConfig, ctx: any, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return compactJsonObject({
+    project_id: cfg.projectId,
+    current_task_id: currentTaskId,
+    agent: cfg.agent,
+    role: cfg.role,
+    instance_id: cfg.instanceId,
+    den_binding_session_id: cfg.sessionId,
+    pi_session_id: getPiRuntimeSessionId(ctx),
+    pi_session_file: getPiRuntimeSessionFile(ctx),
+    model: getPiRuntimeModel(ctx),
+    ...extra,
+  });
+}
+
+function getPiRuntimeSessionId(ctx: any): string | undefined {
+  return normalizeString(ctx?.sessionManager?.getSessionId?.());
+}
+
+function getPiRuntimeSessionFile(ctx: any): string | undefined {
+  return normalizeString(ctx?.sessionManager?.getSessionFile?.());
+}
+
+function getPiRuntimeModel(ctx: any): string | undefined {
+  const provider = normalizeString(ctx?.model?.provider);
+  const id = normalizeString(ctx?.model?.id ?? ctx?.model?.model);
+  if (provider && id) return `${provider}/${id}`;
+  return id ?? normalizeString(ctx?.model);
+}
+
+function compactJsonObject(value: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, item]) => item !== undefined && item !== null && item !== ""),
+  );
+}
+
 async function handleCollabCreate(
   cfg: DenConfig,
   args: string | undefined,
@@ -1585,33 +1686,68 @@ async function handleCollabCreate(
     source_kind: "pi_response",
     created_by: cfg.agent,
     pi_run_id: cfg.instanceId,
-    pi_session_id: cfg.sessionId,
+    pi_session_id: getPiRuntimeSessionId(ctx) ?? cfg.sessionId,
+    source_context: buildPiSourceContext(cfg, ctx, {
+      task_id: taskId ?? currentTaskId,
+      source_kind: "pi_response",
+    }),
   });
 
   return { lines: result.text.split("\n") };
 }
 
-async function getLastAssistantResponse(ctx: any): Promise<string | undefined> {
-  // Try to get the last assistant message from the Pi session context
+export async function getLastAssistantResponse(ctx: any): Promise<string | undefined> {
   try {
     if (typeof ctx?.getLastAssistantResponse === "function") {
-      return await ctx.getLastAssistantResponse();
+      const direct = normalizeString(await ctx.getLastAssistantResponse());
+      if (direct) return direct;
     }
-    if (typeof ctx?.getMessages === "function") {
-      const messages = ctx.getMessages();
-      if (Array.isArray(messages)) {
-        for (let i = messages.length - 1; i >= 0; i--) {
-          const msg = messages[i];
-          if (msg?.role === "assistant" && typeof msg?.content === "string" && msg.content.trim()) {
-            return msg.content;
-          }
-        }
-      }
-    }
+
+    const fromBranch = extractLastAssistantResponseFromEntries(ctx?.sessionManager?.getBranch?.());
+    if (fromBranch) return fromBranch;
+
+    const fromMessages = extractLastAssistantResponseFromEntries(ctx?.getMessages?.());
+    if (fromMessages) return fromMessages;
   } catch {
-    // Best-effort
+    // Best-effort.
   }
   return undefined;
+}
+
+export function extractLastAssistantResponseFromEntries(entries: unknown): string | undefined {
+  if (!Array.isArray(entries)) return undefined;
+
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i] as any;
+    const message = entry?.message ?? entry;
+    const text = extractAssistantMessageText(message);
+    if (text) return text;
+  }
+
+  return undefined;
+}
+
+export function extractAssistantMessageText(message: any): string | undefined {
+  if (!message || message.role !== "assistant") return undefined;
+  if (message.stopReason === "toolUse" || message.stopReason === "tool_use" || message.stopReason === "error" || message.stopReason === "aborted") {
+    return undefined;
+  }
+
+  const content = message.content;
+  if (typeof content === "string") return normalizeString(content);
+  if (!Array.isArray(content)) return normalizeString(message.text);
+  if (content.some((block: any) => block?.type === "toolCall" || block?.type === "tool_call")) return undefined;
+
+  const texts = content
+    .map((block: any) => {
+      if (typeof block === "string") return block;
+      if (block?.type === "text" || block?.type === "output_text") return block.text;
+      return undefined;
+    })
+    .map((text: unknown) => normalizeString(text))
+    .filter((text: string | undefined): text is string => Boolean(text));
+
+  return texts.length > 0 ? texts.join("\n") : undefined;
 }
 
 async function handleCollabList(
@@ -1747,10 +1883,16 @@ async function handleCollabAddTurn(
     }
   }
 
+  const sourceContext = buildPiSourceContext(cfg, ctx, {
+    task_id: currentTaskId,
+    source_kind: "pi_response",
+  });
+
   const turn = await collabAddTurn(cfg, cfg.projectId, sessionId, {
     raw_markdown: markdown,
     role: "assistant",
     source_kind: "pi_response",
+    source_context: Object.keys(sourceContext).length > 0 ? sourceContext : undefined,
   });
 
   const segments = Array.isArray(turn.segments ?? turn.Segments) ? (turn.segments ?? turn.Segments) : [];

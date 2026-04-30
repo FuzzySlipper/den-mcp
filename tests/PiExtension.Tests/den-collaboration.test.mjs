@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { compileResponse, formatSessionSummary, formatSessionDetail } from '../../pi-dev/lib/den-collaboration.ts';
+import { buildPiSourceContext, extractLastAssistantResponseFromEntries } from '../../pi-dev/extensions/den.ts';
 
 // ---------------------------------------------------------------------------
 // compileResponse
@@ -204,4 +205,52 @@ test('formatSessionDetail with turns but no annotations', () => {
   assert.ok(lines.some(l => l.includes('Session #2')));
   assert.ok(lines.some(l => l.includes('[1] paragraph')));
   assert.ok(!lines.some(l => l.includes('--- Annotations')));
+});
+
+// ---------------------------------------------------------------------------
+// Pi collaboration context helpers
+// ---------------------------------------------------------------------------
+
+test('extractLastAssistantResponseFromEntries reads latest text-only assistant branch message', () => {
+  const entries = [
+    { type: 'message', message: { role: 'assistant', content: 'older text' } },
+    { type: 'message', message: { role: 'assistant', stopReason: 'toolUse', content: [{ type: 'text', text: 'tool preface' }, { type: 'toolCall', name: 'bash' }] } },
+    { type: 'message', message: { role: 'assistant', stopReason: 'stop', content: [
+      { type: 'thinking', thinking: 'private scratchpad' },
+      { type: 'text', text: 'final answer' },
+      { type: 'reasoning', reasoning: 'internal' },
+    ] } },
+  ];
+
+  assert.equal(extractLastAssistantResponseFromEntries(entries), 'final answer');
+});
+
+test('extractLastAssistantResponseFromEntries skips tool-use messages and falls back', () => {
+  const entries = [
+    { type: 'message', message: { role: 'assistant', content: [{ type: 'text', text: 'usable answer' }] } },
+    { type: 'message', message: { role: 'assistant', stopReason: 'tool_use', content: [{ type: 'text', text: 'ignore me' }] } },
+  ];
+
+  assert.equal(extractLastAssistantResponseFromEntries(entries), 'usable answer');
+});
+
+test('buildPiSourceContext includes runtime identifiers and removes empty values', () => {
+  const context = buildPiSourceContext(
+    { projectId: 'den-mcp', agent: 'pi', role: 'conductor', instanceId: 'inst-1', sessionId: 'den-session' },
+    {
+      sessionManager: {
+        getSessionId: () => 'pi-session',
+        getSessionFile: () => '/tmp/pi-session.jsonl',
+      },
+      model: { provider: 'test-provider', id: 'test-model' },
+    },
+    { task_id: 918, source_kind: 'pi_response', source_ref: undefined },
+  );
+
+  assert.equal(context.project_id, 'den-mcp');
+  assert.equal(context.task_id, 918);
+  assert.equal(context.pi_session_id, 'pi-session');
+  assert.equal(context.pi_session_file, '/tmp/pi-session.jsonl');
+  assert.equal(context.model, 'test-provider/test-model');
+  assert.equal(context.source_ref, undefined);
 });
