@@ -30,6 +30,8 @@ import {
   buildTerminalSessionOverview,
   canAttachInline,
   relativeActivityLabel,
+  terminalInlineAttachButtonLabel,
+  terminalSessionCardActionHint,
   terminalSessionRefreshUrgency,
   terminalStatusLabel,
   type TerminalOverviewSession,
@@ -385,14 +387,31 @@ function TerminalOverviewWorkbench({ snapshots, workspaces = [] }: Props) {
           </div>
 
           {selectedOverview ? (
-            <div className="terminal-selected-meta">
-              <span>project <strong>{selectedOverview.projectId ?? '—'}</strong></span>
-              <span>task <strong>{selectedOverview.taskId ? `#${selectedOverview.taskId}` : '—'}</strong></span>
-              <span>workspace <strong>{selectedOverview.workspaceId ?? '—'}</strong></span>
-              <span>backend <strong>{selectedOverview.backend}</strong></span>
-              <span>last activity <strong>{relativeActivityLabel(selectedOverview.lastActivityAt ?? selectedOverview.lastObservedAt)}</strong></span>
-              <span>authority <strong>{selectedOverview.authority === 'local' ? 'local sidecar' : 'observed only'}</strong></span>
-            </div>
+            <>
+              <div className="terminal-selected-meta">
+                <span>project <strong>{selectedOverview.projectId ?? '—'}</strong></span>
+                <span>task <strong>{selectedOverview.taskId ? `#${selectedOverview.taskId}` : '—'}</strong></span>
+                <span>workspace <strong>{selectedOverview.workspaceId ?? '—'}</strong></span>
+                <span>backend <strong>{selectedOverview.backend}</strong></span>
+                <span>last activity <strong>{relativeActivityLabel(selectedOverview.lastActivityAt ?? selectedOverview.lastObservedAt)}</strong></span>
+                <span>authority <strong>{selectedOverview.authority === 'local' ? 'local sidecar' : 'observed only'}</strong></span>
+              </div>
+              <div className="terminal-selected-actions">
+                <button
+                  type="button"
+                  onClick={() => void attachToSession(selectedOverview.sessionId)}
+                  disabled={!canAttachInline(selectedOverview)}
+                  aria-label={`${terminalInlineAttachButtonLabel(selectedOverview, attach?.sessionId === selectedOverview.sessionId)} ${selectedOverview.displayName}`}
+                >
+                  {terminalInlineAttachButtonLabel(selectedOverview, attach?.sessionId === selectedOverview.sessionId)}
+                </button>
+                <span className="muted">
+                  {canAttachInline(selectedOverview)
+                    ? 'Single-click selects; use this button, Enter, or double-click to attach.'
+                    : terminalSessionCardActionHint(selectedOverview)}
+                </span>
+              </div>
+            </>
           ) : null}
 
           <div className="terminal-state-line">
@@ -452,11 +471,16 @@ function TerminalSessionCard({
   onExternalAttach: () => void;
 }) {
   const inlineAttach = canAttachInline(session);
+  const inlineAttachLabel = terminalInlineAttachButtonLabel(session, attached);
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    event.preventDefault();
-    if (inlineAttach) onAttach();
-    else onSelect();
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      if (inlineAttach) onAttach();
+      else onSelect();
+    } else if (event.key === ' ') {
+      event.preventDefault();
+      onSelect();
+    }
   };
   const stop = (event: MouseEvent<HTMLButtonElement>) => event.stopPropagation();
 
@@ -465,10 +489,11 @@ function TerminalSessionCard({
       className={`terminal-session-card ${active ? 'active' : ''} ${session.stale ? 'calm' : ''}`}
       role="button"
       tabIndex={0}
-      onClick={() => { inlineAttach ? onAttach() : onSelect(); }}
+      onClick={onSelect}
+      onDoubleClick={() => { if (inlineAttach) onAttach(); }}
       onKeyDown={handleKeyDown}
       aria-pressed={active}
-      aria-label={`${session.displayName}, ${terminalStatusLabel(session.status)}, ${inlineAttach ? 'attachable' : 'read only'}`}
+      aria-label={`${session.displayName}, ${terminalStatusLabel(session.status)}, ${terminalSessionCardActionHint(session)}`}
     >
       <div className="terminal-card-topline">
         <div>
@@ -514,8 +539,8 @@ function TerminalSessionCard({
         </ol>
       ) : null}
 
-      <div className="terminal-card-actions">
-        <button type="button" onClick={(event) => { stop(event); onAttach(); }} disabled={!inlineAttach}>Attach inline</button>
+      <div className="terminal-card-actions" onDoubleClick={(event) => event.stopPropagation()}>
+        <button type="button" onClick={(event) => { stop(event); onAttach(); }} disabled={!inlineAttach}>{inlineAttachLabel}</button>
         <button type="button" className="secondary" onClick={(event) => { stop(event); onReconnect(); }} disabled={!attached || !session.capabilities.canReconnect}>Reconnect</button>
         <button type="button" className="secondary" onClick={(event) => { stop(event); onDetach(); }} disabled={!attached || !session.capabilities.canDetach}>Detach</button>
         <button type="button" className="secondary" onClick={(event) => { stop(event); onTerminate(); }} disabled={!session.capabilities.canTerminate}>Terminate</button>

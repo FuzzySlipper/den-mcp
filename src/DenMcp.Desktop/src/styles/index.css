@@ -975,6 +975,8 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid color-mix(i
 .terminal-attach-panel { position: sticky; top: 0; display: grid; gap: var(--sp-3); min-width: 0; }
 .terminal-selected-meta { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); color: var(--fg-tertiary); }
 .terminal-selected-meta strong { color: var(--fg-primary); }
+.terminal-selected-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+.terminal-selected-actions .muted { font-size: var(--fs-xs); }
 .external-attach-box { display: grid; gap: var(--sp-2); border: var(--bw) solid var(--bd-default); border-radius: var(--r-lg); background: var(--bg-input); padding: var(--sp-3); }
 .external-attach-box p { margin: var(--sp-1) 0 0; color: var(--fg-tertiary); }
 .external-attach-box code { display: block; overflow-x: auto; border: var(--bw) solid var(--bd-subtle); border-radius: var(--r-md); padding: var(--sp-2); color: var(--accent); background: color-mix(in oklab, var(--bg-app) 85%, black 15%); font-family: var(--font-mono); }

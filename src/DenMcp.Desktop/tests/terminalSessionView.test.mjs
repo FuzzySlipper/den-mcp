@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  TERMINAL_ATTACH_INTERACTION_DECISION,
   buildTerminalSessionOverview,
   canAttachInline,
   relativeActivityLabel,
+  terminalInlineAttachButtonLabel,
+  terminalSessionCardActionHint,
   terminalSessionRefreshUrgency,
   terminalStatusLabel,
 } from '../src/terminalSessionView.ts';
@@ -101,6 +104,60 @@ test('stale/source offline labels are calm and relative activity is readable', (
   assert.equal(rows[0].statusTone, 'idle');
   assert.equal(terminalStatusLabel('source_offline'), 'source offline');
   assert.equal(relativeActivityLabel('2026-04-30T00:00:00.000Z', Date.parse('2026-04-30T00:05:00.000Z')), '5m ago');
+});
+
+test('terminal attach labels encode select-first explicit attach UX', () => {
+  const [attachable] = buildTerminalSessionOverview([
+    {
+      session_id: 'pty-1',
+      display_name: 'PTY 1',
+      kind: 'terminal',
+      backend: 'direct_pty',
+      status: 'running',
+      project_id: 'den-mcp',
+      task_id: 1038,
+      workspace_id: 'ws-main',
+      cwd: '/work/den-mcp',
+      can_attach: true,
+      can_stream_terminal: true,
+      can_send_input: true,
+      can_resize: true,
+      can_detach: true,
+      can_reconnect: true,
+      can_terminate: true,
+      last_activity_at: '2026-04-30T00:01:00.000Z',
+      last_observed_at: '2026-04-30T00:01:00.000Z',
+      warnings: [],
+    },
+  ], [], Date.parse('2026-04-30T00:02:20.000Z'));
+  const [externalOnly] = buildTerminalSessionOverview([
+    {
+      session_id: 'tmux-1',
+      display_name: 'tmux detached',
+      kind: 'terminal',
+      backend: 'tmux',
+      status: 'running',
+      project_id: 'den-mcp',
+      task_id: 1038,
+      workspace_id: 'ws-main',
+      cwd: '/work/den-mcp',
+      can_attach: false,
+      can_stream_terminal: false,
+      can_open_external_attach: true,
+      last_activity_at: '2026-04-30T00:01:00.000Z',
+      last_observed_at: '2026-04-30T00:01:00.000Z',
+      warnings: [],
+    },
+  ], [], Date.parse('2026-04-30T00:02:20.000Z'));
+  const [readOnly] = buildTerminalSessionOverview([], [snapshot()], Date.parse('2026-04-30T00:03:00.000Z'));
+
+  assert.equal(TERMINAL_ATTACH_INTERACTION_DECISION, 'select_first_explicit_attach');
+  assert.equal(terminalInlineAttachButtonLabel(attachable), 'Attach inline');
+  assert.equal(terminalInlineAttachButtonLabel(attachable, true), 'Reattach inline');
+  assert.equal(terminalSessionCardActionHint(attachable), 'Single click selects; Attach inline, Enter, or double-click attaches');
+  assert.equal(terminalSessionCardActionHint(externalOnly), 'Single click selects; External attach shows copy-only attach information');
+  assert.equal(terminalInlineAttachButtonLabel(readOnly), 'Inline attach unavailable');
+  assert.equal(terminalSessionCardActionHint(readOnly), 'Single click selects and previews metadata');
 });
 
 test('terminal event refresh urgency favors boundary changes over noisy activity', () => {

@@ -4,6 +4,7 @@ import { recentActivityItems, type RecentActivityItem } from './sessionView.ts';
 export type TerminalOverviewAuthority = 'local' | 'observed';
 export type TerminalStatusTone = 'ok' | 'running' | 'idle' | 'warn' | 'err' | 'info';
 export type TerminalSessionRefreshUrgency = 'immediate' | 'coalesced';
+export type TerminalAttachInteractionDecision = 'select_first_explicit_attach';
 
 export interface TerminalSessionRefreshEvent {
   kind: 'status' | 'lifecycle';
@@ -50,6 +51,11 @@ export interface TerminalOverviewSession {
 }
 
 const STALE_AFTER_MS = 120_000;
+
+// Product decision for Terminals tab cards: selecting and attaching are separate.
+// Single click selects/previews metadata; explicit Attach, Enter, or double-click attaches.
+export const TERMINAL_ATTACH_INTERACTION_DECISION: TerminalAttachInteractionDecision = 'select_first_explicit_attach';
+
 const IMMEDIATE_REFRESH_LIFECYCLE_EVENTS = new Set(['den.terminal.exit', 'den.terminal.error']);
 const IMMEDIATE_REFRESH_STATUSES = new Set(['exited', 'failed', 'crashed', 'detached', 'terminated']);
 
@@ -88,6 +94,17 @@ export function buildTerminalSessionOverview(
 
 export function canAttachInline(session: TerminalOverviewSession): boolean {
   return session.capabilities.canAttach && session.capabilities.canStreamTerminal && !session.readOnly;
+}
+
+export function terminalInlineAttachButtonLabel(session: TerminalOverviewSession, attached = false): string {
+  if (!canAttachInline(session)) return 'Inline attach unavailable';
+  return attached ? 'Reattach inline' : 'Attach inline';
+}
+
+export function terminalSessionCardActionHint(session: TerminalOverviewSession): string {
+  if (canAttachInline(session)) return 'Single click selects; Attach inline, Enter, or double-click attaches';
+  if (session.capabilities.canOpenExternalAttach) return 'Single click selects; External attach shows copy-only attach information';
+  return 'Single click selects and previews metadata';
 }
 
 export function terminalStatusLabel(status: string | null | undefined): string {
