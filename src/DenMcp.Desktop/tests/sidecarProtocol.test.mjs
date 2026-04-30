@@ -295,9 +295,34 @@ test('app-agent helper DTOs use typed commands and events without generic dispat
     },
   });
   const facade = createSidecarBridgeFacade(client);
+  const explicitSelection = {
+    project_id: 'den-mcp',
+    task_id: 1023,
+    workspace_id: 'workspace-1',
+    current_route: '/tasks/1023',
+    current_tab: 'context',
+    session_id: 'session-1',
+    selected_file_path: 'src/DenMcp.Desktop/src/electron/sidecarProtocol.ts',
+    selected_diff_range: 'L161-L168',
+  };
 
-  await facade.appAgentListTools({ selection: { project_id: 'den-mcp', task_id: 1023 } });
-  await facade.appAgentBuildContext({ selection: { project_id: 'den-mcp' } });
+  await facade.appAgentListTools({ selection: explicitSelection });
+  await facade.appAgentBuildContext({
+    selection: {
+      project_id: 'den-mcp',
+      task_id: null,
+      workspace_id: null,
+      current_route: null,
+      current_tab: null,
+      session_id: null,
+      selected_file_path: null,
+      selected_diff_range: null,
+    },
+  });
+  await assert.rejects(
+    () => facade.appAgentBuildContext({ selection: { project_id: 'den-mcp', unexpected_selection_ref: true } }),
+    /den_desktop\.app_agent\.build_context\.request\.selection -> app_agent_selection has unexpected property 'unexpected_selection_ref'/,
+  );
   await facade.appAgentInvokeTool({ tool_name: 'summarize_output', input: { text: 'hello' } });
   await facade.appAgentCancelRequest({ request_id: 'req_app_agent_3', reason: 'user_requested' });
   facade.assertAppAgentRunStateEvent({
@@ -325,6 +350,7 @@ test('app-agent helper DTOs use typed commands and events without generic dispat
     'den_desktop.app_agent.invoke_tool',
     'den_desktop.app_agent.cancel_request',
   ]);
+  assert.deepEqual(sent[0].payload.selection, explicitSelection);
   assert.equal(facade.dispatch, undefined);
 });
 

@@ -158,7 +158,16 @@ export interface TerminalListSessionsRequest extends Record<string, JsonValue | 
   status?: string | null;
 }
 
-export type AppAgentSelection = Record<string, JsonValue>;
+export interface AppAgentSelection {
+  project_id?: string | null;
+  task_id?: number | null;
+  workspace_id?: string | null;
+  current_route?: string | null;
+  current_tab?: string | null;
+  session_id?: string | null;
+  selected_file_path?: string | null;
+  selected_diff_range?: string | null;
+}
 
 export interface TasksDashboardSnapshotRequest extends Record<string, JsonValue | undefined> {
   project_id: string;
@@ -238,7 +247,7 @@ export interface TasksDashboardFreshness {
   errors: string[];
 }
 
-export interface AppAgentBuildContextRequest extends Record<string, JsonValue | undefined> {
+export interface AppAgentBuildContextRequest {
   selection?: AppAgentSelection;
   agent_run_id?: string | null;
   parent_request_id?: string | null;
@@ -247,11 +256,11 @@ export interface AppAgentBuildContextRequest extends Record<string, JsonValue | 
   message_limit?: number;
 }
 
-export interface AppAgentListToolsRequest extends Record<string, JsonValue | undefined> {
+export interface AppAgentListToolsRequest {
   selection?: AppAgentSelection;
 }
 
-export interface AppAgentInvokeToolRequest extends Record<string, JsonValue | undefined> {
+export interface AppAgentInvokeToolRequest {
   tool_name: string;
   input?: Record<string, JsonValue>;
   selection?: AppAgentSelection;
@@ -494,11 +503,11 @@ export function createSidecarBridgeFacade(client: SidecarBridgeClient) {
     consoleRunCommand: async <TRequest, TResponse>(request: TRequest): Promise<TResponse> =>
       facade.consoleRunCommand(request as JsonValue) as Promise<TResponse>,
     appAgentBuildContext: async <TResponse = AppAgentResponse>(request: AppAgentBuildContextRequest = {}): Promise<TResponse> =>
-      facade.appAgentBuildContext(request as JsonValue) as Promise<TResponse>,
+      facade.appAgentBuildContext(request as unknown as JsonValue) as Promise<TResponse>,
     appAgentListTools: async <TResponse = AppAgentResponse>(request: AppAgentListToolsRequest = {}): Promise<TResponse> =>
-      facade.appAgentListTools(request as JsonValue) as Promise<TResponse>,
+      facade.appAgentListTools(request as unknown as JsonValue) as Promise<TResponse>,
     appAgentInvokeTool: async <TResponse = AppAgentResponse>(request: AppAgentInvokeToolRequest): Promise<TResponse> =>
-      facade.appAgentInvokeTool(request as JsonValue) as Promise<TResponse>,
+      facade.appAgentInvokeTool(request as unknown as JsonValue) as Promise<TResponse>,
     appAgentCancelRequest: async <TResponse = AppAgentResponse>(request: AppAgentCancelRequest): Promise<TResponse> =>
       facade.appAgentCancelRequest(request as JsonValue) as Promise<TResponse>,
     tasksGetDashboardSnapshot: async <TResponse = TasksDashboardSnapshot>(request: TasksDashboardSnapshotRequest): Promise<TResponse> =>
