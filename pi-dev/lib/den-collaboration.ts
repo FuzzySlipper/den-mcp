@@ -224,7 +224,7 @@ function formatAnnotationLine(annotation: ReturnType<typeof normalizeAnnotation>
 export function formatSessionSummary(session: any, indent = ""): string[] {
   const lines: string[] = [];
   lines.push(
-    `${indent}Session #${session.id}${session.title ? `: ${session.title}` : ""} [${session.status ?? session.status}]`,
+    `${indent}Session #${session.id}${session.title ? `: ${session.title}` : ""} [${session.status ?? session.Status}]`,
   );
   if (session.task_id ?? session.taskId) lines.push(`${indent}  Task #${session.task_id ?? session.taskId}`);
   if (session.pi_run_id ?? session.piRunId) lines.push(`${indent}  Pi run: ${session.pi_run_id ?? session.piRunId}`);

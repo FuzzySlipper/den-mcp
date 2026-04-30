@@ -334,6 +334,7 @@ den_collab_list_sessions         List sessions for the current project
 den_collab_get_session           Get full session detail with segments/annotations/drafts
 den_collab_add_annotation        Add a note/skip/done/flag annotation to a segment
 den_collab_update_annotation     Update an existing annotation (optimistic concurrency)
+den_collab_delete_annotation     Delete an annotation (optimistic concurrency)
 den_collab_compile_response      Compile annotations into a structured response draft
 den_collab_add_turn              Add a new annotatable turn to a session
 den_collab_update_session_status Change session status (active/resolved/archived)
@@ -346,6 +347,7 @@ den_collab_update_session_status Change session status (active/resolved/archived
 /den-collab-list [--task <id>] [--status active|resolved|archived]
 /den-collab-open <session_id>
 /den-collab-annotate <session_id> <segment_id> <note|skip|done|flag> [body]
+/den-collab-delete-annotation <session_id> <annotation_id> <expected_revision>
 /den-collab-compile <session_id> [turn_id]
 /den-collab-add-turn <session_id> <markdown or ->
 /den-collab-status <session_id> <expected_status> <new_status>
@@ -356,7 +358,7 @@ den_collab_update_session_status Change session status (active/resolved/archived
 **Human starts a collaboration session from the last assistant response:**
 
 ```text
-/den-collab-create - --title "Annotate architecture plan"
+/den-collab-create --title "Annotate architecture plan" -
 
 Session #42 created.
   Session #42: Annotate architecture plan [active]
@@ -410,12 +412,16 @@ Session #42: Annotate architecture plan [active]
   [flag]: Needs discussion on auth model (user)
 ```
 
-**Annotate a segment:**
+**Annotate or delete an annotation:**
 
 ```text
 /den-collab-annotate 42 3 flag "Add rate limiting concerns"
 
 Annotation #101 (flag) created on segment #3.
+
+/den-collab-delete-annotation 42 101 1
+
+Annotation #101 deleted from session #42.
 ```
 
 **Compile the response draft:**
@@ -444,21 +450,26 @@ requiring Desktop or TUI:
 1. **Create** a session with `den_collab_create_session`, linking to task and run.
 2. **List** open sessions with `den_collab_list_sessions` to find pending ones.
 3. **Get** session detail with `den_collab_get_session` to read segments and annotations.
-4. **Compile** response with `den_collab_compile_response` to consume annotations
+4. **Add/update/delete annotations** with `den_collab_add_annotation`,
+   `den_collab_update_annotation`, and `den_collab_delete_annotation`.
+5. **Compile** response with `den_collab_compile_response` to consume annotations
    as structured text. The saved draft is also visible in Den Desktop.
-5. **Add a new turn** with `den_collab_add_turn` for follow-up responses.
-6. **Resolve** the session with `den_collab_update_session_status` when done.
+6. **Add a new turn** with `den_collab_add_turn` for follow-up responses.
+7. **Resolve** the session with `den_collab_update_session_status` when done.
 
 ### Metadata and linking
 
 Sessions created by Pi tools include in the `source_context`:
 
-- `taskId`: the current Den task ID (or provided task_id)
-- `piSessionId`: the Pi session ID
+- `project_id`: the Den project ID
+- `task_id` / `current_task_id`: the linked or current Den task ID
+- `agent`, `role`, `instance_id`, and `den_binding_session_id`: Den agent binding context
+- `pi_session_id` and `pi_session_file`: Pi runtime session identifiers when available
 - `model`: the active model provider/id when available
+- `source_kind`, `source_ref`, and `source_uri`: source provenance when provided
 
-Tools also set `pi_run_id` to the instance ID and `pi_session_id` to the
-session ID for provenance.
+Tools also set top-level `pi_run_id` to the instance ID and `pi_session_id` to
+the Pi runtime session ID when available.
 
 ### Implementation notes
 

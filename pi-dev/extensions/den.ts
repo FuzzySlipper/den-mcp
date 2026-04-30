@@ -64,6 +64,8 @@ const DEFAULT_BASE_URL = "http://192.168.1.10:5199";
 const HEARTBEAT_SECONDS = 60;
 const CONDUCTOR_GUIDANCE_SLUG = "pi-conductor-guidance";
 const GLOBAL_CONDUCTOR_GUIDANCE_SLUG = "pi-conductor-guidance-default";
+const COLLAB_ANNOTATION_TYPES = ["note", "skip", "done", "flag"] as const;
+const COLLAB_SESSION_STATUSES = ["active", "resolved", "archived"] as const;
 const EMPTY_TOOL_PARAMETERS = {
   type: "object",
   properties: {},
@@ -487,6 +489,15 @@ export default function denExtension(pi: ExtensionAPI) {
     },
   });
 
+  pi.registerCommand("den-collab-delete-annotation", {
+    description: "Delete an annotation with optimistic concurrency. Usage: /den-collab-delete-annotation <session_id> <annotation_id> <expected_revision>",
+    handler: async (args, ctx) => {
+      const cfg = await requireConfig(ctx);
+      const result = await handleCollabDeleteAnnotation(cfg, args);
+      ctx.ui.notify(result.summary, "info");
+    },
+  });
+
   pi.registerCommand("den-collab-compile", {
     description: "Compile a response draft from session annotations. Usage: /den-collab-compile <session_id> [turn_id]",
     handler: async (args, ctx) => {
@@ -573,7 +584,7 @@ export default function denExtension(pi: ExtensionAPI) {
       properties: {
         project_id: { type: "string", description: "Project ID. Defaults to current bound project." },
         task_id: { type: "number", description: "Optional task ID filter." },
-        status: { type: "string", description: "Optional status filter: active, resolved, or archived." },
+        status: { type: "string", enum: COLLAB_SESSION_STATUSES, description: "Optional status filter: active, resolved, or archived." },
         limit: { type: "number", description: "Max results. Default 50." },
       },
       additionalProperties: false,
@@ -630,7 +641,7 @@ export default function denExtension(pi: ExtensionAPI) {
         session_id: { type: "number", description: "Collaboration session ID." },
         turn_id: { type: "number", description: "Turn ID containing the segment." },
         segment_id: { type: "number", description: "Segment ID to annotate." },
-        annotation_type: { type: "string", description: "Annotation type: note, skip, done, or flag." },
+        annotation_type: { type: "string", enum: COLLAB_ANNOTATION_TYPES, description: "Annotation type: note, skip, done, or flag." },
         body: { type: "string", description: "Optional annotation body text." },
         created_by: { type: "string", description: "Who created the annotation. Defaults to bound agent." },
         project_id: { type: "string", description: "Project ID. Defaults to current bound project." },
@@ -665,7 +676,7 @@ export default function denExtension(pi: ExtensionAPI) {
         session_id: { type: "number", description: "Collaboration session ID." },
         annotation_id: { type: "number", description: "Annotation ID to update." },
         expected_revision: { type: "number", description: "Expected current revision for optimistic concurrency." },
-        annotation_type: { type: "string", description: "New annotation type." },
+        annotation_type: { type: "string", enum: COLLAB_ANNOTATION_TYPES, description: "New annotation type." },
         body: { type: "string", description: "New annotation body." },
         updated_by: { type: "string", description: "Who updated the annotation. Defaults to bound agent." },
         project_id: { type: "string", description: "Project ID. Defaults to current bound project." },
@@ -686,6 +697,35 @@ export default function denExtension(pi: ExtensionAPI) {
       return {
         content: [{ type: "text", text: `Annotation #${params.annotation_id} updated to revision ${updated.revision ?? updated.Revision}.` }],
         details: { annotation_id: updated.id, revision: updated.revision ?? updated.Revision },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "den_collab_delete_annotation",
+    label: "Den Delete Collaboration Annotation",
+    description: "Delete an existing collaboration annotation with optimistic concurrency.",
+    parameters: {
+      type: "object",
+      properties: {
+        session_id: { type: "number", description: "Collaboration session ID." },
+        annotation_id: { type: "number", description: "Annotation ID to delete." },
+        expected_revision: { type: "number", description: "Expected current revision for optimistic concurrency." },
+        project_id: { type: "string", description: "Project ID. Defaults to current bound project." },
+      },
+      required: ["session_id", "annotation_id", "expected_revision"],
+      additionalProperties: false,
+    },
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const cfg = await requireConfig(ctx);
+      const projectId = normalizeString(params.project_id) ?? cfg.projectId;
+      const deleted = await collabDeleteAnnotation(cfg, projectId, params.session_id, {
+        annotation_id: params.annotation_id,
+        expected_revision: params.expected_revision,
+      });
+      return {
+        content: [{ type: "text", text: `Annotation #${params.annotation_id} deleted from session #${params.session_id}.` }],
+        details: { annotation_id: deleted.id ?? params.annotation_id, deleted: true },
       };
     },
   });
@@ -779,8 +819,8 @@ export default function denExtension(pi: ExtensionAPI) {
       type: "object",
       properties: {
         session_id: { type: "number", description: "Collaboration session ID." },
-        expected_status: { type: "string", description: "Expected current status for optimistic concurrency." },
-        status: { type: "string", description: "New status: active, resolved, or archived." },
+        expected_status: { type: "string", enum: COLLAB_SESSION_STATUSES, description: "Expected current status for optimistic concurrency." },
+        status: { type: "string", enum: COLLAB_SESSION_STATUSES, description: "New status: active, resolved, or archived." },
         project_id: { type: "string", description: "Project ID. Defaults to current bound project." },
       },
       required: ["session_id", "expected_status", "status"],
@@ -1491,6 +1531,17 @@ async function collabUpdateAnnotation(
   });
 }
 
+async function collabDeleteAnnotation(
+  cfg: DenConfig,
+  projectId: string,
+  sessionId: number,
+  options: { annotation_id: number; expected_revision: number },
+): Promise<any> {
+  return denFetch(cfg, `/api/projects/${esc(projectId)}/collaboration/sessions/${sessionId}/annotations/${options.annotation_id}?${query({ expectedRevision: options.expected_revision })}`, {
+    method: "DELETE",
+  });
+}
+
 async function collabAddTurn(
   cfg: DenConfig,
   projectId: string,
@@ -1835,6 +1886,28 @@ async function handleCollabAnnotate(
   return { summary: `Annotation #${annotation.id} (${annotationType}) created on segment #${segmentId}.` };
 }
 
+async function handleCollabDeleteAnnotation(
+  cfg: DenConfig,
+  args: string | undefined,
+): Promise<{ summary: string }> {
+  const parts = (args ?? "").trim().split(/\s+/);
+  if (parts.length < 3) throw new Error("Usage: /den-collab-delete-annotation <session_id> <annotation_id> <expected_revision>");
+
+  const sessionId = Number(parts[0]);
+  if (!Number.isInteger(sessionId) || sessionId <= 0) throw new Error("Expected valid session_id.");
+  const annotationId = Number(parts[1]);
+  if (!Number.isInteger(annotationId) || annotationId <= 0) throw new Error("Expected valid annotation_id.");
+  const expectedRevision = Number(parts[2]);
+  if (!Number.isInteger(expectedRevision) || expectedRevision <= 0) throw new Error("Expected valid expected_revision.");
+
+  await collabDeleteAnnotation(cfg, cfg.projectId, sessionId, {
+    annotation_id: annotationId,
+    expected_revision: expectedRevision,
+  });
+
+  return { summary: `Annotation #${annotationId} deleted from session #${sessionId}.` };
+}
+
 async function handleCollabCompile(
   cfg: DenConfig,
   args: string | undefined,
@@ -1911,9 +1984,8 @@ async function handleCollabStatus(
   const expectedStatus = parts[1];
   const newStatus = parts[2];
 
-  const validStatuses = ["active", "resolved", "archived"];
-  if (!validStatuses.includes(expectedStatus)) throw new Error(`Expected status must be one of: ${validStatuses.join(", ")}`);
-  if (!validStatuses.includes(newStatus)) throw new Error(`New status must be one of: ${validStatuses.join(", ")}`);
+  if (!COLLAB_SESSION_STATUSES.includes(expectedStatus as any)) throw new Error(`Expected status must be one of: ${COLLAB_SESSION_STATUSES.join(", ")}`);
+  if (!COLLAB_SESSION_STATUSES.includes(newStatus as any)) throw new Error(`New status must be one of: ${COLLAB_SESSION_STATUSES.join(", ")}`);
 
   const updated = await collabUpdateSessionStatus(cfg, cfg.projectId, sessionId, {
     expected_status: expectedStatus,

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { compileResponse, formatSessionSummary, formatSessionDetail } from '../../pi-dev/lib/den-collaboration.ts';
-import { buildPiSourceContext, extractLastAssistantResponseFromEntries } from '../../pi-dev/extensions/den.ts';
+import denExtension, { buildPiSourceContext, extractLastAssistantResponseFromEntries } from '../../pi-dev/extensions/den.ts';
 
 // ---------------------------------------------------------------------------
 // compileResponse
@@ -141,6 +141,11 @@ test('formatSessionSummary handles camelCase field names', () => {
   assert.ok(lines.some(l => l.includes('Pi run: run-456')));
 });
 
+test('formatSessionSummary handles PascalCase status fallback', () => {
+  const lines = formatSessionSummary({ id: 100, title: 'Pascal', Status: 'resolved' });
+  assert.ok(lines.some(l => l.includes('Session #100: Pascal [resolved]')));
+});
+
 // ---------------------------------------------------------------------------
 // formatSessionDetail
 // ---------------------------------------------------------------------------
@@ -253,4 +258,30 @@ test('buildPiSourceContext includes runtime identifiers and removes empty values
   assert.equal(context.pi_session_file, '/tmp/pi-session.jsonl');
   assert.equal(context.model, 'test-provider/test-model');
   assert.equal(context.source_ref, undefined);
+});
+
+test('den extension collaboration tools expose enums and delete annotation', () => {
+  const commands = [];
+  const tools = [];
+  denExtension({
+    on() {},
+    registerCommand(name, definition) { commands.push({ name, definition }); },
+    registerTool(definition) { tools.push(definition); },
+  });
+
+  assert.ok(commands.some((entry) => entry.name === 'den-collab-delete-annotation'));
+
+  const addAnnotation = tools.find((entry) => entry.name === 'den_collab_add_annotation');
+  const updateAnnotation = tools.find((entry) => entry.name === 'den_collab_update_annotation');
+  const listSessions = tools.find((entry) => entry.name === 'den_collab_list_sessions');
+  const updateStatus = tools.find((entry) => entry.name === 'den_collab_update_session_status');
+  const deleteAnnotation = tools.find((entry) => entry.name === 'den_collab_delete_annotation');
+
+  assert.deepEqual(addAnnotation.parameters.properties.annotation_type.enum, ['note', 'skip', 'done', 'flag']);
+  assert.deepEqual(updateAnnotation.parameters.properties.annotation_type.enum, ['note', 'skip', 'done', 'flag']);
+  assert.deepEqual(listSessions.parameters.properties.status.enum, ['active', 'resolved', 'archived']);
+  assert.deepEqual(updateStatus.parameters.properties.status.enum, ['active', 'resolved', 'archived']);
+  assert.deepEqual(updateStatus.parameters.properties.expected_status.enum, ['active', 'resolved', 'archived']);
+  assert.ok(deleteAnnotation, 'den_collab_delete_annotation should be registered');
+  assert.deepEqual(deleteAnnotation.parameters.required, ['session_id', 'annotation_id', 'expected_revision']);
 });
