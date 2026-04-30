@@ -518,3 +518,41 @@ public sealed record DesktopDiffSnapshot
     [JsonPropertyName("freshness_seconds")]
     public int FreshnessSeconds { get; init; }
 }
+
+// ── Collaboration API DTOs ────────────────────────────────────────────────
+
+public sealed record CreateCollaborationDraftApiRequest
+{
+    [JsonPropertyName("turn_id")]
+    public long? TurnId { get; init; }
+
+    [JsonPropertyName("content")]
+    public string? Content { get; init; }
+
+    [JsonPropertyName("created_by")]
+    public string? CreatedBy { get; init; }
+}
+
+public sealed record CollaborationDraftRecord
+{
+    [JsonPropertyName("id")]
+    public long Id { get; init; }
+
+    [JsonPropertyName("session_id")]
+    public long SessionId { get; init; }
+
+    [JsonPropertyName("turn_id")]
+    public long? TurnId { get; init; }
+
+    [JsonPropertyName("content")]
+    public string Content { get; init; } = string.Empty;
+
+    [JsonPropertyName("created_by")]
+    public string? CreatedBy { get; init; }
+
+    [JsonPropertyName("revision")]
+    public int Revision { get; init; }
+
+    [JsonPropertyName("created_at")]
+    public string? CreatedAt { get; init; }
+}

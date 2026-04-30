@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Den.Bridge\Den.Bridge.csproj" />
+    <ProjectReference Include="..\DenMcp.Core\DenMcp.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>

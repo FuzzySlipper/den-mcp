@@ -21,6 +21,7 @@ public sealed class AppAgentToolRegistry
         Tool("draft_den_message", "Draft Den Message", "draft", "Produce a Den task-thread/project message draft without sending it.", "app_agent.den_message_drafted", ["den.messages.draft"]),
         Tool("draft_task_update", "Draft Task Update", "draft", "Suggest task changes without applying them.", "app_agent.task_update_drafted", ["den.tasks.draft"]),
         Tool("run_command", "Run Console Command", "action", "Run an allow-listed structured console command from the command registry; no shell passthrough.", "app_agent.console_command_run", ["console.run"], requiresExplicitTarget: true),
+        Tool("send_compiled_response", "Send Compiled Response", "action", "Post a compiled collaboration response to Den and optionally deliver it to a live agent session.", "app_agent.compiled_response_delivered", ["collaboration.deliver"]),
         Tool("cancel_request", "Cancel Request", "action", "Cooperatively cancel an active app-agent bridge request.", "app_agent.cancel_requested", ["app_agent.cancel"]),
         Tool("stop_agent_run", "Stop Agent Run", "action", "Stop an app-agent run when supported by the backend.", "app_agent.stop_requested", ["app_agent.stop"], enabled: false, disabledReason: StopAgentRunDisabledReason),
     ];
@@ -536,6 +537,7 @@ public sealed class AppAgentService
     private readonly IConsoleCommandRunner _commands;
     private readonly DenHttpClient _den;
     private readonly AppAgentAuditService _audit;
+    private readonly CollaborationResponseDeliveryService? _deliveryService;
     private readonly object _lock = new();
     private readonly Dictionary<string, CancellationTokenSource> _activeRequests = new(StringComparer.Ordinal);
 
@@ -546,7 +548,8 @@ public sealed class AppAgentService
         OperatorSessionRegistry sessions,
         IConsoleCommandRunner commands,
         DenHttpClient den,
-        AppAgentAuditService audit)
+        AppAgentAuditService audit,
+        CollaborationResponseDeliveryService? deliveryService = null)
     {
         _contextBuilder = contextBuilder;
         _tools = tools;
@@ -555,6 +558,7 @@ public sealed class AppAgentService
         _commands = commands;
         _den = den;
         _audit = audit;
+        _deliveryService = deliveryService;
     }
 
     public IReadOnlyList<AppAgentToolDefinition> ListTools(AppAgentSelection selection) => _tools.ListTools(selection);
@@ -674,6 +678,8 @@ public sealed class AppAgentService
                 return BridgeJson.ToElement(DraftTaskUpdateTool(request.Input, request.Selection));
             case "run_command":
                 return BridgeJson.ToElement(await RunCommandToolAsync(request.Input, request.Selection, cancellationToken).ConfigureAwait(false));
+            case "send_compiled_response":
+                return BridgeJson.ToElement(await SendCompiledResponseToolAsync(request.Input, request.Selection, cancellationToken).ConfigureAwait(false));
             case "cancel_request":
                 return BridgeJson.ToElement(Cancel(ParseCancelRequest(request.Input)));
             default:
@@ -765,6 +771,34 @@ public sealed class AppAgentService
         }, cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
+    private async Task<CollaborationSendCompiledResponseResponse> SendCompiledResponseToolAsync(
+        JsonElement input,
+        AppAgentSelection selection,
+        CancellationToken cancellationToken)
+    {
+        if (_deliveryService is null)
+        {
+            throw new BridgeHandlerException(
+                "app_agent.send_compiled_response.unavailable",
+                "Collaboration response delivery service is not available.",
+                "unavailable");
+        }
+
+        var sessionId = RequiredLong(input, "session_id");
+        var compiledText = OptionalString(input, "compiled_text");
+        var targetSessionId = OptionalString(input, "target_session_id");
+        var postToDen = !input.TryGetProperty("post_to_den", out var postProp) || postProp.ValueKind != JsonValueKind.False;
+
+        return await _deliveryService.DeliverAsync(new CollaborationSendCompiledResponseRequest
+        {
+            SessionId = sessionId,
+            CompiledText = compiledText,
+            TargetSessionId = targetSessionId,
+            PostToDen = postToDen,
+            RequestedBy = AppAgentConstants.Actor,
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
     private static AppAgentCancelRequest ParseCancelRequest(JsonElement input)
     {
         return new AppAgentCancelRequest
@@ -824,6 +858,17 @@ public sealed class AppAgentService
         }
 
         return null;
+    }
+
+    private static long RequiredLong(JsonElement input, string property)
+    {
+        var value = OptionalLong(input, property);
+        if (value is null)
+        {
+            throw new BridgeHandlerException("app_agent.input.invalid", $"Missing required input property '{property}'.", "validation");
+        }
+
+        return value.Value;
     }
 
     private static int? ToNullableInt(long? value)

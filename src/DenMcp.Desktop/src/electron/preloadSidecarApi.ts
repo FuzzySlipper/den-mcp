@@ -11,7 +11,7 @@ import type {
   SaveOperatorSettingsRequest,
 } from '../desktop/tauriApi.ts';
 import type { SidecarBridgeClient } from './sidecarProtocol.ts';
-import { createSidecarBridgeFacade, type SidecarHealthResponse, type SidecarCapabilitiesResponse, type ConsoleCommandDefinition, type ConsoleCommandRunRequest, type ConsoleCommandRunResponse, type ConsoleCommandListResponse, type TerminalAckOutputRequest, type TerminalAttachRequest, type TerminalCreateSessionRequest, type TerminalDetachRequest, type TerminalListSessionsRequest, type TerminalReadActivityRequest, type TerminalReconnectRequest, type TerminalResizeRequest, type TerminalResponse, type TerminalEventPayload, type TerminalSendInputRequest, type TerminalTerminateRequest, type AppAgentBuildContextRequest, type AppAgentCancelRequest, type AppAgentInvokeToolRequest, type AppAgentListToolsRequest, type AppAgentResponse, type TasksDashboardSnapshotRequest, type TasksDashboardSnapshot } from './sidecarProtocol.ts';
+import { createSidecarBridgeFacade, type SidecarHealthResponse, type SidecarCapabilitiesResponse, type ConsoleCommandDefinition, type ConsoleCommandRunRequest, type ConsoleCommandRunResponse, type ConsoleCommandListResponse, type TerminalAckOutputRequest, type TerminalAttachRequest, type TerminalCreateSessionRequest, type TerminalDetachRequest, type TerminalListSessionsRequest, type TerminalReadActivityRequest, type TerminalReconnectRequest, type TerminalResizeRequest, type TerminalResponse, type TerminalEventPayload, type TerminalSendInputRequest, type TerminalTerminateRequest, type AppAgentBuildContextRequest, type AppAgentCancelRequest, type AppAgentInvokeToolRequest, type AppAgentListToolsRequest, type AppAgentResponse, type TasksDashboardSnapshotRequest, type TasksDashboardSnapshot, type CollaborationSendCompiledResponseRequest, type CollaborationSendCompiledResponseResponse, type CollaborationDeliveryEventPayload } from './sidecarProtocol.ts';
 
 export interface ShellAppearanceSettings {
   theme: string;
@@ -48,6 +48,7 @@ export interface DenDesktopSidecarApi {
   appAgentListTools(request?: AppAgentListToolsRequest): Promise<AppAgentResponse>;
   appAgentInvokeTool(request: AppAgentInvokeToolRequest): Promise<AppAgentResponse>;
   appAgentCancelRequest(request: AppAgentCancelRequest): Promise<AppAgentResponse>;
+  collaborationSendCompiledResponse(request: CollaborationSendCompiledResponseRequest): Promise<CollaborationSendCompiledResponseResponse>;
   tasksGetDashboardSnapshot(request: TasksDashboardSnapshotRequest): Promise<TasksDashboardSnapshot>;
   terminalCreateSession(request: TerminalCreateSessionRequest): Promise<TerminalResponse>;
   terminalListSessions(request?: TerminalListSessionsRequest): Promise<TerminalResponse>;
@@ -66,6 +67,7 @@ export interface DenDesktopSidecarApi {
   onTerminalSessionList(listener: (event: TerminalResponse) => void): () => void;
   onAppAgentRunState(listener: (event: AppAgentResponse) => void): () => void;
   onAppAgentToolCallState(listener: (event: AppAgentResponse) => void): () => void;
+  onCollaborationDelivery(listener: (event: CollaborationDeliveryEventPayload) => void): () => void;
   onOperatorStatus(listener: (status: OperatorStatus) => void): () => void;
   onGitSnapshots(listener: (snapshots: LocalGitSnapshot[]) => void): () => void;
   onSessionSnapshots(listener: (snapshots: LocalSessionSnapshot[]) => void): () => void;
@@ -104,6 +106,7 @@ export function createDenDesktopSidecarApi(
     appAgentListTools: (request?: AppAgentListToolsRequest) => facade.appAgentListTools(request ?? {}),
     appAgentInvokeTool: (request: AppAgentInvokeToolRequest) => facade.appAgentInvokeTool(request),
     appAgentCancelRequest: (request: AppAgentCancelRequest) => facade.appAgentCancelRequest(request),
+    collaborationSendCompiledResponse: (request: CollaborationSendCompiledResponseRequest) => facade.collaborationSendCompiledResponse(request),
     tasksGetDashboardSnapshot: (request: TasksDashboardSnapshotRequest) => facade.tasksGetDashboardSnapshot(request),
     terminalCreateSession: (request: TerminalCreateSessionRequest) => facade.terminalCreateSession(request),
     terminalListSessions: (request?: TerminalListSessionsRequest) => facade.terminalListSessions(request ?? {}),
@@ -172,6 +175,13 @@ export function createDenDesktopSidecarApi(
         if (frame.event !== 'den.app_agent.tool_call_state_changed') return;
         facade.assertAppAgentToolCallStateEvent(frame);
         listener(frame.payload as unknown as AppAgentResponse);
+      });
+    },
+    onCollaborationDelivery(listener: (event: CollaborationDeliveryEventPayload) => void) {
+      return events.subscribe((frame) => {
+        if (frame.event !== 'den.collaboration.delivery_state_changed') return;
+        facade.assertCollaborationDeliveryEvent(frame);
+        listener(frame.payload as unknown as CollaborationDeliveryEventPayload);
       });
     },
     onOperatorStatus(listener: (status: OperatorStatus) => void) {

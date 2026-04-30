@@ -395,6 +395,65 @@ public sealed class DenHttpClient
         }
     }
 
+    public async Task<CollaborationSessionData> GetCollaborationSessionAsync(
+        string baseUrl,
+        long sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        var response = await SendAsync(
+            () => new HttpRequestMessage(HttpMethod.Get, JoinUrl(baseUrl, $"/api/projects/_/collaboration/sessions/{sessionId}")),
+            $"Unable to fetch collaboration session {sessionId}",
+            cancellationToken).ConfigureAwait(false);
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await ReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+                throw new DenHttpClientException($"Collaboration session {sessionId} returned HTTP {(int)response.StatusCode}: {body}");
+            }
+
+            return await ReadJsonAsync<CollaborationSessionData>(
+                response,
+                $"Unable to parse collaboration session {sessionId}",
+                cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    public async Task<CollaborationDraftRecord> CreateCollaborationDraftAsync(
+        string baseUrl,
+        string projectId,
+        long sessionId,
+        CreateCollaborationDraftApiRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+
+        var path = $"/api/projects/{EscapePathSegment(projectId)}/collaboration/sessions/{sessionId}/drafts";
+        var response = await SendAsync(
+            () => new HttpRequestMessage(HttpMethod.Post, JoinUrl(baseUrl, path))
+            {
+                Content = JsonContent(request),
+            },
+            $"Unable to create collaboration draft for session {sessionId}",
+            cancellationToken).ConfigureAwait(false);
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await ReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+                throw new DenHttpClientException($"Collaboration draft create returned HTTP {(int)response.StatusCode}: {body}");
+            }
+
+            return await ReadJsonAsync<CollaborationDraftRecord>(
+                response,
+                "Unable to parse collaboration draft response",
+                cancellationToken).ConfigureAwait(false);
+        }
+    }
+
     public static JsonSerializerOptions CreateJsonSerializerOptions()
     {
         return new JsonSerializerOptions(JsonSerializerDefaults.General)

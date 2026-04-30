@@ -58,8 +58,12 @@ public static class DesktopSidecarProtocol
     // Tasks/orchestrator dashboard projection (task #1028)
     public const string TasksGetDashboardSnapshotCommand = "den_desktop.tasks.get_dashboard_snapshot";
 
+    // Collaboration response delivery (task #920)
+    public const string CollaborationSendCompiledResponseCommand = "den_desktop.collaboration.send_compiled_response";
+
     public const string AppAgentRunStateEvent = "den.app_agent.run_state_changed";
     public const string AppAgentToolCallStateEvent = "den.app_agent.tool_call_state_changed";
+    public const string CollaborationDeliveryEvent = "den.collaboration.delivery_state_changed";
 
     public const string ReadySentinelPrefix = "DEN_DESKTOP_BRIDGE_READY ";
 }

@@ -38,6 +38,7 @@ public static class DesktopSidecarBridge
         services.AddSingleton<AppAgentAuditService>();
         services.AddSingleton<AppAgentContextBuilder>();
         services.AddSingleton<AppAgentService>();
+        services.AddSingleton<CollaborationResponseDeliveryService>();
         services.AddSingleton<TasksDashboardProjectionService>();
         services.AddBridgeHost(
             ConfigureRegistry,
@@ -122,6 +123,9 @@ public static class DesktopSidecarBridge
             .RegisterCommand<TasksDashboardSnapshotRequest, TasksDashboardSnapshot, TasksDashboardSnapshotHandler>(
                 DesktopSidecarProtocol.TasksGetDashboardSnapshotCommand,
                 config => { config.SupportsCancellation = true; })
+            // Collaboration response delivery (task #920)
+            .RegisterCommand<CollaborationSendCompiledResponseRequest, CollaborationSendCompiledResponseResponse, CollaborationSendCompiledResponseHandler>(
+                DesktopSidecarProtocol.CollaborationSendCompiledResponseCommand)
             .RegisterEvent<OperatorStatus>(DesktopSidecarProtocol.OperatorStatusEvent)
             .RegisterEvent<IReadOnlyList<LocalGitSnapshot>>(DesktopSidecarProtocol.GitSnapshotEvent)
             .RegisterEvent<IReadOnlyList<LocalSessionSnapshot>>(DesktopSidecarProtocol.SessionSnapshotEvent)
@@ -135,7 +139,8 @@ public static class DesktopSidecarBridge
             .RegisterEvent<TerminalSessionEvent>(DesktopSidecarProtocol.TerminalSessionStatusEvent)
             .RegisterEvent<TerminalListSessionsResponse>(DesktopSidecarProtocol.TerminalSessionListEvent)
             .RegisterEvent<AppAgentRunStateEvent>(DesktopSidecarProtocol.AppAgentRunStateEvent)
-            .RegisterEvent<AppAgentToolCallStateEvent>(DesktopSidecarProtocol.AppAgentToolCallStateEvent);
+            .RegisterEvent<AppAgentToolCallStateEvent>(DesktopSidecarProtocol.AppAgentToolCallStateEvent)
+            .RegisterEvent<CollaborationDeliveryEvent>(DesktopSidecarProtocol.CollaborationDeliveryEvent);
     }
 
     public static BridgeSchemaBundle CreateSchemaBundle(IServiceProvider serviceProvider)
@@ -260,6 +265,10 @@ public static class DesktopSidecarBridge
             Schema(DesktopSidecarProtocol.TasksGetDashboardSnapshotCommand + ".response", TasksDashboardSnapshotResponseSchema),
             Schema(DesktopSidecarProtocol.AppAgentRunStateEvent + ".payload", AppAgentRunStateEventSchema),
             Schema(DesktopSidecarProtocol.AppAgentToolCallStateEvent + ".payload", AppAgentToolCallStateEventSchema),
+            // Collaboration response delivery schemas (task #920)
+            Schema(DesktopSidecarProtocol.CollaborationSendCompiledResponseCommand + ".request", CollaborationSendCompiledResponseRequestSchema),
+            Schema(DesktopSidecarProtocol.CollaborationSendCompiledResponseCommand + ".response", CollaborationSendCompiledResponseResponseSchema),
+            Schema(DesktopSidecarProtocol.CollaborationDeliveryEvent + ".payload", CollaborationDeliveryEventPayloadSchema),
             // Terminal protocol event schemas
             Schema(DesktopSidecarProtocol.TerminalOutputEvent + ".payload", TerminalOutputEventPayloadSchema),
             Schema(DesktopSidecarProtocol.TerminalReplayCompleteEvent + ".payload", TerminalReplayCompleteEventPayloadSchema),
@@ -444,6 +453,18 @@ public static class DesktopSidecarBridge
 
     private const string AppAgentToolCallStateEventSchema = """
         {"type":"object","additionalProperties":false,"required":["tool_call_id","agent_run_id","tool_name","status","cancellable"],"properties":{"tool_call_id":{"type":"string"},"agent_run_id":{"type":"string"},"tool_name":{"type":"string"},"status":{"type":"string"},"started_at":{"type":["string","null"]},"completed_at":{"type":["string","null"]},"cancellable":{"type":"boolean"},"target_summary":{"type":["string","null"]}}}
+        """;
+
+    private const string CollaborationSendCompiledResponseRequestSchema = """
+        {"type":"object","additionalProperties":false,"required":["session_id"],"properties":{"session_id":{"type":"integer"},"compiled_text":{"type":["string","null"]},"target_session_id":{"type":["string","null"]},"post_to_den":{"type":"boolean"},"requested_by":{"type":["string","null"]}}}
+        """;
+
+    private const string CollaborationSendCompiledResponseResponseSchema = """
+        {"type":"object","additionalProperties":false,"required":["compiled_text","den_post","delivery","session_id"],"properties":{"compiled_text":{"type":"string"},"den_post":{"type":"object","additionalProperties":false,"required":["posted"],"properties":{"posted":{"type":"boolean"},"draft_id":{"type":["integer","null"]},"project_id":{"type":["string","null"]},"error":{"type":["string","null"]}}},"delivery":{"type":"object","additionalProperties":false,"required":["status"],"properties":{"status":{"type":"string"},"target_session_id":{"type":["string","null"]},"target_session_status":{"type":["string","null"]},"can_deliver":{"type":"boolean"},"reason":{"type":["string","null"]},"error":{"type":["string","null"]}}},"session_id":{"type":"integer"},"target_session_id":{"type":["string","null"]}}}
+        """;
+
+    private const string CollaborationDeliveryEventPayloadSchema = """
+        {"type":"object","additionalProperties":false,"required":["session_id","status","compiled_text_length","observed_at"],"properties":{"session_id":{"type":"string"},"status":{"type":"string"},"compiled_text_length":{"type":"integer"},"reason":{"type":["string","null"]},"observed_at":{"type":"string"}}}
         """;
 
     private static BridgeNamedSchema Schema(string name, string schema)

@@ -5,7 +5,7 @@ import type {
   DenCollaborationAnnotation,
   DenCollaborationTurn,
 } from '../desktop/denCollaborationApi';
-import type { CollaborationState, CollaborationActions } from '../desktop/useCollaborationState';
+import type { CollaborationState, CollaborationActions, CollaborationDeliveryResult } from '../desktop/useCollaborationState';
 
 interface Props {
   state: CollaborationState;
@@ -13,8 +13,8 @@ interface Props {
 }
 
 export function CollaborationPane({ state, actions }: Props) {
-  const { sessions, selectedSession, selectedTurn, loading, error, compiledResponse, showCompiled } = state;
-  const { selectSession, selectTurn, addAnnotation, updateAnnotation, deleteAnnotation, toggleCompiled, clearError } = actions;
+  const { sessions, selectedSession, selectedTurn, loading, error, compiledResponse, showCompiled, deliveryResult, delivering } = state;
+  const { selectSession, selectTurn, addAnnotation, updateAnnotation, deleteAnnotation, toggleCompiled, deliverCompiledResponse, clearError } = actions;
 
   const activeSessions = sessions.filter((s) => s.status === 'active');
   const resolvedSessions = sessions.filter((s) => s.status !== 'active');
@@ -132,9 +132,22 @@ export function CollaborationPane({ state, actions }: Props) {
                 <div className="collaboration-compiled panel">
                   <div className="panel-heading">
                     <p className="eyebrow">Compiled response</p>
-                    <button className="btn" onClick={() => copyCompiled(compiledResponse)}>copy</button>
+                    <div className="panel-heading-actions">
+                      <button className="btn" onClick={() => copyCompiled(compiledResponse)}>copy</button>
+                      <button
+                        className="btn btn-primary"
+                        onClick={() => deliverCompiledResponse()}
+                        disabled={delivering}
+                        title="Save compiled response to Den as draft"
+                      >
+                        {delivering ? 'saving...' : 'save to Den →'}
+                      </button>
+                    </div>
                   </div>
                   <pre className="collaboration-compiled-body">{compiledResponse}</pre>
+                  {deliveryResult && (
+                    <DeliveryStatus deliveryResult={deliveryResult} />
+                  )}
                 </div>
               )}
             </>
@@ -347,6 +360,50 @@ async function copyCompiled(text: string) {
   } catch {
     // Clipboard API not available; silently ignore.
   }
+}
+
+function DeliveryStatus({ deliveryResult }: { deliveryResult: CollaborationDeliveryResult }) {
+  const { den_post, delivery } = deliveryResult;
+
+  const statusLabel = (status: string) => {
+    switch (status) {
+      case 'delivered': return 'delivered to session';
+      case 'no_live_session': return 'no live session';
+      case 'session_stale': return 'session stale';
+      case 'session_offline': return 'session offline';
+      case 'capability_denied': return 'capability denied';
+      case 'skipped': return 'skipped';
+      case 'failed': return 'delivery failed';
+      case 'pending_bridge': return 'saved to Den';
+      default: return status;
+    }
+  };
+
+  const statusClass = (status: string) => {
+    switch (status) {
+      case 'delivered': return 'status-running';
+      case 'failed': return 'status-stopped';
+      case 'pending_bridge': case 'skipped': return 'status-idle';
+      default: return 'status-stopped';
+    }
+  };
+
+  return (
+    <div className="collaboration-delivery-status">
+      {den_post.posted && (
+        <span className="status-pill status-running">
+          saved to Den{den_post.draft_id ? ` (draft #${den_post.draft_id})` : ''}
+        </span>
+      )}
+      {den_post.error && (
+        <span className="status-pill status-stopped" title={den_post.error}>Den save failed</span>
+      )}
+      <span className={`status-pill ${statusClass(delivery.status)}`} title={delivery.reason ?? delivery.error ?? ''}>
+        {statusLabel(delivery.status)}
+        {delivery.target_session_id && ` → ${delivery.target_session_id}`}
+      </span>
+    </div>
+  );
 }
 
 function compactDate(iso: string): string {

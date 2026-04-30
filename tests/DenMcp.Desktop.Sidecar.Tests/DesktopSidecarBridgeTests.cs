@@ -25,6 +25,7 @@ public class DesktopSidecarBridgeTests
             DesktopSidecarProtocol.AppAgentCancelRequestCommand,
             DesktopSidecarProtocol.AppAgentInvokeToolCommand,
             DesktopSidecarProtocol.AppAgentListToolsCommand,
+            DesktopSidecarProtocol.CollaborationSendCompiledResponseCommand,
             DesktopSidecarProtocol.GetAppearanceSettingsCommand,
             DesktopSidecarProtocol.GetLatestDiffSnapshotCommand,
             DesktopSidecarProtocol.GetSettingsCommand,
@@ -60,6 +61,7 @@ public class DesktopSidecarBridgeTests
             DesktopSidecarProtocol.TerminalReplayCompleteEvent,
             DesktopSidecarProtocol.TerminalSessionListEvent,
             DesktopSidecarProtocol.TerminalSessionStatusEvent,
+            DesktopSidecarProtocol.CollaborationDeliveryEvent,
             DesktopSidecarProtocol.AppAgentRunStateEvent,
             DesktopSidecarProtocol.AppAgentToolCallStateEvent,
             DesktopSidecarProtocol.GitSnapshotEvent,
@@ -72,6 +74,9 @@ public class DesktopSidecarBridgeTests
         Assert.Contains(DesktopSidecarProtocol.AppAgentInvokeToolCommand + ".request", bundle.Definitions.Keys);
         Assert.Contains(DesktopSidecarProtocol.TasksGetDashboardSnapshotCommand + ".request", bundle.Definitions.Keys);
         Assert.Contains(DesktopSidecarProtocol.TasksGetDashboardSnapshotCommand + ".response", bundle.Definitions.Keys);
+        Assert.Contains(DesktopSidecarProtocol.CollaborationSendCompiledResponseCommand + ".request", bundle.Definitions.Keys);
+        Assert.Contains(DesktopSidecarProtocol.CollaborationSendCompiledResponseCommand + ".response", bundle.Definitions.Keys);
+        Assert.Contains(DesktopSidecarProtocol.CollaborationDeliveryEvent + ".payload", bundle.Definitions.Keys);
         Assert.Equal(sortedEvents, bundle.Events.Select(@event => @event.Event).ToArray());
         Assert.Contains(DesktopSidecarProtocol.GetOperatorStatusCommand + ".response", bundle.Definitions.Keys);
         Assert.Contains(DesktopSidecarProtocol.OperatorStatusEvent + ".payload", bundle.Definitions.Keys);

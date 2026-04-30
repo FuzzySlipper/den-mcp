@@ -27,6 +27,7 @@ public class AppAgentBridgeTests
             "draft_den_message",
             "draft_task_update",
             "run_command",
+            "send_compiled_response",
             "cancel_request",
             "stop_agent_run",
         }, tools.Select(tool => tool.Name).ToArray());

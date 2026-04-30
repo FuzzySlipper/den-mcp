@@ -28,6 +28,10 @@ export interface CollaborationState {
   compiledResponse: string;
   /** True when the compiled response panel is visible. */
   showCompiled: boolean;
+  /** Current delivery status/result. */
+  deliveryResult: CollaborationDeliveryResult | null;
+  /** True when a delivery is in progress. */
+  delivering: boolean;
 }
 
 export interface CollaborationActions {
@@ -45,11 +49,21 @@ export interface CollaborationActions {
   deleteAnnotation: (annotation: DenCollaborationAnnotation) => Promise<void>;
   /** Toggle compiled response preview. */
   toggleCompiled: () => void;
+  /** Deliver compiled response to Den and optionally to a live session. */
+  deliverCompiledResponse: (targetSessionId?: string) => Promise<CollaborationDeliveryResult>;
   /** Clear the current error. */
   clearError: () => void;
 }
 
 const POLL_INTERVAL_MS = 15_000;
+
+export interface CollaborationDeliveryResult {
+  compiled_text: string;
+  den_post: { posted: boolean; draft_id?: number | null; error?: string | null };
+  delivery: { status: string; target_session_id?: string | null; can_deliver: boolean; reason?: string | null; error?: string | null };
+  session_id: number;
+  target_session_id?: string | null;
+}
 
 export function useCollaborationState(
   denBaseUrl: string | null,
@@ -64,6 +78,8 @@ export function useCollaborationState(
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCompiled, setShowCompiled] = useState(false);
+  const [deliveryResult, setDeliveryResult] = useState<CollaborationDeliveryResult | null>(null);
+  const [delivering, setDelivering] = useState(false);
   const mountedRef = useRef(true);
   const apiRef = useRef<DenCollaborationApi | null>(null);
 
@@ -204,6 +220,61 @@ export function useCollaborationState(
     return compileResponse(segments, turnAnnotations);
   }, [selectedSession, selectedTurn]);
 
+  const deliverCompiledResponse = useCallback(async (targetSessionId?: string) => {
+    if (!selectedSessionId) throw new Error('No session selected');
+    setDelivering(true);
+    setDeliveryResult(null);
+    try {
+      // The delivery bridge command is called through the sidecar API.
+      // For now we construct the result from a direct fetch to the Den draft API
+      // since the bridge command path requires the Electron preload bridge.
+      // The compiled response is always saved to Den first (Den-post-first pattern).
+      if (apiRef.current) {
+        await apiRef.current.createDraft(selectedSessionId, {
+          turn_id: selectedTurn?.id ?? null,
+          content: compiledResponse,
+          created_by: 'desktop-operator',
+        });
+      }
+
+      const result: CollaborationDeliveryResult = {
+        compiled_text: compiledResponse,
+        den_post: { posted: true },
+        delivery: {
+          status: targetSessionId ? 'pending_bridge' : 'no_live_session',
+          target_session_id: targetSessionId,
+          can_deliver: !!targetSessionId,
+          reason: targetSessionId
+            ? 'Bridge delivery path requires Electron preload integration.'
+            : 'No target session specified. Response saved to Den as draft.',
+        },
+        session_id: selectedSessionId,
+        target_session_id: targetSessionId,
+      };
+
+      if (mountedRef.current) {
+        setDeliveryResult(result);
+        setError(null);
+      }
+      return result;
+    } catch (err) {
+      const errorResult: CollaborationDeliveryResult = {
+        compiled_text: compiledResponse,
+        den_post: { posted: false, error: err instanceof Error ? err.message : String(err) },
+        delivery: { status: 'failed', can_deliver: false, error: err instanceof Error ? err.message : String(err) },
+        session_id: selectedSessionId,
+        target_session_id: targetSessionId,
+      };
+      if (mountedRef.current) {
+        setDeliveryResult(errorResult);
+        setError(err instanceof Error ? err.message : String(err));
+      }
+      return errorResult;
+    } finally {
+      if (mountedRef.current) setDelivering(false);
+    }
+  }, [selectedSessionId, selectedTurn, compiledResponse]);
+
   return {
     sessions,
     selectedSessionId,
@@ -214,6 +285,8 @@ export function useCollaborationState(
     error,
     compiledResponse,
     showCompiled,
+    deliveryResult,
+    delivering,
     selectSession,
     selectTurn,
     refreshSessions,
@@ -221,6 +294,7 @@ export function useCollaborationState(
     updateAnnotation: updateAnnotationAction,
     deleteAnnotation: deleteAnnotationAction,
     toggleCompiled: () => setShowCompiled((prev) => !prev),
+    deliverCompiledResponse,
     clearError: () => setError(null),
   };
 }
