@@ -453,6 +453,17 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
         return await _den.LatestDiffSnapshotAsync(settings.DenBaseUrl, effectiveRequest, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Publishes the latest local git, diff, and session snapshots to Den.
+    /// Snapshot publication intentionally uses the full refresh cycle because Den
+    /// project/workspace scope discovery, local inspection, connection state, and
+    /// publish status are a single consistency unit for the desktop runtime.
+    /// </summary>
+    public Task PublishSnapshotsAsync(CancellationToken cancellationToken = default)
+    {
+        return RefreshAsync(cancellationToken);
+    }
+
     public async Task RefreshAsync(CancellationToken cancellationToken = default)
     {
         OperatorSettings settings;

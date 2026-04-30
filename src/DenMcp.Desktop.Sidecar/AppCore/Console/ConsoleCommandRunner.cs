@@ -20,7 +20,7 @@ public sealed class ConsoleCommandRunner : IConsoleCommandRunner
         {
             Name = "refresh",
             DisplayName = "Refresh",
-            Description = "Trigger a Den operator refresh cycle (projects, workspaces, snapshots).",
+            Description = "Trigger a Den operator refresh cycle (projects, workspaces, and snapshot publication).",
             NeedsTarget = false,
         },
         new ConsoleCommandDefinition
@@ -34,7 +34,7 @@ public sealed class ConsoleCommandRunner : IConsoleCommandRunner
         {
             Name = "publish-snapshot",
             DisplayName = "Publish Snapshot",
-            Description = "Publish the latest local git/session snapshot to Den now.",
+            Description = "Publish latest local git/diff/session snapshots via the runtime snapshot publish cycle.",
             NeedsTarget = false,
         },
         new ConsoleCommandDefinition
@@ -89,28 +89,28 @@ public sealed class ConsoleCommandRunner : IConsoleCommandRunner
 
         return request.Command switch
         {
-            "help" => RunHelp(onProgress),
+            "help" => await RunHelpAsync(onProgress, cancellationToken).ConfigureAwait(false),
             "refresh" => await RunRefreshAsync(onProgress, cancellationToken).ConfigureAwait(false),
             "inspect-connection" => await RunInspectConnectionAsync(onProgress, cancellationToken).ConfigureAwait(false),
-            "publish-snapshot" => await RunRefreshAsync(onProgress, cancellationToken).ConfigureAwait(false),
-            "list-sessions" => RunListSessions(onProgress),
+            "publish-snapshot" => await RunPublishSnapshotAsync(onProgress, cancellationToken).ConfigureAwait(false),
+            "list-sessions" => await RunListSessionsAsync(onProgress, cancellationToken).ConfigureAwait(false),
             "git-status" => await RunGitStatusAsync(request, onProgress, cancellationToken).ConfigureAwait(false),
             "diagnostics" => await RunDiagnosticsAsync(onProgress, cancellationToken).ConfigureAwait(false),
             "clear-diagnostics" => await RunClearDiagnosticsAsync(onProgress, cancellationToken).ConfigureAwait(false),
-            _ => UnknownCommand(request.Command, onProgress),
+            _ => await UnknownCommandAsync(request.Command, onProgress, cancellationToken).ConfigureAwait(false),
         };
     }
 
-    private ConsoleCommandRunResponse RunHelp(ConsoleCommandProgressCallback? onProgress = null)
+    private async Task<ConsoleCommandRunResponse> RunHelpAsync(ConsoleCommandProgressCallback? onProgress = null, CancellationToken cancellationToken = default)
     {
         var ts = NowString();
         var lines = new List<ConsoleCommandLine>();
-        Emit(onProgress, Line("ok", "console", $"Available commands ({BuiltInCommands.Count}):", ts), ref lines, default);
+        await EmitAsync(onProgress, Line("ok", "console", $"Available commands ({BuiltInCommands.Count}):", ts), lines, cancellationToken).ConfigureAwait(false);
 
         foreach (var cmd in BuiltInCommands)
         {
             var targetHint = cmd.NeedsTarget ? " [needs target]" : "";
-            Emit(onProgress, Line("info", "console", $"  {cmd.Name,-20} {cmd.DisplayName,-15} {cmd.Description}{targetHint}", ts), ref lines, default);
+            await EmitAsync(onProgress, Line("info", "console", $"  {cmd.Name,-20} {cmd.DisplayName,-15} {cmd.Description}{targetHint}", ts), lines, cancellationToken).ConfigureAwait(false);
         }
 
         return Ok("help", lines);
@@ -120,19 +120,40 @@ public sealed class ConsoleCommandRunner : IConsoleCommandRunner
     {
         var ts = NowString();
         var lines = new List<ConsoleCommandLine>();
-        Emit(onProgress, Line("info", "console", "Triggering operator refresh cycle...", ts), ref lines, cancellationToken);
+        await EmitAsync(onProgress, Line("info", "console", "Triggering operator refresh cycle...", ts), lines, cancellationToken).ConfigureAwait(false);
 
         try
         {
             await _runtime.RefreshAsync(cancellationToken).ConfigureAwait(false);
             var status = await _runtime.GetStatusAsync(cancellationToken).ConfigureAwait(false);
-            Emit(onProgress, Line("ok", "console", $"Refresh complete. {status.ProjectCount} projects, {status.WorkspaceCount} workspaces, {status.LocalSnapshotCount} snapshots.", ts), ref lines, cancellationToken);
+            await EmitAsync(onProgress, Line("ok", "console", $"Refresh complete. {status.ProjectCount} projects, {status.WorkspaceCount} workspaces, {status.LocalSnapshotCount} snapshots.", ts), lines, cancellationToken).ConfigureAwait(false);
             return Ok("refresh", lines);
         }
         catch (Exception ex)
         {
-            Emit(onProgress, Line("err", "console", $"Refresh failed: {ex.Message}", ts), ref lines, cancellationToken);
+            await EmitAsync(onProgress, Line("err", "console", $"Refresh failed: {ex.Message}", ts), lines, cancellationToken).ConfigureAwait(false);
             return Error("refresh", ex.Message, lines);
+        }
+    }
+
+    private async Task<ConsoleCommandRunResponse> RunPublishSnapshotAsync(ConsoleCommandProgressCallback? onProgress = null, CancellationToken cancellationToken = default)
+    {
+        var ts = NowString();
+        var lines = new List<ConsoleCommandLine>();
+        await EmitAsync(onProgress, Line("info", "console", "Publishing latest snapshots (refresh-backed publish cycle)...", ts), lines, cancellationToken).ConfigureAwait(false);
+        await EmitAsync(onProgress, Line("info", "console", "Snapshot publication uses the runtime refresh cycle to discover Den scopes, inspect local git/session state, and publish git/diff/session snapshots consistently.", ts), lines, cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            await _runtime.PublishSnapshotsAsync(cancellationToken).ConfigureAwait(false);
+            var status = await _runtime.GetStatusAsync(cancellationToken).ConfigureAwait(false);
+            await EmitAsync(onProgress, Line("ok", "console", $"Publish snapshot complete. {status.LocalSnapshotCount} git snapshots, {status.LocalSessionSnapshotCount} session snapshots.", ts), lines, cancellationToken).ConfigureAwait(false);
+            return Ok("publish-snapshot", lines);
+        }
+        catch (Exception ex)
+        {
+            await EmitAsync(onProgress, Line("err", "console", $"Publish snapshot failed: {ex.Message}", ts), lines, cancellationToken).ConfigureAwait(false);
+            return Error("publish-snapshot", ex.Message, lines);
         }
     }
 
@@ -143,45 +164,45 @@ public sealed class ConsoleCommandRunner : IConsoleCommandRunner
         var conn = status.DenConnection;
 
         var lines = new List<ConsoleCommandLine>();
-        Emit(onProgress, Line("info", "console", "--- Den Connection Status ---", ts), ref lines, cancellationToken);
-        Emit(onProgress, Line("info", "den", $"State: {conn.State}", ts), ref lines, cancellationToken);
-        Emit(onProgress, Line("info", "den", $"URL:   {status.DenBaseUrl}", ts), ref lines, cancellationToken);
-        Emit(onProgress, Line("info", "den", $"Phase: {status.Phase}", ts), ref lines, cancellationToken);
+        await EmitAsync(onProgress, Line("info", "console", "--- Den Connection Status ---", ts), lines, cancellationToken).ConfigureAwait(false);
+        await EmitAsync(onProgress, Line("info", "den", $"State: {conn.State}", ts), lines, cancellationToken).ConfigureAwait(false);
+        await EmitAsync(onProgress, Line("info", "den", $"URL:   {status.DenBaseUrl}", ts), lines, cancellationToken).ConfigureAwait(false);
+        await EmitAsync(onProgress, Line("info", "den", $"Phase: {status.Phase}", ts), lines, cancellationToken).ConfigureAwait(false);
 
         if (!string.IsNullOrWhiteSpace(conn.Message))
-            Emit(onProgress, Line("info", "den", $"Message: {conn.Message}", ts), ref lines, cancellationToken);
+            await EmitAsync(onProgress, Line("info", "den", $"Message: {conn.Message}", ts), lines, cancellationToken).ConfigureAwait(false);
         if (!string.IsNullOrWhiteSpace(conn.LastSuccessAt))
-            Emit(onProgress, Line("info", "den", $"Last success: {conn.LastSuccessAt}", ts), ref lines, cancellationToken);
+            await EmitAsync(onProgress, Line("info", "den", $"Last success: {conn.LastSuccessAt}", ts), lines, cancellationToken).ConfigureAwait(false);
         if (!string.IsNullOrWhiteSpace(conn.LastFailureAt))
-            Emit(onProgress, Line("warn", "den", $"Last failure: {conn.LastFailureAt}", ts), ref lines, cancellationToken);
+            await EmitAsync(onProgress, Line("warn", "den", $"Last failure: {conn.LastFailureAt}", ts), lines, cancellationToken).ConfigureAwait(false);
         if (!string.IsNullOrWhiteSpace(conn.NextRetryAt))
-            Emit(onProgress, Line("info", "den", $"Next retry: {conn.NextRetryAt}", ts), ref lines, cancellationToken);
+            await EmitAsync(onProgress, Line("info", "den", $"Next retry: {conn.NextRetryAt}", ts), lines, cancellationToken).ConfigureAwait(false);
 
-        Emit(onProgress, Line("info", "console", "--- Observers ---", ts), ref lines, cancellationToken);
+        await EmitAsync(onProgress, Line("info", "console", "--- Observers ---", ts), lines, cancellationToken).ConfigureAwait(false);
         foreach (var observer in status.ObserverStatuses)
         {
             var warnPart = observer.WarningCount > 0 ? $" ({observer.WarningCount} warnings)" : "";
-            Emit(onProgress, Line("info", observer.Kind, $"  {observer.Kind}: {observer.State}{warnPart}", ts), ref lines, cancellationToken);
+            await EmitAsync(onProgress, Line("info", observer.Kind, $"  {observer.Kind}: {observer.State}{warnPart}", ts), lines, cancellationToken).ConfigureAwait(false);
         }
 
         return Ok("inspect-connection", lines);
     }
 
-    private ConsoleCommandRunResponse RunListSessions(ConsoleCommandProgressCallback? onProgress = null)
+    private async Task<ConsoleCommandRunResponse> RunListSessionsAsync(ConsoleCommandProgressCallback? onProgress = null, CancellationToken cancellationToken = default)
     {
         var ts = NowString();
         var sessions = _sessionRegistry.List();
         var lines = new List<ConsoleCommandLine>();
-        Emit(onProgress, Line("info", "console", $"Operator sessions ({sessions.Count}):", ts), ref lines, default);
+        await EmitAsync(onProgress, Line("info", "console", $"Operator sessions ({sessions.Count}):", ts), lines, cancellationToken).ConfigureAwait(false);
 
         foreach (var session in sessions)
         {
-            Emit(onProgress, Line("info", "session", $"  {session.SessionId} — {session.Kind ?? "unknown"} ({session.Status ?? "unknown"})", ts), ref lines, default);
+            await EmitAsync(onProgress, Line("info", "session", $"  {session.SessionId} — {session.Kind ?? "unknown"} ({session.Status ?? "unknown"})", ts), lines, cancellationToken).ConfigureAwait(false);
         }
 
         if (sessions.Count == 0)
         {
-            Emit(onProgress, Line("info", "session", "  (no sessions observed)", ts), ref lines, default);
+            await EmitAsync(onProgress, Line("info", "session", "  (no sessions observed)", ts), lines, cancellationToken).ConfigureAwait(false);
         }
 
         return Ok("list-sessions", lines);
@@ -206,7 +227,7 @@ public sealed class ConsoleCommandRunner : IConsoleCommandRunner
         }
 
         var lines = new List<ConsoleCommandLine>();
-        Emit(onProgress, Line("info", "console", $"Git status for {filtered.Count} workspace(s):", ts), ref lines, cancellationToken);
+        await EmitAsync(onProgress, Line("info", "console", $"Git status for {filtered.Count} workspace(s):", ts), lines, cancellationToken).ConfigureAwait(false);
 
         foreach (var snapshot in filtered)
         {
@@ -214,21 +235,21 @@ public sealed class ConsoleCommandRunner : IConsoleCommandRunner
             var branch = req.Branch ?? "(detached)";
             var dirty = req.DirtyCounts.Total > 0 ? $"±{req.DirtyCounts.Total}" : "clean";
             var head = req.HeadSha is { Length: > 8 } ? req.HeadSha[..8] : req.HeadSha ?? "—";
-            Emit(onProgress, Line("info", "git", $"  {snapshot.Scope.ProjectId}/{snapshot.Scope.RootPath}", ts), ref lines, cancellationToken);
-            Emit(onProgress, Line("info", "git", $"    branch: {branch}  head: {head}  dirty: {dirty}", ts), ref lines, cancellationToken);
+            await EmitAsync(onProgress, Line("info", "git", $"  {snapshot.Scope.ProjectId}/{snapshot.Scope.RootPath}", ts), lines, cancellationToken).ConfigureAwait(false);
+            await EmitAsync(onProgress, Line("info", "git", $"    branch: {branch}  head: {head}  dirty: {dirty}", ts), lines, cancellationToken).ConfigureAwait(false);
 
             if (req.Warnings.Count > 0)
             {
                 foreach (var warning in req.Warnings.Take(3))
                 {
-                    Emit(onProgress, Line("warn", "git", $"    warning: {warning}", ts), ref lines, cancellationToken);
+                    await EmitAsync(onProgress, Line("warn", "git", $"    warning: {warning}", ts), lines, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
 
         if (filtered.Count == 0)
         {
-            Emit(onProgress, Line("info", "git", "  (no matching workspaces)", ts), ref lines, cancellationToken);
+            await EmitAsync(onProgress, Line("info", "git", "  (no matching workspaces)", ts), lines, cancellationToken).ConfigureAwait(false);
         }
 
         return Ok("git-status", lines);
@@ -240,16 +261,16 @@ public sealed class ConsoleCommandRunner : IConsoleCommandRunner
         var ts = NowString();
         var diagnostics = status.Diagnostics;
         var lines = new List<ConsoleCommandLine>();
-        Emit(onProgress, Line("info", "console", $"Recent diagnostics ({diagnostics.Count} entries):", ts), ref lines, cancellationToken);
+        await EmitAsync(onProgress, Line("info", "console", $"Recent diagnostics ({diagnostics.Count} entries):", ts), lines, cancellationToken).ConfigureAwait(false);
 
         foreach (var entry in diagnostics.Take(20))
         {
-            Emit(onProgress, Line(entry.Level, entry.Source, $"  [{entry.ObservedAt}] {entry.Message}", ts), ref lines, cancellationToken);
+            await EmitAsync(onProgress, Line(entry.Level, entry.Source, $"  [{entry.ObservedAt}] {entry.Message}", ts), lines, cancellationToken).ConfigureAwait(false);
         }
 
         if (diagnostics.Count == 0)
         {
-            Emit(onProgress, Line("info", "console", "  (no diagnostics)", ts), ref lines, cancellationToken);
+            await EmitAsync(onProgress, Line("info", "console", "  (no diagnostics)", ts), lines, cancellationToken).ConfigureAwait(false);
         }
 
         return Ok("diagnostics", lines);
@@ -260,16 +281,16 @@ public sealed class ConsoleCommandRunner : IConsoleCommandRunner
         await _runtime.ClearDiagnosticsAsync(cancellationToken).ConfigureAwait(false);
         var ts = NowString();
         var lines = new List<ConsoleCommandLine>();
-        Emit(onProgress, Line("ok", "console", "Diagnostics buffer cleared.", ts), ref lines, cancellationToken);
+        await EmitAsync(onProgress, Line("ok", "console", "Diagnostics buffer cleared.", ts), lines, cancellationToken).ConfigureAwait(false);
 
         return Ok("clear-diagnostics", lines);
     }
 
-    private ConsoleCommandRunResponse UnknownCommand(string command, ConsoleCommandProgressCallback? onProgress = null)
+    private async Task<ConsoleCommandRunResponse> UnknownCommandAsync(string command, ConsoleCommandProgressCallback? onProgress = null, CancellationToken cancellationToken = default)
     {
         var ts = NowString();
         var lines = new List<ConsoleCommandLine>();
-        Emit(onProgress, Line("err", "console", $"Unknown command '{command}'. Type 'help' to list available commands.", ts), ref lines, default);
+        await EmitAsync(onProgress, Line("err", "console", $"Unknown command '{command}'. Type 'help' to list available commands.", ts), lines, cancellationToken).ConfigureAwait(false);
 
         return new ConsoleCommandRunResponse
         {
@@ -316,23 +337,28 @@ public sealed class ConsoleCommandRunner : IConsoleCommandRunner
     /// Emit a structured line: record it in the response list and, if a progress callback
     /// is provided, forward it as a progress event for streaming consumption.
     /// </summary>
-    private void Emit(ConsoleCommandProgressCallback? onProgress, ConsoleCommandLine line, ref List<ConsoleCommandLine> lines, CancellationToken cancellationToken)
+    private static async ValueTask EmitAsync(ConsoleCommandProgressCallback? onProgress, ConsoleCommandLine line, List<ConsoleCommandLine> lines, CancellationToken cancellationToken)
     {
-        lines ??= [];
         lines.Add(line);
-        if (onProgress is not null)
+        if (onProgress is null)
         {
-            // Fire-and-forget progress reporting. The callback is expected to complete
-            // quickly (writing to a channel/bridge progress publisher). Exceptions are
-            // swallowed so that output collection is not disrupted by a slow consumer.
-            try
-            {
-                onProgress(line, cancellationToken).AsTask().GetAwaiter().GetResult();
-            }
-            catch
-            {
-                // Progress reporting is best-effort; output lines are always collected.
-            }
+            return;
+        }
+
+        // Progress reporting is best-effort and async-safe. Await the callback so
+        // bridge progress publishers can flush frames without blocking synchronously;
+        // keep collected output intact if a progress consumer fails.
+        try
+        {
+            await onProgress(line, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            // Progress reporting is best-effort; output lines are always collected.
         }
     }
 

@@ -292,6 +292,10 @@ export function useOperatorRuntime(): RuntimeState {
     });
   }, [loading, callIpc]);
 
+  // Console commands currently render as batch output from the final response.
+  // The .NET sidecar emits typed progress frames, but the renderer/preload bridge
+  // does not yet expose per-request progress subscription callbacks; wiring that
+  // transport API is the follow-up boundary before ConsoleDock can stream in-flight lines.
   const runConsoleCommand = useCallback(
     async (
       command: string,

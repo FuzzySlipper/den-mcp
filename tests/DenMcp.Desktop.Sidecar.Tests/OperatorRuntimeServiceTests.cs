@@ -41,6 +41,39 @@ public class OperatorRuntimeServiceTests
     }
 
     [Fact]
+    public async Task PublishSnapshotsAsync_UsesRefreshCycleByDesignToPublishFreshSnapshotsAndEvents()
+    {
+        using var temp = TempDirectory.Create();
+        var root = temp.CreateDirectory("repo");
+        var service = CreateService(
+            temp,
+            new QueueHandler(
+                JsonResponse("""
+                    {"status":"healthy","version":"1.0"}
+                    """),
+                JsonResponse($$"""
+                    [{"id":"den-mcp","name":"Den MCP","root_path":"{{Json(root)}}","description":null,"created_at":null,"updated_at":null}]
+                    """),
+                JsonResponse("[]"),
+                JsonResponse("{}")),
+            new FakeGitRunner(StatusOutput()));
+
+        await service.Runtime.StartAsync(runInitialRefresh: false, startBackgroundLoop: false);
+        await service.Runtime.PublishSnapshotsAsync();
+
+        var status = await service.Runtime.GetStatusAsync();
+        var snapshots = await service.Runtime.ListLocalSnapshotsAsync();
+
+        Assert.Equal("connected", status.DenConnection.State);
+        Assert.Equal(1, status.ProjectCount);
+        Assert.Equal("published", snapshots.Snapshots.Single().LastPublishStatus);
+        Assert.Contains(service.Http.Requests, request =>
+            request.Method == "PUT" && request.Uri.Contains("/desktop/git-snapshots", StringComparison.Ordinal));
+        Assert.Contains(DesktopSidecarProtocol.GitSnapshotEvent, service.Events.PublishedFrames.Select(frame => frame.Event));
+        Assert.Contains(DesktopSidecarProtocol.SessionSnapshotEvent, service.Events.PublishedFrames.Select(frame => frame.Event));
+    }
+
+    [Fact]
     public async Task RefreshAsync_OfflineKeepsCachedScopesAndQueuesLocalSnapshots()
     {
         using var temp = TempDirectory.Create();

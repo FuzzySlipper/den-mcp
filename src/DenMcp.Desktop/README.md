@@ -31,6 +31,10 @@ cargo check
 - Keeps local in-memory snapshots and shows queued/stale/offline-style status when Den is disconnected.
 - Renders a local React UI for connection health, observer status, diagnostics, task/workspace snapshot cards, changed-file grouping, bounded diff lookup status, and prototype Pi session snapshots.
 
+## Console command output
+
+Structured console commands run through the typed sidecar bridge and return structured `ConsoleCommandLine` output in the final `consoleRunCommand` response. The sidecar command handler also reports progress frames, but the current renderer/preload API is intentionally batch-only: `BridgeClientTransport.send()` exposes the final response and does not yet provide a per-request progress subscription callback. A real-time ConsoleDock renderer should first add that typed progress subscription to the Electron/preload bridge, then append in-flight command lines before reconciling with the final response.
+
 ## Boundaries
 
 - Den remains the durable source of truth for tasks, messages, reviews, runs, and published snapshots.
