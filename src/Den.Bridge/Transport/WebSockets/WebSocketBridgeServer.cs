@@ -408,11 +408,15 @@ public sealed class WebSocketBridgeServer : IBridgeEventPublisher, IBridgeProgre
             sendTasks[index] = connections[index].TrySendFrameAsync(frame, cancellationToken).AsTask();
         }
 
+        // Sends are intentionally started for all current connections before awaiting; WhenAll still
+        // waits for every send, and callers can bound that wait with cancellation if needed.
         await Task.WhenAll(sendTasks).ConfigureAwait(false);
     }
 
     private void RemoveConnection(Guid id)
     {
+        // Send failures and receive-loop finalization can race here. TryRemove keeps removal
+        // idempotent; RunAsync remains the single owner of socket/gate disposal.
         _connections.TryRemove(id, out _);
     }
 

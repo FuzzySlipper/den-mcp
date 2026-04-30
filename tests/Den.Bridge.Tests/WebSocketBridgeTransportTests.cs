@@ -90,6 +90,35 @@ public class WebSocketBridgeTransportTests
     }
 
     [Fact]
+    public async Task DispatchRequestWithLoggingAsync_LogsUnhandledDispatchFailures()
+    {
+        var logger = new CapturingLogger<WebSocketBridgeServer>();
+        var router = new DelegatingRouter((_, _) =>
+            throw new InvalidOperationException("Unexpected router dispatch."));
+        await using var server = new WebSocketBridgeServer(
+            new WebSocketBridgeServerOptions { Port = 0, AuthToken = "token" },
+            router,
+            logger);
+        using var socket = new ClientWebSocket();
+        var connection = CreateConnection(server, socket);
+        var method = connection.GetType().GetMethod("DispatchRequestWithLoggingAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        var result = method.Invoke(connection, [new BridgeRequestFrame
+        {
+            RequestId = null!,
+            Command = "sample.invalid",
+        }]);
+
+        Assert.NotNull(result);
+        await Assert.IsAssignableFrom<Task>(result).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Contains(logger.Entries, entry =>
+            entry.Level == LogLevel.Error
+            && entry.Exception is ArgumentNullException
+            && entry.Message.Contains("Unhandled bridge WebSocket request dispatch failure", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task ClientAndServer_RouteRequestsAndResponsesOverJsonFrames()
     {
         var router = new DelegatingRouter((request, _) =>
@@ -296,6 +325,19 @@ public class WebSocketBridgeTransportTests
         Assert.NotNull(method);
         var endpoint = method.Invoke(null, [listenAddress, port, path]);
         return Assert.IsType<Uri>(endpoint);
+    }
+
+    private static object CreateConnection(WebSocketBridgeServer server, WebSocket socket)
+    {
+        var connectionType = typeof(WebSocketBridgeServer).GetNestedType("WebSocketBridgeConnection", BindingFlags.NonPublic);
+        Assert.NotNull(connectionType);
+        var constructor = connectionType.GetConstructor(
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+            binder: null,
+            [typeof(WebSocketBridgeServer), typeof(WebSocket)],
+            modifiers: null);
+        Assert.NotNull(constructor);
+        return constructor.Invoke([server, socket]);
     }
 
     private static async Task WaitUntilAsync(Func<bool> condition)
