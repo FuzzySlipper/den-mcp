@@ -31,13 +31,15 @@ interface AppShellProps {
   diagnostics: DiagnosticEntry[];
   ipcHealth: IpcHealth | null;
   children: Record<ShellTabId, ReactNode>;
+  activeProjectId?: string | null;
+  onSelectProject?: (projectId: string) => void;
   onRunConsoleCommand?: (command: string) => Promise<void>;
   consoleCommands?: { name: string; displayName: string; description: string; needsTarget: boolean }[];
   consoleCommandHistory?: ConsoleCommandHistoryEntry[];
   activeProgressLines?: ConsoleCommandOutputLine[];
 }
 
-export function AppShell({ state, onStateChange, status, snapshots, sessionSnapshots, diagnostics, ipcHealth, children, onRunConsoleCommand, consoleCommands, consoleCommandHistory, activeProgressLines }: AppShellProps) {
+export function AppShell({ state, onStateChange, status, snapshots, sessionSnapshots, diagnostics, ipcHealth, children, activeProjectId, onSelectProject, onRunConsoleCommand, consoleCommands, consoleCommandHistory, activeProgressLines }: AppShellProps) {
   const setState = (patch: Partial<ShellState>) => onStateChange({ ...state, ...patch });
   const activeTab = shellTabs.some((tab) => tab.id === state.activeTab) ? state.activeTab : 'operator';
   const activeTabTitle = shellTabs.find((tab) => tab.id === activeTab)?.label ?? 'operator';
@@ -62,10 +64,11 @@ export function AppShell({ state, onStateChange, status, snapshots, sessionSnaps
         accent={state.accent}
         onCycleTheme={() => setState({ theme: nextTheme(state.theme) })}
         onOpenSettings={() => setState({ activeTab: 'settings' })}
+        onOpenSearch={() => setState({ activeTab: 'tasks' })}
       />
       <TabBar activeTab={activeTab} onSelect={(tab) => setState({ activeTab: tab })} />
       <div className="shell-main">
-        <LeftRail snapshots={snapshots} mode={state.railMode} onModeChange={(railMode) => setState({ railMode })} />
+        <LeftRail snapshots={snapshots} activeProjectId={activeProjectId} mode={state.railMode} onModeChange={(railMode) => setState({ railMode })} onSelectProject={onSelectProject} />
         <section className="tab-canvas" aria-label={`${activeTabTitle} tab content`}>
           {activeTab === 'settings' ? (
             <div className="settings-tab tab-stack">
@@ -96,6 +99,7 @@ function Titlebar({
   accent,
   onCycleTheme,
   onOpenSettings,
+  onOpenSearch,
 }: {
   activeTabTitle: string;
   status: OperatorStatus | null;
@@ -103,6 +107,7 @@ function Titlebar({
   accent: ShellAccent;
   onCycleTheme: () => void;
   onOpenSettings: () => void;
+  onOpenSearch: () => void;
 }) {
   const connection = status?.denConnection;
   const state = connection?.state ?? 'unknown';
@@ -125,8 +130,8 @@ function Titlebar({
         <span className="titlebar-run"><span>sync</span>{syncId}</span>
       </div>
       <div className="titlebar-actions">
-        <button type="button" className="icon-button" title="Search">⌕</button>
-        <button type="button" className="icon-button" title="Notifications">▽</button>
+        <button type="button" className="icon-button" title="Open Tasks search context" onClick={onOpenSearch}>⌕</button>
+        <button type="button" className="icon-button" title="Notifications are not wired yet" disabled>▽</button>
         <button type="button" className="icon-button" title={`Cycle theme (${theme})`} onClick={onCycleTheme}>◐</button>
         <button type="button" className="icon-button" title={`Settings · ${accent}`} onClick={onOpenSettings}>⚙</button>
       </div>
@@ -157,31 +162,51 @@ function TabBar({ activeTab, onSelect }: { activeTab: ShellTabId; onSelect: (tab
 
 function LeftRail({
   snapshots,
+  activeProjectId,
   mode,
   onModeChange,
+  onSelectProject,
 }: {
   snapshots: LocalGitSnapshot[];
+  activeProjectId?: string | null;
   mode: ShellRailMode;
   onModeChange: (mode: ShellRailMode) => void;
+  onSelectProject?: (projectId: string) => void;
 }) {
-  const rows = projectRows(snapshots);
+  const rows = projectRows(snapshots, activeProjectId ?? null);
+  const collapsed = mode === 'collapsed';
 
   return (
     <aside className="left-rail" aria-label="Project rail">
       <div className="rail-header">
         <span>Projects · {rows.length}</span>
-        <button type="button" className="rail-add" title="New task placeholder">+</button>
+        <button
+          type="button"
+          className="rail-toggle"
+          title={collapsed ? 'Expand project sidebar' : 'Collapse project sidebar'}
+          aria-label={collapsed ? 'Expand project sidebar' : 'Collapse project sidebar'}
+          onClick={() => onModeChange(collapsed ? 'expanded' : 'collapsed')}
+        >
+          {collapsed ? '›' : '‹'}
+        </button>
       </div>
       <div className="rail-list">
         {rows.map((row) => (
-          <div key={row.id} className={`rail-project ${row.active ? 'active' : ''}`}>
+          <button
+            key={row.id}
+            type="button"
+            className={`rail-project ${row.active ? 'active' : ''}`}
+            title={collapsed ? `${row.name} · ${row.subtitle}` : undefined}
+            aria-pressed={row.active}
+            onClick={() => onSelectProject?.(row.id)}
+          >
             <span className={`rail-dot ${row.state}`} aria-hidden="true" />
             <span className="rail-project-body">
               <strong>{row.name}</strong>
               <span>{row.subtitle}</span>
             </span>
             <span className="rail-delta">{row.delta}</span>
-          </div>
+          </button>
         ))}
       </div>
       <div className="rail-section-title">Shell</div>
@@ -192,7 +217,7 @@ function LeftRail({
           </button>
         ))}
       </div>
-      <button type="button" className="rail-action">+ New Task</button>
+      <button type="button" className="rail-action" disabled title="Task creation is not wired in this desktop slice yet">+ New Task</button>
       <div className="rail-card">
         <span className="rail-card-label">Today</span>
         <span><b>{snapshots.length}</b> workspaces observed</span>
@@ -266,7 +291,7 @@ function Select<T extends string>({ label, value, options, onChange }: { label: 
   );
 }
 
-function projectRows(snapshots: LocalGitSnapshot[]) {
+export function projectRows(snapshots: LocalGitSnapshot[], activeProjectId: string | null = null) {
   if (snapshots.length === 0) {
     return [{ id: 'den-mcp', name: 'den-mcp', subtitle: 'awaiting bridge snapshot', delta: '—', state: 'idle', active: true }];
   }
@@ -281,13 +306,15 @@ function projectRows(snapshots: LocalGitSnapshot[]) {
     byProject.set(id, current);
   }
 
-  return [...byProject.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([id, item], index) => ({
+  const sorted = [...byProject.entries()].sort(([a], [b]) => a.localeCompare(b));
+  const activeId = activeProjectId && byProject.has(activeProjectId) ? activeProjectId : sorted[0]?.[0] ?? null;
+  return sorted.map(([id, item]) => ({
     id,
     name: id,
     subtitle: `${item.workspaces} workspace${item.workspaces === 1 ? '' : 's'}`,
     delta: item.dirty > 0 ? `±${item.dirty}` : 'clean',
     state: item.warning ? 'warn' : item.dirty > 0 ? 'running' : 'ok',
-    active: index === 0,
+    active: id === activeId,
   }));
 }
 

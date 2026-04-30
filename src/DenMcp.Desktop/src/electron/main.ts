@@ -14,7 +14,7 @@
  * through typed IPC channels that mirror the DenDesktopSidecarApi contract.
  */
 
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu } from 'electron';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -290,6 +290,27 @@ function setupIpcBridge(): void {
 
 // ── Window creation ──
 
+function setupRendererContextMenu(win: BrowserWindow): void {
+  win.webContents.on('context-menu', (_event, params) => {
+    const hasSelection = params.selectionText.trim().length > 0;
+    const template: Electron.MenuItemConstructorOptions[] = params.isEditable
+      ? [
+          { role: 'cut' },
+          { role: 'copy' },
+          { role: 'paste' },
+          { type: 'separator' },
+          { role: 'selectAll' },
+        ]
+      : [
+          { role: 'copy', enabled: hasSelection },
+          { type: 'separator' },
+          { role: 'selectAll' },
+        ];
+
+    Menu.buildFromTemplate(template).popup({ window: win });
+  });
+}
+
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1440,
@@ -307,6 +328,8 @@ function createWindow(): BrowserWindow {
       // Security: no remote module, no nodeIntegrationInWorker
     },
   });
+
+  setupRendererContextMenu(win);
 
   const loadTarget = resolveRendererLoadTarget({
     isPackaged: app.isPackaged,

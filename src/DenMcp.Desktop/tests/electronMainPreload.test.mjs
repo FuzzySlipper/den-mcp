@@ -326,6 +326,22 @@ test('event subscription channel names follow the den-desktop:event prefix conve
   }
 });
 
+test('Electron shell exposes safe context menu and avoids dead topbar controls', async () => {
+  const mainSource = await readFile(resolve(__dirname, '../src/electron/main.ts'), 'utf8');
+  assert.match(mainSource, /role: 'copy'/);
+  assert.match(mainSource, /role: 'paste'/);
+  assert.match(mainSource, /role: 'selectAll'/);
+  assert.match(mainSource, /setupRendererContextMenu\(win\)/);
+  assert.doesNotMatch(mainSource, /role: 'open'/);
+  assert.doesNotMatch(mainSource, /shell\.open/);
+
+  const shellSource = await readFile(resolve(__dirname, '../src/components/AppShell.tsx'), 'utf8');
+  assert.match(shellSource, /onClick=\{onOpenSearch\}/);
+  assert.match(shellSource, /Notifications are not wired yet" disabled/);
+  assert.match(shellSource, /Expand project sidebar/);
+  assert.match(shellSource, /onSelectProject\?\.\(row\.id\)/);
+});
+
 test('built Electron dev launch uses sandbox-compatible preload and relative Vite asset URLs', async () => {
   const packageJsonPath = resolve(__dirname, '../package.json');
   const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8'));

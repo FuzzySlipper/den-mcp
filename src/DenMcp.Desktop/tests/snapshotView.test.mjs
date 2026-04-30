@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  buildLatestDiffSnapshotRequest,
   calmStateLabel,
   diffStatusMessage,
   freshnessLabel,
@@ -77,6 +78,31 @@ test('changed files group in operator-friendly order', () => {
     ['deleted', ['gone.txt']],
     ['untracked', ['z.txt']],
   ]);
+});
+
+test('diff request builder normalizes optional snapshot scope fields to null', () => {
+  const item = snapshot({
+    scope: {
+      projectId: 'den-mcp',
+      projectName: 'Den MCP',
+      rootPath: '/repo',
+      sourceKind: 'project_root',
+    },
+    request: {
+      ...snapshot().request,
+      root_path: '/repo',
+      source_instance_id: 'desktop-1',
+    },
+  });
+
+  assert.deepEqual(buildLatestDiffSnapshotRequest(item, file('src/App.tsx', 'modified')), {
+    projectId: 'den-mcp',
+    taskId: null,
+    workspaceId: null,
+    rootPath: '/repo',
+    path: 'src/App.tsx',
+    sourceInstanceId: 'desktop-1',
+  });
 });
 
 test('diff status explains missing or unavailable bounded diffs calmly', () => {

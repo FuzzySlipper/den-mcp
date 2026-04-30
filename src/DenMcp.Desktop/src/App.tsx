@@ -14,7 +14,7 @@ import { getLatestDiffSnapshot } from './desktop/tauriApi';
 import type { DesktopDiffSnapshotLatestResult, GitFileStatus, LocalGitSnapshot, ShellAppearanceSettings } from './desktop/tauriApi';
 import { useOperatorRuntime } from './desktop/useOperatorRuntime';
 import { applyShellDataAttributes, defaultShellState, loadShellState, nextConsoleMode, parseShellState, saveShellState, ShellState, ShellTabId } from './shellState';
-import { snapshotKey } from './snapshotView';
+import { buildLatestDiffSnapshotRequest, snapshotKey } from './snapshotView';
 import './styles/index.css';
 
 function bridgeAppearanceToShellState(appearance: ShellAppearanceSettings | null, fallback: ShellState): ShellState {
@@ -119,19 +119,19 @@ export function App() {
     setDiffError(null);
     setDiffLoading(true);
     try {
-      const result = await getLatestDiffSnapshot({
-        projectId: snapshot.scope.projectId,
-        taskId: snapshot.scope.taskId,
-        workspaceId: snapshot.scope.workspaceId,
-        rootPath: snapshot.request.root_path,
-        path: file.path,
-        sourceInstanceId: snapshot.request.source_instance_id,
-      });
+      const result = await getLatestDiffSnapshot(buildLatestDiffSnapshotRequest(snapshot, file));
       setDiff(result);
     } catch (err) {
       setDiffError(err instanceof Error ? err.message : String(err));
     } finally {
       setDiffLoading(false);
+    }
+  };
+
+  const selectProject = (projectId: string) => {
+    const nextSnapshot = runtime.snapshots.find((snapshot) => snapshot.scope.projectId === projectId) ?? null;
+    if (nextSnapshot) {
+      selectSnapshot(nextSnapshot);
     }
   };
 
@@ -273,6 +273,8 @@ export function App() {
       sessionSnapshots={runtime.sessionSnapshots}
       diagnostics={runtime.status?.diagnostics ?? []}
       ipcHealth={runtime.ipcHealth}
+      activeProjectId={activeSnapshot?.scope.projectId ?? null}
+      onSelectProject={selectProject}
       onRunConsoleCommand={runConsoleCommand}
       consoleCommands={runtime.consoleCommands}
       consoleCommandHistory={runtime.consoleCommandHistory}

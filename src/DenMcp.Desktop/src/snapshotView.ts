@@ -1,4 +1,4 @@
-import type { DesktopDiffSnapshotLatestResult, GitFileStatus, LocalGitSnapshot } from './desktop/tauriApi';
+import type { DesktopDiffSnapshotLatestResult, GitFileStatus, LatestDiffSnapshotRequest, LocalGitSnapshot } from './desktop/tauriApi';
 
 export interface FileGroup {
   category: string;
@@ -53,6 +53,17 @@ export function calmStateLabel(state: string): string {
     case 'missing': return 'missing';
     default: return state.replaceAll('_', ' ');
   }
+}
+
+export function buildLatestDiffSnapshotRequest(snapshot: LocalGitSnapshot, file: GitFileStatus): LatestDiffSnapshotRequest {
+  return {
+    projectId: snapshot.scope.projectId,
+    taskId: snapshot.scope.taskId ?? null,
+    workspaceId: snapshot.scope.workspaceId ?? null,
+    rootPath: snapshot.request.root_path,
+    path: file.path,
+    sourceInstanceId: snapshot.request.source_instance_id,
+  };
 }
 
 export function diffStatusMessage(result: DesktopDiffSnapshotLatestResult | null, selectedPath: string | null): string {

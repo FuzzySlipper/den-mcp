@@ -173,7 +173,7 @@ body {
 
 button, input, select { font: inherit; }
 button { cursor: pointer; }
-button:disabled { cursor: progress; opacity: 0.65; }
+button:disabled { cursor: default; opacity: 0.55; }
 
 .app-shell {
   width: min(1500px, calc(100vw - var(--sp-4)));
@@ -228,7 +228,7 @@ button:disabled { cursor: progress; opacity: 0.65; }
 .icon-button,
 .console-controls button,
 .rail-mode-controls button,
-.rail-add {
+.rail-toggle {
   display: inline-grid;
   place-items: center;
   min-width: 26px;
@@ -239,10 +239,10 @@ button:disabled { cursor: progress; opacity: 0.65; }
   color: var(--fg-tertiary);
   padding: 0 var(--sp-1);
 }
-.icon-button:hover,
-.console-controls button:hover,
-.rail-mode-controls button:hover,
-.rail-add:hover { background: var(--bg-hover); color: var(--fg-primary); border-color: var(--bd-subtle); }
+.icon-button:not(:disabled):hover,
+.console-controls button:not(:disabled):hover,
+.rail-mode-controls button:not(:disabled):hover,
+.rail-toggle:not(:disabled):hover { background: var(--bg-hover); color: var(--fg-primary); border-color: var(--bd-subtle); }
 
 .tabbar {
   position: relative;
@@ -335,14 +335,20 @@ button:disabled { cursor: progress; opacity: 0.65; }
   grid-template-columns: 10px minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--sp-2);
+  width: 100%;
   min-height: 36px;
   padding: var(--sp-1_5) var(--sp-2);
   border-radius: var(--r-md);
   color: var(--fg-secondary);
   border: var(--bw) solid transparent;
+  background: transparent;
+  text-align: left;
 }
+.rail-project:hover { background: var(--bg-hover); color: var(--fg-primary); border-color: var(--bd-subtle); }
 .rail-project.active { background: var(--accent-bg); border-color: color-mix(in oklab, var(--accent) 35%, transparent); }
 .rail-project.active::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; border-radius: 2px; background: var(--accent); }
+.desktop-shell[data-rail="collapsed"] .rail-project { grid-template-columns: 1fr; justify-items: center; padding: var(--sp-2) 0; }
+.desktop-shell[data-rail="collapsed"] .rail-header { justify-content: center; padding: 0; }
 .rail-dot, .status-light, .pill-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; background: var(--st-idle); }
 .rail-dot.ok, .status-light.ok, .pill.ok .pill-dot { background: var(--st-ok); }
 .rail-dot.running, .status-light.running, .pill.running .pill-dot { background: var(--st-running); box-shadow: 0 0 8px var(--st-running); }
@@ -430,7 +436,7 @@ kbd { border: var(--bw) solid var(--bd-default); border-bottom-color: var(--bd-s
 .tab-intro p { max-width: 760px; }
 .connection-actions { margin-top: var(--sp-4); }
 
-button:not(.tab-button):not(.icon-button):not(.rail-add):not(.workspace-card):not(.file-button):not(.console-controls button):not(.rail-mode-controls button) { border: var(--bw) solid color-mix(in oklab, var(--accent) 35%, transparent); border-radius: var(--r-lg); padding: 0.65rem 0.9rem; background: var(--accent); color: var(--accent-fg); font-weight: 800; }
+button:not(.tab-button):not(.icon-button):not(.rail-toggle):not(.rail-project):not(.workspace-card):not(.file-button):not(.console-controls button):not(.rail-mode-controls button) { border: var(--bw) solid color-mix(in oklab, var(--accent) 35%, transparent); border-radius: var(--r-lg); padding: 0.65rem 0.9rem; background: var(--accent); color: var(--accent-fg); font-weight: 800; }
 button.secondary { background: var(--bg-panel-2) !important; color: var(--fg-primary) !important; border-color: var(--bd-default) !important; }
 input, select { width: 100%; border: var(--bw) solid var(--bd-default); border-radius: var(--r-lg); background: var(--bg-input); color: var(--fg-primary); padding: 0.65rem 0.75rem; }
 input:focus, select:focus, button:focus-visible { outline: 2px solid color-mix(in oklab, var(--accent) 55%, transparent); outline-offset: 2px; }
