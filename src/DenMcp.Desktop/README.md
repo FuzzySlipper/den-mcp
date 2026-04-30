@@ -18,14 +18,28 @@ npm run test:helpers
 The Electron dev shell launches the .NET sidecar, connects via typed WebSocket bridge, and loads the React UI in a BrowserWindow with a secure preload boundary.
 
 ```bash
-# Build UI and Electron main/preload bundles, then launch Electron
+# Build UI and Electron main/preload bundles, then launch Electron from built dist/
 npm run electron:dev
 ```
+
+This default command intentionally loads the built UI directly from `dist/index.html`; it does not probe the Vite dev server first. This avoids a noisy failed connection attempt when you are testing the sidecar/preload/Electron shell without hot reload.
 
 This will:
 1. Build the React UI to `dist/` via Vite.
 2. Bundle the Electron main process (`src/electron/main.ts`) and preload (`src/electron/preload.ts`) to `electron-dist/` via esbuild.
-3. Launch Electron which starts the .NET sidecar, waits for the ready sentinel, connects the typed bridge, and loads the UI.
+3. Launch Electron which starts the .NET sidecar, waits for the ready sentinel, connects the typed bridge, and loads the built UI.
+
+For hot React reload, run Vite separately and launch Electron in hot mode:
+
+```bash
+# Terminal 1: serve the renderer
+npm run ui:dev
+
+# Terminal 2: bundle Electron main/preload and load http://127.0.0.1:1421
+npm run electron:dev:hot
+```
+
+`electron:dev:hot` sets `DEN_DESKTOP_ELECTRON_LOAD_MODE=hot`; `VITE_DEV_SERVER_URL` can override the default `http://127.0.0.1:1421`.
 
 **Manual step:** the sidecar `.NET` project must be buildable (`dotnet build src/DenMcp.Desktop.Sidecar`). If `dotnet` is not on PATH, the sidecar will fail to launch.
 

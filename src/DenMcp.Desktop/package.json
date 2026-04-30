@@ -8,6 +8,7 @@
     "ui:build": "tsc --noEmit && vite build",
     "electron:build": "esbuild src/electron/main.ts --bundle --platform=node --format=esm --outfile=electron-dist/main.mjs --external:electron --external:ws && esbuild src/electron/preload.ts --bundle --platform=node --format=esm --outfile=electron-dist/preload.mjs --external:electron",
     "electron:dev": "npm run ui:build && npm run electron:build && npx electron electron-dist/main.mjs",
+    "electron:dev:hot": "npm run electron:build && DEN_DESKTOP_ELECTRON_LOAD_MODE=hot npx electron electron-dist/main.mjs",
     "test:helpers": "node --test tests/*.test.mjs",
     "sidecar:dev": "dotnet run --project ../DenMcp.Desktop.Sidecar --",
     "tauri:dev": "tauri dev",

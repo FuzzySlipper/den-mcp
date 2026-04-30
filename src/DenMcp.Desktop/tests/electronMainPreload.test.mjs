@@ -750,6 +750,35 @@ test('IPC subscription contract: the old broken preload pattern (sending eventNa
   assert.equal(sidecarUnsubscribes.length, 0, 'BUG: sidecar unsubscribe never called — leak!');
 });
 
+test('electron renderer load mode defaults to built UI and supports explicit hot mode', async () => {
+  const { resolveRendererLoadTarget } = await import('../src/electron/rendererLoadMode.ts');
+  const simulatedBundledDir = resolve(__dirname, '../electron-dist');
+
+  const defaultTarget = resolveRendererLoadTarget({
+    isPackaged: false,
+    electronDistDir: simulatedBundledDir,
+    env: {},
+  });
+  assert.equal(defaultTarget.kind, 'file');
+  assert.equal(defaultTarget.mode, 'build');
+  assert.equal(defaultTarget.path, resolve(__dirname, '../dist/index.html'));
+
+  const hotTarget = resolveRendererLoadTarget({
+    isPackaged: false,
+    electronDistDir: simulatedBundledDir,
+    env: { DEN_DESKTOP_ELECTRON_LOAD_MODE: 'hot', VITE_DEV_SERVER_URL: 'http://127.0.0.1:1666' },
+  });
+  assert.deepEqual(hotTarget, { kind: 'url', mode: 'hot', url: 'http://127.0.0.1:1666' });
+
+  const packagedTarget = resolveRendererLoadTarget({
+    isPackaged: true,
+    electronDistDir: simulatedBundledDir,
+    env: { DEN_DESKTOP_ELECTRON_LOAD_MODE: 'hot', VITE_DEV_SERVER_URL: 'http://127.0.0.1:1666' },
+  });
+  assert.equal(packagedTarget.kind, 'file');
+  assert.equal(packagedTarget.mode, 'build');
+});
+
 test('electron main/preload path helpers resolve correctly from electron-dist context', async () => {
   const path = await import('node:path');
   // Simulate the path resolution as it would work from electron-dist/main.mjs

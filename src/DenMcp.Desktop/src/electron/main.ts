@@ -7,7 +7,7 @@
  * - Auth token generation and sidecar process launch via SidecarSupervisor
  * - WebSocket bridge connection lifecycle
  * - IPC bridge: exposes only allow-listed sidecar API to the renderer
- * - Loads Vite dev server URL (dev) or built index.html (prod)
+ * - Loads built UI by default, or Vite dev server URL when hot mode is requested
  *
  * Security boundary: the renderer receives no raw token, endpoint URL,
  * Node APIs, shell access, or generic dispatch. All communication flows
@@ -30,6 +30,7 @@ import {
 import { sidecarCommands, sidecarEvents } from './sidecarProtocol.ts';
 import { createDenDesktopSidecarApi, type DenDesktopSidecarApi } from './preloadSidecarApi.ts';
 import { createSidecarBridgeTransport } from './sidecarBridgeConnection.ts';
+import { resolveRendererLoadTarget } from './rendererLoadMode.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -287,8 +288,6 @@ function setupIpcBridge(): void {
 // ── Window creation ──
 
 function createWindow(): BrowserWindow {
-  const isDev = !app.isPackaged;
-
   const win = new BrowserWindow({
     width: 1440,
     height: 960,
@@ -306,18 +305,14 @@ function createWindow(): BrowserWindow {
     },
   });
 
-  if (isDev) {
-    // In dev mode, load from Vite dev server.
-    // Fall back to built index.html if the dev server is not running.
-    // From electron-dist/, ../dist/index.html points to src/DenMcp.Desktop/dist/index.html.
-    const viteDevUrl = process.env.VITE_DEV_SERVER_URL || 'http://127.0.0.1:1421';
-    win.loadURL(viteDevUrl).catch(() => {
-      win.loadFile(path.resolve(__dirname, '../dist/index.html'));
-    });
+  const loadTarget = resolveRendererLoadTarget({
+    isPackaged: app.isPackaged,
+    electronDistDir: __dirname,
+  });
+  if (loadTarget.kind === 'url') {
+    win.loadURL(loadTarget.url);
   } else {
-    // In prod/packaged mode, load built UI.
-    // app.isPackaged mode uses process.resourcesPath; dev fallback uses relative path.
-    win.loadFile(path.resolve(__dirname, '../dist/index.html'));
+    win.loadFile(loadTarget.path);
   }
 
   return win;
