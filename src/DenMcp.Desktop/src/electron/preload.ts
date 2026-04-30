@@ -28,6 +28,11 @@ async function callSidecar(method: string, ...args: unknown[]): Promise<unknown>
 /**
  * Helper to subscribe to a sidecar event through IPC.
  * Returns an unsubscribe function that the renderer can call to clean up.
+ *
+ * The subscribe IPC call returns a `subscriptionId` that must be used
+ * to unsubscribe. We capture it from the response so that the
+ * unsubscribe IPC call sends the correct ID to the main process.
+ * If the subscription request fails, the unsubscribe is a no-op.
  */
 function subscribeToEvent(eventName: string, listener: (payload: unknown) => void): () => void {
   const channel = `den-desktop:event:${eventName}`;
@@ -38,16 +43,21 @@ function subscribeToEvent(eventName: string, listener: (payload: unknown) => voi
   };
   ipcRenderer.on(channel, wrappedListener);
 
-  // Then request subscription from main process
-  ipcRenderer.invoke(SIDECAR_SUBSCRIBE_CHANNEL, eventName).catch(() => {
-    // Subscription failed; listener is harmless
-  });
+  // Then request subscription from main process and capture the subscriptionId.
+  const subscriptionIdPromise = ipcRenderer.invoke(SIDECAR_SUBSCRIBE_CHANNEL, eventName)
+    .then((result: { subscriptionId: string }) => result.subscriptionId)
+    .catch(() => null);
 
   // Return unsubscribe function
   return () => {
     ipcRenderer.removeListener(channel, wrappedListener);
-    ipcRenderer.invoke(SIDECAR_UNSUBSCRIBE_CHANNEL, eventName).catch(() => {
-      // Cleanup is best-effort
+    // Use the captured subscriptionId (not the eventName) to unsubscribe.
+    subscriptionIdPromise.then((subscriptionId) => {
+      if (subscriptionId) {
+        ipcRenderer.invoke(SIDECAR_UNSUBSCRIBE_CHANNEL, subscriptionId).catch(() => {
+          // Cleanup is best-effort
+        });
+      }
     });
   };
 }

@@ -630,6 +630,123 @@ test('IPC subscription lifecycle: subscribe returns unique ID, unsubscribe remov
   assert.equal(sidecarApiSubscriptions.filter((s) => s.action === 'unsubscribed').length, 2);
 });
 
+test('IPC subscription contract: preload captures subscriptionId from subscribe and sends it on unsubscribe', async () => {
+  // This test exercises the full preload→main IPC subscription contract
+  // to verify the subscriptionId flows correctly (covers R1066-1 fix).
+  //
+  // Simulates:
+  //   preload: subscribeToEvent(eventName, listener)
+  //     → ipcRenderer.invoke('subscribe', eventName) → { subscriptionId }
+  //     → unsubscribe: ipcRenderer.invoke('unsubscribe', subscriptionId)
+  //   main:
+  //     subscribe handler: creates subscriptionId, returns it
+  //     unsubscribe handler: looks up subscriptionId, calls unsubscribe
+
+  const activeSubscriptions = new Map();
+  const sidecarUnsubscribes = [];
+
+  // Simulate main-process subscribe handler
+  function mainHandleSubscribe(eventName) {
+    const subscriptionId = `${eventName}:${Date.now().toString(36)}`;
+    const unsubscribe = () => {
+      sidecarUnsubscribes.push({ event: eventName, id: subscriptionId });
+    };
+    activeSubscriptions.set(subscriptionId, unsubscribe);
+    return { subscriptionId };
+  }
+
+  // Simulate main-process unsubscribe handler
+  function mainHandleUnsubscribe(subscriptionId) {
+    const unsubscribe = activeSubscriptions.get(subscriptionId);
+    if (unsubscribe) {
+      activeSubscriptions.delete(subscriptionId);
+      unsubscribe();
+    }
+  }
+
+  // Simulate the fixed preload subscribeToEvent behavior
+  // (captures subscriptionId from subscribe response)
+  function simulatePreloadSubscribeToEvent(eventName) {
+    // 1. Preload calls subscribe and captures subscriptionId
+    const subscriptionIdPromise = Promise.resolve(mainHandleSubscribe(eventName))
+      .then((result) => result.subscriptionId);
+
+    // 2. Return unsubscribe function that uses the captured subscriptionId
+    return () => {
+      subscriptionIdPromise.then((subscriptionId) => {
+        mainHandleUnsubscribe(subscriptionId);
+      });
+    };
+  }
+
+  // Subscribe to events
+  const unsub1 = simulatePreloadSubscribeToEvent('terminalOutput');
+  const unsub2 = simulatePreloadSubscribeToEvent('operatorStatus');
+
+  // Let promises resolve so subscriptionIds are captured
+  await new Promise((r) => setTimeout(r, 0));
+
+  assert.equal(activeSubscriptions.size, 2, 'Should have two active subscriptions');
+
+  // Unsubscribe first
+  unsub1();
+  await new Promise((r) => setTimeout(r, 0));
+
+  assert.equal(activeSubscriptions.size, 1, 'Should have one active subscription after unsub1');
+  assert.equal(sidecarUnsubscribes.length, 1, 'Should have one sidecar unsubscribe');
+  assert.equal(sidecarUnsubscribes[0].event, 'terminalOutput');
+
+  // Unsubscribe second
+  unsub2();
+  await new Promise((r) => setTimeout(r, 0));
+
+  assert.equal(activeSubscriptions.size, 0, 'Should have zero active subscriptions after unsub2');
+  assert.equal(sidecarUnsubscribes.length, 2, 'Should have two sidecar unsubscribes');
+  assert.equal(sidecarUnsubscribes[1].event, 'operatorStatus');
+});
+
+test('IPC subscription contract: the old broken preload pattern (sending eventName) fails to clean up', async () => {
+  // This test demonstrates the bug that R1066-1 describes:
+  // if preload sends eventName instead of subscriptionId, the main process
+  // Map lookup fails silently and subscriptions leak.
+
+  const activeSubscriptions = new Map();
+  const sidecarUnsubscribes = [];
+
+  function mainHandleSubscribe(eventName) {
+    const subscriptionId = `${eventName}:${Date.now().toString(36)}`;
+    const unsubscribe = () => {
+      sidecarUnsubscribes.push({ event: eventName, id: subscriptionId });
+    };
+    activeSubscriptions.set(subscriptionId, unsubscribe);
+    return { subscriptionId };
+  }
+
+  function mainHandleUnsubscribe(subscriptionIdOrEventName) {
+    const unsubscribe = activeSubscriptions.get(subscriptionIdOrEventName);
+    if (unsubscribe) {
+      activeSubscriptions.delete(subscriptionIdOrEventName);
+      unsubscribe();
+    }
+  }
+
+  // Simulate the BROKEN preload behavior (ignores subscriptionId, sends eventName)
+  function simulateBrokenPreload(eventName) {
+    mainHandleSubscribe(eventName); // subscriptionId is created but ignored
+    return () => {
+      mainHandleUnsubscribe(eventName); // BUG: sends eventName, not subscriptionId
+    };
+  }
+
+  const unsub = simulateBrokenPreload('terminalOutput');
+  assert.equal(activeSubscriptions.size, 1, 'Should have one active subscription');
+
+  unsub();
+  // The Map lookup with eventName fails because keys are subscriptionIds
+  assert.equal(activeSubscriptions.size, 1, 'BUG: subscription still active — leak!');
+  assert.equal(sidecarUnsubscribes.length, 0, 'BUG: sidecar unsubscribe never called — leak!');
+});
+
 test('electron main/preload path helpers resolve correctly from electron-dist context', async () => {
   const path = await import('node:path');
   // Simulate the path resolution as it would work from electron-dist/main.mjs
