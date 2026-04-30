@@ -1,4 +1,5 @@
 import type {
+  BridgeCallOptions,
   BridgeCommandSpec,
   BridgeEventFrame,
   BridgeEventSpec,
@@ -500,8 +501,11 @@ export function createSidecarBridgeFacade(client: SidecarBridgeClient) {
     getLatestDiffSnapshot: async <TRequest, TResponse>(request: TRequest): Promise<TResponse> =>
       facade.getLatestDiffSnapshot(request as JsonValue) as Promise<TResponse>,
     consoleListCommands: async <T>(): Promise<T> => facade.consoleListCommands({}) as Promise<T>,
-    consoleRunCommand: async <TRequest, TResponse>(request: TRequest): Promise<TResponse> =>
-      facade.consoleRunCommand(request as JsonValue) as Promise<TResponse>,
+    consoleRunCommand: async <TRequest, TResponse>(
+      request: TRequest,
+      options?: BridgeCallOptions,
+    ): Promise<TResponse> =>
+      facade.consoleRunCommand(request as JsonValue, options) as Promise<TResponse>,
     appAgentBuildContext: async <TResponse = AppAgentResponse>(request: AppAgentBuildContextRequest = {}): Promise<TResponse> =>
       facade.appAgentBuildContext(request as unknown as JsonValue) as Promise<TResponse>,
     appAgentListTools: async <TResponse = AppAgentResponse>(request: AppAgentListToolsRequest = {}): Promise<TResponse> =>

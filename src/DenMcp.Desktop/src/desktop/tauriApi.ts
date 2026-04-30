@@ -48,6 +48,7 @@ interface DenDesktopSidecarRuntimeApi {
   getLatestDiffSnapshot(request: LatestDiffSnapshotRequest): Promise<DesktopDiffSnapshotLatestResult>;
   consoleListCommands(): Promise<ConsoleCommandListResponse>;
   consoleRunCommand(request: ConsoleCommandRunRequest): Promise<ConsoleCommandRunResponse>;
+  consoleRunCommandWithProgress(request: ConsoleCommandRunRequest, onProgress: (line: ConsoleCommandLine) => void): Promise<ConsoleCommandRunResponse>;
   terminalCreateSession(request: TerminalCreateSessionRequest): Promise<TerminalCreateSessionResponse>;
   terminalListSessions(request?: TerminalListSessionsRequest): Promise<TerminalListSessionsResponse>;
   terminalAttach(request: TerminalAttachRequest): Promise<TerminalAttachResponse>;
@@ -392,6 +393,30 @@ export async function consoleListCommands(): Promise<ConsoleCommandListResponse>
 
 export async function consoleRunCommand(request: ConsoleCommandRunRequest): Promise<ConsoleCommandRunResponse> {
   return callSidecar('consoleRunCommand', () => sidecarApi().consoleRunCommand(request));
+}
+
+/**
+ * Run a console command with per-request progress frame delivery.
+ * Progress lines are delivered to `onProgress` as they arrive from the
+ * sidecar bridge, enabling incremental rendering before the final response.
+ * Falls back to the batch-only consoleRunCommand when onProgress is not provided.
+ */
+export async function consoleRunCommandWithProgress(
+  request: ConsoleCommandRunRequest,
+  onProgress?: (line: ConsoleCommandLine) => void,
+): Promise<ConsoleCommandRunResponse> {
+  if (!onProgress) {
+    return consoleRunCommand(request);
+  }
+
+  const api = sidecarApi();
+  if (!api.consoleRunCommandWithProgress) {
+    return consoleRunCommand(request);
+  }
+
+  return callSidecar('consoleRunCommandWithProgress', () =>
+    api.consoleRunCommandWithProgress(request, onProgress),
+  );
 }
 
 // ── Terminal stream/control protocol (#945/#911) ──

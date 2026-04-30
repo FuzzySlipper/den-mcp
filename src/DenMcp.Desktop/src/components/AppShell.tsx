@@ -19,7 +19,7 @@ import {
 } from '../shellState';
 import { DiagnosticEntry, LocalGitSnapshot, LocalSessionSnapshot, OperatorStatus } from '../desktop/tauriApi';
 import { IpcHealth } from '../desktop/ipcHealth';
-import { buildConsoleLines, ConsoleCommandHistoryEntry } from '../consoleLines';
+import { buildConsoleLines, ConsoleCommandHistoryEntry, ConsoleCommandOutputLine } from '../consoleLines';
 import { ConsoleDock } from './ConsoleDock';
 
 interface AppShellProps {
@@ -34,9 +34,10 @@ interface AppShellProps {
   onRunConsoleCommand?: (command: string) => Promise<void>;
   consoleCommands?: { name: string; displayName: string; description: string; needsTarget: boolean }[];
   consoleCommandHistory?: ConsoleCommandHistoryEntry[];
+  activeProgressLines?: ConsoleCommandOutputLine[];
 }
 
-export function AppShell({ state, onStateChange, status, snapshots, sessionSnapshots, diagnostics, ipcHealth, children, onRunConsoleCommand, consoleCommands, consoleCommandHistory }: AppShellProps) {
+export function AppShell({ state, onStateChange, status, snapshots, sessionSnapshots, diagnostics, ipcHealth, children, onRunConsoleCommand, consoleCommands, consoleCommandHistory, activeProgressLines }: AppShellProps) {
   const setState = (patch: Partial<ShellState>) => onStateChange({ ...state, ...patch });
   const activeTab = shellTabs.some((tab) => tab.id === state.activeTab) ? state.activeTab : 'operator';
   const activeTabTitle = shellTabs.find((tab) => tab.id === activeTab)?.label ?? 'operator';
@@ -81,6 +82,7 @@ export function AppShell({ state, onStateChange, status, snapshots, sessionSnaps
         onRunCommand={onRunConsoleCommand}
         consoleCommands={consoleCommands}
         consoleCommandHistory={consoleCommandHistory}
+        activeProgressLines={activeProgressLines}
       />
       <StatusBar status={status} snapshots={snapshots} sessionSnapshots={sessionSnapshots} state={state} />
     </div>

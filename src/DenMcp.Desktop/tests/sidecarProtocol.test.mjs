@@ -403,6 +403,7 @@ test('preload sidecar API exposes no generic dispatch, token, endpoint, or node 
     'appAgentListTools',
     'consoleListCommands',
     'consoleRunCommand',
+    'consoleRunCommandWithProgress',
     'getAppearanceSettings',
     'getCapabilities',
     'getHealth',

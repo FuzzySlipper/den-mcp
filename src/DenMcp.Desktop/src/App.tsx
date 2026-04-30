@@ -263,6 +263,7 @@ export function App() {
       onRunConsoleCommand={runConsoleCommand}
       consoleCommands={runtime.consoleCommands}
       consoleCommandHistory={runtime.consoleCommandHistory}
+      activeProgressLines={runtime.activeProgressLines}
     >
       {tabContent}
     </AppShell>

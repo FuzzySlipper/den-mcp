@@ -89,6 +89,34 @@ contextBridge.exposeInMainWorld('denDesktopSidecar', {
   // Console commands
   consoleListCommands: () => callSidecar('consoleListCommands'),
   consoleRunCommand: (request: unknown) => callSidecar('consoleRunCommand', request),
+  /**
+   * Run a console command with per-request progress frame delivery via IPC.
+   * The preload sets up an IPC listener for progress frames on a unique channel
+   * before invoking the command. The main process forwards progress frames from
+   * the bridge transport to that channel until the final response resolves.
+   * The renderer passes an `onProgress` callback that receives structured
+   * console command lines only; raw bridge progress frames stay behind the
+   * preload boundary.
+   */
+  consoleRunCommandWithProgress: (request: unknown, onProgress: (line: unknown) => void) => {
+    const progressChannel = `den-desktop:progress:${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+
+    // Set up IPC listener for progress frames from the main process.
+    // This listener is registered before the invoke so the main process
+    // can start forwarding progress frames immediately.
+    const progressListener = (_event: Electron.IpcRendererEvent, frame: unknown) => {
+      const progressFrame = frame as { payload?: { lines?: unknown[] } };
+      for (const line of progressFrame.payload?.lines ?? []) {
+        onProgress(line);
+      }
+    };
+    ipcRenderer.on(progressChannel, progressListener);
+
+    return ipcRenderer.invoke('den-desktop:console-run-command-with-progress', request, progressChannel)
+      .finally(() => {
+        ipcRenderer.removeListener(progressChannel, progressListener);
+      });
+  },
 
   // App agent
   appAgentBuildContext: (request?: unknown) => callSidecar('appAgentBuildContext', request ?? {}),

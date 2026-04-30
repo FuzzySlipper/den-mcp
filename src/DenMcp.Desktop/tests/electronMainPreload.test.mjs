@@ -142,7 +142,7 @@ test('preload exposes only allow-listed sidecar API surface via contextBridge', 
     requestIdFactory: () => `req_preload_${sent.length + 1}`,
     now: () => '2026-04-30T12:00:00.000Z',
     transport: {
-      async send(frame) {
+      async send(frame, _onProgress) {
         sent.push(frame);
         return {
           protocol_version: fixture.schema_bundle.protocol_version,
@@ -171,6 +171,7 @@ test('preload exposes only allow-listed sidecar API surface via contextBridge', 
     'appAgentListTools',
     'consoleListCommands',
     'consoleRunCommand',
+    'consoleRunCommandWithProgress',
     'getAppearanceSettings',
     'getCapabilities',
     'getHealth',
@@ -761,6 +762,225 @@ test('electron main/preload path helpers resolve correctly from electron-dist co
   const schemaBundlePath = path.default.resolve(simulatedBundledDir, '../../../testdata/den-desktop-sidecar/sidecar-wire-fixture.json');
   const expectedSchemaPath = resolve(__dirname, '../../../testdata/den-desktop-sidecar/sidecar-wire-fixture.json');
   assert.equal(schemaBundlePath, expectedSchemaPath, 'Schema bundle path should resolve to repo testdata/');
+});
+
+test('bridge transport delivers progress frames to per-request onProgress callback', async () => {
+  const fixture = await readFixture();
+  const receivedProgress = [];
+  const sockets = [];
+
+  class ProgressCapableWebSocket {
+    constructor() {
+      this.readyState = 0;
+      this._listeners = {};
+      sockets.push(this);
+      setTimeout(() => {
+        this.readyState = 1;
+        this._emit('open', {});
+      }, 0);
+    }
+    on(event, callback) {
+      if (!this._listeners[event]) this._listeners[event] = [];
+      this._listeners[event].push(callback);
+      return this;
+    }
+    addEventListener(event, callback) { this.on(event, callback); }
+    send(data) {
+      const frame = JSON.parse(data);
+      // Simulate two progress frames followed by a response
+      setTimeout(() => {
+        this._emit('message', JSON.stringify({
+          protocol_version: fixture.schema_bundle.protocol_version,
+          schema_version: fixture.schema_bundle.schema_version,
+          frame_type: 'progress',
+          request_id: frame.request_id,
+          stage: 'running',
+          message: 'first output line',
+          payload: { lines: [{ level: 'info', timestamp: '2026-04-30T12:00:01.000Z', source: 'console', message: 'line 1' }] },
+          sent_at: '2026-04-30T12:00:01.000Z',
+        }));
+      }, 0);
+      setTimeout(() => {
+        this._emit('message', JSON.stringify({
+          protocol_version: fixture.schema_bundle.protocol_version,
+          schema_version: fixture.schema_bundle.schema_version,
+          frame_type: 'progress',
+          request_id: frame.request_id,
+          stage: 'running',
+          message: 'second output line',
+          payload: { lines: [{ level: 'info', timestamp: '2026-04-30T12:00:02.000Z', source: 'console', message: 'line 2' }] },
+          sent_at: '2026-04-30T12:00:02.000Z',
+        }));
+      }, 0);
+      setTimeout(() => {
+        this._emit('message', JSON.stringify({
+          protocol_version: fixture.schema_bundle.protocol_version,
+          schema_version: fixture.schema_bundle.schema_version,
+          frame_type: 'response',
+          request_id: frame.request_id,
+          result: { command: 'test', status: 'success', lines: [] },
+          correlation: {},
+          sent_at: '2026-04-30T12:00:03.000Z',
+        }));
+      }, 0);
+    }
+    close() { this.readyState = 3; }
+    _emit(event, data) {
+      for (const listener of this._listeners[event] ?? []) listener(data);
+    }
+  }
+
+  const transport = createSidecarBridgeTransport({
+    baseUrl: 'http://127.0.0.1:54321',
+    endpointPath: '/bridge',
+    authToken: 'token',
+    WebSocketCtor: ProgressCapableWebSocket,
+  });
+
+  // Send a request with a progress callback
+  const responsePromise = transport.send({
+    protocol_version: '1.0',
+    schema_version: 'den-desktop@2026-04-29',
+    frame_type: 'request',
+    request_id: 'req_progress_test',
+    command: 'den_desktop.console.run_command',
+    payload: { command: 'test' },
+    expects_progress: true,
+  }, (progressFrame) => {
+    receivedProgress.push(progressFrame);
+  });
+
+  const response = await responsePromise;
+
+  // Both progress frames should have been delivered to the callback
+  assert.equal(receivedProgress.length, 2, 'Should have received two progress frames');
+  assert.equal(receivedProgress[0].frame_type, 'progress');
+  assert.equal(receivedProgress[0].payload.lines[0].message, 'line 1');
+  assert.equal(receivedProgress[1].payload.lines[0].message, 'line 2');
+
+  // Final response should still resolve correctly
+  assert.equal(response.frame_type, 'response');
+  assert.equal(response.result.status, 'success');
+
+  transport.close();
+});
+
+test('bridge transport ignores progress frames when no onProgress callback is provided', async () => {
+  const fixture = await readFixture();
+  const sockets = [];
+
+  class ProgressSilentWebSocket {
+    constructor() {
+      this.readyState = 0;
+      this._listeners = {};
+      sockets.push(this);
+      setTimeout(() => {
+        this.readyState = 1;
+        this._emit('open', {});
+      }, 0);
+    }
+    on(event, callback) {
+      if (!this._listeners[event]) this._listeners[event] = [];
+      this._listeners[event].push(callback);
+      return this;
+    }
+    addEventListener(event, callback) { this.on(event, callback); }
+    send(data) {
+      const frame = JSON.parse(data);
+      setTimeout(() => {
+        // Send a progress frame (should be silently ignored)
+        this._emit('message', JSON.stringify({
+          protocol_version: fixture.schema_bundle.protocol_version,
+          schema_version: fixture.schema_bundle.schema_version,
+          frame_type: 'progress',
+          request_id: frame.request_id,
+          stage: 'running',
+          payload: {},
+          sent_at: '2026-04-30T12:00:00.000Z',
+        }));
+      }, 0);
+      setTimeout(() => {
+        // Then send the response
+        this._emit('message', JSON.stringify({
+          protocol_version: fixture.schema_bundle.protocol_version,
+          schema_version: fixture.schema_bundle.schema_version,
+          frame_type: 'response',
+          request_id: frame.request_id,
+          result: {},
+          correlation: {},
+          sent_at: '2026-04-30T12:00:01.000Z',
+        }));
+      }, 0);
+    }
+    close() { this.readyState = 3; }
+    _emit(event, data) {
+      for (const listener of this._listeners[event] ?? []) listener(data);
+    }
+  }
+
+  const transport = createSidecarBridgeTransport({
+    baseUrl: 'http://127.0.0.1:54321',
+    endpointPath: '/bridge',
+    authToken: 'token',
+    WebSocketCtor: ProgressSilentWebSocket,
+  });
+
+  // Send a request without a progress callback
+  const response = await transport.send({
+    protocol_version: '1.0',
+    schema_version: 'den-desktop@2026-04-29',
+    frame_type: 'request',
+    request_id: 'req_no_progress',
+    command: 'den_desktop.console.run_command',
+    payload: { command: 'test' },
+  });
+
+  // Response should still resolve even though progress was silently ignored
+  assert.equal(response.frame_type, 'response');
+
+  transport.close();
+});
+
+test('preload API consoleRunCommandWithProgress delegates to progress-enabled IPC path', async () => {
+  const fixture = await readFixture();
+  const sent = [];
+  const client = createCheckedBridgeClient({
+    bundle: fixture.schema_bundle,
+    commands: sidecarCommands,
+    events: sidecarEvents,
+    requestIdFactory: () => 'req_progress_api_test',
+    now: () => '2026-04-30T12:00:00.000Z',
+    transport: {
+      async send(frame, onProgress) {
+        sent.push({ frame, hasProgressCallback: typeof onProgress === 'function' });
+        return {
+          protocol_version: fixture.schema_bundle.protocol_version,
+          schema_version: fixture.schema_bundle.schema_version,
+          frame_type: 'response',
+          request_id: frame.request_id,
+          result: { command: 'test', status: 'success', lines: [] },
+          correlation: {},
+          sent_at: '2026-04-30T12:00:00.000Z',
+        };
+      },
+    },
+  });
+
+  const api = createDenDesktopSidecarApi(client, {
+    subscribe() { return () => undefined; },
+  });
+
+  const progressFrames = [];
+  const result = await api.consoleRunCommandWithProgress(
+    { command: 'test' },
+    (frame) => progressFrames.push(frame),
+  );
+
+  assert.equal(result.status, 'success');
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].frame.command, 'den_desktop.console.run_command');
+  assert.equal(sent[0].frame.expects_progress, true);
+  assert.equal(sent[0].hasProgressCallback, true, 'Should pass onProgress callback to transport');
 });
 
 test('preload event subscription returns unsubscribe function', async () => {

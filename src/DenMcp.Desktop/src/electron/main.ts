@@ -46,6 +46,7 @@ let mainWindow: BrowserWindow | null = null;
 let supervisor: SidecarSupervisor | null = null;
 let bridgeTransport: ReturnType<typeof createSidecarBridgeTransport> | null = null;
 let sidecarApi: DenDesktopSidecarApi | null = null;
+let bridgeClient: ReturnType<typeof createCheckedBridgeClient> | null = null;
 let sidecarReadySentinel: { port: number; endpoint_path: string } | null = null;
 
 // ── IPC channel names ──
@@ -196,6 +197,7 @@ async function connectBridge(): Promise<void> {
     transport: bridgeTransport,
   });
 
+  bridgeClient = client;
   sidecarApi = createDenDesktopSidecarApi(client, eventSource);
 }
 
@@ -250,6 +252,34 @@ function setupIpcBridge(): void {
     if (unsubscribe) {
       activeSubscriptions.delete(subscriptionId);
       unsubscribe();
+    }
+  });
+
+  // Progress-enabled console command: direct IPC handler that forwards progress
+  // frames from the bridge transport to the renderer via a dedicated IPC channel.
+  // This avoids serializing callbacks through the generic sidecar-call bridge.
+  ipcMain.handle('den-desktop:console-run-command-with-progress', async (_event, request: unknown, progressChannel: string) => {
+    if (!bridgeClient) {
+      throw new Error('Sidecar bridge client is not connected.');
+    }
+
+    // Set up IPC listener for progress events from the sidecar bridge.
+    // Each progress frame from the bridge transport's onProgress callback
+    // is forwarded to the renderer through the dedicated progress channel.
+    const onProgress = (frame: unknown) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(progressChannel, frame);
+      }
+    };
+
+    try {
+      const result = await bridgeClient.call('consoleRunCommand', request as JsonValue, {
+        expectsProgress: true,
+        onProgress,
+      });
+      return result;
+    } finally {
+      ipcMain.removeAllListeners(progressChannel);
     }
   });
 }
@@ -313,6 +343,7 @@ app.on('window-all-closed', () => {
     unsubscribe();
   }
   activeSubscriptions.clear();
+  ipcMain.removeHandler('den-desktop:console-run-command-with-progress');
   bridgeTransport?.close();
   supervisor?.stop('SIGTERM');
   app.quit();
@@ -329,6 +360,7 @@ app.on('before-quit', () => {
     unsubscribe();
   }
   activeSubscriptions.clear();
+  ipcMain.removeHandler('den-desktop:console-run-command-with-progress');
   bridgeTransport?.close();
   supervisor?.stop('SIGTERM');
 });

@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { ShellConsoleMode, shellConsoleModes } from '../shellState';
-import { ConsoleCommandHistoryEntry, ConsoleLine } from '../consoleLines';
+import { ConsoleCommandHistoryEntry, ConsoleCommandOutputLine, ConsoleLine } from '../consoleLines';
 
 interface ConsoleDockProps {
   mode: ShellConsoleMode;
@@ -9,6 +9,8 @@ interface ConsoleDockProps {
   onRunCommand?: (command: string) => Promise<void>;
   consoleCommands?: { name: string; displayName: string; description: string; needsTarget: boolean }[];
   consoleCommandHistory?: ConsoleCommandHistoryEntry[];
+  /** In-flight progress lines from the currently running command. */
+  activeProgressLines?: ConsoleCommandOutputLine[];
 }
 
 type InputMode = 'filter' | 'palette' | 'agent';
@@ -35,6 +37,7 @@ export function ConsoleDock({
   onRunCommand,
   consoleCommands,
   consoleCommandHistory,
+  activeProgressLines,
 }: ConsoleDockProps) {
   const [inputValue, setInputValue] = useState('');
   const [runningCommand, setRunningCommand] = useState(false);
@@ -42,11 +45,28 @@ export function ConsoleDock({
   const inputRef = useRef<HTMLInputElement>(null);
   const inputMode = detectInputMode(inputValue);
 
-  // Merge diagnostic lines with command history entries for the output display
+  // Merge diagnostic lines with command history entries for the output display.
+  // In-flight progress lines are rendered before the final response history.
   const displayLines = useMemo(() => {
-    const result: { kind: 'diag' | 'cmd-start' | 'cmd-line' | 'cmd-end'; data: unknown; key: string }[] = [];
+    const result: { kind: 'diag' | 'cmd-start' | 'cmd-line' | 'cmd-end' | 'progress-line'; data: unknown; key: string }[] = [];
 
     // When showing command history, prepend history entries
+    // In-flight progress lines: rendered before history when a command is running
+    if (activeProgressLines && activeProgressLines.length > 0) {
+      result.push({
+        kind: 'cmd-start',
+        data: { command: '…', executedAt: new Date().toISOString(), lines: [], status: 'success' } as ConsoleCommandHistoryEntry,
+        key: 'progress:running',
+      });
+      for (let i = 0; i < activeProgressLines.length; i++) {
+        result.push({
+          kind: 'progress-line',
+          data: activeProgressLines[i],
+          key: `progress:${i}`,
+        });
+      }
+    }
+
     if (showHistory && consoleCommandHistory && consoleCommandHistory.length > 0) {
       for (const entry of consoleCommandHistory) {
         result.push({
@@ -119,7 +139,7 @@ export function ConsoleDock({
     }
 
     return result;
-  }, [lines, inputValue, inputMode, showHistory, consoleCommandHistory]);
+  }, [lines, inputValue, inputMode, showHistory, consoleCommandHistory, activeProgressLines]);
 
   const modeIndicator = inputMode !== 'filter'
     ? (inputMode === 'palette' ? '[command]' : '[agent prompt]')
@@ -246,7 +266,7 @@ export function ConsoleDock({
                 );
               }
 
-              if (item.kind === 'cmd-line') {
+              if (item.kind === 'cmd-line' || item.kind === 'progress-line') {
                 const line = item.data as { level: string; timestamp: string; source: string; message: string };
                 return (
                   <div className="console-line console-cmd-output" key={item.key}>

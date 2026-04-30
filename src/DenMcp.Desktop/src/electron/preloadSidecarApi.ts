@@ -37,6 +37,13 @@ export interface DenDesktopSidecarApi {
   getLatestDiffSnapshot(request: LatestDiffSnapshotRequest): Promise<DesktopDiffSnapshotLatestResult>;
   consoleListCommands(): Promise<ConsoleCommandListResponse>;
   consoleRunCommand(request: ConsoleCommandRunRequest): Promise<ConsoleCommandRunResponse>;
+  /**
+   * Run a console command with per-request progress frame delivery.
+   * The `onProgress` callback receives each progress frame as it arrives
+   * from the bridge transport, enabling incremental rendering before the
+   * final response resolves.
+   */
+  consoleRunCommandWithProgress(request: ConsoleCommandRunRequest, onProgress: (frame: unknown) => void): Promise<ConsoleCommandRunResponse>;
   appAgentBuildContext(request?: AppAgentBuildContextRequest): Promise<AppAgentResponse>;
   appAgentListTools(request?: AppAgentListToolsRequest): Promise<AppAgentResponse>;
   appAgentInvokeTool(request: AppAgentInvokeToolRequest): Promise<AppAgentResponse>;
@@ -91,6 +98,8 @@ export function createDenDesktopSidecarApi(
     consoleListCommands: () => facade.consoleListCommands<ConsoleCommandListResponse>(),
     consoleRunCommand: (request: ConsoleCommandRunRequest) =>
       facade.consoleRunCommand<ConsoleCommandRunRequest, ConsoleCommandRunResponse>(request),
+    consoleRunCommandWithProgress: (request: ConsoleCommandRunRequest, onProgress?: (frame: unknown) => void) =>
+      facade.consoleRunCommand<ConsoleCommandRunRequest, ConsoleCommandRunResponse>(request, { expectsProgress: true, onProgress }),
     appAgentBuildContext: (request?: AppAgentBuildContextRequest) => facade.appAgentBuildContext(request ?? {}),
     appAgentListTools: (request?: AppAgentListToolsRequest) => facade.appAgentListTools(request ?? {}),
     appAgentInvokeTool: (request: AppAgentInvokeToolRequest) => facade.appAgentInvokeTool(request),

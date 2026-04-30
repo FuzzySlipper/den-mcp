@@ -13,6 +13,7 @@ import type {
   BridgeCancelFrame,
   BridgeClientTransport,
   BridgeEventFrame,
+  BridgeProgressFrame,
   BridgeRequestFrame,
   BridgeResponseFrame,
 } from '../bridge/contract.ts';
@@ -58,6 +59,7 @@ export function createSidecarBridgeTransport(
   const pending = new Map<string, {
     resolve: (frame: BridgeResponseFrame) => void;
     reject: (error: Error) => void;
+    onProgress?: (frame: BridgeProgressFrame) => void;
   }>();
 
   let socket: any = null;
@@ -84,6 +86,16 @@ export function createSidecarBridgeTransport(
     }
 
     if (typeof frame.request_id !== 'string') {
+      return;
+    }
+
+    // Progress frames carry request_id and frame_type='progress'; route to
+    // the per-request onProgress callback if one is registered.
+    if (frame.frame_type === 'progress' && typeof frame.request_id === 'string') {
+      const progressEntry = pending.get(frame.request_id);
+      if (progressEntry?.onProgress) {
+        progressEntry.onProgress(parsed as BridgeProgressFrame);
+      }
       return;
     }
 
@@ -147,7 +159,7 @@ export function createSidecarBridgeTransport(
   }
 
   return {
-    async send(frame: BridgeRequestFrame): Promise<BridgeResponseFrame> {
+    async send(frame: BridgeRequestFrame, onProgress?: (frame: BridgeProgressFrame) => void): Promise<BridgeResponseFrame> {
       await ensureConnected();
       return new Promise<BridgeResponseFrame>((resolve, reject) => {
         const timeout = setTimeout(() => {
@@ -164,6 +176,7 @@ export function createSidecarBridgeTransport(
             clearTimeout(timeout);
             reject(error);
           },
+          onProgress,
         });
 
         socket!.send(JSON.stringify(frame));

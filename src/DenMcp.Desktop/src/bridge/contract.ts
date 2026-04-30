@@ -180,7 +180,7 @@ export interface BridgeEventSpec<TPayload extends JsonValue> {
 }
 
 export interface BridgeClientTransport {
-  send(frame: BridgeRequestFrame): Promise<BridgeResponseFrame>;
+  send(frame: BridgeRequestFrame, onProgress?: (frame: BridgeProgressFrame) => void): Promise<BridgeResponseFrame>;
   cancel?(frame: BridgeCancelFrame): Promise<void>;
 }
 
@@ -202,6 +202,13 @@ export interface BridgeCallOptions {
   deadlineMs?: number;
   expectsProgress?: boolean;
   correlation?: BridgeCorrelation;
+  /**
+   * Optional per-request progress callback. When the transport receives a
+   * progress frame whose request_id matches this call, the callback is
+   * invoked before the final response arrives. This enables incremental
+   * rendering of structured command output (e.g. ConsoleDock lines).
+   */
+  onProgress?: (frame: BridgeProgressFrame) => void;
 }
 
 export type RequestOf<TSpec> = TSpec extends BridgeCommandSpec<infer TRequest, JsonValue> ? TRequest : never;
@@ -473,7 +480,7 @@ export function createCheckedBridgeClient<
       }
 
       assertBridgeFrameMatchesBundle(frame, options.bundle);
-      const response = await options.transport.send(frame);
+      const response = await options.transport.send(frame, callOptions?.onProgress);
       assertBridgeFrameMatchesBundle(response, options.bundle, { resultSchema: spec.responseSchema });
       if (response.error) {
         throw new BridgeResponseError(response.error);

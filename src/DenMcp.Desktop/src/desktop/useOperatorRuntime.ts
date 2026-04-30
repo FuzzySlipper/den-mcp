@@ -7,7 +7,7 @@ import {
   ConsoleCommandRunRequest,
   ConsoleCommandRunResponse,
   consoleListCommands,
-  consoleRunCommand as tauriConsoleRunCommand,
+  consoleRunCommandWithProgress,
   getAppearanceSettings,
   getOperatorStatus,
   getSettings,
@@ -44,6 +44,7 @@ export interface RuntimeState {
   saveAppearanceSettings: (request: Partial<ShellAppearanceSettings>) => Promise<ShellAppearanceSettings>;
   consoleCommands: ConsoleCommandDefinition[];
   consoleCommandHistory: ConsoleCommandHistoryEntry[];
+  activeProgressLines: ConsoleCommandLine[];
   runConsoleCommand: (command: string, options?: { projectId?: string | null; taskId?: number | null; workspaceId?: string | null; sessionId?: string | null }) => Promise<ConsoleCommandRunResponse>;
 }
 
@@ -62,6 +63,7 @@ export function useOperatorRuntime(): RuntimeState {
   const [error, setError] = useState<string | null>(null);
   const [consoleCommands, setConsoleCommands] = useState<ConsoleCommandDefinition[]>([]);
   const [consoleCommandHistory, setConsoleCommandHistory] = useState<ConsoleCommandHistoryEntry[]>([]);
+  const [activeProgressLines, setActiveProgressLines] = useState<ConsoleCommandLine[]>([]);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -292,10 +294,10 @@ export function useOperatorRuntime(): RuntimeState {
     });
   }, [loading, callIpc]);
 
-  // Console commands currently render as batch output from the final response.
-  // The .NET sidecar emits typed progress frames, but the renderer/preload bridge
-  // does not yet expose per-request progress subscription callbacks; wiring that
-  // transport API is the follow-up boundary before ConsoleDock can stream in-flight lines.
+  // Console commands stream in-flight progress lines via the typed per-request
+  // progress callback path through the Electron/preload bridge transport.
+  // Progress lines are rendered incrementally in ConsoleDock before the final
+  // response resolves and is added to command history.
   const runConsoleCommand = useCallback(
     async (
       command: string,
@@ -309,7 +311,24 @@ export function useOperatorRuntime(): RuntimeState {
         sessionId: options?.sessionId ?? null,
       };
 
-      const response = await callIpc('consoleRunCommand', () => tauriConsoleRunCommand(request));
+      // Clear any previous in-flight progress lines
+      setActiveProgressLines([]);
+
+      let response: ConsoleCommandRunResponse;
+      try {
+        response = await callIpc('consoleRunCommandWithProgress', () =>
+          consoleRunCommandWithProgress(request, (line: ConsoleCommandLine) => {
+            if (mountedRef.current) {
+              setActiveProgressLines((prev) => [...prev, line]);
+            }
+          }),
+        );
+      } finally {
+        // Clear in-flight progress lines once the command settles, whether the
+        // final response succeeds or the bridge call fails.
+        setActiveProgressLines([]);
+      }
+
       const executedAt = new Date().toISOString();
 
       setConsoleCommandHistory((prev) => {
@@ -385,8 +404,9 @@ export function useOperatorRuntime(): RuntimeState {
       saveAppearanceSettings: saveAppearanceCallback,
       consoleCommands,
       consoleCommandHistory,
+      activeProgressLines,
       runConsoleCommand,
     }),
-    [status, settings, appearanceSettings, snapshots, sessionSnapshots, ipcHealth, loading, error, refresh, saveSettings, saveAppearanceCallback, consoleCommands, consoleCommandHistory, runConsoleCommand],
+    [status, settings, appearanceSettings, snapshots, sessionSnapshots, ipcHealth, loading, error, refresh, saveSettings, saveAppearanceCallback, consoleCommands, consoleCommandHistory, activeProgressLines, runConsoleCommand],
   );
 }
