@@ -36,6 +36,8 @@ test('sidecar schema bundle and representative frames are compatible with the ch
   assert.deepEqual(bundle.commands.map((command) => command.command), [
     'bridge.get_capabilities',
     'bridge.get_health',
+    'den_desktop.console.list_commands',
+    'den_desktop.console.run_command',
     'den_desktop.operator.get_appearance_settings',
     'den_desktop.operator.get_latest_diff_snapshot',
     'den_desktop.operator.get_settings',
@@ -144,6 +146,8 @@ test('sidecar checked facade allow-lists health/capabilities/runtime commands an
     'assertGitSnapshotsEvent',
     'assertOperatorStatusEvent',
     'assertSessionSnapshotsEvent',
+    'consoleListCommands',
+    'consoleRunCommand',
     'getAppearanceSettings',
     'getCapabilities',
     'getHealth',
@@ -192,6 +196,8 @@ test('preload sidecar API exposes no generic dispatch, token, endpoint, or node 
   api.onOperatorStatus((event) => events.push(event));
 
   assert.deepEqual(Object.keys(api).sort(), [
+    'consoleListCommands',
+    'consoleRunCommand',
     'getAppearanceSettings',
     'getCapabilities',
     'getHealth',

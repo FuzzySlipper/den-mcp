@@ -94,6 +94,7 @@ export const sidecarCommands: Record<string, BridgeCommandSpec<JsonValue, JsonVa
     command: 'den_desktop.console.run_command',
     requestSchema: 'den_desktop.console.run_command.request',
     responseSchema: 'den_desktop.console.run_command.response',
+    supportsProgress: true,
   },
   getHealth: {
     command: 'bridge.get_health',

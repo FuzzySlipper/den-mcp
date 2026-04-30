@@ -94,7 +94,8 @@ public static class DesktopSidecarBridge
             .RegisterCommand<DesktopSidecarEmptyRequest, ConsoleCommandListResponse, ConsoleListCommandsHandler>(
                 DesktopSidecarProtocol.ConsoleListCommandsCommand)
             .RegisterCommand<ConsoleCommandRunRequest, ConsoleCommandRunResponse, ConsoleRunCommandHandler>(
-                DesktopSidecarProtocol.ConsoleRunCommandCommand)
+                DesktopSidecarProtocol.ConsoleRunCommandCommand,
+                config => { config.SupportsProgress = true; })
             .RegisterEvent<OperatorStatus>(DesktopSidecarProtocol.OperatorStatusEvent)
             .RegisterEvent<IReadOnlyList<LocalGitSnapshot>>(DesktopSidecarProtocol.GitSnapshotEvent)
             .RegisterEvent<IReadOnlyList<LocalSessionSnapshot>>(DesktopSidecarProtocol.SessionSnapshotEvent)
@@ -490,6 +491,16 @@ public sealed class ConsoleRunCommandHandler : IBridgeCommandHandler<ConsoleComm
 
     public async ValueTask<ConsoleCommandRunResponse?> HandleAsync(ConsoleCommandRunRequest request, BridgeRequestContext context, CancellationToken cancellationToken)
     {
-        return await _runner.RunCommandAsync(request, cancellationToken).ConfigureAwait(false);
+        // Forward each structured line as a progress event so the caller can stream output.
+        async ValueTask OnProgress(ConsoleCommandLine line, CancellationToken ct)
+        {
+            await context.ReportProgressAsync(
+                "line",
+                message: $"[{line.Level}] [{line.Source}] {line.Message}",
+                payload: BridgeJson.ToElement(line),
+                cancellationToken: ct).ConfigureAwait(false);
+        }
+
+        return await _runner.RunCommandAsync(request, OnProgress, cancellationToken).ConfigureAwait(false);
     }
 }
