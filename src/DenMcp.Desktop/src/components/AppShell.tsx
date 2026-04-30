@@ -109,11 +109,6 @@ function Titlebar({
   return (
     <header className="titlebar">
       <div className="titlebar-left">
-        <div className="traffic-lights" aria-hidden="true">
-          <span className="traffic-dot close" />
-          <span className="traffic-dot minimize" />
-          <span className="traffic-dot zoom" />
-        </div>
         <div className="titlebar-mark">
           <span className="mark-glyph" aria-hidden="true">◈</span>
           <span>DEN DESKTOP</span>

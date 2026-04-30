@@ -202,7 +202,7 @@ button:disabled { cursor: progress; opacity: 0.65; }
   -webkit-app-region: drag;
 }
 
-.titlebar-left, .titlebar-center, .titlebar-actions, .titlebar-mark, .traffic-lights {
+.titlebar-left, .titlebar-center, .titlebar-actions, .titlebar-mark {
   display: flex;
   align-items: center;
   min-width: 0;
@@ -224,11 +224,6 @@ button:disabled { cursor: progress; opacity: 0.65; }
 .titlebar-run span { color: var(--fg-muted); }
 .mark-glyph { color: var(--accent); }
 
-.traffic-lights { gap: 6px; }
-.traffic-dot { width: 10px; height: 10px; border-radius: 50%; opacity: 0.9; }
-.traffic-dot.close { background: #ff5f57; }
-.traffic-dot.minimize { background: #ffbd2e; }
-.traffic-dot.zoom { background: #28c840; }
 
 .icon-button,
 .console-controls button,
