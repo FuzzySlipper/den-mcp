@@ -120,6 +120,7 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
 
         var streamId = $"stream_{Guid.NewGuid():N}";
         var viewport = request.Viewport ?? new TerminalViewport { Cols = 120, Rows = 32 };
+        ValidateViewport(viewport.Cols, viewport.Rows);
         var stream = new DirectPtyStreamState(streamId, session.SessionId, request.ClientId, viewport.Cols, viewport.Rows);
         lock (_lock)
         {
@@ -208,10 +209,7 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
         ArgumentNullException.ThrowIfNull(request);
         var session = RequireDirectSession(request.SessionId, s => s.Capabilities.CanResize, "resize");
         RequireAttachedStream(request.StreamId, session.SessionId, "resize");
-        if (request.Cols is < 1 or > 500 || request.Rows is < 1 or > 500)
-        {
-            throw Invalid("Terminal viewport cols/rows must be within 1..500.");
-        }
+        ValidateViewport(request.Cols, request.Rows);
 
         ProcessFor(session.SessionId).Resize(request.Cols, request.Rows);
         lock (_lock)
@@ -630,6 +628,11 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
 
     private OperatorSession RequireDirectSession(string sessionId, Func<OperatorSession, bool> predicate, string action)
     {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            throw Invalid("session_id is required.");
+        }
+
         var session = _registry.Get(sessionId) ?? throw NotFound(sessionId);
         if (!string.Equals(session.Backend, OperatorSessionBackend.DirectPty, StringComparison.Ordinal))
         {
@@ -801,6 +804,14 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
         }
 
         return long.TryParse(cursor.Replace("cur_", "", StringComparison.Ordinal), out var value) ? value : 0;
+    }
+
+    private static void ValidateViewport(int cols, int rows)
+    {
+        if (cols is < 1 or > 500 || rows is < 1 or > 500)
+        {
+            throw Invalid("Terminal viewport cols/rows must be within 1..500.");
+        }
     }
 
     private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;

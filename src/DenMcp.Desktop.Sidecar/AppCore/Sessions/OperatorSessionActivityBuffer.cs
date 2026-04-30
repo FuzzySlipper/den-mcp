@@ -81,7 +81,7 @@ public sealed class OperatorSessionActivityBuffer
                 .ToList();
 
             var nextCursor = items.Count > 0 ? items[^1].Sequence : afterSequence;
-            var replayGap = items.Count == 0 && afterSequence > 0 && _chunks.Count > 0 && _chunks.First!.Value.Sequence > afterSequence;
+            var replayGap = afterSequence > 0 && _chunks.Count > 0 && _chunks.First!.Value.Sequence > afterSequence + 1;
 
             return new ActivityBufferReadResult
             {

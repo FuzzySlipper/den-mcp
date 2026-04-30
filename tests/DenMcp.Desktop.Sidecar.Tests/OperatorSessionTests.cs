@@ -942,6 +942,330 @@ public class TerminalBridgeHandlerTests
     }
 
     [Fact]
+    public async Task DirectPtyService_DetachPreservesBackendAndReattachCanReplayAndControl()
+    {
+        var backend = new FakeDirectPtyBackend();
+        var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
+        var events = new OperatorRuntimeBridgeEventSink(new DesktopSidecarRuntimeState(DesktopSidecarFixtures.CreateFixtureOptions()));
+        await using var service = CreateDirectPtyService(backend, registry, events);
+
+        var session = await service.CreateAsync(new TerminalCreateSessionRequest
+        {
+            ProjectId = string.Empty,
+            Title = "Detach",
+            Backend = OperatorSessionBackend.DirectPty,
+        }, CancellationToken.None);
+        var firstAttach = await service.AttachAsync(new TerminalAttachRequest
+        {
+            SessionId = session.SessionId,
+            Viewport = new TerminalViewport { Cols = 80, Rows = 24 },
+        }, CancellationToken.None);
+
+        var detached = await service.DetachAsync(new TerminalDetachRequest
+        {
+            SessionId = session.SessionId,
+            StreamId = firstAttach.StreamId,
+            Reason = "test_detach",
+        }, CancellationToken.None);
+
+        Assert.True(detached.Detached);
+        Assert.True(detached.BackendPreserved);
+        Assert.False(backend.Processes[0].HasExited);
+
+        var outputCountAfterDetach = events.PublishedFrames.Count(frame => frame.Event == DesktopSidecarProtocol.TerminalOutputEvent);
+        backend.Processes[0].EmitOutput(Encoding.UTF8.GetBytes("detached output"));
+        await WaitForActivityCountAsync(registry, session.SessionId, 1);
+        Assert.Equal(outputCountAfterDetach, events.PublishedFrames.Count(frame => frame.Event == DesktopSidecarProtocol.TerminalOutputEvent));
+
+        var staleStreamError = await Assert.ThrowsAsync<BridgeHandlerException>(() =>
+            service.SendInputAsync(new TerminalSendInputRequest
+            {
+                SessionId = session.SessionId,
+                StreamId = firstAttach.StreamId,
+                Data = "should fail",
+                ByteCount = 11,
+            }, CancellationToken.None));
+        Assert.Equal("terminal.request.invalid", staleStreamError.Code);
+
+        var secondAttach = await service.AttachAsync(new TerminalAttachRequest
+        {
+            SessionId = session.SessionId,
+            Replay = new TerminalReplaySpec { AfterCursor = null, MaxChunks = 10 },
+        }, CancellationToken.None);
+        var replayFrame = events.PublishedFrames.Last(frame =>
+            frame.Event == DesktopSidecarProtocol.TerminalOutputEvent
+            && string.Equals(frame.Payload.GetProperty("stream_id").GetString(), secondAttach.StreamId, StringComparison.Ordinal));
+        var replay = JsonSerializer.Deserialize<TerminalOutputEvent>(replayFrame.Payload.GetRawText());
+        Assert.NotNull(replay);
+        Assert.Equal("replay", replay!.Origin);
+        Assert.Equal("detached output", Encoding.UTF8.GetString(Convert.FromBase64String(replay.Data)));
+
+        var input = await service.SendInputAsync(new TerminalSendInputRequest
+        {
+            SessionId = session.SessionId,
+            StreamId = secondAttach.StreamId,
+            InputId = "in_after_reattach",
+            Data = "echo after\n",
+            ByteCount = 11,
+        }, CancellationToken.None);
+        Assert.True(input.Accepted);
+        Assert.Equal("echo after\n", Encoding.UTF8.GetString(backend.Processes[0].Writes.Single()));
+    }
+
+    [Fact]
+    public async Task DirectPtyService_ReconnectWithCursorReplaysOnlyNewOutput()
+    {
+        var backend = new FakeDirectPtyBackend();
+        var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
+        var events = new OperatorRuntimeBridgeEventSink(new DesktopSidecarRuntimeState(DesktopSidecarFixtures.CreateFixtureOptions()));
+        await using var service = CreateDirectPtyService(backend, registry, events);
+
+        var session = await service.CreateAsync(new TerminalCreateSessionRequest
+        {
+            ProjectId = string.Empty,
+            Title = "Reconnect",
+            Backend = OperatorSessionBackend.DirectPty,
+        }, CancellationToken.None);
+
+        backend.Processes[0].EmitOutput(Encoding.UTF8.GetBytes("first"));
+        await WaitForActivityCountAsync(registry, session.SessionId, 1);
+        var firstAttach = await service.AttachAsync(new TerminalAttachRequest
+        {
+            SessionId = session.SessionId,
+            Replay = new TerminalReplaySpec { AfterCursor = null, MaxChunks = 10 },
+        }, CancellationToken.None);
+        Assert.Equal("cur_000000000001", firstAttach.StartCursor);
+        Assert.False(firstAttach.ReplayGap);
+
+        await service.DetachAsync(new TerminalDetachRequest { SessionId = session.SessionId, StreamId = firstAttach.StreamId }, CancellationToken.None);
+        backend.Processes[0].EmitOutput(Encoding.UTF8.GetBytes("second"));
+        await WaitForActivityCountAsync(registry, session.SessionId, 2);
+
+        var frameStart = events.PublishedFrames.Count;
+        var reconnect = await service.ReconnectAsync(new TerminalReconnectRequest
+        {
+            SessionId = session.SessionId,
+            PreviousStreamId = firstAttach.StreamId,
+            LastSeenCursor = firstAttach.StartCursor,
+        }, CancellationToken.None);
+
+        Assert.Equal("cur_000000000002", reconnect.StartCursor);
+        Assert.False(reconnect.ReplayGap);
+        var replayFrames = events.PublishedFrames.Skip(frameStart)
+            .Where(frame => frame.Event == DesktopSidecarProtocol.TerminalOutputEvent
+                && string.Equals(frame.Payload.GetProperty("stream_id").GetString(), reconnect.StreamId, StringComparison.Ordinal))
+            .Select(frame => JsonSerializer.Deserialize<TerminalOutputEvent>(frame.Payload.GetRawText())!)
+            .ToList();
+        Assert.Single(replayFrames);
+        Assert.Equal("replay", replayFrames[0].Origin);
+        Assert.Equal("second", Encoding.UTF8.GetString(Convert.FromBase64String(replayFrames[0].Data)));
+    }
+
+    [Fact]
+    public async Task DirectPtyService_ReconnectSignalsReplayGapWhenCursorPredatesRetainedBuffer()
+    {
+        var backend = new FakeDirectPtyBackend();
+        var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
+        var events = new OperatorRuntimeBridgeEventSink(new DesktopSidecarRuntimeState(DesktopSidecarFixtures.CreateFixtureOptions()));
+        await using var service = CreateDirectPtyService(
+            backend,
+            registry,
+            events,
+            new TerminalStreamLimits { SessionReplayMaxBytes = 2, HeartbeatIntervalMs = 5000 });
+
+        var session = await service.CreateAsync(new TerminalCreateSessionRequest
+        {
+            ProjectId = string.Empty,
+            Title = "Reconnect gap",
+            Backend = OperatorSessionBackend.DirectPty,
+        }, CancellationToken.None);
+
+        foreach (var value in new[] { "a", "b", "c", "d" })
+        {
+            backend.Processes[0].EmitOutput(Encoding.UTF8.GetBytes(value));
+        }
+
+        await WaitForActivityCountAsync(registry, session.SessionId, 4);
+        var reconnect = await service.ReconnectAsync(new TerminalReconnectRequest
+        {
+            SessionId = session.SessionId,
+            LastSeenCursor = "cur_000000000001",
+        }, CancellationToken.None);
+
+        Assert.True(reconnect.ReplayGap);
+        Assert.Equal("cur_000000000003", reconnect.ReplayAvailableFrom);
+        Assert.Equal("cur_000000000004", reconnect.StartCursor);
+        var replayPayloads = events.PublishedFrames
+            .Where(frame => frame.Event == DesktopSidecarProtocol.TerminalOutputEvent
+                && string.Equals(frame.Payload.GetProperty("stream_id").GetString(), reconnect.StreamId, StringComparison.Ordinal))
+            .Select(frame => JsonSerializer.Deserialize<TerminalOutputEvent>(frame.Payload.GetRawText())!)
+            .Select(output => Encoding.UTF8.GetString(Convert.FromBase64String(output.Data)))
+            .ToList();
+        Assert.Equal(["c", "d"], replayPayloads);
+    }
+
+    [Fact]
+    public async Task DirectPtyService_FansOutputToMultipleStreamsAndAckIsPerStream()
+    {
+        var backend = new FakeDirectPtyBackend();
+        var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
+        var events = new OperatorRuntimeBridgeEventSink(new DesktopSidecarRuntimeState(DesktopSidecarFixtures.CreateFixtureOptions()));
+        await using var service = CreateDirectPtyService(
+            backend,
+            registry,
+            events,
+            new TerminalStreamLimits { AckAfterBytes = 5, SubscriberQueueMaxBytes = 16, HeartbeatIntervalMs = 10 });
+
+        var session = await service.CreateAsync(new TerminalCreateSessionRequest
+        {
+            ProjectId = string.Empty,
+            Title = "Multiple streams",
+            Backend = OperatorSessionBackend.DirectPty,
+        }, CancellationToken.None);
+        var streamA = await service.AttachAsync(new TerminalAttachRequest { SessionId = session.SessionId, ClientId = "a" }, CancellationToken.None);
+        var streamB = await service.AttachAsync(new TerminalAttachRequest { SessionId = session.SessionId, ClientId = "b" }, CancellationToken.None);
+
+        backend.Processes[0].EmitOutput(Encoding.UTF8.GetBytes("abcdef"));
+
+        var outputA = await WaitForPublishedFrameAsync(events, DesktopSidecarProtocol.TerminalOutputEvent,
+            frame => string.Equals(frame.Payload.GetProperty("stream_id").GetString(), streamA.StreamId, StringComparison.Ordinal));
+        var outputB = await WaitForPublishedFrameAsync(events, DesktopSidecarProtocol.TerminalOutputEvent,
+            frame => string.Equals(frame.Payload.GetProperty("stream_id").GetString(), streamB.StreamId, StringComparison.Ordinal));
+        Assert.Equal("abcdef", Encoding.UTF8.GetString(Convert.FromBase64String(outputA.Payload.GetProperty("data").GetString()!)));
+        Assert.Equal("abcdef", Encoding.UTF8.GetString(Convert.FromBase64String(outputB.Payload.GetProperty("data").GetString()!)));
+
+        await WaitForPublishedFrameAsync(events, DesktopSidecarProtocol.TerminalBackpressureEvent,
+            frame => string.Equals(frame.Payload.GetProperty("stream_id").GetString(), streamA.StreamId, StringComparison.Ordinal)
+                && frame.Payload.GetProperty("queue_bytes").GetInt32() >= 6);
+        await WaitForPublishedFrameAsync(events, DesktopSidecarProtocol.TerminalBackpressureEvent,
+            frame => string.Equals(frame.Payload.GetProperty("stream_id").GetString(), streamB.StreamId, StringComparison.Ordinal)
+                && frame.Payload.GetProperty("queue_bytes").GetInt32() >= 6);
+
+        await service.AckOutputAsync(new TerminalAckOutputRequest
+        {
+            SessionId = session.SessionId,
+            StreamId = streamA.StreamId,
+            AckCursor = "cur_000000000001",
+            ReceivedBytes = 6,
+        }, CancellationToken.None);
+
+        var frameStart = events.PublishedFrames.Count;
+        backend.Processes[0].EmitOutput(Encoding.UTF8.GetBytes("g"));
+        await WaitForPublishedFrameAsync(events, DesktopSidecarProtocol.TerminalBackpressureEvent,
+            frame => string.Equals(frame.Payload.GetProperty("stream_id").GetString(), streamB.StreamId, StringComparison.Ordinal)
+                && frame.Payload.GetProperty("queue_bytes").GetInt32() >= 7,
+            startIndex: frameStart);
+        await Task.Delay(50);
+
+        Assert.DoesNotContain(events.PublishedFrames.Skip(frameStart), frame =>
+            frame.Event == DesktopSidecarProtocol.TerminalBackpressureEvent
+            && string.Equals(frame.Payload.GetProperty("stream_id").GetString(), streamA.StreamId, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task DirectPtyService_BuildSnapshotListForDenOmitsRawTerminalBytes()
+    {
+        var backend = new FakeDirectPtyBackend();
+        var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
+        var events = new OperatorRuntimeBridgeEventSink(new DesktopSidecarRuntimeState(DesktopSidecarFixtures.CreateFixtureOptions()));
+        await using var service = CreateDirectPtyService(backend, registry, events);
+
+        var session = await service.CreateAsync(new TerminalCreateSessionRequest
+        {
+            ProjectId = "den-mcp",
+            TaskId = 1032,
+            WorkspaceId = "ws-test",
+            Title = "Snapshot",
+            Cwd = "/tmp/work",
+            Backend = OperatorSessionBackend.DirectPty,
+        }, CancellationToken.None);
+        var rawTerminal = "\u001b[31mSECRET_RAW_TERMINAL_BYTES\u001b[0m";
+        backend.Processes[0].EmitOutput(Encoding.UTF8.GetBytes(rawTerminal));
+        await WaitForActivityCountAsync(registry, session.SessionId, 1);
+
+        var snapshots = service.BuildSnapshotListForDen();
+
+        var snapshot = Assert.Single(snapshots);
+        Assert.Equal("den-mcp", snapshot.ProjectId);
+        Assert.Equal(session.SessionId, snapshot.Request.SessionId);
+        Assert.Equal(1032, snapshot.Request.TaskId);
+        Assert.Equal(OperatorSessionBackend.DirectPty, snapshot.Request.Backend);
+        Assert.Equal(OperatorSessionKind.Terminal, snapshot.Request.Kind);
+        var snapshotRequestJson = BridgeJson.Serialize(snapshot.Request);
+        var recentActivityJson = snapshot.Request.RecentActivity.GetRawText();
+        Assert.Contains("terminal output (", recentActivityJson, StringComparison.Ordinal);
+        Assert.Contains(" bytes)", recentActivityJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("SECRET_RAW_TERMINAL_BYTES", snapshotRequestJson, StringComparison.Ordinal);
+        Assert.DoesNotContain(Convert.ToBase64String(Encoding.UTF8.GetBytes(rawTerminal)), snapshotRequestJson, StringComparison.Ordinal);
+        var capabilitiesJson = snapshot.Request.Capabilities!.Value.GetRawText();
+        Assert.Contains("raw_stream_scope", capabilitiesJson, StringComparison.Ordinal);
+        Assert.Contains("local_bridge_only", capabilitiesJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DirectPtyService_RejectsInvalidSessionInputAndViewportBounds()
+    {
+        var backend = new FakeDirectPtyBackend();
+        var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
+        var events = new OperatorRuntimeBridgeEventSink(new DesktopSidecarRuntimeState(DesktopSidecarFixtures.CreateFixtureOptions()));
+        await using var service = CreateDirectPtyService(backend, registry, events);
+
+        var session = await service.CreateAsync(new TerminalCreateSessionRequest
+        {
+            ProjectId = string.Empty,
+            Title = "Invalid inputs",
+            Backend = OperatorSessionBackend.DirectPty,
+        }, CancellationToken.None);
+        var attach = await service.AttachAsync(new TerminalAttachRequest
+        {
+            SessionId = session.SessionId,
+            Viewport = new TerminalViewport { Cols = 80, Rows = 24 },
+        }, CancellationToken.None);
+
+        var emptySession = await Assert.ThrowsAsync<BridgeHandlerException>(() =>
+            service.AttachAsync(new TerminalAttachRequest { SessionId = string.Empty }, CancellationToken.None));
+        Assert.Equal("terminal.request.invalid", emptySession.Code);
+
+        var emptySendInputSession = await Assert.ThrowsAsync<BridgeHandlerException>(() =>
+            service.SendInputAsync(new TerminalSendInputRequest
+            {
+                SessionId = "   ",
+                StreamId = attach.StreamId,
+                Data = "ignored",
+                ByteCount = 7,
+            }, CancellationToken.None));
+        Assert.Equal("terminal.request.invalid", emptySendInputSession.Code);
+
+        var oversizedInput = await Assert.ThrowsAsync<BridgeHandlerException>(() =>
+            service.SendInputAsync(new TerminalSendInputRequest
+            {
+                SessionId = session.SessionId,
+                StreamId = attach.StreamId,
+                Data = new string('x', 16_385),
+                ByteCount = 16_385,
+            }, CancellationToken.None));
+        Assert.Equal("terminal.request.invalid", oversizedInput.Code);
+
+        var invalidAttachViewport = await Assert.ThrowsAsync<BridgeHandlerException>(() =>
+            service.AttachAsync(new TerminalAttachRequest
+            {
+                SessionId = session.SessionId,
+                Viewport = new TerminalViewport { Cols = 0, Rows = 24 },
+            }, CancellationToken.None));
+        Assert.Equal("terminal.request.invalid", invalidAttachViewport.Code);
+
+        var invalidResizeBounds = await Assert.ThrowsAsync<BridgeHandlerException>(() =>
+            service.ResizeAsync(new TerminalResizeRequest
+            {
+                SessionId = session.SessionId,
+                StreamId = attach.StreamId,
+                Cols = 120,
+                Rows = 501,
+            }, CancellationToken.None));
+        Assert.Equal("terminal.request.invalid", invalidResizeBounds.Code);
+    }
+
+    [Fact]
     public async Task TmuxAckOutput_IsCapabilityValidatedSnapshotContract()
     {
         var runner = new FakeTmuxCommandRunner();
@@ -994,6 +1318,23 @@ public class TerminalBridgeHandlerTests
         Assert.False(stale.Capabilities.CanSendInput);
     }
 
+    private static DirectPtyOperatorSessionService CreateDirectPtyService(
+        FakeDirectPtyBackend backend,
+        OperatorSessionRegistry registry,
+        OperatorRuntimeBridgeEventSink events,
+        TerminalStreamLimits? limits = null)
+    {
+        var settings = new OperatorSettingsService(OperatorSettingsStorage.ForPath(Path.Combine(Path.GetTempPath(), "den-tests", Guid.NewGuid().ToString("N"), "settings.json")));
+        return new DirectPtyOperatorSessionService(
+            backend,
+            registry,
+            events,
+            settings,
+            new DenHttpClient(),
+            () => new DateTimeOffset(2026, 4, 29, 12, 0, 0, TimeSpan.Zero),
+            limits);
+    }
+
     private static TmuxOperatorSessionService CreateTmuxService(FakeTmuxCommandRunner runner, OperatorSessionRegistry registry)
     {
         var options = DesktopSidecarFixtures.CreateFixtureOptions();
@@ -1029,6 +1370,22 @@ public class TerminalBridgeHandlerTests
             den,
             () => new DateTimeOffset(2026, 4, 29, 12, 0, 0, TimeSpan.Zero));
         return new TerminalOperatorSessionService(registry, tmux, direct);
+    }
+
+    private static async Task WaitForActivityCountAsync(OperatorSessionRegistry registry, string sessionId, int expectedCount, int timeoutMs = 1000)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddMilliseconds(timeoutMs);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            if ((registry.Get(sessionId)?.RecentActivity.Count ?? 0) >= expectedCount)
+            {
+                return;
+            }
+
+            await Task.Delay(10);
+        }
+
+        throw new TimeoutException($"Timed out waiting for {expectedCount} activity item(s) on {sessionId}.");
     }
 
     private static async Task<BridgeEventFrame> WaitForPublishedFrameAsync(
