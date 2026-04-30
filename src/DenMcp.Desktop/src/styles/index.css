@@ -314,8 +314,7 @@ button:disabled { cursor: default; opacity: 0.55; }
 .desktop-shell[data-rail="collapsed"] .rail-section-title,
 .desktop-shell[data-rail="collapsed"] .rail-mode-controls,
 .desktop-shell[data-rail="collapsed"] .rail-action,
-.desktop-shell[data-rail="collapsed"] .rail-card,
-.desktop-shell[data-rail="collapsed"] .rail-tip { display: none; }
+.desktop-shell[data-rail="collapsed"] .rail-card { display: none; }
 
 .rail-header, .rail-section-title {
   display: flex;
@@ -362,9 +361,8 @@ button:disabled { cursor: default; opacity: 0.55; }
 .rail-mode-controls { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
 .rail-mode-controls button.active, .console-controls button.active { color: var(--accent); background: var(--accent-bg); border-color: color-mix(in oklab, var(--accent) 35%, transparent); }
 .rail-action { border: var(--bw) dashed var(--bd-default); border-radius: var(--r-md); background: transparent; color: var(--fg-secondary); padding: var(--sp-2); }
-.rail-card, .rail-tip { display: grid; gap: var(--sp-1); padding: var(--sp-2); border: var(--bw) solid var(--bd-subtle); border-radius: var(--r-lg); background: var(--bg-panel); color: var(--fg-tertiary); font-size: var(--fs-xs); }
-.rail-card-label, .rail-tip span { color: var(--accent); font-family: var(--font-mono); font-size: var(--fs-3xs); letter-spacing: 0.12em; text-transform: uppercase; }
-.rail-tip p { margin: 0; }
+.rail-card { display: grid; gap: var(--sp-1); padding: var(--sp-2); border: var(--bw) solid var(--bd-subtle); border-radius: var(--r-lg); background: var(--bg-panel); color: var(--fg-tertiary); font-size: var(--fs-xs); }
+.rail-card-label { color: var(--accent); font-family: var(--font-mono); font-size: var(--fs-3xs); letter-spacing: 0.12em; text-transform: uppercase; }
 kbd { border: var(--bw) solid var(--bd-default); border-bottom-color: var(--bd-strong); border-radius: var(--r-sm); padding: 0 4px; background: var(--bg-panel-2); color: var(--fg-secondary); font-family: var(--font-mono); }
 
 .tab-canvas { min-width: 0; min-height: 0; overflow: auto; padding: var(--sp-4); background: var(--bg-canvas); }

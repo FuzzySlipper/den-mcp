@@ -223,10 +223,6 @@ function LeftRail({
         <span><b>{snapshots.length}</b> workspaces observed</span>
         <span><b>{snapshots.reduce((sum, snapshot) => sum + snapshot.request.dirty_counts.total, 0)}</b> dirty files</span>
       </div>
-      <div className="rail-tip">
-        <span>Tips</span>
-        <p><kbd>⌘K</kbd> palette · <kbd>⌘`</kbd> console</p>
-      </div>
     </aside>
   );
 }

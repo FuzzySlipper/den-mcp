@@ -18,6 +18,7 @@ import {
   sidecarEvents,
 } from '../src/electron/sidecarProtocol.ts';
 import { SidecarSupervisor, buildDevSidecarLaunchConfig } from '../src/electron/sidecarSupervisor.ts';
+import { normalizeAppAgentSelection } from '../src/desktop/appAgentSelection.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const fixturePath = resolve(__dirname, '../../../testdata/den-desktop-sidecar/sidecar-wire-fixture.json');
@@ -265,6 +266,19 @@ test('terminal attach facade accepts typed viewport and replay fields and reject
     () => facade.terminalAttach({ session_id: 'tmux-session:test', replay: { after_cursor: null, unexpected: true } }),
     /den_desktop\.terminal\.attach\.request\.replay has unexpected property 'unexpected'/,
   );
+});
+
+test('app-agent selection normalization sends nulls for absent optional bridge fields', () => {
+  assert.deepEqual(normalizeAppAgentSelection({ project_id: 'den-mcp', current_tab: 'agent' }), {
+    project_id: 'den-mcp',
+    task_id: null,
+    workspace_id: null,
+    current_route: null,
+    current_tab: 'agent',
+    session_id: null,
+    selected_file_path: null,
+    selected_diff_range: null,
+  });
 });
 
 test('app-agent helper DTOs use typed commands and events without generic dispatch', async () => {

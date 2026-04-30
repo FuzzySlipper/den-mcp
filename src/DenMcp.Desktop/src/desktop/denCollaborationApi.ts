@@ -124,20 +124,43 @@ function buildUrl(baseUrl: string, path: string): string {
   return `${normalized}${path}`;
 }
 
+function formatUnexpectedResponse(url: string, text: string, contentType: string | null): string {
+  const trimmed = text.trim();
+  const kind = contentType?.split(';', 1)[0] || (trimmed.startsWith('<') ? 'text/html' : 'non-json');
+  if (trimmed.startsWith('<!doctype') || trimmed.startsWith('<html') || kind === 'text/html') {
+    return `Den collaboration API returned HTML instead of JSON for ${url}. Check that the Den server REST endpoint is reachable.`;
+  }
+
+  return `Den collaboration API returned ${kind} instead of JSON for ${url}.`;
+}
+
 async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     headers: { 'Content-Type': 'application/json' },
     ...options,
   });
 
+  const text = await response.text();
+
   if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(`Den API error ${response.status} for ${url}: ${body || response.statusText}`);
+    const message = text.trim().startsWith('<')
+      ? formatUnexpectedResponse(url, text, response.headers.get('content-type'))
+      : (text || response.statusText);
+    throw new Error(`Den API error ${response.status} for ${url}: ${message}`);
   }
 
-  const text = await response.text();
   if (!text) return undefined as T;
-  return JSON.parse(text) as T;
+
+  const contentType = response.headers.get('content-type');
+  if (contentType && !contentType.toLowerCase().includes('application/json')) {
+    throw new Error(formatUnexpectedResponse(url, text, contentType));
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch (err) {
+    throw new Error(formatUnexpectedResponse(url, text, contentType));
+  }
 }
 
 export function createDenCollaborationApi(denBaseUrl: string, projectId: string) {

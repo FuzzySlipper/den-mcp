@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { compileResponse } from '../src/desktop/collaborationCompileResponse.ts';
+import { createDenCollaborationApi } from '../src/desktop/denCollaborationApi.ts';
 
 function segment(overrides = {}) {
   return {
@@ -43,6 +44,16 @@ function headingSegment(overrides = {}) {
   });
 }
 
+async function withFetchStub(fetchStub, run) {
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = fetchStub;
+  try {
+    return await run();
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+}
+
 function annotation(overrides = {}) {
   return {
     id: 10,
@@ -60,6 +71,24 @@ function annotation(overrides = {}) {
     ...overrides,
   };
 }
+
+test('collaboration API reports HTML responses calmly instead of raw JSON parse errors', async () => {
+  await withFetchStub(async () => new Response('<!doctype html><html><body>SPA</body></html>', {
+    status: 200,
+    headers: { 'content-type': 'text/html' },
+  }), async () => {
+    const api = createDenCollaborationApi('http://127.0.0.1:5199', 'den-mcp');
+    await assert.rejects(
+      () => api.listSessions(null, null),
+      (error) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /returned HTML instead of JSON/);
+        assert.doesNotMatch(error.message, /Unexpected token/);
+        return true;
+      },
+    );
+  });
+});
 
 test('compileResponse returns fallback when no annotations exist', () => {
   const segments = [segment()];

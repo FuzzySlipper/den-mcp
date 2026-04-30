@@ -25,6 +25,7 @@ import {
 } from './tauriApi';
 import type { AppAgentBuildContextRequest, AppAgentInvokeToolRequest } from '../electron/sidecarProtocol.ts';
 import type { JsonValue } from '../bridge/contract.ts';
+import { normalizeAppAgentSelection } from './appAgentSelection.ts';
 
 // ── Agent action log entry ──
 
@@ -169,13 +170,14 @@ export function useAppAgentRuntime(
     setError(null);
 
     try {
+      const normalizedSelection = normalizeAppAgentSelection(selection);
       const request: AppAgentBuildContextRequest = {
-        selection,
+        selection: normalizedSelection,
         message_limit: 10,
       };
       const [contextResult, toolsResult] = await Promise.allSettled([
         appAgentBuildContext(request),
-        appAgentListTools({ selection }),
+        appAgentListTools({ selection: normalizedSelection }),
       ]);
 
       if (!mountedRef.current) return;
@@ -236,7 +238,7 @@ export function useAppAgentRuntime(
       const request: AppAgentInvokeToolRequest = {
         tool_name: toolName,
         input,
-        selection,
+        selection: normalizeAppAgentSelection(selection),
       };
       const response = await appAgentInvokeTool(request) as unknown as AppAgentInvokeToolResponse;
 
