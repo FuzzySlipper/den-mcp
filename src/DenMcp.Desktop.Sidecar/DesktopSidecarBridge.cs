@@ -22,6 +22,8 @@ public static class DesktopSidecarBridge
         services.AddSingleton<IGitCommandRunner, SystemGitCommandRunner>();
         services.AddSingleton<GitSnapshotBuilder>();
         services.AddSingleton<PiSessionSnapshotBuilder>();
+        services.AddSingleton<OperatorSessionRegistry>();
+        services.AddSingleton<OperatorSessionLeaseStore>();
         services.AddSingleton<DesktopSidecarRuntimeState>();
         services.AddSingleton<OperatorRuntimeBridgeEventSink>();
         services.AddSingleton<IOperatorRuntimeEventSink>(sp => sp.GetRequiredService<OperatorRuntimeBridgeEventSink>());
@@ -64,9 +66,31 @@ public static class DesktopSidecarBridge
                 DesktopSidecarProtocol.ListLocalSessionSnapshotsCommand)
             .RegisterCommand<LatestDiffSnapshotRequest, DesktopDiffSnapshotLatestResult, GetLatestDiffSnapshotHandler>(
                 DesktopSidecarProtocol.GetLatestDiffSnapshotCommand)
+            // Terminal protocol commands (task #1010, spec #945)
+            .RegisterCommand<TerminalListSessionsRequest, TerminalListSessionsResponse, TerminalListSessionsHandler>(
+                DesktopSidecarProtocol.TerminalListSessionsCommand)
+            .RegisterCommand<TerminalReadActivityRequest, TerminalReadActivityResponse, TerminalReadActivityHandler>(
+                DesktopSidecarProtocol.TerminalReadActivityCommand)
+            .RegisterCommand<TerminalAttachRequest, TerminalAttachResponse, TerminalAttachHandler>(
+                DesktopSidecarProtocol.TerminalAttachCommand)
+            .RegisterCommand<TerminalDetachRequest, TerminalDetachResponse, TerminalDetachHandler>(
+                DesktopSidecarProtocol.TerminalDetachCommand)
+            .RegisterCommand<TerminalSendInputRequest, TerminalSendInputResponse, TerminalSendInputHandler>(
+                DesktopSidecarProtocol.TerminalSendInputCommand)
+            .RegisterCommand<TerminalResizeRequest, TerminalResizeResponse, TerminalResizeHandler>(
+                DesktopSidecarProtocol.TerminalResizeCommand)
+            .RegisterCommand<TerminalTerminateRequest, TerminalTerminateResponse, TerminalTerminateHandler>(
+                DesktopSidecarProtocol.TerminalTerminateCommand)
+            .RegisterCommand<TerminalReconnectRequest, TerminalAttachResponse, TerminalReconnectHandler>(
+                DesktopSidecarProtocol.TerminalReconnectCommand)
+            .RegisterCommand<TerminalAckOutputRequest, TerminalAckOutputResponse, TerminalAckOutputHandler>(
+                DesktopSidecarProtocol.TerminalAckOutputCommand)
             .RegisterEvent<OperatorStatus>(DesktopSidecarProtocol.OperatorStatusEvent)
             .RegisterEvent<IReadOnlyList<LocalGitSnapshot>>(DesktopSidecarProtocol.GitSnapshotEvent)
-            .RegisterEvent<IReadOnlyList<LocalSessionSnapshot>>(DesktopSidecarProtocol.SessionSnapshotEvent);
+            .RegisterEvent<IReadOnlyList<LocalSessionSnapshot>>(DesktopSidecarProtocol.SessionSnapshotEvent)
+            // Terminal protocol events (task #1010, dot-convention names per R945-4)
+            .RegisterEvent<TerminalSessionEvent>(DesktopSidecarProtocol.TerminalSessionStatusEvent)
+            .RegisterEvent<TerminalListSessionsResponse>(DesktopSidecarProtocol.TerminalSessionListEvent);
     }
 
     public static BridgeSchemaBundle CreateSchemaBundle(IServiceProvider serviceProvider)
@@ -122,6 +146,65 @@ public static class DesktopSidecarBridge
                 """),
             Schema(DesktopSidecarProtocol.SessionSnapshotEvent + ".payload", """
                 {"type":"array","items":{"type":"object","additionalProperties":true}}
+                """),
+            // Terminal protocol command schemas (task #1010)
+            Schema(DesktopSidecarProtocol.TerminalListSessionsCommand + ".request", """
+                {"type":"object","additionalProperties":false,"properties":{"kind":{"type":["string","null"]},"backend":{"type":["string","null"]},"status":{"type":["string","null"]}}}
+                """),
+            Schema(DesktopSidecarProtocol.TerminalListSessionsCommand + ".response", """
+                {"type":"object","additionalProperties":false}
+                """),
+            Schema(DesktopSidecarProtocol.TerminalReadActivityCommand + ".request", """
+                {"type":"object","additionalProperties":false,"required":["session_id"],"properties":{"session_id":{"type":"string"},"after_cursor":{"type":["string","null"]},"limit":{"type":"integer"}}}
+                """),
+            Schema(DesktopSidecarProtocol.TerminalReadActivityCommand + ".response", """
+                {"type":"object","additionalProperties":false}
+                """),
+            Schema(DesktopSidecarProtocol.TerminalAttachCommand + ".request", """
+                {"type":"object","additionalProperties":false,"required":["session_id"],"properties":{"session_id":{"type":"string"},"mode":{"type":"string"},"client_id":{"type":["string","null"]}}}
+                """),
+            Schema(DesktopSidecarProtocol.TerminalAttachCommand + ".response", """
+                {"type":"object","additionalProperties":false}
+                """),
+            Schema(DesktopSidecarProtocol.TerminalDetachCommand + ".request", """
+                {"type":"object","additionalProperties":false,"required":["stream_id","session_id"],"properties":{"stream_id":{"type":"string"},"session_id":{"type":"string"},"reason":{"type":["string","null"]}}}
+                """),
+            Schema(DesktopSidecarProtocol.TerminalDetachCommand + ".response", """
+                {"type":"object","additionalProperties":false}
+                """),
+            Schema(DesktopSidecarProtocol.TerminalSendInputCommand + ".request", """
+                {"type":"object","additionalProperties":false,"required":["session_id","data"],"properties":{"session_id":{"type":"string"},"stream_id":{"type":["string","null"]},"input_id":{"type":["string","null"]},"encoding":{"type":"string"},"data":{"type":"string"},"byte_count":{"type":"integer"},"expected_lease_generation":{"type":["integer","null"]}}}
+                """),
+            Schema(DesktopSidecarProtocol.TerminalSendInputCommand + ".response", """
+                {"type":"object","additionalProperties":false}
+                """),
+            Schema(DesktopSidecarProtocol.TerminalResizeCommand + ".request", """
+                {"type":"object","additionalProperties":false,"required":["session_id","cols","rows"],"properties":{"session_id":{"type":"string"},"stream_id":{"type":["string","null"]},"cols":{"type":"integer"},"rows":{"type":"integer"}}}
+                """),
+            Schema(DesktopSidecarProtocol.TerminalResizeCommand + ".response", """
+                {"type":"object","additionalProperties":false}
+                """),
+            Schema(DesktopSidecarProtocol.TerminalTerminateCommand + ".request", """
+                {"type":"object","additionalProperties":false,"required":["session_id"],"properties":{"session_id":{"type":"string"},"stream_id":{"type":["string","null"]},"mode":{"type":"string"},"reason":{"type":["string","null"]},"expected_lease_generation":{"type":["integer","null"]},"requested_by":{"type":["string","null"]}}}
+                """),
+            Schema(DesktopSidecarProtocol.TerminalTerminateCommand + ".response", """
+                {"type":"object","additionalProperties":false}
+                """),
+            Schema(DesktopSidecarProtocol.TerminalReconnectCommand + ".request", """
+                {"type":"object","additionalProperties":false,"required":["session_id"],"properties":{"session_id":{"type":"string"},"previous_stream_id":{"type":["string","null"]},"last_seen_cursor":{"type":["string","null"]},"viewport":{"type":["object","null"]}}}
+                """),
+            Schema(DesktopSidecarProtocol.TerminalAckOutputCommand + ".request", """
+                {"type":"object","additionalProperties":false,"required":["session_id"],"properties":{"session_id":{"type":"string"},"stream_id":{"type":["string","null"]},"ack_cursor":{"type":["string","null"]},"received_bytes":{"type":"integer"}}}
+                """),
+            Schema(DesktopSidecarProtocol.TerminalAckOutputCommand + ".response", """
+                {"type":"object","additionalProperties":false}
+                """),
+            // Terminal protocol event schemas
+            Schema(DesktopSidecarProtocol.TerminalSessionStatusEvent + ".payload", """
+                {"type":"object","additionalProperties":false}
+                """),
+            Schema(DesktopSidecarProtocol.TerminalSessionListEvent + ".payload", """
+                {"type":"object","additionalProperties":false}
                 """),
         };
     }

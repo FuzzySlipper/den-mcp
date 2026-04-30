@@ -15,28 +15,39 @@ public class DesktopSidecarBridgeTests
 
         Assert.Equal(DesktopSidecarProtocol.SchemaBundleId, bundle.BundleId);
         Assert.Equal(DesktopSidecarProtocol.SchemaVersion, bundle.SchemaVersion);
-        Assert.Equal(
-            new[]
-            {
-                DesktopSidecarProtocol.CapabilitiesCommand,
-                DesktopSidecarProtocol.HealthCommand,
-                DesktopSidecarProtocol.GetLatestDiffSnapshotCommand,
-                DesktopSidecarProtocol.GetSettingsCommand,
-                DesktopSidecarProtocol.GetOperatorStatusCommand,
-                DesktopSidecarProtocol.ListLocalGitSnapshotsCommand,
-                DesktopSidecarProtocol.ListLocalSessionSnapshotsCommand,
-                DesktopSidecarProtocol.RefreshNowCommand,
-                DesktopSidecarProtocol.SaveSettingsCommand,
-            },
-            bundle.Commands.Select(command => command.Command).ToArray());
-        Assert.Equal(
-            new[]
-            {
-                DesktopSidecarProtocol.GitSnapshotEvent,
-                DesktopSidecarProtocol.OperatorStatusEvent,
-                DesktopSidecarProtocol.SessionSnapshotEvent,
-            },
-            bundle.Events.Select(@event => @event.Event).ToArray());
+        // Both registries sort by name (Ordinal).
+        var sortedCommands = new[]
+        {
+            DesktopSidecarProtocol.CapabilitiesCommand,
+            DesktopSidecarProtocol.HealthCommand,
+            DesktopSidecarProtocol.GetLatestDiffSnapshotCommand,
+            DesktopSidecarProtocol.GetSettingsCommand,
+            DesktopSidecarProtocol.GetOperatorStatusCommand,
+            DesktopSidecarProtocol.ListLocalGitSnapshotsCommand,
+            DesktopSidecarProtocol.ListLocalSessionSnapshotsCommand,
+            DesktopSidecarProtocol.RefreshNowCommand,
+            DesktopSidecarProtocol.SaveSettingsCommand,
+            DesktopSidecarProtocol.TerminalAckOutputCommand,
+            DesktopSidecarProtocol.TerminalAttachCommand,
+            DesktopSidecarProtocol.TerminalDetachCommand,
+            DesktopSidecarProtocol.TerminalListSessionsCommand,
+            DesktopSidecarProtocol.TerminalReadActivityCommand,
+            DesktopSidecarProtocol.TerminalReconnectCommand,
+            DesktopSidecarProtocol.TerminalResizeCommand,
+            DesktopSidecarProtocol.TerminalSendInputCommand,
+            DesktopSidecarProtocol.TerminalTerminateCommand,
+        }.OrderBy(c => c, StringComparer.Ordinal).ToArray();
+        Assert.Equal(sortedCommands, bundle.Commands.Select(command => command.Command).ToArray());
+
+        var sortedEvents = new[]
+        {
+            DesktopSidecarProtocol.TerminalSessionListEvent,
+            DesktopSidecarProtocol.TerminalSessionStatusEvent,
+            DesktopSidecarProtocol.GitSnapshotEvent,
+            DesktopSidecarProtocol.OperatorStatusEvent,
+            DesktopSidecarProtocol.SessionSnapshotEvent,
+        }.OrderBy(e => e, StringComparer.Ordinal).ToArray();
+        Assert.Equal(sortedEvents, bundle.Events.Select(@event => @event.Event).ToArray());
         Assert.Contains(DesktopSidecarProtocol.GetOperatorStatusCommand + ".response", bundle.Definitions.Keys);
         Assert.Contains(DesktopSidecarProtocol.OperatorStatusEvent + ".payload", bundle.Definitions.Keys);
     }

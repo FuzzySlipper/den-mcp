@@ -252,6 +252,7 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
     private readonly GitSnapshotBuilder _git;
     private readonly PiSessionSnapshotBuilder _sessions;
     private readonly IOperatorRuntimeEventSink _events;
+    private readonly OperatorSessionRegistry _operatorSessions;
     private readonly Func<DateTimeOffset> _now;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Queue<DiagnosticEntry> _diagnostics = new();
@@ -271,6 +272,7 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
         GitSnapshotBuilder git,
         PiSessionSnapshotBuilder sessions,
         IOperatorRuntimeEventSink events,
+        OperatorSessionRegistry operatorSessions,
         Func<DateTimeOffset>? now = null)
     {
         _settingsService = settingsService;
@@ -278,6 +280,7 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
         _git = git;
         _sessions = sessions;
         _events = events;
+        _operatorSessions = operatorSessions;
         _now = now ?? (() => DateTimeOffset.UtcNow);
         _settings = OperatorSettings.CreateDefault().Normalized();
         _status = OperatorStatus.Starting(_settings);
@@ -632,6 +635,13 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
                     LastPublishError = "Den is offline; latest local session snapshot is retained in memory.",
                 };
             }
+        }
+
+        // Register Pi artifact snapshots into OperatorSession registry
+        // (task #1010: observe-only OperatorSession records from Pi artifacts).
+        foreach (var session in sessionSnapshots)
+        {
+            _operatorSessions.RegisterFromPiSnapshot(session);
         }
 
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);

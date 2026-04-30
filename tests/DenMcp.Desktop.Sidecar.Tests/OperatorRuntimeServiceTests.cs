@@ -206,12 +206,14 @@ public class OperatorRuntimeServiceTests
         var options = DesktopSidecarFixtures.CreateFixtureOptions() with { ConfigPath = temp.Path };
         var sidecarState = new DesktopSidecarRuntimeState(options, new DateTimeOffset(2026, 4, 29, 12, 0, 0, TimeSpan.Zero));
         var events = new OperatorRuntimeBridgeEventSink(sidecarState);
+        var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
         var runtime = new OperatorRuntimeService(
             settingsService,
             new DenHttpClient(new HttpClient(http)),
             new GitSnapshotBuilder(git),
             new PiSessionSnapshotBuilder(name => name == "PI_SUBAGENT_RUNS_DIR" ? Path.Combine(temp.Path, "runs") : null, () => "2026-04-29T12:00:00.000Z"),
             events,
+            registry,
             () => new DateTimeOffset(2026, 4, 29, 12, 0, 0, TimeSpan.Zero));
 
         return new RuntimeHarness(runtime, events, http, settingsService);

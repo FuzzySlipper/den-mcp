@@ -20,6 +20,28 @@ public static class DesktopSidecarProtocol
     public const string OperatorStatusEvent = "den://operator-status";
     public const string GitSnapshotEvent = "den://git-snapshot-updated";
     public const string SessionSnapshotEvent = "den://session-snapshot-updated";
+
+    // Terminal protocol commands (task #1010, spec #945)
+    public const string TerminalListSessionsCommand = "den_desktop.terminal.list_sessions";
+    public const string TerminalReadActivityCommand = "den_desktop.terminal.read_activity";
+    public const string TerminalAttachCommand = "den_desktop.terminal.attach";
+    public const string TerminalDetachCommand = "den_desktop.terminal.detach";
+    public const string TerminalSendInputCommand = "den_desktop.terminal.send_input";
+    public const string TerminalResizeCommand = "den_desktop.terminal.resize";
+    public const string TerminalTerminateCommand = "den_desktop.terminal.terminate";
+    public const string TerminalReconnectCommand = "den_desktop.terminal.reconnect";
+    public const string TerminalAckOutputCommand = "den_desktop.terminal.ack_output";
+
+    // Terminal protocol events per R945-4: dotted-name convention
+    public const string TerminalSessionListEvent = "den.terminal.session_list_updated";
+    public const string TerminalSessionStatusEvent = "den.terminal.session_status_changed";
+    public const string TerminalOutputEvent = "den.terminal.output";
+    public const string TerminalReplayCompleteEvent = "den.terminal.replay_complete";
+    public const string TerminalExitEvent = "den.terminal.exit";
+    public const string TerminalErrorEvent = "den.terminal.error";
+    public const string TerminalHeartbeatEvent = "den.terminal.heartbeat";
+    public const string TerminalBackpressureEvent = "den.terminal.backpressure";
+
     public const string ReadySentinelPrefix = "DEN_DESKTOP_BRIDGE_READY ";
 }
 
