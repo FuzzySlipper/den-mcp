@@ -639,6 +639,55 @@ public class TerminalBridgeHandlerTests
     }
 
     [Fact]
+    public async Task DirectPtyService_AttachPublishesHeartbeatUntilDetached()
+    {
+        var backend = new FakeDirectPtyBackend();
+        var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
+        var options = DesktopSidecarFixtures.CreateFixtureOptions();
+        var settings = new OperatorSettingsService(OperatorSettingsStorage.ForPath(Path.Combine(Path.GetTempPath(), "den-tests", Guid.NewGuid().ToString("N"), "settings.json")));
+        var events = new OperatorRuntimeBridgeEventSink(new DesktopSidecarRuntimeState(options));
+        await using var service = new DirectPtyOperatorSessionService(
+            backend,
+            registry,
+            events,
+            settings,
+            new DenHttpClient(),
+            () => new DateTimeOffset(2026, 4, 29, 12, 0, 0, TimeSpan.Zero),
+            new TerminalStreamLimits { HeartbeatIntervalMs = 10 });
+
+        var session = await service.CreateAsync(new TerminalCreateSessionRequest
+        {
+            ProjectId = "den-mcp",
+            Title = "Heartbeat",
+            Backend = OperatorSessionBackend.DirectPty,
+        }, CancellationToken.None);
+        var attach = await service.AttachAsync(new TerminalAttachRequest
+        {
+            SessionId = session.SessionId,
+            Viewport = new TerminalViewport { Cols = 80, Rows = 24 },
+        }, CancellationToken.None);
+
+        var heartbeatFrame = await WaitForPublishedFrameAsync(
+            events,
+            DesktopSidecarProtocol.TerminalHeartbeatEvent,
+            frame => string.Equals(frame.Payload.GetProperty("stream_id").GetString(), attach.StreamId, StringComparison.Ordinal));
+        var heartbeat = JsonSerializer.Deserialize<TerminalHeartbeatEvent>(heartbeatFrame.Payload.GetRawText());
+
+        Assert.NotNull(heartbeat);
+        Assert.Equal(session.SessionId, heartbeat!.SessionId);
+        Assert.Equal(attach.StreamId, heartbeat.StreamId);
+        Assert.Equal(OperatorSessionStatus.Running, heartbeat.BackendStatus);
+        Assert.Equal("cur_000000000000", heartbeat.StreamCursor);
+        Assert.Equal(0, heartbeat.QueueBytes);
+        Assert.False(heartbeat.Paused);
+
+        await service.DetachAsync(new TerminalDetachRequest { SessionId = session.SessionId, StreamId = attach.StreamId, Reason = "test" }, CancellationToken.None);
+        var heartbeatCountAfterDetach = events.PublishedFrames.Count(frame => frame.Event == DesktopSidecarProtocol.TerminalHeartbeatEvent);
+        await Task.Delay(50);
+        Assert.Equal(heartbeatCountAfterDetach, events.PublishedFrames.Count(frame => frame.Event == DesktopSidecarProtocol.TerminalHeartbeatEvent));
+    }
+
+    [Fact]
     public async Task TmuxRediscover_RegistersExistingManagedSessionAndMarksMissingStale()
     {
         var runner = new FakeTmuxCommandRunner
@@ -704,6 +753,28 @@ public class TerminalBridgeHandlerTests
             den,
             () => new DateTimeOffset(2026, 4, 29, 12, 0, 0, TimeSpan.Zero));
         return new TerminalOperatorSessionService(registry, tmux, direct);
+    }
+
+    private static async Task<BridgeEventFrame> WaitForPublishedFrameAsync(
+        OperatorRuntimeBridgeEventSink events,
+        string eventName,
+        Func<BridgeEventFrame, bool>? predicate = null,
+        int timeoutMs = 1000)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddMilliseconds(timeoutMs);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var frame = events.PublishedFrames.FirstOrDefault(frame =>
+                frame.Event == eventName && (predicate is null || predicate(frame)));
+            if (frame is not null)
+            {
+                return frame;
+            }
+
+            await Task.Delay(10);
+        }
+
+        throw new TimeoutException($"Timed out waiting for {eventName}.");
     }
 
     private static BridgeRequestContext TestContext()

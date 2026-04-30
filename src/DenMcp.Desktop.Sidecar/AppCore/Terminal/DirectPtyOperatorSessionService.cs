@@ -13,9 +13,11 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
     private readonly OperatorSettingsService _settingsService;
     private readonly DenHttpClient _den;
     private readonly Func<DateTimeOffset> _now;
+    private readonly TerminalStreamLimits _limits;
     private readonly Dictionary<string, IDirectPtyProcess> _processes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DirectPtyStreamState> _streams = new(StringComparer.Ordinal);
     private readonly Dictionary<string, OperatorSessionActivityBuffer> _buffers = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, DirectPtyHeartbeatLoop> _heartbeatLoops = new(StringComparer.Ordinal);
     private readonly object _lock = new();
 
     public DirectPtyOperatorSessionService(
@@ -24,7 +26,8 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
         IOperatorRuntimeEventSink events,
         OperatorSettingsService settingsService,
         DenHttpClient den,
-        Func<DateTimeOffset>? now = null)
+        Func<DateTimeOffset>? now = null,
+        TerminalStreamLimits? limits = null)
     {
         _backend = backend;
         _registry = registry;
@@ -32,6 +35,7 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
         _settingsService = settingsService;
         _den = den;
         _now = now ?? (() => DateTimeOffset.UtcNow);
+        _limits = limits ?? new TerminalStreamLimits();
     }
 
     public async Task<OperatorSession> CreateAsync(TerminalCreateSessionRequest request, CancellationToken cancellationToken = default)
@@ -146,7 +150,7 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
             ReplayGap = replay.ReplayGap,
             Capabilities = ToAttachCapabilities(session.Capabilities),
             ViewportLimits = DirectPtyViewportLimits,
-            Limits = new TerminalStreamLimits(),
+            Limits = _limits,
         };
 
         await _events.PublishAsync(DesktopSidecarProtocol.TerminalReplayCompleteEvent, new TerminalReplayCompleteEvent
@@ -160,6 +164,7 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
         }, cancellationToken).ConfigureAwait(false);
 
         await PublishSessionEventsAsync(session, "session.attached", new { stream_id = streamId, mode = request.Mode, raw_stream = request.Mode == "terminal_stream" }, null, null, cancellationToken).ConfigureAwait(false);
+        StartHeartbeatLoop(streamId, session.SessionId);
         return response;
     }
 
@@ -167,11 +172,14 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
     {
         ArgumentNullException.ThrowIfNull(request);
         var session = RequireDirectSession(request.SessionId, s => s.Capabilities.CanDetach, "detach");
+        DirectPtyHeartbeatLoop? heartbeatLoop;
         lock (_lock)
         {
             _streams.Remove(request.StreamId);
+            heartbeatLoop = RemoveHeartbeatLoopLocked(request.StreamId);
         }
 
+        await StopHeartbeatLoopAsync(heartbeatLoop).ConfigureAwait(false);
         await PublishSessionEventsAsync(session, "session.detached", new { stream_id = request.StreamId }, null, request.Reason, cancellationToken).ConfigureAwait(false);
         return new TerminalDetachResponse { Detached = true, BackendPreserved = true };
     }
@@ -182,7 +190,7 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
         var session = RequireDirectSession(request.SessionId, s => s.Capabilities.CanSendInput, "send_input");
         RequireAttachedStream(request.StreamId, session.SessionId, "send_input");
         var bytes = DecodeInput(request);
-        if (bytes.Length > new TerminalStreamLimits().InputChunkMaxBytes)
+        if (bytes.Length > _limits.InputChunkMaxBytes)
         {
             throw Invalid("Terminal input exceeds the 16 KiB per-command limit.");
         }
@@ -279,11 +287,19 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
     public async ValueTask DisposeAsync()
     {
         IDirectPtyProcess[] processes;
+        DirectPtyHeartbeatLoop[] heartbeatLoops;
         lock (_lock)
         {
             processes = _processes.Values.ToArray();
+            heartbeatLoops = _heartbeatLoops.Values.ToArray();
             _processes.Clear();
             _streams.Clear();
+            _heartbeatLoops.Clear();
+        }
+
+        foreach (var heartbeatLoop in heartbeatLoops)
+        {
+            await StopHeartbeatLoopAsync(heartbeatLoop).ConfigureAwait(false);
         }
 
         foreach (var process in processes)
@@ -327,7 +343,6 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
         {
             await PublishOutputChunksAsync(stream.StreamId, sessionId, chunks, cancellationToken).ConfigureAwait(false);
             var addedBytes = chunks.Sum(c => c.ByteCount);
-            var limits = new TerminalStreamLimits();
             DirectPtyStreamState next;
             lock (_lock)
             {
@@ -340,7 +355,7 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
                 _streams[stream.StreamId] = next;
             }
 
-            if (next.UnackedBytes >= limits.AckAfterBytes)
+            if (next.UnackedBytes >= _limits.AckAfterBytes)
             {
                 await _events.PublishAsync(DesktopSidecarProtocol.TerminalBackpressureEvent, new TerminalBackpressureEvent
                 {
@@ -378,10 +393,22 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
         });
 
         DirectPtyStreamState[] streams;
+        DirectPtyHeartbeatLoop[] heartbeatLoops;
         lock (_lock)
         {
             streams = _streams.Values.Where(s => string.Equals(s.SessionId, sessionId, StringComparison.Ordinal)).ToArray();
+            foreach (var stream in streams)
+            {
+                _streams.Remove(stream.StreamId);
+            }
+
+            heartbeatLoops = RemoveHeartbeatLoopsLocked(streams.Select(s => s.StreamId));
             _processes.Remove(sessionId);
+        }
+
+        foreach (var heartbeatLoop in heartbeatLoops)
+        {
+            await StopHeartbeatLoopAsync(heartbeatLoop).ConfigureAwait(false);
         }
 
         foreach (var stream in streams)
@@ -421,6 +448,138 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
                 Redacted = chunk.Redacted,
             }, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    private void StartHeartbeatLoop(string streamId, string sessionId)
+    {
+        var interval = TimeSpan.FromMilliseconds(Math.Max(1, _limits.HeartbeatIntervalMs));
+        var cancellation = new CancellationTokenSource();
+        var task = RunHeartbeatLoopAsync(streamId, sessionId, interval, cancellation);
+        DirectPtyHeartbeatLoop? previous;
+        lock (_lock)
+        {
+            previous = RemoveHeartbeatLoopLocked(streamId);
+            _heartbeatLoops[streamId] = new DirectPtyHeartbeatLoop(cancellation, task);
+        }
+
+        _ = StopHeartbeatLoopAsync(previous);
+    }
+
+    private async Task RunHeartbeatLoopAsync(string streamId, string sessionId, TimeSpan interval, CancellationTokenSource cancellation)
+    {
+        using var timer = new PeriodicTimer(interval);
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellation.Token).ConfigureAwait(false))
+            {
+                if (!await PublishHeartbeatAsync(streamId, sessionId, cancellation.Token).ConfigureAwait(false))
+                {
+                    break;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            // Expected during detach/exit/dispose.
+        }
+        catch (Exception) when (!cancellation.IsCancellationRequested)
+        {
+            // Heartbeats are a liveness aid; do not let a transient bridge publish failure crash the PTY session.
+        }
+        finally
+        {
+            var removed = false;
+            lock (_lock)
+            {
+                if (_heartbeatLoops.TryGetValue(streamId, out var current) && ReferenceEquals(current.Cancellation, cancellation))
+                {
+                    _heartbeatLoops.Remove(streamId);
+                    removed = true;
+                }
+            }
+
+            if (removed)
+            {
+                cancellation.Dispose();
+            }
+        }
+    }
+
+    private async ValueTask<bool> PublishHeartbeatAsync(string streamId, string sessionId, CancellationToken cancellationToken)
+    {
+        DirectPtyStreamState stream;
+        lock (_lock)
+        {
+            if (!_streams.TryGetValue(streamId, out stream!) || !string.Equals(stream.SessionId, sessionId, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        var session = _registry.Get(sessionId);
+        if (session is null || !string.Equals(session.Status, OperatorSessionStatus.Running, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var stats = BufferFor(sessionId).GetStats();
+        await _events.PublishAsync(DesktopSidecarProtocol.TerminalHeartbeatEvent, new TerminalHeartbeatEvent
+        {
+            SessionId = sessionId,
+            StreamId = streamId,
+            StreamCursor = $"cur_{stats.NewestSequence:D12}",
+            BackendStatus = session.Status,
+            LastActivityAt = Format(session.LastActivityAt),
+            QueueBytes = stream.UnackedBytes,
+            Paused = stream.UnackedBytes >= _limits.AckAfterBytes,
+        }, cancellationToken).ConfigureAwait(false);
+        return true;
+    }
+
+    private static async ValueTask StopHeartbeatLoopAsync(DirectPtyHeartbeatLoop? heartbeatLoop)
+    {
+        if (heartbeatLoop is null)
+        {
+            return;
+        }
+
+        await heartbeatLoop.Cancellation.CancelAsync().ConfigureAwait(false);
+        try
+        {
+            await heartbeatLoop.Task.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected.
+        }
+        finally
+        {
+            heartbeatLoop.Cancellation.Dispose();
+        }
+    }
+
+    private DirectPtyHeartbeatLoop? RemoveHeartbeatLoopLocked(string streamId)
+    {
+        if (_heartbeatLoops.Remove(streamId, out var heartbeatLoop))
+        {
+            return heartbeatLoop;
+        }
+
+        return null;
+    }
+
+    private DirectPtyHeartbeatLoop[] RemoveHeartbeatLoopsLocked(IEnumerable<string> streamIds)
+    {
+        var heartbeatLoops = new List<DirectPtyHeartbeatLoop>();
+        foreach (var streamId in streamIds)
+        {
+            if (RemoveHeartbeatLoopLocked(streamId) is { } heartbeatLoop)
+            {
+                heartbeatLoops.Add(heartbeatLoop);
+            }
+        }
+
+        return heartbeatLoops.ToArray();
     }
 
     private async ValueTask PublishStatusEventsAsync(OperatorSession session, CancellationToken cancellationToken)
@@ -522,7 +681,10 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
         {
             if (!_buffers.TryGetValue(sessionId, out var buffer))
             {
-                buffer = new OperatorSessionActivityBuffer();
+                buffer = new OperatorSessionActivityBuffer(
+                    maxBytes: _limits.SessionReplayMaxBytes,
+                    outputChunkMaxBytes: _limits.OutputChunkMaxBytes,
+                    maxQueuedSubscriberBytes: _limits.SubscriberQueueMaxBytes);
                 _buffers[sessionId] = buffer;
             }
 
@@ -652,4 +814,6 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
     {
         public int UnackedBytes { get; init; }
     }
+
+    private sealed record DirectPtyHeartbeatLoop(CancellationTokenSource Cancellation, Task Task);
 }
