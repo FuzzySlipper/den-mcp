@@ -328,7 +328,7 @@ public sealed class PiSessionSnapshotBuilder
     private static string? MatchProjectShortName(string shortName, IReadOnlyList<DenProject> projects)
     {
         var idMatch = projects.FirstOrDefault(project =>
-            string.Equals(project.Id, shortName, PathComparison));
+            string.Equals(project.Id, shortName, StringComparison.Ordinal));
         if (idMatch is not null)
         {
             return idMatch.Id;
