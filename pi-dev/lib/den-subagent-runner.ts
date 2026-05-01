@@ -20,6 +20,7 @@ import {
 } from "./den-subagent-pipeline.ts";
 import type { SubagentRunRecorder } from "./den-subagent-recorder.ts";
 import type { FinalHeadSource, FinalHeadStatus, FinalWorktreeStatus } from "./den-subagent-final-head.ts";
+import type { ContextMetrics } from "./den-subagent-pipeline.ts";
 
 export type DenConfig = {
   baseUrl: string;
@@ -108,6 +109,7 @@ export type SubagentResult = {
   artifacts: SubagentArtifacts;
   fallback_from_model?: string;
   fallback_from_exit_code?: number;
+  context_metrics?: ContextMetrics;
 };
 
 export type SubagentBackendInput = {

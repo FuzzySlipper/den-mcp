@@ -138,6 +138,7 @@ function buildSubagentParentToolDetails(
     infrastructure_warning_reason: result.infrastructure_warning_reason,
     fallback_from_model: result.fallback_from_model,
     fallback_from_exit_code: result.fallback_from_exit_code,
+    context_metrics: result.context_metrics,
     final_output_preview: finalSummary.text,
     final_output_chars: finalSummary.originalChars,
     final_output_truncated: finalSummary.truncated,

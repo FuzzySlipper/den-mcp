@@ -46,6 +46,21 @@ export type SubagentUsageSummary = {
   latest_usage_at?: string;
 };
 
+export type ContextMetrics = {
+  session?: {
+    message_counts_by_role: Record<string, number>;
+    model_visible_chars: number;
+    session_file_bytes?: number;
+  };
+  artifacts?: {
+    stdout_jsonl_bytes?: number;
+    events_jsonl_bytes?: number;
+    status_json_bytes?: number;
+    stderr_log_bytes?: number;
+  };
+  usage_summary_source?: string;
+};
+
 export type SubagentRunContext = {
   reviewRoundId?: number;
   workspaceId?: string;
@@ -864,6 +879,38 @@ export function summarizeSubagentUsageFromSessionJsonl(sessionJsonl: string | un
     message_count: messageCount,
     latest_usage_at: latestUsageAt,
   }) as SubagentUsageSummary;
+}
+
+export function collectContextMetricsFromSessionJsonl(sessionJsonl: string | undefined): { session: { message_counts_by_role: Record<string, number>; model_visible_chars: number } } | undefined {
+  if (!sessionJsonl) return undefined;
+  const countsByRole: Record<string, number> = {};
+  let modelVisibleChars = 0;
+  for (const line of sessionJsonl.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let entry: any;
+    try { entry = JSON.parse(trimmed); } catch { continue; }
+    if (entry?.type !== "message" || !entry?.message) continue;
+    const msg = entry.message;
+    const role = typeof msg.role === "string" ? msg.role : undefined;
+    if (role) {
+      countsByRole[role] = (countsByRole[role] ?? 0) + 1;
+    }
+    if (Array.isArray(msg.content)) {
+      for (const part of msg.content) {
+        if (part?.type === "text" && typeof part.text === "string") {
+          modelVisibleChars += part.text.length;
+        }
+      }
+    }
+  }
+  if (Object.keys(countsByRole).length === 0) return undefined;
+  return {
+    session: {
+      message_counts_by_role: countsByRole,
+      model_visible_chars: modelVisibleChars,
+    },
+  };
 }
 
 function workContextMetadata(context: PiWorkEventContext): JsonObject {

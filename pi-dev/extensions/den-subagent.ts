@@ -1,11 +1,13 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import {
   createSubagentRunRecorder,
+  type SubagentRunRecorder,
 } from "../lib/den-subagent-recorder.ts";
 import { buildSubagentParentToolResult } from "../lib/den-subagent-parent-tool-result.ts";
 import {
@@ -47,6 +49,8 @@ import {
   subagentOperatorEventForOpsEvent,
   taskThreadPacketOperatorEvent,
   subagentOpsEventTypeForEvent,
+  collectContextMetricsFromSessionJsonl,
+  type ContextMetrics,
   type JsonObject,
   type SubagentArtifacts,
 } from "../lib/den-subagent-pipeline.ts";
@@ -1591,6 +1595,16 @@ async function runDenSubagent(
     });
     await recorder.flushEvents();
   }
+
+  // Collect context metrics from session JSONL and artifact files.
+  const contextMetrics = await collectContextMetricsForRun(result, recorder.artifacts);
+  result.context_metrics = contextMetrics;
+
+  // Write enriched status.json with final-head and context_metrics so the
+  // status artifact is self-contained for final-head verification and compact
+  // context-efficiency analysis.
+  await enrichStatusJson(recorder, finalHeadMetadata, contextMetrics);
+
   const completionEventType = subagentSucceeded(result)
     ? "subagent_completed"
     : result.aborted
@@ -1634,6 +1648,7 @@ async function runDenSubagent(
       assistant_message_count: result.assistant_message_count,
       child_error_message: result.child_error_message ?? null,
       usage_summary: result.usage_summary ?? null,
+      context_metrics: result.context_metrics ?? null,
       infrastructure_failure_reason: result.infrastructure_failure_reason ?? null,
       infrastructure_warning_reason: result.infrastructure_warning_reason ?? null,
       stderr_preview: result.stderr_tail,
@@ -1674,6 +1689,7 @@ async function runDenSubagent(
       infrastructure_failure_reason: result.infrastructure_failure_reason ?? null,
       infrastructure_warning_reason: result.infrastructure_warning_reason ?? null,
       usage_summary: result.usage_summary ?? null,
+      context_metrics: result.context_metrics ?? null,
       fallback_from_model: result.fallback_from_model ?? null,
       fallback_from_exit_code: result.fallback_from_exit_code ?? null,
       ...finalHeadMetadata,
@@ -2555,6 +2571,97 @@ function baseUrlFromEnv(): string {
 function isPathInside(cwd: string, rootPath: string): boolean {
   const normalizedRoot = path.resolve(rootPath);
   return cwd === normalizedRoot || cwd.startsWith(`${normalizedRoot}${path.sep}`);
+}
+
+// ---------------------------------------------------------------------------
+// Context metrics collection
+// ---------------------------------------------------------------------------
+
+async function collectContextMetricsForRun(
+  result: SubagentResult,
+  artifacts: SubagentArtifacts,
+): Promise<ContextMetrics | undefined> {
+  // Session metrics from session JSONL
+  let sessionMetrics: ContextMetrics["session"];
+  if (result.pi_session_file_path) {
+    try {
+      const sessionContent = await readFile(result.pi_session_file_path, "utf8");
+      const sessionFileStats = await stat(result.pi_session_file_path);
+      const parsed = collectContextMetricsFromSessionJsonl(sessionContent);
+      sessionMetrics = parsed
+        ? { ...parsed.session, session_file_bytes: sessionFileStats.size }
+        : { message_counts_by_role: {}, model_visible_chars: 0, session_file_bytes: sessionFileStats.size };
+    } catch {
+      // Session metrics are optional
+    }
+  }
+
+  // Artifact sizes
+  let artifactMetrics: ContextMetrics["artifacts"];
+  try {
+    const sizes = await Promise.all([
+      statOrUndefined(artifacts.stdout_jsonl_path),
+      statOrUndefined(artifacts.events_jsonl_path),
+      statOrUndefined(artifacts.status_json_path),
+      statOrUndefined(artifacts.stderr_log_path),
+    ]);
+    artifactMetrics = {
+      stdout_jsonl_bytes: sizes[0]?.size,
+      events_jsonl_bytes: sizes[1]?.size,
+      status_json_bytes: sizes[2]?.size,
+      stderr_log_bytes: sizes[3]?.size,
+    };
+  } catch {
+    // Artifact metrics are optional
+  }
+
+  const usageSummarySource = result.usage_summary?.source;
+  if (!sessionMetrics && !artifactMetrics && !usageSummarySource) return undefined;
+
+  return omitContextUndefined({
+    session: sessionMetrics,
+    artifacts: artifactMetrics,
+    usage_summary_source: usageSummarySource,
+  });
+}
+
+async function statOrUndefined(filePath: string): Promise<{ size: number } | undefined> {
+  try {
+    return await stat(filePath);
+  } catch {
+    return undefined;
+  }
+}
+
+function omitContextUndefined(value: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (entry !== undefined) result[key] = entry;
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Status artifact enrichment
+// ---------------------------------------------------------------------------
+
+async function enrichStatusJson(
+  recorder: SubagentRunRecorder,
+  finalHeadMetadata: JsonObject,
+  contextMetrics: ContextMetrics | undefined,
+): Promise<void> {
+  try {
+    const currentText = await readFile(recorder.artifacts.status_json_path, "utf8");
+    const current = JSON.parse(currentText);
+    const enriched = {
+      ...current,
+      ...finalHeadMetadata,
+      context_metrics: contextMetrics ?? null,
+    };
+    await recorder.writeStatus(enriched);
+  } catch {
+    // Status enrichment is best-effort; the runner's final status write remains the fallback.
+  }
 }
 
 function esc(value: string): string {
