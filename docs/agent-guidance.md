@@ -13,7 +13,8 @@ A guidance entry points at an existing Den document:
 - `document_project_id` and `document_slug` — the referenced Den document.
 - `importance` — `required` or `important`.
 - `audience` — optional labels such as `pi`, `orchestrator`, `coder`, or
-  `reviewer`.  (Legacy references may use `conductor` instead of `orchestrator`.)
+  `reviewer`.  (Legacy references may use `conductor` instead of `orchestrator`;
+  new guidance entries should prefer `orchestrator`.)
 - `sort_order` — deterministic ordering within the scope; lower values come
   first.
 - `notes` — optional operator context explaining why the document is included.
@@ -54,7 +55,7 @@ Content-Type: application/json
   "document_project_id": "_global",
   "document_slug": "pi-conductor-guidance-default",
   "importance": "required",
-  "audience": ["pi", "conductor"],
+  "audience": ["pi", "orchestrator"],
   "sort_order": 10,
   "notes": "Default orchestrator operating policy"
 }
@@ -87,7 +88,7 @@ den guidance add pi-conductor-guidance-default \
   --project _global \
   --doc-project _global \
   --importance required \
-  --audience pi,conductor \
+  --audience pi,orchestrator \
   --order 10
 
 # Mark a project-local document as important guidance.

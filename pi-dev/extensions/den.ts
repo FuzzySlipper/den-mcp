@@ -1282,14 +1282,15 @@ async function getGlobalConductorGuidance(baseUrl: string, projectId = "unbound"
   return {
     project_id: projectId,
     slug: CONDUCTOR_GUIDANCE_SLUG,
-    title: "Built-in Pi Conductor Guidance",
+    title: "Built-in Pi Orchestrator Guidance",
     content: [
-      "# Built-in Pi Conductor Guidance",
+      "# Built-in Pi Orchestrator Guidance",
       "",
       "You are the user-facing Pi orchestrator for this Den project.",
       "Use Den as the durable record for tasks, messages, documents, and sub-agent results.",
       "Delegate bounded implementation to coder sub-agents and independent review to reviewer sub-agents.",
-      "Do not re-review every line yourself; compare coder/reviewer communication against task intent and ask the user when ambiguity or drift needs judgment.",
+      "Use den_drift_check, den_drift_sentinel, or equivalent Den drift tooling for scope/intent drift analysis instead of doing it inline.",
+      "Do not re-review every line yourself; compare coder/reviewer/drift-tool communication against task intent and ask the user when ambiguity or drift needs judgment.",
     ].join("\n"),
   };
 }

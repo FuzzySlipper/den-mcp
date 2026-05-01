@@ -46,7 +46,7 @@ On `session_start`, the extension:
 - registers an `agent_instance_binding` with:
   - `agent_family`: `pi`
   - `agent_identity`: `pi` by default
-  - `role`: `conductor` by default  <!-- backward-compatible value -->
+  - `role`: `conductor` by default  <!-- backward-compatible value; user-facing term is *orchestrator* -->
   - `transport_kind`: `pi_extension`
 - resolves Den-native agent guidance from `/api/projects/{projectId}/agent-guidance`
   and appends the packet to Pi's system prompt when guidance sources exist
@@ -56,7 +56,7 @@ On `session_start`, the extension:
 It also updates the binding metadata on Pi agent start/end with a lightweight
 `state` value of `busy` or `idle`. In unbound mode, project-specific commands
 fail with an actionable message; `/den-status` explains how to bind, and
-`/den-conductor-guidance` can still load global orchestrator guidance.  <!-- command name kept for backward compatibility -->
+`/den-conductor-guidance` can still load global orchestrator guidance.  <!-- command slug kept for backward compatibility; content uses *orchestrator* nomenclature -->
 
 ## Commands
 
@@ -150,9 +150,12 @@ suspicious harness/CI/package/dependency changes while preserving the existing
 Den review-loop thread metadata and finding severities.
 
 The `den-conductor` Pi skill is the user/agent-invokable entry point for
-orchestrator mode (called conductor in older/internal tooling). It does not duplicate the policy text. It tells Pi to use Den
-MCP document tools to resolve project document `pi-conductor-guidance`, then
-`_global/pi-conductor-guidance-default`, then this skill's built-in fallback.
+orchestrator mode. (The skill directory name and command slug retain the legacy
+`conductor` naming for backward compatibility.) It does not duplicate the policy
+text. It tells Pi to use Den MCP document tools to resolve project document
+`pi-conductor-guidance`, then `_global/pi-conductor-guidance-default`, then
+this skill's built-in fallback. The resolved guidance uses *orchestrator*
+nomenclature in user-facing text.
 
 Den-native guidance is the broader project guidance path. Operators mark Den
 documents as required or important with first-class guidance entries, then Pi
@@ -170,7 +173,7 @@ DEN_MCP_URL             default http://192.168.1.10:5199
 DEN_MCP_BASE_URL        fallback if DEN_MCP_URL is unset
 DEN_PI_PROJECT_ID       optional explicit project id; when unset, bind by registered project root_path
 DEN_PI_AGENT            default pi
-DEN_PI_ROLE             default conductor  <!-- backward-compatible value -->
+DEN_PI_ROLE             default conductor  <!-- backward-compatible value; user-facing term is *orchestrator* -->
 DEN_PI_INSTANCE_ID      optional stable instance id
 ```
 
@@ -300,13 +303,15 @@ Then try:
 /den-run-reviewer 123 "Review main...task/123-example."
 ```
 
-## Conductor direction
+## Orchestrator direction
 
 The intended next shape is:
 
 - one user-facing, durable Pi orchestrator per project
 - implementation and review work run as bounded sub-agent sessions
 - reviewer sessions use fresh context and a different provider/model
+- drift analysis uses `den_drift_check`, `den_drift_sentinel`, or equivalent
+  Den drift tooling rather than inline orchestrator analysis
 - Den task messages and review rounds stay the source of truth
 - the orchestrator reads coder/reviewer communication for intent drift, not as a
   second code reviewer

@@ -121,11 +121,11 @@ those artifacts, but it must not copy their raw contents into the orchestrator
 conversation.
 
 Task `#852` adds the complementary parent-session budget surface documented in
-[`pi-conductor-context-status.md`](pi-conductor-context-status.md). The
-model-callable `den_context_status` tool and `/den-context-status` command report
-a clearly labeled estimate of the orchestrator's current Pi context budget so the
-orchestrator can compact between tasks instead of relying on child-run transcript
-artifacts or stale intuition. Task `#967` adds `den_compact_context` and
+[`pi-conductor-context-status.md`](pi-conductor-context-status.md) (document filename
+retains legacy naming; content uses *orchestrator*). The model-callable `den_context_status`
+tool and `/den-context-status` command report a clearly labeled estimate of the orchestrator's
+current Pi context budget so the orchestrator can compact between tasks instead of relying
+on child-run transcript artifacts or stale intuition. Task `#967` adds `den_compact_context` and
 `/den-compact-context` so orchestrators can request compaction themselves at safe
 Den-recorded task boundaries instead of stopping solely to ask the user to run
 `/compact`. Task `#974` adds post-compaction resume so the orchestrator session is

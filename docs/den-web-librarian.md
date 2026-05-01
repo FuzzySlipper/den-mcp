@@ -52,7 +52,7 @@ Examples:
 
 ```text
 [doc: den-mcp/pi-subagent-infrastructure]
-[doc: _global/pi-conductor-guidance-default]
+[doc: _global/pi-conductor-guidance-default]  <!-- slug retains legacy naming; content uses *orchestrator* nomenclature -->
 ```
 
 Task references render as `#<task_id>`, for example `#855`.

@@ -1,4 +1,4 @@
-# Pi Conductor Context Status
+# Pi Orchestrator Context Status
 
 Date: 2026-04-27
 Status: implemented for task `#852`; compaction trigger added for task `#967`;
@@ -118,7 +118,7 @@ extension automatically sends a follow-up prompt after compaction completes.
 When enabled, the extension calls `pi.sendUserMessage()` from the compaction
 `onComplete` callback with a message like:
 
-> Conductor context compaction completed. Re-read your current Den task/thread
+> Orchestrator context compaction completed. Re-read your current Den task/thread
 > state and continue with the next step.
 
 The live task `#976` smoke test showed that always queuing this message as
