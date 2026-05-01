@@ -164,6 +164,11 @@ export function reviewerIdentityGuidanceSection(): string {
     "",
     "Do not use the parent orchestrator identity (e.g. `pi`) for these fields. The reviewer identity makes audit trails distinguishable from parent orchestrator actions.",
     "",
+    "Server-side enforcement note: When passing `subagent_role` (e.g. `reviewer`) to review mutation tools,",
+    "the Den server will validate that the identity field (e.g. `created_by`, `decided_by`) matches the",
+    "`<agent>-<role>` convention and reject calls where it doesn't. Pass `run_id` for audit traceability",
+    "in message metadata.",
+    "",
   ].join("\n");
 }
 

@@ -79,6 +79,7 @@ public sealed class RequestReviewInput
     public int? InheritedCommitCount { get; set; }
     public int? TaskLocalCommitCount { get; set; }
     public int? ThreadId { get; set; }
+    public string? RunId { get; set; }
 }
 
 public sealed class PostReviewFindingsInput
@@ -88,6 +89,8 @@ public sealed class PostReviewFindingsInput
     public required string Sender { get; set; }
     public int? ThreadId { get; set; }
     public string? Notes { get; set; }
+    public string? RunId { get; set; }
+    public string? SubagentRole { get; set; }
 }
 
 public sealed class SetReviewVerdictInput
@@ -98,6 +101,8 @@ public sealed class SetReviewVerdictInput
     public ReviewVerdict Verdict { get; set; }
     public required string DecidedBy { get; set; }
     public string? Notes { get; set; }
+    public string? RunId { get; set; }
+    public string? SubagentRole { get; set; }
 }
 
 public sealed class ReviewVerdictResult

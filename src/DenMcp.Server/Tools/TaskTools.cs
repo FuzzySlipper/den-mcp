@@ -206,14 +206,19 @@ public sealed class TaskTools
         [Description("Verdict: changes_requested, looks_good, follow_up_needed, blocked_by_dependency.")] string verdict,
         [Description("Agent or user setting the verdict.")] string decided_by,
         [Description("Optional verdict notes.")] string? notes = null,
+        [Description("Optional sub-agent run ID for audit traceability.")] string? run_id = null,
+        [Description("Optional sub-agent role for identity validation (e.g. 'reviewer'). When provided, decided_by must follow the '<agent>-<role>' convention.")] string? subagent_role = null,
         [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
+        ValidateSubagentIdentity(decided_by, "decided_by", subagent_role, run_id);
         var result = await workflow.SetReviewVerdictAsync(new SetReviewVerdictInput
         {
             ReviewRoundId = review_round_id,
             Verdict = EnumExtensions.ParseReviewVerdict(verdict),
             DecidedBy = decided_by,
-            Notes = notes
+            Notes = notes,
+            RunId = run_id,
+            SubagentRole = subagent_role
         });
         return verbose
             ? JsonSerializer.Serialize(result.ReviewRound, JsonOpts.Default)
@@ -230,8 +235,11 @@ public sealed class TaskTools
         [Description("Optional detailed reviewer notes.")] string? notes = null,
         [Description("Optional JSON array of file refs such as [\"src/Foo.cs:42\"].")] string? file_references = null,
         [Description("Optional JSON array of test commands relevant to the finding.")] string? test_commands = null,
+        [Description("Optional sub-agent run ID for audit traceability.")] string? run_id = null,
+        [Description("Optional sub-agent role for identity validation (e.g. 'reviewer'). When provided, created_by must follow the '<agent>-<role>' convention.")] string? subagent_role = null,
         [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
+        ValidateSubagentIdentity(created_by, "created_by", subagent_role, run_id);
         var parsedFileRefs = file_references is not null ? JsonSerializer.Deserialize<List<string>>(file_references) : null;
         var parsedTestCommands = test_commands is not null ? JsonSerializer.Deserialize<List<string>>(test_commands) : null;
         var finding = await repo.CreateAsync(new CreateReviewFindingInput
@@ -242,7 +250,9 @@ public sealed class TaskTools
             Summary = summary,
             Notes = notes,
             FileReferences = parsedFileRefs,
-            TestCommands = parsedTestCommands
+            TestCommands = parsedTestCommands,
+            RunId = run_id,
+            SubagentRole = subagent_role
         });
         return verbose
             ? JsonSerializer.Serialize(finding, JsonOpts.Default)
@@ -284,8 +294,11 @@ public sealed class TaskTools
         [Description("Optional status update: open, claimed_fixed, verified_fixed, not_fixed, superseded, split_to_follow_up.")] string? status = null,
         [Description("Optional notes explaining this status transition; use for current verification/status evidence.")] string? status_notes = null,
         [Description("Optional follow-up task ID. Required for split_to_follow_up and rejected for all other statuses.")] int? follow_up_task_id = null,
+        [Description("Optional sub-agent run ID for audit traceability.")] string? run_id = null,
+        [Description("Optional sub-agent role for identity validation (e.g. 'reviewer'). When provided, responded_by must follow the '<agent>-<role>' convention.")] string? subagent_role = null,
         [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
+        ValidateSubagentIdentity(responded_by, "responded_by", subagent_role, run_id);
         var parsedStatus = status is not null ? EnumExtensions.ParseReviewFindingStatus(status) : (ReviewFindingStatus?)null;
         ValidateFollowUpStatusCombination(parsedStatus, follow_up_task_id);
         await ValidateFollowUpTaskProjectAsync(repo, taskRepo, review_finding_id, follow_up_task_id);
@@ -296,7 +309,9 @@ public sealed class TaskTools
             ResponseNotes = response_notes,
             Status = parsedStatus,
             StatusNotes = status_notes,
-            FollowUpTaskId = follow_up_task_id
+            FollowUpTaskId = follow_up_task_id,
+            RunId = run_id,
+            SubagentRole = subagent_role
         });
         return verbose
             ? JsonSerializer.Serialize(updated, JsonOpts.Default)
@@ -312,8 +327,11 @@ public sealed class TaskTools
         [Description("Agent or user updating the finding status.")] string updated_by,
         [Description("Optional status/verification notes for this transition.")] string? notes = null,
         [Description("Optional follow-up task ID. Required for split_to_follow_up and rejected for all other statuses.")] int? follow_up_task_id = null,
+        [Description("Optional sub-agent run ID for audit traceability.")] string? run_id = null,
+        [Description("Optional sub-agent role for identity validation (e.g. 'reviewer'). When provided, updated_by must follow the '<agent>-<role>' convention.")] string? subagent_role = null,
         [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
+        ValidateSubagentIdentity(updated_by, "updated_by", subagent_role, run_id);
         var parsedStatus = EnumExtensions.ParseReviewFindingStatus(status);
         ValidateFollowUpStatusCombination(parsedStatus, follow_up_task_id);
         await ValidateFollowUpTaskProjectAsync(repo, taskRepo, review_finding_id, follow_up_task_id);
@@ -323,7 +341,9 @@ public sealed class TaskTools
             Status = parsedStatus,
             UpdatedBy = updated_by,
             Notes = notes,
-            FollowUpTaskId = follow_up_task_id
+            FollowUpTaskId = follow_up_task_id,
+            RunId = run_id,
+            SubagentRole = subagent_role
         });
         return verbose
             ? JsonSerializer.Serialize(updated, JsonOpts.Default)
@@ -356,6 +376,7 @@ public sealed class TaskTools
         [Description("Optional count of inherited commits from unmerged parent work.")] int? inherited_commit_count = null,
         [Description("Optional count of task-local commits on top of inherited work.")] int? task_local_commit_count = null,
         [Description("Optional task-thread message to reply to.")] int? thread_id = null,
+        [Description("Optional sub-agent run ID for audit traceability.")] string? run_id = null,
         [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
         var parsedTests = tests_run is not null ? JsonSerializer.Deserialize<List<string>>(tests_run) : null;
@@ -382,7 +403,8 @@ public sealed class TaskTools
             DeltaBaseCommit = delta_base_commit,
             InheritedCommitCount = inherited_commit_count,
             TaskLocalCommitCount = task_local_commit_count,
-            ThreadId = thread_id
+            ThreadId = thread_id,
+            RunId = run_id
         });
         return verbose
             ? JsonSerializer.Serialize(result, JsonOpts.Default)
@@ -398,15 +420,20 @@ public sealed class TaskTools
         [Description("Agent or user posting the findings packet.")] string sender,
         [Description("Optional task-thread message to reply to.")] int? thread_id = null,
         [Description("Optional summary note to append to the packet.")] string? notes = null,
+        [Description("Optional sub-agent run ID for audit traceability.")] string? run_id = null,
+        [Description("Optional sub-agent role for identity validation (e.g. 'reviewer'). When provided, sender must follow the '<agent>-<role>' convention.")] string? subagent_role = null,
         [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
+        ValidateSubagentIdentity(sender, "sender", subagent_role, run_id);
         var result = await workflow.PostReviewFindingsAsync(project_id, new PostReviewFindingsInput
         {
             TaskId = task_id,
             ReviewRoundId = review_round_id,
             Sender = sender,
             ThreadId = thread_id,
-            Notes = notes
+            Notes = notes,
+            RunId = run_id,
+            SubagentRole = subagent_role
         });
         return verbose
             ? JsonSerializer.Serialize(result, JsonOpts.Default)
@@ -514,6 +541,38 @@ public sealed class TaskTools
         {
             throw new InvalidOperationException(
                 $"Follow-up task {followUpTaskId.Value} must be in the same project as review finding {reviewFindingId}.");
+        }
+    }
+
+    /// <summary>
+    /// When <paramref name="subagentRole"/> is provided, validates that <paramref name="identityField"/>
+    /// follows the convention <c>&lt;agent&gt;-&lt;role&gt;</c> (e.g. <c>pi-reviewer</c>).
+    /// This enforces that review mutation actions by sub-agents are distinguishable from
+    /// parent orchestrator actions at the server level, not just by prompt guidance.
+    /// Backwards compatible: when <paramref name="subagentRole"/> is null, no validation is performed.
+    /// </summary>
+    private static void ValidateSubagentIdentity(
+        string identityField,
+        string identityLabel,
+        string? subagentRole,
+        string? runId)
+    {
+        if (subagentRole is null)
+            return; // No enforcement when role is not specified (backwards compatible).
+
+        if (string.IsNullOrWhiteSpace(subagentRole))
+            throw new ArgumentException("subagent_role must be non-empty when provided.");
+
+        if (string.IsNullOrWhiteSpace(identityField))
+            throw new ArgumentException($"{identityLabel} must be non-empty when subagent_role is '{subagentRole}'.");
+
+        // Convention: identity must end with -{role} (e.g. pi-reviewer).
+        var suffix = $"-{subagentRole}";
+        if (!identityField.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException(
+                $"When subagent_role is '{subagentRole}', {identityLabel} ('{identityField}') must end with '{suffix}' " +
+                $"to distinguish sub-agent actions from parent orchestrator actions. The convention is '<agent>-<role>' (e.g. 'pi-reviewer').");
         }
     }
 }

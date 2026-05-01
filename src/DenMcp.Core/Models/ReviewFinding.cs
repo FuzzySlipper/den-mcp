@@ -35,6 +35,8 @@ public sealed class CreateReviewFindingInput
     public string? Notes { get; set; }
     public List<string>? FileReferences { get; set; }
     public List<string>? TestCommands { get; set; }
+    public string? RunId { get; set; }
+    public string? SubagentRole { get; set; }
 }
 
 public sealed class RespondToReviewFindingInput
@@ -44,6 +46,8 @@ public sealed class RespondToReviewFindingInput
     public ReviewFindingStatus? Status { get; set; }
     public string? StatusNotes { get; set; }
     public int? FollowUpTaskId { get; set; }
+    public string? RunId { get; set; }
+    public string? SubagentRole { get; set; }
 }
 
 public sealed class UpdateReviewFindingStatusInput
@@ -52,4 +56,6 @@ public sealed class UpdateReviewFindingStatusInput
     public required string UpdatedBy { get; set; }
     public string? Notes { get; set; }
     public int? FollowUpTaskId { get; set; }
+    public string? RunId { get; set; }
+    public string? SubagentRole { get; set; }
 }

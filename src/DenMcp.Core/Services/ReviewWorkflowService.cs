@@ -95,38 +95,7 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
             Sender = input.RequestedBy,
             Content = packet.Content,
             Intent = MessageIntent.ReviewRequest,
-            Metadata = JsonSerializer.SerializeToElement(new
-            {
-                type = packet.Kind == ReviewPacketKind.RereviewRequest ? "rereview_packet" : "review_request_packet",
-                packet_kind = packet.Kind == ReviewPacketKind.RereviewRequest ? "rereview_request" : "review_request",
-                target_role = "reviewer",
-                review_round_id = round.Id,
-                review_round_number = round.RoundNumber,
-                branch = round.Branch,
-                base_branch = round.BaseBranch,
-                base_commit = round.BaseCommit,
-                head_commit = round.HeadCommit,
-                last_reviewed_head_commit = round.LastReviewedHeadCommit,
-                commits_since_last_review = round.CommitsSinceLastReview,
-                preferred_diff = new
-                {
-                    base_ref = round.PreferredDiff.BaseRef,
-                    base_commit = round.PreferredDiff.BaseCommit,
-                    head_ref = round.PreferredDiff.HeadRef,
-                    head_commit = round.PreferredDiff.HeadCommit
-                },
-                alternate_diff = round.AlternateDiff is null ? null : new
-                {
-                    base_ref = round.AlternateDiff.BaseRef,
-                    base_commit = round.AlternateDiff.BaseCommit,
-                    head_ref = round.AlternateDiff.HeadRef,
-                    head_commit = round.AlternateDiff.HeadCommit
-                },
-                delta_base_commit = round.DeltaDiff?.BaseCommit,
-                findings_addressed = addressedFindingDetails.Select(ToMetadataFinding).ToList(),
-                open_findings = openFindingDetails.Select(ToMetadataFinding).ToList(),
-                tests_run = round.TestsRun
-            })
+            Metadata = BuildRequestReviewMetadata(round, packet, addressedFindingDetails, openFindingDetails, input.RunId)
         });
 
         try
@@ -172,6 +141,25 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
             .Distinct(StringComparer.Ordinal)
             .ToList();
 
+        var metadataObj = new Dictionary<string, object?>
+        {
+            ["type"] = "review_findings_packet",
+            ["packet_kind"] = "review_findings",
+            ["review_round_id"] = round.Id,
+            ["review_round_number"] = round.RoundNumber,
+            ["branch"] = round.Branch,
+            ["verdict"] = round.Verdict?.ToDbValue(),
+            ["findings"] = findings
+                .OrderBy(finding => finding.FindingNumber)
+                .Select(ToMetadataFinding)
+                .ToList(),
+            ["open_findings"] = openFindingDetails.Select(ToMetadataFinding).ToList(),
+            ["reviewer_test_commands"] = reviewerCommands
+        };
+
+        if (input.RunId is not null)
+            metadataObj["run_id"] = input.RunId;
+
         var message = await _messages.CreateAsync(new Message
         {
             ProjectId = projectId,
@@ -180,21 +168,7 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
             Sender = input.Sender,
             Content = packet.Content,
             Intent = MessageIntent.ReviewFeedback,
-            Metadata = JsonSerializer.SerializeToElement(new
-            {
-                type = "review_findings_packet",
-                packet_kind = "review_findings",
-                review_round_id = round.Id,
-                review_round_number = round.RoundNumber,
-                branch = round.Branch,
-                verdict = round.Verdict?.ToDbValue(),
-                findings = findings
-                    .OrderBy(finding => finding.FindingNumber)
-                    .Select(ToMetadataFinding)
-                    .ToList(),
-                open_findings = openFindingDetails.Select(ToMetadataFinding).ToList(),
-                reviewer_test_commands = reviewerCommands
-            })
+            Metadata = JsonSerializer.SerializeToElement(metadataObj)
         });
 
         return new ReviewPacketResult
@@ -476,6 +450,52 @@ public sealed class ReviewWorkflowService : IReviewWorkflowService
         test_commands = finding.TestCommands,
         follow_up_task_id = finding.FollowUpTaskId
     };
+
+    private static JsonElement BuildRequestReviewMetadata(
+        ReviewRound round,
+        ReviewPacket packet,
+        IReadOnlyList<ReviewFinding> addressedFindingDetails,
+        IReadOnlyList<ReviewFinding> openFindingDetails,
+        string? runId)
+    {
+        var meta = new Dictionary<string, object?>
+        {
+            ["type"] = packet.Kind == ReviewPacketKind.RereviewRequest ? "rereview_packet" : "review_request_packet",
+            ["packet_kind"] = packet.Kind == ReviewPacketKind.RereviewRequest ? "rereview_request" : "review_request",
+            ["target_role"] = "reviewer",
+            ["review_round_id"] = round.Id,
+            ["review_round_number"] = round.RoundNumber,
+            ["branch"] = round.Branch,
+            ["base_branch"] = round.BaseBranch,
+            ["base_commit"] = round.BaseCommit,
+            ["head_commit"] = round.HeadCommit,
+            ["last_reviewed_head_commit"] = round.LastReviewedHeadCommit,
+            ["commits_since_last_review"] = round.CommitsSinceLastReview,
+            ["preferred_diff"] = new Dictionary<string, object?>
+            {
+                ["base_ref"] = round.PreferredDiff.BaseRef,
+                ["base_commit"] = round.PreferredDiff.BaseCommit,
+                ["head_ref"] = round.PreferredDiff.HeadRef,
+                ["head_commit"] = round.PreferredDiff.HeadCommit
+            },
+            ["alternate_diff"] = round.AlternateDiff is null ? null : new Dictionary<string, object?>
+            {
+                ["base_ref"] = round.AlternateDiff.BaseRef,
+                ["base_commit"] = round.AlternateDiff.BaseCommit,
+                ["head_ref"] = round.AlternateDiff.HeadRef,
+                ["head_commit"] = round.AlternateDiff.HeadCommit
+            },
+            ["delta_base_commit"] = round.DeltaDiff?.BaseCommit,
+            ["findings_addressed"] = addressedFindingDetails.Select(ToMetadataFinding).ToList(),
+            ["open_findings"] = openFindingDetails.Select(ToMetadataFinding).ToList(),
+            ["tests_run"] = round.TestsRun
+        };
+
+        if (runId is not null)
+            meta["run_id"] = runId;
+
+        return JsonSerializer.SerializeToElement(meta);
+    }
 
     private static bool ShouldEmitVerdictHandoff(ReviewVerdict? verdict) =>
         verdict is ReviewVerdict.ChangesRequested or ReviewVerdict.FollowUpNeeded or ReviewVerdict.LooksGood;
