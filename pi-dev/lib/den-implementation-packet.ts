@@ -271,7 +271,7 @@ export function formatPacketMissingNoticeMessage(
     "",
     "## Next steps",
     "",
-    "The conductor should either:",
+    "The orchestrator should either:",
     "1. Manually post a complete implementation packet for this run, or",
     "2. Trigger a rerun or fix the coder output.",
   );
