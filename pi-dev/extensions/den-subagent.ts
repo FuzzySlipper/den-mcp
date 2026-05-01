@@ -22,13 +22,9 @@ import {
   type SubagentResult,
 } from "../lib/den-subagent-runner.ts";
 import {
-  extractImplementationPacket,
-  buildImplementationPacketMeta,
-  findDuplicateImplementationPacketMessage,
-  formatImplementationPacketMessage,
-  formatPacketMissingNoticeMessage,
-  buildPacketMissingNoticeMeta,
-} from "../lib/den-implementation-packet.ts";
+  postCoderImplementationPacket,
+  type PacketPostingDeps,
+} from "../lib/den-post-implementation-packet.ts";
 import {
   buildFinalBranchHeadMetadata,
   collectFinalBranchHead,
@@ -1710,88 +1706,30 @@ async function runDenSubagent(
     && result.final_output
   ) {
     try {
-      const extraction = extractImplementationPacket(result.final_output);
-
-      // Detect incomplete coder prompts that should not be posted as real packets.
-      // When the output is just an instruction like "Now post the implementation
-      // packet to the Den task thread:" without actual structured content, we
-      // post a clearly typed packet_missing notice instead.
-      if (extraction.incomplete_prompt_detected) {
-        const noticeContent = formatPacketMissingNoticeMessage(result, extraction);
-        const noticeMeta = buildPacketMissingNoticeMeta(result, extraction);
-        const noticeMessage = await sendTaskMessage(cfg, effectiveOptions.taskId, noticeContent, {
-          ...buildSubagentRunMetadata({
-            runId,
-            role: effectiveOptions.role,
-            taskId: effectiveOptions.taskId,
-            cwd,
-            backend: result.backend,
-            model: result.model ?? finalRequestedModel,
-            tools: effectiveOptions.tools ?? defaultToolsForRole(effectiveOptions.role),
-            sessionMode: result.session_mode,
-            session: result.session,
-            rerunOfRunId: effectiveOptions.rerunOfRunId,
-            ...contextIdentity,
-            artifacts: result.artifacts,
-          }),
-          ...noticeMeta,
-          incomplete_prompt_detected: true,
-          usage_summary: result.usage_summary ?? null,
-          ...finalHeadMetadata,
-        });
-        await appendPacketLifecycleOps(cfg, effectiveOptions.taskId, "implementation_packet_missing", optionalNumber(noticeMessage?.id), {
-          run_id: result.run_id,
-          role: result.role,
-          branch: result.branch ?? null,
-          head_commit: result.final_head_commit ?? result.head_commit ?? null,
-          missing_fields: extraction.missing_fields,
-        });
-      } else {
-        const packetContent = formatImplementationPacketMessage(result, extraction);
-        const extractedPacketMeta = buildImplementationPacketMeta(result, extraction);
-        const packetMeta = {
-          ...extractedPacketMeta,
-          branch: metadataString(finalHeadMetadata, "final_branch") ?? extractedPacketMeta.branch,
-          head_commit: metadataString(finalHeadMetadata, "final_head_commit") ?? extractedPacketMeta.head_commit,
-        };
-        let duplicatePacket: any | undefined;
-        try {
-          const existingPackets = await getTaskMessages(cfg, effectiveOptions.taskId);
-          duplicatePacket = findDuplicateImplementationPacketMessage(existingPackets, {
-            ...packetMeta,
-            final_branch: metadataString(finalHeadMetadata, "final_branch") ?? null,
-            final_head_commit: metadataString(finalHeadMetadata, "final_head_commit") ?? null,
-          });
-        } catch {
-          // Duplicate detection is best-effort; still try to post the auto packet.
-        }
-        const packetMessage = duplicatePacket ?? await sendTaskMessage(cfg, effectiveOptions.taskId, packetContent, {
-          ...buildSubagentRunMetadata({
-            runId,
-            role: effectiveOptions.role,
-            taskId: effectiveOptions.taskId,
-            cwd,
-            backend: result.backend,
-            model: result.model ?? finalRequestedModel,
-            tools: effectiveOptions.tools ?? defaultToolsForRole(effectiveOptions.role),
-            sessionMode: result.session_mode,
-            session: result.session,
-            rerunOfRunId: effectiveOptions.rerunOfRunId,
-            ...contextIdentity,
-            artifacts: result.artifacts,
-          }),
-          ...packetMeta,
-          usage_summary: result.usage_summary ?? null,
-          ...finalHeadMetadata,
-        });
-        await appendPacketLifecycleOps(cfg, effectiveOptions.taskId, "implementation_packet", optionalNumber(packetMessage?.id), {
-          run_id: result.run_id,
-          role: result.role,
-          branch: result.branch ?? null,
-          head_commit: result.final_head_commit ?? result.head_commit ?? null,
-          duplicate_skipped: duplicatePacket !== undefined,
-        });
-      }
+      const packetDeps: PacketPostingDeps = {
+        sendMessage: (content, metadata) => sendTaskMessage(cfg, effectiveOptions.taskId!, content, metadata),
+        getExistingMessages: () => getTaskMessages(cfg, effectiveOptions.taskId!),
+        recordLifecycleOps: (packetType, messageId, extra) => appendPacketLifecycleOps(cfg, effectiveOptions.taskId!, packetType, messageId, extra),
+        buildRunMetadata: () => buildSubagentRunMetadata({
+          runId,
+          role: effectiveOptions.role,
+          taskId: effectiveOptions.taskId,
+          cwd,
+          backend: result.backend,
+          model: result.model ?? finalRequestedModel,
+          tools: effectiveOptions.tools ?? defaultToolsForRole(effectiveOptions.role),
+          sessionMode: result.session_mode,
+          session: result.session,
+          rerunOfRunId: effectiveOptions.rerunOfRunId,
+          ...contextIdentity,
+          artifacts: result.artifacts,
+        }),
+      };
+      await postCoderImplementationPacket(packetDeps, {
+        taskId: effectiveOptions.taskId,
+        result,
+        finalHeadMetadata: finalHeadMetadata as Record<string, unknown>,
+      });
     } catch (packetError) {
       // Packet posting is advisory; failures should not break the sub-agent result flow.
       console.warn(
