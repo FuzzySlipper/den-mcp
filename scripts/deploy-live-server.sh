@@ -5,7 +5,7 @@ REPO_ROOT="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 PUBLISH_DIR="${PUBLISH_DIR:-}"
 SSH_TARGET="${SSH_TARGET:-patch@192.168.1.10}"
 SERVICE_NAME="${SERVICE_NAME:-den-mcp.service}"
-REMOTE_SERVER_ROOT="${REMOTE_SERVER_ROOT:-/data/dev/den-mcp/server}"
+REMOTE_SERVER_ROOT="${REMOTE_SERVER_ROOT:-/data/services/den-mcp/server}"
 REMOTE_STAGE_DIR="${REMOTE_STAGE_DIR:-/tmp/den-mcp-live-publish}"
 SKIP_RESTART=0
 TEMP_PUBLISH_DIR_CREATED=0
