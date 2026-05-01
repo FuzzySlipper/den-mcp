@@ -1,5 +1,6 @@
 using System.Text.Json;
 using DenMcp.Core.Models;
+using DenMcp.Core.Services;
 using TaskStatus = DenMcp.Core.Models.TaskStatus;
 
 namespace DenMcp.Server.Tools;
@@ -134,6 +135,23 @@ public static class ConciseResponse
             status = finding.Status.ToDbValue(),
             status_updated_by = finding.StatusUpdatedBy,
             follow_up_task_id = finding.FollowUpTaskId
+        });
+    }
+
+    // Review finding triage operations
+
+    public static string SplitReviewFindingsToFollowUp(SplitFindingsToFollowUpResult result)
+    {
+        var skipText = result.SkippedFindingIds.Count > 0
+            ? $", {result.SkippedFindingIds.Count} skipped"
+            : "";
+        return Serialize(new
+        {
+            summary = $"split {result.UpdatedFindings.Count} findings to follow-up task #{result.FollowUpTask.Id}{skipText}",
+            follow_up_task_id = result.FollowUpTask.Id,
+            split_count = result.UpdatedFindings.Count,
+            skipped_count = result.SkippedFindingIds.Count,
+            finding_ids = result.UpdatedFindings.Select(f => f.Id).ToArray()
         });
     }
 

@@ -85,6 +85,7 @@ builder.Services.AddSingleton<IDispatchRepository>(services =>
         services.GetRequiredService<DispatchRepository>(),
         services.GetRequiredService<IAgentStreamOpsService>()));
 builder.Services.AddSingleton<IReviewWorkflowService, ReviewWorkflowService>();
+builder.Services.AddSingleton<IReviewFindingTriageService, ReviewFindingTriageService>();
 builder.Services.AddSingleton<IAgentRecipientResolver, AgentRecipientResolver>();
 builder.Services.AddSingleton<IAgentStreamMessageService, AgentStreamMessageService>();
 builder.Services.AddSingleton<ISubagentRunService, SubagentRunService>();

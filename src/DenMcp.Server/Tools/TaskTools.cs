@@ -6,6 +6,7 @@ using DenMcp.Core.Services;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using TaskStatus = DenMcp.Core.Models.TaskStatus;
+using static DenMcp.Core.Services.ReviewFindingTriageService;
 
 namespace DenMcp.Server.Tools;
 
@@ -433,6 +434,46 @@ public sealed class TaskTools
     {
         await repo.RemoveDependencyAsync(task_id, depends_on);
         return JsonSerializer.Serialize(new { message = $"Removed dependency: task {task_id} no longer depends on task {depends_on}." }, JsonOpts.Default);
+    }
+
+    [McpServerTool(Name = "split_review_findings_to_follow_up"), Description("Split selected non-blocking review findings into a follow-up task. Creates a follow-up task with generated description and marks each finding split_to_follow_up. Blocking findings are skipped unless override_blocking=true.")]
+    public static async Task<string> SplitReviewFindingsToFollowUp(
+        IReviewFindingTriageService triageService,
+        [Description("Project ID.")] string project_id,
+        [Description("Task ID that owns the review findings.")] int task_id,
+        [Description("JSON array of review finding IDs to split.")] string finding_ids,
+        [Description("Agent or user performing the split.")] string split_by,
+        [Description("Optional title for the follow-up task. Default: auto-generated.")] string? follow_up_title = null,
+        [Description("Optional parent task ID for the follow-up task.")] int? follow_up_parent_task_id = null,
+        [Description("Priority for the follow-up task (1-5). Default: 3.")] int? follow_up_priority = null,
+        [Description("Optional agent identity to assign the follow-up task to.")] string? follow_up_assigned_to = null,
+        [Description("Optional JSON array of string tags for the follow-up task.")] string? follow_up_tags = null,
+        [Description("If true, include blocking findings in the split. Default: false.")] bool override_blocking = false,
+        [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
+    {
+        var parsedFindingIds = JsonSerializer.Deserialize<List<int>>(finding_ids)
+            ?? throw new ArgumentException("finding_ids must be a valid JSON array of integers.");
+        var parsedTags = follow_up_tags is not null
+            ? JsonSerializer.Deserialize<List<string>>(follow_up_tags)
+            : null;
+
+        var result = await triageService.SplitFindingsToFollowUpAsync(new SplitFindingsToFollowUpInput
+        {
+            TaskId = task_id,
+            ProjectId = project_id,
+            FindingIds = parsedFindingIds,
+            SplitBy = split_by,
+            FollowUpTitle = follow_up_title,
+            FollowUpParentTaskId = follow_up_parent_task_id,
+            FollowUpPriority = follow_up_priority,
+            FollowUpAssignedTo = follow_up_assigned_to,
+            FollowUpTags = parsedTags,
+            OverrideBlocking = override_blocking
+        });
+
+        return verbose
+            ? JsonSerializer.Serialize(result, JsonOpts.Default)
+            : ConciseResponse.SplitReviewFindingsToFollowUp(result);
     }
 
     private static void ValidateFollowUpStatusCombination(ReviewFindingStatus? status, int? followUpTaskId)
