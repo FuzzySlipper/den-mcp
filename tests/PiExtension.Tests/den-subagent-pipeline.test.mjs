@@ -1374,6 +1374,9 @@ test('infrastructure failures are classified before fallback retry', () => {
   assert.equal(isSubagentInfrastructureFailure({ forced_kill: true }), true);
   assert.equal(isSubagentInfrastructureFailure({ signal: 'SIGTERM' }), true);
   assert.equal(isSubagentInfrastructureFailure({ child_error_message: 'spawn ENOENT' }), true);
+  assert.equal(classifySubagentInfrastructureFailure({ child_error_message: 'Provider returned 429 Too Many Requests' }), 'quota');
+  assert.equal(classifySubagentInfrastructureFailure({ child_error_message: 'Usage limit reached for 5 hour' }), 'quota');
+  assert.equal(classifySubagentInfrastructureFailure({ stderr_tail: 'rate limit exceeded for selected model' }), 'quota');
   assert.equal(classifySubagentInfrastructureFailure({
     stderr_tail: 'Error: Failed to load extension "/tmp/bad.ts": Extension does not export a valid factory function',
   }), 'extension_load');

@@ -83,6 +83,37 @@ project tasks:
 Ask the user only when the task is ambiguous, blocked, risky, or requires
 product judgment.
 
+## Quota / Provider-Limit Fallback
+
+When a coder sub-agent run (`den_run_coder`) fails with a quota or provider-limit
+infrastructure failure (429, rate-limit, quota-exceeded):
+
+1. **Check the parent tool result recovery guidance** — the `den_run_coder` tool
+   result includes structured recovery guidance with branch state and
+   infrastructure failure classification (`"quota"`).
+
+2. **Inspect branch state**:
+   - **Clean worktree, no useful commits**: Rerun `den_run_coder` with an
+     alternate model: `model=<alternate_model>`. Check effective fallback model
+     in Den config (`/den-config` or `den-config.json`).
+   - **Dirty partial work or useful commits**: Preserve the work. Options:
+     a. Rerun from the same branch with an alternate model — the dirty work
+        carries over to the fresh sub-agent.
+     b. Recover manually under the **sub-agent-unavailable exception** (see
+        Delegated Coder Workflow Policy).
+     c. Ask the user for direction.
+
+3. **Never auto-discard** dirty partial work or reset the branch. The coder may
+   have produced useful changes before the quota failure.
+
+4. **Audit the decision** — post a Den task-thread message recording the recovery
+   path taken, the alternate model used, and the current branch/head state.
+
+This fallback path is an **exception**, not the default. Substantial
+implementation should still be delegated to a coder sub-agent when possible.
+The fallback preserves the orchestrator's audit trail and does not silently
+switch to inline work.
+
 ## Drift Guard
 
 Do not perform inline drift analysis or act as a second code reviewer by default.

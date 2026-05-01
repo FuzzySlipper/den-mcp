@@ -235,7 +235,23 @@ function collectRecoveryState(result: SubagentResult): RecoveryState | undefined
 function determineRecoveryActions(result: SubagentResult, state: RecoveryState): string[] {
   const actions: string[] = [];
 
-  if (result.assistant_final_found) {
+  if (result.infrastructure_failure_reason === "quota") {
+    // Quota/provider-limit failure: suggest alternate model retry
+    actions.push(`Quota/provider-limit failure${result.child_error_message ? `: ${oneLine(result.child_error_message).slice(0, 200)}` : ""}.`);
+
+    if (state.worktree_dirty) {
+      actions.push("Worktree has uncommitted dirty partial work — preserve it.");
+      actions.push("Option A: rerun coder from this branch with an alternate model (`den_run_coder` with explicit `model=`). The dirty work carries over.");
+      actions.push("Option B: recover manually under the sub-agent-unavailable exception in orchestrator policy.");
+      actions.push("Option C: ask the user for direction. Do NOT auto-discard dirty work.");
+      actions.push("Record the chosen recovery path in a Den task-thread message.");
+    } else {
+      actions.push("No dirty partial work detected (clean worktree).");
+      actions.push("If an alternate model is configured or available, rerun `den_run_coder` with `model=<alternate_model>`.");
+      actions.push("If no alternate model is configured, ask the user to configure one or work manually.");
+      actions.push("Record the retry decision in a Den task-thread message.");
+    }
+  } else if (result.assistant_final_found) {
     actions.push(`Inspect branch ${state.branch ?? "(unknown)"} for partial work and commits.`);
     if (state.worktree_dirty) {
       actions.push("Worktree has uncommitted changes — review before deciding next step.");
@@ -295,6 +311,8 @@ function formatInfrastructureFailureReason(reason: string): string {
       return "child process error";
     case "forced_kill":
       return "forced process kill";
+    case "quota":
+      return "quota/provider-limit exceeded";
     default:
       return reason.replace(/_/g, " ");
   }

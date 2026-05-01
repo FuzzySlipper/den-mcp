@@ -339,6 +339,135 @@ test('sub-agent parent tool return omits requested head line when it matches fin
   assert.equal(toolResult.details.final_head_commit, 'same-sha');
 });
 
+test('sub-agent parent tool return includes quota-specific recovery guidance for clean worktree', () => {
+  const toolResult = buildSubagentParentToolResult(subagentResult({
+    exit_code: 1,
+    aborted: false,
+    assistant_final_found: false,
+    output_status: 'no_assistant_final',
+    final_output: '',
+    final_head_commit: 'deadbeef12345678',
+    final_head_status: 'clean',
+    final_branch: 'task/1125-quota-test',
+    final_worktree_branch: 'task/1125-quota-test',
+    final_worktree_status: 'clean',
+    infrastructure_failure_reason: 'quota',
+    child_error_message: '429 Too Many Requests - quota exceeded for model gpt-5.5',
+  }));
+
+  assert.equal(toolResult.isError, true);
+  assert.equal(toolResult.details.state, 'infrastructure_failed');
+  assert.equal(toolResult.details.infrastructure_failure_reason, 'quota');
+
+  // Recovery guidance present
+  assert.ok(toolResult.details.recovery_guidance, 'should have recovery_guidance');
+  assert.equal(toolResult.details.recovery_branch, 'task/1125-quota-test');
+  assert.equal(toolResult.details.recovery_worktree_dirty, false);
+
+  const text = toolResult.content[0].text;
+  assert.match(text, /Recovery guidance:/);
+  assert.match(text, /Quota\/provider-limit failure/);
+  assert.match(text, /No dirty partial work detected/);
+  assert.match(text, /alternate model is configured/);
+  assert.match(text, /rerun `den_run_coder` with `model=/);
+  assert.match(text, /Record the retry decision/);
+
+  // Failure summary should mention quota
+  assert.match(text, /Sub-agent infrastructure failure: quota\/provider-limit exceeded/);
+  // Infrastructure failure reason appears in text
+  assert.match(text, /429 Too Many Requests/);
+});
+
+test('sub-agent parent tool return includes quota-specific recovery guidance for dirty worktree', () => {
+  const toolResult = buildSubagentParentToolResult(subagentResult({
+    exit_code: 1,
+    aborted: false,
+    assistant_final_found: false,
+    output_status: 'no_assistant_final',
+    final_output: '',
+    final_head_commit: 'abc123def456789',
+    final_head_status: 'dirty_uncommitted',
+    final_branch: 'task/1125-quota-dirty',
+    final_worktree_branch: 'task/1125-quota-dirty',
+    final_worktree_status: 'dirty_uncommitted',
+    final_worktree_status_short: ' M pi-dev/lib/example.ts',
+    infrastructure_failure_reason: 'quota',
+    child_error_message: 'rate limit exceeded for model gpt-4o',
+  }));
+
+  assert.equal(toolResult.isError, true);
+  assert.equal(toolResult.details.state, 'infrastructure_failed');
+  assert.equal(toolResult.details.infrastructure_failure_reason, 'quota');
+
+  // Recovery guidance present
+  assert.ok(toolResult.details.recovery_guidance, 'should have recovery_guidance');
+  assert.equal(toolResult.details.recovery_worktree_dirty, true);
+
+  const text = toolResult.content[0].text;
+  assert.match(text, /Recovery guidance:/);
+  assert.match(text, /Worktree has uncommitted dirty partial work/);
+  assert.match(text, /Option A:/);
+  assert.match(text, /Option B:/);
+  assert.match(text, /Option C:/);
+  assert.match(text, /rerun coder from this branch/);
+  assert.match(text, /alternate model/);
+  assert.match(text, /sub-agent-unavailable exception/);
+  assert.match(text, /Do NOT auto-discard dirty work/);
+  assert.match(text, /Record the chosen recovery path/);
+  assert.doesNotMatch(text, /No dirty partial work detected/);
+});
+
+test('sub-agent parent tool return classifies quota failure from child_error_message with 429 pattern', () => {
+  const toolResult = buildSubagentParentToolResult(subagentResult({
+    exit_code: 1,
+    aborted: false,
+    assistant_final_found: false,
+    output_status: 'no_assistant_final',
+    final_output: '',
+    final_head_commit: 'abc123',
+    final_head_status: 'clean',
+    final_branch: 'task/quota-429',
+    final_worktree_branch: 'task/quota-429',
+    final_worktree_status: 'clean',
+    infrastructure_failure_reason: 'quota',
+    child_error_message: 'Provider returned 429 - too many requests',
+  }));
+
+  assert.equal(toolResult.details.state, 'infrastructure_failed');
+  assert.equal(toolResult.details.infrastructure_failure_reason, 'quota');
+
+  const text = toolResult.content[0].text;
+  assert.match(text, /Recovery guidance:/);
+  assert.match(text, /too many requests/);
+});
+
+test('sub-agent parent tool return recovery guidance for quota failure preserves assistant output', () => {
+  const toolResult = buildSubagentParentToolResult(subagentResult({
+    exit_code: 143,
+    signal: 'SIGTERM',
+    aborted: false,
+    assistant_final_found: true,
+    output_status: 'assistant_final',
+    final_output: 'Partial implementation: added recovery helper but not yet complete.',
+    final_head_commit: 'cafe0123456789',
+    final_head_status: 'dirty_uncommitted',
+    final_branch: 'task/1125-quota-partial',
+    final_worktree_branch: 'task/1125-quota-partial',
+    final_worktree_status: 'dirty_uncommitted',
+    infrastructure_failure_reason: 'quota',
+    child_error_message: 'Usage quota exceeded for model',
+  }));
+
+  const text = toolResult.content[0].text;
+  assert.match(text, /Recovery guidance:/);
+  // Quota-specific guidance takes priority; assistant_final_found also applies
+  assert.match(text, /quota/i);
+  assert.match(text, /Worktree has uncommitted dirty partial work/);
+  // Should NOT show generic assistant_final guidance for quota
+  assert.match(text, /Option A:/);
+  assert.doesNotMatch(text, /do NOT auto-reset or delete the branch/);
+});
+
 test('Pi parent session stores tool-result details, while compaction/provider payloads use content only', () => {
   const sentinel = 'DETAILS_SENTINEL_SHOULD_NOT_REACH_PROVIDER_PAYLOAD';
   const toolMessage = {

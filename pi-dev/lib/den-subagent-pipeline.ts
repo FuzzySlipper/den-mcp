@@ -343,6 +343,7 @@ export type InfrastructureFailureReason =
   | "forced_kill"
   | "signal"
   | "child_error"
+  | "quota"
   | "extension_load"
   | "extension_runtime";
 
@@ -565,9 +566,12 @@ export function classifySubagentInfrastructureFailure(
   if (result.timeout_kind) return "timeout";
   if (result.forced_kill) return "forced_kill";
   if (result.signal) return "signal";
+  if (result.child_error_message && isQuotaFailureMessage(result.child_error_message)) return "quota";
   if (result.child_error_message) return "child_error";
 
   const stderr = `${result.stderr_tail ?? ""}\n${result.stderr ?? ""}`;
+  const quotaReason = classifySubagentStderrQuota(stderr);
+  if (quotaReason) return quotaReason;
   return classifySubagentStderrIssue(stderr);
 }
 
@@ -575,6 +579,30 @@ export function classifySubagentStderrIssue(stderr: string): InfrastructureFailu
   if (isExtensionLoadFailure(stderr)) return "extension_load";
   if (isExtensionRuntimeFailure(stderr)) return "extension_runtime";
   return undefined;
+}
+
+/// Quota failure patterns for 429/rate-limit/quota-exceeded provider errors.
+const QUOTA_PATTERNS = [
+  /429/i,
+  /rate\s*limit/i,
+  /too many requests/i,
+  /quota/i,
+  /insufficient.*tokens/i,
+  /usage.*limit/i,
+  /capacity.*limit/i,
+  /throttled/i,
+  /resource.*exhausted/i,
+  /model.*unavailable/i,
+  /exceeded.*model/i,
+  /provider.*overloaded/i,
+];
+
+function isQuotaFailureMessage(message: string): boolean {
+  return QUOTA_PATTERNS.some((pattern) => pattern.test(message));
+}
+
+function classifySubagentStderrQuota(stderr: string): InfrastructureFailureReason | undefined {
+  return isQuotaFailureMessage(stderr) ? "quota" : undefined;
 }
 
 function isExtensionLoadFailure(stderr: string): boolean {
