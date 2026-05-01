@@ -2,7 +2,9 @@ using System.Text;
 using System.Text.Json;
 using DenMcp.Core.Data;
 using DenMcp.Core.Models;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
+using TaskStatus = DenMcp.Core.Models.TaskStatus;
 
 namespace DenMcp.Core.Services;
 
@@ -36,15 +38,18 @@ public sealed class ReviewFindingTriageService : IReviewFindingTriageService
 {
     private readonly ITaskRepository _tasks;
     private readonly IReviewFindingRepository _findings;
+    private readonly DbConnectionFactory _db;
     private readonly ILogger<ReviewFindingTriageService> _logger;
 
     public ReviewFindingTriageService(
         ITaskRepository tasks,
         IReviewFindingRepository findings,
+        DbConnectionFactory db,
         ILogger<ReviewFindingTriageService> logger)
     {
         _tasks = tasks;
         _findings = findings;
+        _db = db;
         _logger = logger;
     }
 
@@ -101,34 +106,77 @@ public sealed class ReviewFindingTriageService : IReviewFindingTriageService
             throw new InvalidOperationException(
                 "No findings to split. All findings were either blocking (set override_blocking=true to include) or already resolved.");
 
-        // Create the follow-up task with generated description
-        var description = BuildFollowUpDescription(loadedFindings);
+        // Build the follow-up description with source task context
+        var description = BuildFollowUpDescription(loadedFindings, sourceTask);
         var title = input.FollowUpTitle ?? $"Follow up: {loadedFindings.Count} review finding(s) from #{input.TaskId}";
+        var splitStatusValue = ReviewFindingStatus.SplitToFollowUp.ToDbValue();
 
-        var followUpTask = await _tasks.CreateAsync(new ProjectTask
+        // Execute task creation + all finding status updates in a single transaction
+        await using var conn = await _db.CreateConnectionAsync();
+        await using var tx = await conn.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+
+        // Insert the follow-up task
+        ProjectTask followUpTask;
+        await using (var taskCmd = conn.CreateCommand())
         {
-            ProjectId = input.ProjectId,
-            Title = title,
-            Description = description,
-            Priority = input.FollowUpPriority ?? 3,
-            AssignedTo = input.FollowUpAssignedTo,
-            ParentId = input.FollowUpParentTaskId,
-            Tags = input.FollowUpTags
-        });
+            taskCmd.CommandText = """
+                INSERT INTO tasks (project_id, parent_id, title, description, status, priority, assigned_to, tags)
+                VALUES (@projectId, @parentId, @title, @description, @status, @priority, @assignedTo, @tags)
+                RETURNING id, project_id, parent_id, title, description, status, priority, assigned_to, tags, created_at, updated_at
+                """;
+            taskCmd.Parameters.AddWithValue("@projectId", input.ProjectId);
+            taskCmd.Parameters.AddWithValue("@parentId", (object?)input.FollowUpParentTaskId ?? DBNull.Value);
+            taskCmd.Parameters.AddWithValue("@title", title);
+            taskCmd.Parameters.AddWithValue("@description", description);
+            taskCmd.Parameters.AddWithValue("@status", TaskStatus.Planned.ToDbValue());
+            taskCmd.Parameters.AddWithValue("@priority", input.FollowUpPriority ?? 3);
+            taskCmd.Parameters.AddWithValue("@assignedTo", (object?)input.FollowUpAssignedTo ?? DBNull.Value);
+            taskCmd.Parameters.AddWithValue("@tags",
+                input.FollowUpTags is { Count: > 0 }
+                    ? JsonSerializer.Serialize(input.FollowUpTags)
+                    : DBNull.Value);
 
-        // Update each finding status to split_to_follow_up with the new task ID
+            await using var reader = await taskCmd.ExecuteReaderAsync();
+            await reader.ReadAsync();
+            followUpTask = TaskRepository.ReadTask(reader);
+            await reader.CloseAsync();
+        }
+
+        // Update all finding statuses within the same transaction
         var updatedFindings = new List<ReviewFinding>();
         foreach (var finding in loadedFindings)
         {
-            var updated = await _findings.SetStatusAsync(finding.Id, new UpdateReviewFindingStatusInput
-            {
-                Status = ReviewFindingStatus.SplitToFollowUp,
-                UpdatedBy = input.SplitBy,
-                Notes = $"Split to follow-up task #{followUpTask.Id}",
-                FollowUpTaskId = followUpTask.Id
-            });
-            updatedFindings.Add(updated);
+            var statusNotes = $"Split to follow-up task #{followUpTask.Id}";
+            await using var updateCmd = conn.CreateCommand();
+            updateCmd.CommandText = """
+                UPDATE review_findings
+                SET status = @status,
+                    status_updated_by = @updatedBy,
+                    status_notes = @statusNotes,
+                    status_updated_at = datetime('now'),
+                    follow_up_task_id = @followUpTaskId,
+                    updated_at = datetime('now')
+                WHERE id = @id
+                RETURNING id, finding_key, task_id, review_round_id, finding_number, created_by,
+                          category, summary, notes, file_references, test_commands, status,
+                          status_updated_by, status_notes, status_updated_at, response_by,
+                          response_notes, response_at, follow_up_task_id, created_at, updated_at,
+                          (SELECT round_number FROM review_rounds WHERE id = review_round_id) AS round_number
+                """;
+            updateCmd.Parameters.AddWithValue("@id", finding.Id);
+            updateCmd.Parameters.AddWithValue("@status", splitStatusValue);
+            updateCmd.Parameters.AddWithValue("@updatedBy", input.SplitBy);
+            updateCmd.Parameters.AddWithValue("@statusNotes", statusNotes);
+            updateCmd.Parameters.AddWithValue("@followUpTaskId", followUpTask.Id);
+
+            await using var reader = await updateCmd.ExecuteReaderAsync();
+            if (!await reader.ReadAsync())
+                throw new KeyNotFoundException($"Review finding {finding.Id} not found during status update");
+            updatedFindings.Add(ReviewFindingRepository.ReadReviewFinding(reader));
         }
+
+        // Commit the entire transaction — task + all findings succeed or fail together
+        await tx.CommitAsync();
 
         _logger.LogInformation(
             "Split {Count} findings from task #{TaskId} to follow-up task #{FollowUpTaskId}. Skipped: {SkippedCount}",
@@ -145,10 +193,15 @@ public sealed class ReviewFindingTriageService : IReviewFindingTriageService
     private static bool IsBlockingCategory(ReviewFindingCategory category) =>
         category == ReviewFindingCategory.BlockingBug;
 
-    internal static string BuildFollowUpDescription(List<ReviewFinding> findings)
+    internal static string BuildFollowUpDescription(List<ReviewFinding> findings, ProjectTask sourceTask)
     {
         var sb = new StringBuilder();
         sb.AppendLine("Follow-up task for review findings split from the parent task.");
+        sb.AppendLine();
+        sb.AppendLine("## Source context");
+        sb.AppendLine();
+        sb.AppendLine($"- **Source task**: #{sourceTask.Id} — {sourceTask.Title}");
+        sb.AppendLine($"- **Project**: `{sourceTask.ProjectId}`");
         sb.AppendLine();
         sb.AppendLine("## Findings");
         sb.AppendLine();

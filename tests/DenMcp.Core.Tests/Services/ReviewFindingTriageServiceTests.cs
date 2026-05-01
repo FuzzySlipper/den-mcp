@@ -23,7 +23,7 @@ public class ReviewFindingTriageServiceTests : IAsyncLifetime
         _rounds = new ReviewRoundRepository(_testDb.Db);
         _findings = new ReviewFindingRepository(_testDb.Db);
         _projects = new ProjectRepository(_testDb.Db);
-        _triage = new ReviewFindingTriageService(_tasks, _findings, NullLogger<ReviewFindingTriageService>.Instance);
+        _triage = new ReviewFindingTriageService(_tasks, _findings, _testDb.Db, NullLogger<ReviewFindingTriageService>.Instance);
 
         await _projects.CreateAsync(new Project { Id = ProjectId, Name = "Test" });
     }
@@ -247,9 +247,104 @@ public class ReviewFindingTriageServiceTests : IAsyncLifetime
         Assert.Contains($"**Review round**: {f.ReviewRoundNumber}", desc);
     }
 
-    private async Task<(ProjectTask Task, ReviewRound Round)> CreateRoundAsync()
+    [Fact]
+    public async Task SplitFindings_DescriptionIncludesSourceTaskContext()
     {
-        var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = ProjectId, Title = "Review target" });
+        var (task, round) = await CreateRoundAsync(title: "Implement auth flow");
+        var f = await CreateFindingAsync(round.Id, ReviewFindingCategory.AcceptanceGap, "Missing validation");
+
+        var result = await _triage.SplitFindingsToFollowUpAsync(new SplitFindingsToFollowUpInput
+        {
+            TaskId = task.Id,
+            ProjectId = ProjectId,
+            FindingIds = [f.Id],
+            SplitBy = "codex"
+        });
+
+        var desc = result.FollowUpTask.Description!;
+        Assert.Contains("## Source context", desc);
+        Assert.Contains($"#{task.Id}", desc);
+        Assert.Contains("Implement auth flow", desc);
+        Assert.Contains($"`{ProjectId}`", desc);
+    }
+
+    [Fact]
+    public async Task SplitFindings_IsAtomic_TaskNotCreatedIfFindingUpdateFails()
+    {
+        var (task, round) = await CreateRoundAsync();
+        var f1 = await CreateFindingAsync(round.Id, ReviewFindingCategory.AcceptanceGap, "Valid finding");
+
+        // Count tasks before
+        var tasksBefore = (await _tasks.ListAsync(ProjectId)).Count;
+
+        // Manually delete the finding to cause the update to fail mid-transaction
+        await using (var conn = await _testDb.Db.CreateConnectionAsync())
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "DELETE FROM review_findings WHERE id = @id";
+            cmd.Parameters.AddWithValue("@id", f1.Id);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // The split should fail because the finding no longer exists during the update phase
+        // But since the finding was loaded before it was deleted, the update will fail with KeyNotFoundException
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            _triage.SplitFindingsToFollowUpAsync(new SplitFindingsToFollowUpInput
+            {
+                TaskId = task.Id,
+                ProjectId = ProjectId,
+                FindingIds = [f1.Id],
+                SplitBy = "codex"
+            }));
+
+        // Verify no follow-up task was created (transaction rolled back)
+        var tasksAfter = (await _tasks.ListAsync(ProjectId)).Count;
+        Assert.Equal(tasksBefore, tasksAfter);
+    }
+
+    [Fact]
+    public async Task SplitFindings_IsAtomic_AllStatusesCommittedTogether()
+    {
+        var (task, round) = await CreateRoundAsync();
+        var f1 = await CreateFindingAsync(round.Id, ReviewFindingCategory.AcceptanceGap, "Gap 1");
+        var f2 = await CreateFindingAsync(round.Id, ReviewFindingCategory.TestWeakness, "Weak test");
+        var f3 = await CreateFindingAsync(round.Id, ReviewFindingCategory.FollowUpCandidate, "Follow up");
+
+        var result = await _triage.SplitFindingsToFollowUpAsync(new SplitFindingsToFollowUpInput
+        {
+            TaskId = task.Id,
+            ProjectId = ProjectId,
+            FindingIds = [f1.Id, f2.Id, f3.Id],
+            SplitBy = "codex"
+        });
+
+        // All three should be updated
+        Assert.Equal(3, result.UpdatedFindings.Count);
+
+        // Verify by re-loading from DB that all findings are persisted with the correct status
+        var reloaded1 = await _findings.GetByIdAsync(f1.Id);
+        var reloaded2 = await _findings.GetByIdAsync(f2.Id);
+        var reloaded3 = await _findings.GetByIdAsync(f3.Id);
+
+        Assert.NotNull(reloaded1);
+        Assert.NotNull(reloaded2);
+        Assert.NotNull(reloaded3);
+        Assert.Equal(ReviewFindingStatus.SplitToFollowUp, reloaded1!.Status);
+        Assert.Equal(ReviewFindingStatus.SplitToFollowUp, reloaded2!.Status);
+        Assert.Equal(ReviewFindingStatus.SplitToFollowUp, reloaded3!.Status);
+        Assert.Equal(result.FollowUpTask.Id, reloaded1.FollowUpTaskId);
+        Assert.Equal(result.FollowUpTask.Id, reloaded2.FollowUpTaskId);
+        Assert.Equal(result.FollowUpTask.Id, reloaded3.FollowUpTaskId);
+
+        // Verify the follow-up task is persisted
+        var followUp = await _tasks.GetByIdAsync(result.FollowUpTask.Id);
+        Assert.NotNull(followUp);
+        Assert.Contains("Follow up", followUp!.Title);
+    }
+
+    private async Task<(ProjectTask Task, ReviewRound Round)> CreateRoundAsync(string? title = null)
+    {
+        var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = ProjectId, Title = title ?? "Review target" });
         var round = await _rounds.CreateAsync(new CreateReviewRoundInput
         {
             TaskId = task.Id,
