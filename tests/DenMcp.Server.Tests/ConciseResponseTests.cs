@@ -742,6 +742,378 @@ public class ConciseResponseTests : IAsyncLifetime
         Assert.True(json.Length < 500, $"Concise response too long: {json.Length} chars");
     }
 
+    // ─── Create project ──────────────────────────────────────────────────
+
+    [Fact]
+    public async Task CreateProject_ConciseDefault_ReturnsSummaryWithId()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IProjectRepository>();
+
+        var json = await ProjectTools.CreateProject(
+            repo,
+            "secondary-test-proj",
+            "Secondary Test Project",
+            description: "A very long project description that should not appear in concise output. ".PadRight(500, 'x'),
+            verbose: false);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        var summary = root.GetProperty("summary").GetString()!;
+        Assert.Contains("created project 'secondary-test-proj'", summary);
+
+        Assert.Equal("secondary-test-proj", root.GetProperty("id").GetString());
+        Assert.Equal("Secondary Test Project", root.GetProperty("name").GetString());
+
+        // Must NOT contain the description
+        Assert.DoesNotContain("very long project description", json);
+    }
+
+    [Fact]
+    public async Task CreateProject_VerboseTrue_ReturnsFullRecord()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IProjectRepository>();
+
+        var json = await ProjectTools.CreateProject(
+            repo,
+            "verbose-test-proj",
+            "Verbose Test Project",
+            description: "Full description visible",
+            verbose: true);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        Assert.Equal("verbose-test-proj", root.GetProperty("id").GetString());
+        Assert.Equal("Verbose Test Project", root.GetProperty("name").GetString());
+        Assert.Equal("Full description visible", root.GetProperty("description").GetString());
+    }
+
+    // ─── Store document ──────────────────────────────────────────────────
+
+    [Fact]
+    public async Task StoreDocument_ConciseDefault_ReturnsSummaryWithSlug()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IDocumentRepository>();
+
+        var json = await DocumentTools.StoreDocument(
+            repo,
+            ProjectId,
+            "test-spec",
+            "Test Specification",
+            content: "# Very Long Content\n\n".PadRight(2000, 'x'),
+            doc_type: "spec",
+            tags: """["core","api"]""",
+            verbose: false);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        var summary = root.GetProperty("summary").GetString()!;
+        Assert.Contains("stored document", summary);
+        Assert.Contains(ProjectId, summary);
+        Assert.Contains("test-spec", summary);
+
+        Assert.Equal(ProjectId, root.GetProperty("project_id").GetString());
+        Assert.Equal("test-spec", root.GetProperty("slug").GetString());
+        Assert.Equal("Test Specification", root.GetProperty("title").GetString());
+        Assert.Equal("spec", root.GetProperty("doc_type").GetString());
+
+        // Must NOT contain the content
+        Assert.DoesNotContain("Very Long Content", json);
+    }
+
+    [Fact]
+    public async Task StoreDocument_VerboseTrue_ReturnsFullRecord()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IDocumentRepository>();
+
+        var json = await DocumentTools.StoreDocument(
+            repo,
+            ProjectId,
+            "verbose-spec",
+            "Verbose Spec",
+            content: "Full markdown content here",
+            verbose: true);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        Assert.Equal("Full markdown content here", root.GetProperty("content").GetString());
+        Assert.Equal("verbose-spec", root.GetProperty("slug").GetString());
+    }
+
+    // ─── Add agent guidance entry ─────────────────────────────────────────
+
+    [Fact]
+    public async Task AddAgentGuidanceEntry_ConciseDefault_ReturnsSummaryWithId()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var docRepo = scope.ServiceProvider.GetRequiredService<IDocumentRepository>();
+        var guidanceRepo = scope.ServiceProvider.GetRequiredService<IAgentGuidanceRepository>();
+
+        // Prerequisite: store a document for the guidance to reference
+        await DocumentTools.StoreDocument(
+            docRepo,
+            ProjectId,
+            "guidance-doc",
+            "Guidance Doc",
+            content: "# Guidance content",
+            verbose: true);
+
+        var json = await AgentGuidanceTools.AddAgentGuidanceEntry(
+            guidanceRepo, docRepo,
+            ProjectId,
+            document_slug: "guidance-doc",
+            importance: "required",
+            audience: "pi,conductor",
+            sort_order: 10,
+            notes: "Detailed notes about why this guidance is important that should not appear in concise output",
+            verbose: false);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        var summary = root.GetProperty("summary").GetString()!;
+        Assert.Contains("added guidance entry #", summary);
+        Assert.Contains("guidance-doc", summary);
+        Assert.Contains(ProjectId, summary);
+
+        Assert.True(root.TryGetProperty("id", out var id));
+        Assert.True(id.GetInt32() > 0);
+        Assert.Equal(ProjectId, root.GetProperty("project_id").GetString());
+        Assert.Equal("guidance-doc", root.GetProperty("document_slug").GetString());
+        Assert.Equal("required", root.GetProperty("importance").GetString());
+
+        // Must NOT contain the notes
+        Assert.DoesNotContain("Detailed notes about why", json);
+    }
+
+    [Fact]
+    public async Task AddAgentGuidanceEntry_VerboseTrue_ReturnsFullRecord()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var docRepo = scope.ServiceProvider.GetRequiredService<IDocumentRepository>();
+        var guidanceRepo = scope.ServiceProvider.GetRequiredService<IAgentGuidanceRepository>();
+
+        await DocumentTools.StoreDocument(
+            docRepo,
+            ProjectId,
+            "verbose-guidance-doc",
+            "Verbose Guidance Doc",
+            content: "Content",
+            verbose: true);
+
+        var json = await AgentGuidanceTools.AddAgentGuidanceEntry(
+            guidanceRepo, docRepo,
+            ProjectId,
+            document_slug: "verbose-guidance-doc",
+            importance: "important",
+            notes: "Full notes visible",
+            verbose: true);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        Assert.Equal("verbose-guidance-doc", root.GetProperty("document_slug").GetString());
+        Assert.Equal("Full notes visible", root.GetProperty("notes").GetString());
+    }
+
+    // ─── Store blackboard entry ───────────────────────────────────────────
+
+    [Fact]
+    public async Task StoreBlackboardEntry_ConciseDefault_ReturnsSummaryWithSlug()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IBlackboardRepository>();
+
+        var json = await BlackboardTools.StoreBlackboardEntry(
+            repo,
+            "test-blackboard-entry",
+            "Test Entry",
+            content: "# Very Long Blackboard Content\n\n".PadRight(2000, 'x'),
+            tags: """["handoff","coordination"]""",
+            verbose: false);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        var summary = root.GetProperty("summary").GetString()!;
+        Assert.Contains("stored blackboard entry 'test-blackboard-entry'", summary);
+
+        Assert.Equal("test-blackboard-entry", root.GetProperty("slug").GetString());
+        Assert.Equal("Test Entry", root.GetProperty("title").GetString());
+
+        // Must NOT contain the content
+        Assert.DoesNotContain("Very Long Blackboard Content", json);
+    }
+
+    [Fact]
+    public async Task StoreBlackboardEntry_VerboseTrue_ReturnsFullRecord()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IBlackboardRepository>();
+
+        var json = await BlackboardTools.StoreBlackboardEntry(
+            repo,
+            "verbose-bb-entry",
+            "Verbose Entry",
+            content: "Full content here",
+            verbose: true);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        Assert.Equal("Full content here", root.GetProperty("content").GetString());
+        Assert.Equal("verbose-bb-entry", root.GetProperty("slug").GetString());
+    }
+
+    // ─── Approve dispatch ─────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ApproveDispatch_ConciseDefault_ReturnsSummaryWithId()
+    {
+        var dispatch = await CreatePendingDispatchAsync();
+
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IDispatchRepository>();
+
+        var json = await DispatchTools.ApproveDispatch(
+            repo, dispatch.Id, "test-user",
+            verbose: false);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        var summary = root.GetProperty("summary").GetString()!;
+        Assert.Contains($"approved dispatch #{dispatch.Id}", summary);
+        Assert.Contains("test-agent", summary);
+
+        Assert.Equal(dispatch.Id, root.GetProperty("id").GetInt32());
+        Assert.Equal("test-agent", root.GetProperty("target_agent").GetString());
+        Assert.Equal("approved", root.GetProperty("status").GetString());
+
+        // Must NOT contain the context_prompt or context_json
+        Assert.DoesNotContain("context", json);
+    }
+
+    [Fact]
+    public async Task ApproveDispatch_VerboseTrue_ReturnsFullRecord()
+    {
+        var dispatch = await CreatePendingDispatchAsync();
+
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IDispatchRepository>();
+
+        var json = await DispatchTools.ApproveDispatch(
+            repo, dispatch.Id, "test-user",
+            verbose: true);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        Assert.Equal(dispatch.Id, root.GetProperty("id").GetInt32());
+        Assert.Equal("approved", root.GetProperty("status").GetString());
+        Assert.True(root.TryGetProperty("decided_by", out _));
+    }
+
+    // ─── Reject dispatch ──────────────────────────────────────────────────
+
+    [Fact]
+    public async Task RejectDispatch_ConciseDefault_ReturnsSummaryWithId()
+    {
+        var dispatch = await CreatePendingDispatchAsync();
+
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IDispatchRepository>();
+
+        var json = await DispatchTools.RejectDispatch(
+            repo, dispatch.Id, "test-user",
+            verbose: false);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        var summary = root.GetProperty("summary").GetString()!;
+        Assert.Contains($"rejected dispatch #{dispatch.Id}", summary);
+
+        Assert.Equal(dispatch.Id, root.GetProperty("id").GetInt32());
+        Assert.Equal("rejected", root.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task RejectDispatch_VerboseTrue_ReturnsFullRecord()
+    {
+        var dispatch = await CreatePendingDispatchAsync();
+
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IDispatchRepository>();
+
+        var json = await DispatchTools.RejectDispatch(
+            repo, dispatch.Id, "test-user",
+            verbose: true);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        Assert.Equal(dispatch.Id, root.GetProperty("id").GetInt32());
+        Assert.Equal("rejected", root.GetProperty("status").GetString());
+    }
+
+    // ─── Complete dispatch ────────────────────────────────────────────────
+
+    [Fact]
+    public async Task CompleteDispatch_ConciseDefault_ReturnsSummaryWithId()
+    {
+        var dispatch = await CreatePendingDispatchAsync();
+
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IDispatchRepository>();
+
+        // Must approve before completing
+        await repo.ApproveAsync(dispatch.Id, "test-user");
+
+        var json = await DispatchTools.CompleteDispatch(
+            repo, dispatch.Id, "test-agent",
+            verbose: false);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        var summary = root.GetProperty("summary").GetString()!;
+        Assert.Contains($"completed dispatch #{dispatch.Id}", summary);
+
+        Assert.Equal(dispatch.Id, root.GetProperty("id").GetInt32());
+        Assert.Equal("completed", root.GetProperty("status").GetString());
+        Assert.Equal("test-agent", root.GetProperty("completed_by").GetString());
+    }
+
+    [Fact]
+    public async Task CompleteDispatch_VerboseTrue_ReturnsFullRecord()
+    {
+        var dispatch = await CreatePendingDispatchAsync();
+
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IDispatchRepository>();
+
+        await repo.ApproveAsync(dispatch.Id, "test-user");
+
+        var json = await DispatchTools.CompleteDispatch(
+            repo, dispatch.Id, "test-agent",
+            verbose: true);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        Assert.Equal(dispatch.Id, root.GetProperty("id").GetInt32());
+        Assert.Equal("completed", root.GetProperty("status").GetString());
+        Assert.True(root.TryGetProperty("completed_by", out _));
+    }
+
     // ─── Helpers ─────────────────────────────────────────────────────────
 
     private async Task<(ProjectTask Task, ReviewRound Round)> CreateRoundAsync()
@@ -776,6 +1148,26 @@ public class ConciseResponseTests : IAsyncLifetime
             Category = ReviewFindingCategory.BlockingBug,
             Summary = "Test finding"
         });
+    }
+
+    private int _dispatchTriggerCounter = 1000;
+
+    private async Task<DispatchEntry> CreatePendingDispatchAsync()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IDispatchRepository>();
+        var triggerId = Interlocked.Increment(ref _dispatchTriggerCounter);
+        var (entry, _) = await repo.CreateIfAbsentAsync(new DispatchEntry
+        {
+            ProjectId = ProjectId,
+            TargetAgent = "test-agent",
+            TriggerType = DispatchTriggerType.TaskStatus,
+            TriggerId = triggerId,
+            Summary = $"Test dispatch {triggerId}",
+            DedupKey = DispatchEntry.BuildDedupKey(DispatchTriggerType.TaskStatus, triggerId, "test-agent"),
+            ExpiresAt = DateTime.UtcNow.AddHours(24)
+        });
+        return entry;
     }
 
     // ─── Test app factory ────────────────────────────────────────────────
