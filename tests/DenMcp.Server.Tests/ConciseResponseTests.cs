@@ -384,6 +384,215 @@ public class ConciseResponseTests : IAsyncLifetime
         Assert.Equal("claimed_fixed", root.GetProperty("status").GetString());
     }
 
+    // ─── Create review round ──────────────────────────────────────────────
+
+    [Fact]
+    public async Task CreateReviewRound_ConciseDefault_ReturnsSummaryWithRoundNumber()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var taskRepo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+        var roundRepo = scope.ServiceProvider.GetRequiredService<IReviewRoundRepository>();
+
+        var task = await taskRepo.CreateAsync(new ProjectTask { ProjectId = ProjectId, Title = "Review target" });
+
+        var json = await TaskTools.CreateReviewRound(
+            roundRepo,
+            task.Id, "codex",
+            branch: "task/999-test",
+            base_branch: "main",
+            base_commit: "aaa111",
+            head_commit: "bbb222",
+            notes: "Detailed review notes that should not appear in concise output",
+            verbose: false);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        var summary = root.GetProperty("summary").GetString()!;
+        Assert.Contains("created review round #", summary);
+        Assert.Contains($"task #{task.Id}", summary);
+
+        Assert.True(root.TryGetProperty("id", out var id));
+        Assert.True(id.GetInt32() > 0);
+        Assert.Equal(task.Id, root.GetProperty("task_id").GetInt32());
+        Assert.Equal(1, root.GetProperty("round_number").GetInt32());
+        Assert.Equal("task/999-test", root.GetProperty("branch").GetString());
+
+        // Must NOT contain the notes
+        Assert.DoesNotContain("Detailed review notes", json);
+    }
+
+    [Fact]
+    public async Task CreateReviewRound_VerboseTrue_ReturnsFullRecord()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var taskRepo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+        var roundRepo = scope.ServiceProvider.GetRequiredService<IReviewRoundRepository>();
+
+        var task = await taskRepo.CreateAsync(new ProjectTask { ProjectId = ProjectId, Title = "Verbose review" });
+
+        var json = await TaskTools.CreateReviewRound(
+            roundRepo,
+            task.Id, "codex",
+            branch: "task/999-test",
+            base_branch: "main",
+            base_commit: "aaa111",
+            head_commit: "bbb222",
+            notes: "Full notes visible",
+            verbose: true);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        // Verbose returns full ReviewRound
+        Assert.Equal("task/999-test", root.GetProperty("branch").GetString());
+        Assert.Equal("main", root.GetProperty("base_branch").GetString());
+        Assert.Equal("Full notes visible", root.GetProperty("notes").GetString());
+        Assert.True(root.TryGetProperty("head_commit", out _));
+        Assert.True(root.TryGetProperty("requested_at", out _));
+    }
+
+    // ─── Request review ───────────────────────────────────────────────────
+
+    [Fact]
+    public async Task RequestReview_ConciseDefault_ReturnsSummaryWithMessageId()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var taskRepo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+        var workflow = scope.ServiceProvider.GetRequiredService<IReviewWorkflowService>();
+
+        var task = await taskRepo.CreateAsync(new ProjectTask { ProjectId = ProjectId, Title = "Review target" });
+
+        var json = await TaskTools.RequestReview(
+            workflow,
+            ProjectId, task.Id, "codex",
+            branch: "task/999-test",
+            base_branch: "main",
+            base_commit: "aaa111",
+            head_commit: "bbb222",
+            notes: "Long notes that should not appear in concise mode",
+            verbose: false);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        var summary = root.GetProperty("summary").GetString()!;
+        Assert.Contains("requested review", summary);
+        Assert.Contains($"task #{task.Id}", summary);
+
+        Assert.True(root.TryGetProperty("review_round_id", out _));
+        Assert.Equal(task.Id, root.GetProperty("task_id").GetInt32());
+        Assert.Equal(1, root.GetProperty("round_number").GetInt32());
+        Assert.True(root.TryGetProperty("message_id", out var msgId));
+        Assert.True(msgId.GetInt32() > 0);
+
+        // Must NOT contain the notes
+        Assert.DoesNotContain("Long notes", json);
+    }
+
+    [Fact]
+    public async Task RequestReview_VerboseTrue_ReturnsFullRecord()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var taskRepo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+        var workflow = scope.ServiceProvider.GetRequiredService<IReviewWorkflowService>();
+
+        var task = await taskRepo.CreateAsync(new ProjectTask { ProjectId = ProjectId, Title = "Verbose request" });
+
+        var json = await TaskTools.RequestReview(
+            workflow,
+            ProjectId, task.Id, "codex",
+            branch: "task/999-test",
+            base_branch: "main",
+            base_commit: "aaa111",
+            head_commit: "bbb222",
+            verbose: true);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        // Verbose returns full ReviewPacketResult
+        Assert.True(root.TryGetProperty("review_round", out _));
+        Assert.True(root.TryGetProperty("message", out _));
+        Assert.True(root.TryGetProperty("packet", out _));
+    }
+
+    // ─── Post review findings ─────────────────────────────────────────────
+
+    [Fact]
+    public async Task PostReviewFindings_ConciseDefault_ReturnsSummaryWithMessageId()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var taskRepo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+        var roundRepo = scope.ServiceProvider.GetRequiredService<IReviewRoundRepository>();
+        var workflow = scope.ServiceProvider.GetRequiredService<IReviewWorkflowService>();
+
+        var task = await taskRepo.CreateAsync(new ProjectTask { ProjectId = ProjectId, Title = "Findings target" });
+        var round = await roundRepo.CreateAsync(new CreateReviewRoundInput
+        {
+            TaskId = task.Id,
+            RequestedBy = "codex",
+            Branch = "task/999-test",
+            BaseBranch = "main",
+            BaseCommit = "aaa111",
+            HeadCommit = "bbb222"
+        });
+
+        var json = await TaskTools.PostReviewFindings(
+            workflow,
+            ProjectId, task.Id, round.Id, "codex",
+            notes: "Summary note that should not appear in concise output",
+            verbose: false);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        var summary = root.GetProperty("summary").GetString()!;
+        Assert.Contains("posted findings", summary);
+        Assert.Contains($"round #{round.Id}", summary);
+
+        Assert.Equal(round.Id, root.GetProperty("review_round_id").GetInt32());
+        Assert.Equal(task.Id, root.GetProperty("task_id").GetInt32());
+        Assert.True(root.TryGetProperty("message_id", out var msgId));
+        Assert.True(msgId.GetInt32() > 0);
+
+        // Must NOT contain the notes
+        Assert.DoesNotContain("Summary note", json);
+    }
+
+    [Fact]
+    public async Task PostReviewFindings_VerboseTrue_ReturnsFullRecord()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var taskRepo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+        var roundRepo = scope.ServiceProvider.GetRequiredService<IReviewRoundRepository>();
+        var workflow = scope.ServiceProvider.GetRequiredService<IReviewWorkflowService>();
+
+        var task = await taskRepo.CreateAsync(new ProjectTask { ProjectId = ProjectId, Title = "Verbose findings" });
+        var round = await roundRepo.CreateAsync(new CreateReviewRoundInput
+        {
+            TaskId = task.Id,
+            RequestedBy = "codex",
+            Branch = "task/999-test",
+            BaseBranch = "main",
+            BaseCommit = "aaa111",
+            HeadCommit = "bbb222"
+        });
+
+        var json = await TaskTools.PostReviewFindings(
+            workflow,
+            ProjectId, task.Id, round.Id, "codex",
+            verbose: true);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        // Verbose returns full ReviewPacketResult
+        Assert.True(root.TryGetProperty("review_round", out _));
+        Assert.True(root.TryGetProperty("message", out _));
+        Assert.True(root.TryGetProperty("packet", out _));
+    }
+
     // ─── Send message ────────────────────────────────────────────────────
 
     [Fact]
