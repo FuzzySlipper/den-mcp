@@ -164,12 +164,5 @@ public sealed class AgentRecipientResolver : IAgentRecipientResolver
         });
     }
 
-    private static string ToApiValue(AgentRecipientResolutionStatus status) => status switch
-    {
-        AgentRecipientResolutionStatus.Resolved => "resolved",
-        AgentRecipientResolutionStatus.MissingRecipient => "missing_recipient",
-        AgentRecipientResolutionStatus.MissingBinding => "missing_binding",
-        AgentRecipientResolutionStatus.Ambiguous => "ambiguous",
-        _ => throw new ArgumentOutOfRangeException(nameof(status), status, "Unknown agent recipient resolution status.")
-    };
+    private static string ToApiValue(AgentRecipientResolutionStatus status) => status.ToApiValue();
 }

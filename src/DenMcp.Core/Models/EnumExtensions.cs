@@ -393,6 +393,19 @@ public static class EnumExtensions
         _ => false
     };
 
+    /// <summary>
+    /// Maps AgentRecipientResolutionStatus to compact API-facing string values
+    /// used in wake_resolution_status responses and wake_dropped metadata.
+    /// </summary>
+    public static string ToApiValue(this AgentRecipientResolutionStatus status) => status switch
+    {
+        AgentRecipientResolutionStatus.Resolved => "resolved",
+        AgentRecipientResolutionStatus.MissingRecipient => "missing_recipient",
+        AgentRecipientResolutionStatus.MissingBinding => "missing_binding",
+        AgentRecipientResolutionStatus.Ambiguous => "ambiguous",
+        _ => throw new ArgumentOutOfRangeException(nameof(status), status, "Unknown agent recipient resolution status.")
+    };
+
     public static string ToDbValue(this SessionEventType eventType) => eventType switch
     {
         SessionEventType.Created => "created",

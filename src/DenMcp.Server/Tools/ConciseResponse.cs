@@ -270,7 +270,7 @@ public static class ConciseResponse
                 : "";
 
         var wakeStatus = result.WakeResolution is not null
-            ? ToApiValue(result.WakeResolution.Status)
+            ? result.WakeResolution.Status.ToApiValue()
             : (string?)null;
 
         return Serialize(new
@@ -283,15 +283,6 @@ public static class ConciseResponse
             wake_resolution_status = wakeStatus
         });
     }
-
-    private static string ToApiValue(AgentRecipientResolutionStatus status) => status switch
-    {
-        AgentRecipientResolutionStatus.Resolved => "resolved",
-        AgentRecipientResolutionStatus.MissingRecipient => "missing_recipient",
-        AgentRecipientResolutionStatus.MissingBinding => "missing_binding",
-        AgentRecipientResolutionStatus.Ambiguous => "ambiguous",
-        _ => throw new ArgumentOutOfRangeException(nameof(status), status, "Unknown agent recipient resolution status.")
-    };
 
     // Review workflow operations
 
