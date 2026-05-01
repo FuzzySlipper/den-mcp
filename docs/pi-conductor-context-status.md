@@ -143,6 +143,14 @@ resume failures, and the operator can manually resume with a normal prompt. A
 runtime nonce check would not make this safer without risking false negatives
 that suppress a valid resume.
 
+## Policy review after #1076 noise reductions
+
+Task `#1111` reviewed this policy after the #1076 context-noise follow-ups (#1106-#1110) landed or were scoped. No threshold changes are needed:
+
+- Keep the default `watch` threshold at 65% and `compact_after_current_task` at 80% (or the derived ratios of Pi auto-compaction when lower). The thresholds are intentionally conservative because `ctx.getContextUsage()` is an estimate and the cost of compacting at a durable task boundary is low.
+- Keep timing guidance unchanged: compact between tasks, after durable planning/review/merge summaries, or before a large implementation/review loop; avoid mid-handoff compaction unless necessary.
+- Keep the `durable_context_posted: true` guardrail unchanged. The post-#1106 through #1110 response-shaping work reduces avoidable context growth, but it does not remove the need for Den to hold branch/head/tests/findings/next-step state before compaction.
+
 ## Recommended orchestrator behavior
 
 - Check `den_context_status` before starting a large implementation/review task
