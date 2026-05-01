@@ -990,7 +990,6 @@ function mergeExpectedScopes(
   if (Object.keys(merged).length === 0) return undefined;
   return merged;
 }
-}
 
 // parseStringList and tokenizeArgs are now imported from den-drift-cmd-helpers.ts
 
