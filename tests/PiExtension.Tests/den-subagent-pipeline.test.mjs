@@ -19,6 +19,7 @@ import {
 import {
   CODER_PROMPT_SLUG,
   REVIEWER_PROMPT_SLUG,
+  buildReviewerIdentity,
   fallbackPrompt,
   renderTemplate,
   summarizeTaskContext,
@@ -636,6 +637,64 @@ test('den prompt template fallbacks enforce delegated coder and reviewer guardra
   assert.match(reviewerPrompt, /scope drift/i);
   assert.match(reviewerPrompt, /test\/scoring harness/i);
   assert.match(reviewerPrompt, /blocking.*follow-up.*informational/s);
+});
+
+test('reviewer prompt template includes reviewer identity guidance and attribution instructions', () => {
+  const reviewerPrompt = fallbackPrompt(REVIEWER_PROMPT_SLUG);
+
+  // The template has the reviewer_identity placeholder.
+  assert.match(reviewerPrompt, /\{\{reviewer_identity\}\}/);
+
+  // Identity attribution instructions cover the key review tools.
+  assert.match(reviewerPrompt, /create_review_finding.*created_by.*reviewer_identity/s);
+  assert.match(reviewerPrompt, /set_review_verdict.*decided_by.*reviewer_identity/s);
+  assert.match(reviewerPrompt, /post_review_findings.*sender.*reviewer_identity/s);
+  assert.match(reviewerPrompt, /set_review_finding_status.*updated_by.*reviewer_identity/s);
+
+  // Anti-pattern: don't use parent identity.
+  assert.match(reviewerPrompt, /Do not use the parent orchestrator identity/);
+});
+
+test('buildReviewerIdentity produces correct identity strings', () => {
+  // Standard case: agent + role.
+  assert.equal(buildReviewerIdentity('pi', 'reviewer'), 'pi-reviewer');
+
+  // Already suffixed: no double-suffixing.
+  assert.equal(buildReviewerIdentity('pi-reviewer', 'reviewer'), 'pi-reviewer');
+
+  // Case normalization.
+  assert.equal(buildReviewerIdentity('PI', 'Reviewer'), 'pi-reviewer');
+
+  // Whitespace trimming.
+  assert.equal(buildReviewerIdentity(' pi ', ' reviewer '), 'pi-reviewer');
+
+  // Defaults.
+  assert.equal(buildReviewerIdentity('', 'reviewer'), 'pi-reviewer');
+  assert.equal(buildReviewerIdentity('pi', ''), 'pi-reviewer');
+  assert.equal(buildReviewerIdentity('', ''), 'pi-reviewer');
+
+  // Non-reviewer role.
+  assert.equal(buildReviewerIdentity('pi', 'planner'), 'pi-planner');
+});
+
+test('reviewer prompt renders with reviewer identity substituted', () => {
+  const prompt = renderTemplate(fallbackPrompt(REVIEWER_PROMPT_SLUG), {
+    project_id: 'den-mcp',
+    task_id: '1079',
+    task_title: 'Clarify reviewer identity',
+    task_description: 'Make review attribution consistent.',
+    task_context: '(no additional context)',
+    review_target: 'task/1079-reviewer-identity-audit',
+    extra_notes: '',
+    reviewer_identity: 'pi-reviewer',
+    role: 'reviewer',
+  });
+
+  assert.match(prompt, /Your reviewer identity is: `pi-reviewer`/);
+  assert.match(prompt, /create_review_finding.*pi-reviewer/s);
+  assert.match(prompt, /set_review_verdict.*pi-reviewer/s);
+  assert.match(prompt, /post_review_findings.*pi-reviewer/s);
+  assert.match(prompt, /Do not use the parent orchestrator identity/);
 });
 
 test('taskMessages extracts messages from task detail with multiple key conventions', () => {

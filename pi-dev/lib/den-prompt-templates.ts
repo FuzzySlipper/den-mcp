@@ -103,6 +103,20 @@ export function fallbackPrompt(slug: string): string {
     "Project: {{project_id}}",
     "Task: #{{task_id}} {{task_title}}",
     "",
+    "## Reviewer Identity",
+    "",
+    "Your reviewer identity is: `{{reviewer_identity}}`",
+    "",
+    "When calling Den review tools, use this identity consistently:",
+    "- `create_review_finding`: pass `created_by` as `{{reviewer_identity}}`.",
+    "- `set_review_verdict`: pass `decided_by` as `{{reviewer_identity}}`.",
+    "- `respond_to_review_finding`: pass `responded_by` as `{{reviewer_identity}}` (only when responding as reviewer; implementers use their own identity).",
+    "- `set_review_finding_status`: pass `updated_by` as `{{reviewer_identity}}`.",
+    "- `post_review_findings`: pass `sender` as `{{reviewer_identity}}`.",
+    "- `request_review`: pass `requested_by` as `{{reviewer_identity}}` (only when the reviewer initiates a re-review; implementer reviews use implementer identity).",
+    "",
+    "Do not use the parent orchestrator identity (e.g. `pi`) for these fields. The reviewer identity makes audit trails distinguishable from parent orchestrator actions.",
+    "",
     "## Task Intent",
     "",
     "{{task_description}}",
@@ -139,6 +153,18 @@ export function fallbackPrompt(slug: string): string {
     "- Packet-vs-diff accuracy notes.",
     "- Tests or validation you ran, if any.",
   ].join("\n");
+}
+
+/**
+ * Build a reviewer sub-agent identity string from the parent agent config and role.
+ * Convention: `<agent>-<role>` (e.g. `pi-reviewer`).
+ */
+export function buildReviewerIdentity(agent: string, role: string): string {
+  const normalizedAgent = (agent ?? "pi").trim().toLowerCase() || "pi";
+  const normalizedRole = (role ?? "reviewer").trim().toLowerCase() || "reviewer";
+  // Avoid double-suffixing if the agent already ends with the role.
+  if (normalizedAgent.endsWith(`-${normalizedRole}`)) return normalizedAgent;
+  return `${normalizedAgent}-${normalizedRole}`;
 }
 
 export function taskMessages(detail: any): any[] {

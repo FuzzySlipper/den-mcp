@@ -67,6 +67,7 @@ import {
 import {
   CODER_PROMPT_SLUG,
   REVIEWER_PROMPT_SLUG,
+  buildReviewerIdentity,
   fallbackPrompt,
   renderTemplate,
   summarizeTaskContext,
@@ -1407,6 +1408,7 @@ async function runPromptedSubagent(
     task_context: summarizeTaskContext(task),
     review_target: options.reviewTarget ?? formatReviewContextTarget(reviewContext) ?? options.extraNotes ?? "(no review target provided)",
     extra_notes: options.extraNotes ?? "",
+    reviewer_identity: role === "reviewer" ? buildReviewerIdentity(cfg.agent, "reviewer") : "",
     role,
   });
 
