@@ -374,3 +374,33 @@ test('limitHunk truncates at 2501 chars', () => {
   const result = limitHunk('f.ts', content);
   assert.ok(result.includes('truncated'));
 });
+
+// ---------------------------------------------------------------------------
+// parseDriftCheckArgs --expected-categories
+// ---------------------------------------------------------------------------
+
+test('parseDriftCheckArgs parses --expected-categories with JSON array', () => {
+  const result = parseDriftCheckArgs('936 --expected-categories \'["large_ui","fixtures"]\'');
+  assert.deepEqual(result.expected_categories, ['large_ui', 'fixtures']);
+});
+
+test('parseDriftCheckArgs parses --expected-categories with comma-separated text', () => {
+  const result = parseDriftCheckArgs('936 --expected-categories "large_ui,docs,generated"');
+  assert.deepEqual(result.expected_categories, ['large_ui', 'docs', 'generated']);
+});
+
+test('parseDriftCheckArgs parses --expected-categories with all flags', () => {
+  const result = parseDriftCheckArgs(
+    '936 --base main --expected-paths \'["src/a.ts"]\' --expected-categories "fixtures,generated" --no-post',
+  );
+  assert.equal(result.task_id, 936);
+  assert.equal(result.base_ref, 'main');
+  assert.deepEqual(result.expected_paths, ['src/a.ts']);
+  assert.deepEqual(result.expected_categories, ['fixtures', 'generated']);
+  assert.equal(result.post_result, false);
+});
+
+test('parseDriftCheckArgs expected_categories is undefined when not provided', () => {
+  const result = parseDriftCheckArgs('936 --base main');
+  assert.equal(result.expected_categories, undefined);
+});

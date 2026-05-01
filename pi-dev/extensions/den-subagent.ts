@@ -423,6 +423,7 @@ export default function denSubagent(pi: ExtensionAPI) {
       branch: Type.Optional(Type.String({ description: "Fallback branch name for reporting if git collection cannot resolve it." })),
       head_commit: Type.Optional(Type.String({ description: "Fallback head commit for reporting if git collection cannot resolve it." })),
       expected_paths: Type.Optional(Type.String({ description: "Optional JSON array or comma-separated list of expected path hints." })),
+      expected_categories: Type.Optional(Type.String({ description: "Optional JSON array or comma-separated list of expected change categories (large_ui, docs, fixtures, generated, schema, config, tests)." })),
       declared_tests: Type.Optional(Type.String({ description: "Optional JSON array or newline-separated declared test results." })),
       implementation_summary: Type.Optional(Type.String({ description: "Optional one-line implementation summary." })),
       post_result: Type.Optional(Type.Boolean({ description: "Post drift_check_packet to Den. Defaults true." })),
@@ -437,6 +438,7 @@ export default function denSubagent(pi: ExtensionAPI) {
         branch: normalizeString(params.branch),
         head_commit: normalizeString(params.head_commit),
         expected_paths: parseStringList(params.expected_paths),
+        expected_categories: parseStringList(params.expected_categories),
         declared_tests: parseStringList(params.declared_tests),
         implementation_summary: normalizeString(params.implementation_summary),
         post_result: typeof params.post_result === "boolean" ? params.post_result : undefined,
@@ -758,6 +760,7 @@ async function runAndMaybePostDriftCheck(
     branch?: string;
     head_commit?: string;
     expected_paths?: string[];
+    expected_categories?: string[];
     declared_tests?: string[];
     implementation_summary?: string;
     post_result?: boolean;
@@ -774,7 +777,8 @@ async function runAndMaybePostDriftCheck(
 
   const contextScope = contextPacket?.content ? extractExpectedScopeFromContextPacket(contextPacket.content) : undefined;
   const explicitScope = expectedScopeFromPaths(options.expected_paths);
-  const expectedScope = mergeExpectedScopes(contextScope, explicitScope);
+  const explicitCategories = normalizeExplicitCategories(options.expected_categories);
+  const expectedScope = mergeExpectedScopes(contextScope, explicitScope, explicitCategories);
   const declaredTests = options.declared_tests?.length
     ? options.declared_tests
     : (implementationPacket?.content ? extractDeclaredTestsFromImplementationPacket(implementationPacket.content) : []);
@@ -945,14 +949,47 @@ function expectedScopeFromPaths(paths: string[] | undefined): DriftExpectedScope
   return { paths, raw_hints: paths };
 }
 
-function mergeExpectedScopes(a: DriftExpectedScope | undefined, b: DriftExpectedScope | undefined): DriftExpectedScope | undefined {
-  if (!a) return b;
-  if (!b) return a;
-  return {
-    paths: [...(a.paths ?? []), ...(b.paths ?? [])],
-    globs: [...(a.globs ?? []), ...(b.globs ?? [])],
-    raw_hints: [...(a.raw_hints ?? []), ...(b.raw_hints ?? [])],
-  };
+/** Normalize explicit category strings into valid expected change categories. */
+function normalizeExplicitCategories(categories: string[] | undefined): string[] | undefined {
+  if (!categories || categories.length === 0) return undefined;
+  const valid = new Set(["large_ui", "docs", "fixtures", "generated", "schema", "config", "tests"]);
+  const normalized = categories.map((c) => c.trim().toLowerCase()).filter((c) => valid.has(c));
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function mergeExpectedScopes(
+  a: DriftExpectedScope | undefined,
+  b: DriftExpectedScope | undefined,
+  explicitCategories?: string[],
+): DriftExpectedScope | undefined {
+  const merged: DriftExpectedScope = {};
+
+  // Merge paths/globs/hints from both scopes.
+  const allPaths = [...(a?.paths ?? []), ...(b?.paths ?? [])];
+  const allGlobs = [...(a?.globs ?? []), ...(b?.globs ?? [])];
+  const allHints = [...(a?.raw_hints ?? []), ...(b?.raw_hints ?? [])];
+
+  if (allPaths.length > 0) merged.paths = allPaths;
+  if (allGlobs.length > 0) merged.globs = allGlobs;
+  if (allHints.length > 0) merged.raw_hints = allHints;
+
+  // Merge expected_change_categories from both scopes and explicit categories.
+  const allCategories: string[] = [];
+  const validCategories = new Set(["large_ui", "docs", "fixtures", "generated", "schema", "config", "tests"]);
+  for (const cat of [...(a?.expected_change_categories ?? []), ...(b?.expected_change_categories ?? []), ...(explicitCategories ?? [])]) {
+    const cleaned = cat.trim().toLowerCase();
+    if (validCategories.has(cleaned)) allCategories.push(cleaned);
+  }
+  const uniqueCats = [...new Set(allCategories)];
+  if (uniqueCats.length > 0) {
+    (merged as any).expected_change_categories = uniqueCats;
+  }
+
+  // If nothing was merged and no inputs, return undefined.
+  if (!a && !b && (!explicitCategories || explicitCategories.length === 0)) return undefined;
+  if (Object.keys(merged).length === 0) return undefined;
+  return merged;
+}
 }
 
 // parseStringList and tokenizeArgs are now imported from den-drift-cmd-helpers.ts

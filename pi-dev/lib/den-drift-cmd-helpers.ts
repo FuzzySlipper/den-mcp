@@ -116,6 +116,7 @@ export interface ParsedDriftCheckArgs {
   branch?: string;
   head_commit?: string;
   expected_paths?: string[];
+  expected_categories?: string[];
   declared_tests?: string[];
   implementation_summary?: string;
   post_result?: boolean;
@@ -127,7 +128,7 @@ export function parseDriftCheckArgs(args: string | undefined): ParsedDriftCheckA
   const taskToken = tokens.shift();
   const taskId = Number(taskToken);
   if (!Number.isInteger(taskId) || taskId <= 0) {
-    throw new Error("Usage: /den-drift-check <task_id> [--base <ref>] [--base-commit <sha>] [--declared-tests <text>] [--expected-paths <json|csv>] [--no-post]");
+    throw new Error("Usage: /den-drift-check <task_id> [--base <ref>] [--base-commit <sha>] [--declared-tests <text>] [--expected-paths <json|csv>] [--expected-categories <json|csv>] [--no-post]");
   }
 
   const parsed: ParsedDriftCheckArgs = { task_id: taskId };
@@ -149,6 +150,7 @@ export function parseDriftCheckArgs(args: string | undefined): ParsedDriftCheckA
       case "--head": parsed.head_commit = value; break;
       case "--head-commit": parsed.head_commit = value; break;
       case "--expected-paths": parsed.expected_paths = parseStringList(value); break;
+      case "--expected-categories": parsed.expected_categories = parseStringList(value); break;
       case "--declared-tests": parsed.declared_tests = parseStringList(value); break;
       case "--summary": parsed.implementation_summary = value; break;
       default: throw new Error(`Unknown drift-check flag: ${token}`);

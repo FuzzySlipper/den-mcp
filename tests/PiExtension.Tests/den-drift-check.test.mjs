@@ -6,9 +6,12 @@ import {
   compareExpectedScope,
   extractDeclaredTestsFromImplementationPacket,
   extractExpectedScopeFromContextPacket,
+  extractExpectedChangeCategories,
   extractTaskIntentFromContextPacket,
   formatDriftCheckPacketMessage,
   buildDriftCheckPacketMeta,
+  applyExpectedCategoryAdjustments,
+  EXPECTED_CHANGE_CATEGORIES,
 } from '../../pi-dev/lib/den-drift-check.ts';
 
 test('analyzeDriftCheck keeps scoped source/test changes at medium risk with declared tests', () => {
@@ -259,4 +262,401 @@ Finish delegated-coder workflow foundation before roadmap work.
     extractTaskIntentFromContextPacket(packet),
     'Finish delegated-coder workflow foundation before roadmap work.',
   );
+});
+
+// ---------------------------------------------------------------------------
+// Expected change categories — analysis adjustments
+// ---------------------------------------------------------------------------
+
+test('large_ui expected category downgrades large_diff to low risk', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [{ status: 'M', path: 'src/ui/App.tsx', additions: 400, deletions: 200 }],
+    expected_scope: {
+      paths: ['src/ui/App.tsx'],
+      expected_change_categories: ['large_ui'],
+    },
+    declared_tests: ['node --test tests/ui.test.mjs — pass'],
+  });
+
+  assert.equal(result.risk, 'low');
+  assert.ok(result.expected_categories.includes('large_ui'));
+  const largeDiff = result.signals.find((s) => s.code === 'large_diff');
+  assert.ok(largeDiff);
+  assert.equal(largeDiff.severity, 'low');
+  assert.equal(largeDiff.expected, true);
+  assert.ok(largeDiff.message.includes('Expected per task scope'));
+});
+
+test('docs expected category downgrades large_diff to low risk', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [{ status: 'M', path: 'docs/api.md', additions: 600, deletions: 100 }],
+    expected_scope: {
+      expected_change_categories: ['docs'],
+    },
+    declared_tests: ['none needed'],
+  });
+
+  assert.equal(result.risk, 'low');
+  const largeDiff = result.signals.find((s) => s.code === 'large_diff');
+  assert.ok(largeDiff);
+  assert.equal(largeDiff.expected, true);
+});
+
+test('generated expected category downgrades generated_files to low', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [{ status: 'M', path: 'src/generated/client.ts', additions: 500, deletions: 100 }],
+    expected_scope: {
+      expected_change_categories: ['generated'],
+    },
+    declared_tests: ['node --test tests/api.test.mjs — pass'],
+  });
+
+  const genSignal = result.signals.find((s) => s.code === 'generated_files');
+  assert.ok(genSignal);
+  assert.equal(genSignal.severity, 'low');
+  assert.equal(genSignal.expected, true);
+});
+
+test('fixtures expected category downgrades test harness signals for fixture paths', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [{ status: 'M', path: 'tests/__fixtures__/response.json', additions: 100, deletions: 0 }],
+    expected_scope: {
+      expected_change_categories: ['fixtures'],
+    },
+    declared_tests: ['node --test tests/api.test.mjs — pass'],
+  });
+
+  // tests/__fixtures__/ paths are caught by test_or_scoring_harness, not generated_files.
+  const testSignal = result.signals.find((s) => s.code === 'test_or_scoring_harness_changes');
+  assert.ok(testSignal);
+  assert.equal(testSignal.severity, 'low');
+  assert.equal(testSignal.expected, true);
+});
+
+test('fixtures expected does not downgrade non-fixture generated files', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [{ status: 'M', path: 'dist/bundle.min.js', additions: 500, deletions: 0 }],
+    expected_scope: {
+      expected_change_categories: ['fixtures'],
+    },
+    declared_tests: ['node --test tests/api.test.mjs — pass'],
+  });
+
+  const genSignal = result.signals.find((s) => s.code === 'generated_files');
+  assert.ok(genSignal);
+  assert.equal(genSignal.severity, 'medium');
+  assert.equal(genSignal.expected, undefined);
+});
+
+test('tests expected category downgrades non-high test changes to low', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [
+      { status: 'M', path: 'tests/unit/api.test.ts', additions: 30, deletions: 5 },
+    ],
+    expected_scope: {
+      expected_change_categories: ['tests'],
+    },
+    declared_tests: ['node --test tests/unit/api.test.ts — pass'],
+  });
+
+  const testSignal = result.signals.find((s) => s.code === 'test_or_scoring_harness_changes');
+  assert.ok(testSignal);
+  assert.equal(testSignal.severity, 'low');
+  assert.equal(testSignal.expected, true);
+});
+
+test('tests expected category still keeps high-risk harness at medium', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [
+      { status: 'M', path: '.github/workflows/ci.yml', additions: 5, deletions: 0 },
+    ],
+    expected_scope: {
+      expected_change_categories: ['tests'],
+    },
+    declared_tests: ['node --test tests/api.test.ts — pass'],
+  });
+
+  const testSignal = result.signals.find((s) => s.code === 'test_or_scoring_harness_changes');
+  assert.ok(testSignal);
+  // High-risk harness is downgraded from high to medium (not to low)
+  assert.equal(testSignal.severity, 'medium');
+  assert.equal(testSignal.expected, true);
+});
+
+test('config expected category downgrades package changes from high to medium', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [
+      { status: 'M', path: 'package.json', additions: 1, deletions: 1 },
+    ],
+    expected_scope: {
+      expected_change_categories: ['config'],
+    },
+    declared_tests: ['node --test tests/api.test.ts — pass'],
+  });
+
+  const pkgSignal = result.signals.find((s) => s.code === 'package_project_dependency_changes');
+  assert.ok(pkgSignal);
+  assert.equal(pkgSignal.severity, 'medium');
+  assert.equal(pkgSignal.expected, true);
+  assert.ok(pkgSignal.message.includes('expected per task scope'));
+});
+
+test('schema expected category marks suspicious schema files as expected but keeps severity', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [
+      { status: 'M', path: 'src/migrations/001_create_users.sql', additions: 10, deletions: 0 },
+    ],
+    expected_scope: {
+      expected_change_categories: ['schema'],
+    },
+    declared_tests: ['node --test tests/api.test.ts — pass'],
+  });
+
+  const suspSignal = result.signals.find((s) => s.code === 'suspicious_files');
+  assert.ok(suspSignal);
+  assert.equal(suspSignal.expected, true);
+  assert.ok(suspSignal.message.includes('Schema changes expected'));
+});
+
+test('without expected categories, large_diff stays at medium', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [{ status: 'M', path: 'src/ui/App.tsx', additions: 400, deletions: 200 }],
+    declared_tests: ['node --test tests/ui.test.mjs — pass'],
+  });
+
+  const largeDiff = result.signals.find((s) => s.code === 'large_diff');
+  assert.ok(largeDiff);
+  assert.equal(largeDiff.severity, 'medium');
+  assert.equal(largeDiff.expected, undefined);
+});
+
+test('invalid categories are ignored', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [{ status: 'M', path: 'src/ui/App.tsx', additions: 400, deletions: 200 }],
+    expected_scope: {
+      expected_change_categories: ['invalid_category', 'large_ui'],
+    },
+    declared_tests: ['node --test tests/ui.test.mjs — pass'],
+  });
+
+  assert.deepEqual(result.expected_categories, ['large_ui']);
+  const largeDiff = result.signals.find((s) => s.code === 'large_diff');
+  assert.ok(largeDiff);
+  assert.equal(largeDiff.severity, 'low');
+  assert.equal(largeDiff.expected, true);
+});
+
+// ---------------------------------------------------------------------------
+// Expected change categories — output format
+// ---------------------------------------------------------------------------
+
+test('formatDriftCheckPacketMessage shows expected categories and expected tag', () => {
+  const result = analyzeDriftCheck({
+    task_id: 1081,
+    task_intent: 'Reduce drift noise.',
+    branch: 'task/1081-drift-noise',
+    base_ref: 'main',
+    head_commit: 'abc1234',
+    changed_paths: [{ status: 'M', path: 'src/ui/App.tsx', additions: 400, deletions: 200 }],
+    expected_scope: {
+      expected_change_categories: ['large_ui'],
+    },
+    declared_tests: ['node --test tests/ui.test.mjs — pass'],
+  });
+
+  const message = formatDriftCheckPacketMessage(result);
+
+  // Should show expected categories section
+  assert.ok(message.includes('## Expected Change Categories'));
+  assert.ok(message.includes('`large_ui`'));
+  assert.ok(message.includes('Expected does not mean automatically approved'));
+
+  // Expected signals should show *(expected)* tag
+  assert.match(message, /\*\(expected\)\*/);
+
+  // Risk should be low
+  assert.ok(message.includes('**Risk:** low'));
+});
+
+test('formatDriftCheckPacketMessage omits expected categories section when none declared', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [{ status: 'M', path: 'src/ui/App.tsx', additions: 5, deletions: 1 }],
+    declared_tests: ['node --test tests/ui.test.mjs — pass'],
+  });
+
+  const message = formatDriftCheckPacketMessage(result);
+  assert.ok(!message.includes('## Expected Change Categories'));
+  assert.ok(!message.includes('*(expected)*'));
+});
+
+// ---------------------------------------------------------------------------
+// Expected change categories — context packet extraction
+// ---------------------------------------------------------------------------
+
+test('extractExpectedChangeCategories reads dedicated section', () => {
+  const packet = `
+# Coder Context Packet
+
+## Expected change categories
+
+- \`large_ui\`
+- \`fixtures\`
+- \`generated\`
+`;
+
+  const categories = extractExpectedChangeCategories(packet);
+  assert.deepEqual(categories, ['large_ui', 'fixtures', 'generated']);
+});
+
+test('extractExpectedChangeCategories reads from constraints section', () => {
+  const packet = `
+# Coder Context Packet
+
+## Constraints
+
+Expected categories: \`docs\` and \`schema\`.
+`;
+
+  const categories = extractExpectedChangeCategories(packet);
+  assert.deepEqual(categories, ['docs', 'schema']);
+});
+
+test('extractExpectedChangeCategories returns empty for no matches', () => {
+  const packet = `
+# Coder Context Packet
+
+## Scope
+
+- \`src/lib/foo.ts\`
+`;
+
+  const categories = extractExpectedChangeCategories(packet);
+  assert.deepEqual(categories, []);
+});
+
+test('extractExpectedScopeFromContextPacket includes expected_change_categories', () => {
+  const packet = `
+# Coder Context Packet
+
+## Expected change categories
+
+- \`large_ui\`
+- \`fixtures\`
+
+## Suggested file pointers
+
+- \`src/ui/App.tsx\`
+`;
+
+  const scope = extractExpectedScopeFromContextPacket(packet);
+  assert.ok(scope.paths.includes('src/ui/App.tsx'));
+  assert.ok(scope.expected_change_categories);
+  assert.deepEqual(scope.expected_change_categories, ['large_ui', 'fixtures']);
+});
+
+test('EXPECTED_CHANGE_CATEGORIES constant contains all valid categories', () => {
+  assert.deepEqual([...EXPECTED_CHANGE_CATEGORIES], ['large_ui', 'docs', 'fixtures', 'generated', 'schema', 'config', 'tests']);
+});
+
+// ---------------------------------------------------------------------------
+// applyExpectedCategoryAdjustments — direct function tests
+// ---------------------------------------------------------------------------
+
+test('applyExpectedCategoryAdjustments returns signals unchanged when no categories', () => {
+  const signals = [
+    { code: 'large_diff', severity: 'medium', message: 'big diff' },
+  ];
+  const result = applyExpectedCategoryAdjustments(signals, [], []);
+  assert.equal(result[0].severity, 'medium');
+  assert.equal(result[0].expected, undefined);
+});
+
+test('applyExpectedCategoryAdjustments does not affect unrelated signals', () => {
+  const signals = [
+    { code: 'dirty_worktree', severity: 'high', message: 'dirty' },
+    { code: 'collection_error', severity: 'high', message: 'error' },
+    { code: 'missing_head_commit', severity: 'medium', message: 'no head' },
+  ];
+  const result = applyExpectedCategoryAdjustments(signals, ['large_ui'], []);
+  assert.equal(result[0].severity, 'high');
+  assert.equal(result[0].expected, undefined);
+  assert.equal(result[1].severity, 'high');
+  assert.equal(result[1].expected, undefined);
+  assert.equal(result[2].severity, 'medium');
+  assert.equal(result[2].expected, undefined);
+});
+
+test('multiple expected categories can combine to reduce noise', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [
+      { status: 'M', path: 'src/ui/App.tsx', additions: 400, deletions: 200 },
+      { status: 'M', path: 'tests/__snapshots__/api.test.mjs.snap', additions: 100, deletions: 0 },
+    ],
+    expected_scope: {
+      expected_change_categories: ['large_ui', 'fixtures'],
+    },
+    declared_tests: ['node --test tests/api.test.ts — pass'],
+  });
+
+  const largeDiff = result.signals.find((s) => s.code === 'large_diff');
+  assert.ok(largeDiff);
+  assert.equal(largeDiff.severity, 'low');
+  assert.equal(largeDiff.expected, true);
+
+  const genFiles = result.signals.find((s) => s.code === 'generated_files');
+  assert.ok(genFiles, `Expected generated_files signal; got: ${result.signals.map(s => s.code).join(', ')}`);
+  assert.equal(genFiles.severity, 'low');
+  assert.equal(genFiles.expected, true);
+});
+
+test('blocking signals for out-of-scope paths are not reduced by categories', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [
+      { status: 'M', path: 'src/ui/App.tsx', additions: 400, deletions: 200 },
+      { status: 'M', path: 'src/completely/unrelated/Secret.ts', additions: 5, deletions: 0 },
+    ],
+    expected_scope: {
+      paths: ['src/ui/App.tsx'],
+      expected_change_categories: ['large_ui'],
+    },
+    declared_tests: ['node --test tests/api.test.ts — pass'],
+  });
+
+  // out-of-scope signal should not be reduced
+  const oosSignal = result.signals.find((s) => s.code === 'outside_expected_scope');
+  assert.ok(oosSignal);
+  assert.equal(oosSignal.expected, undefined);
+
+  // large_diff should be reduced
+  const largeDiff = result.signals.find((s) => s.code === 'large_diff');
+  assert.ok(largeDiff);
+  assert.equal(largeDiff.expected, true);
+});
+
+test('reasons include expected tag for adjusted signals', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [{ status: 'M', path: 'src/ui/App.tsx', additions: 400, deletions: 200 }],
+    expected_scope: {
+      expected_change_categories: ['large_ui'],
+    },
+    declared_tests: ['node --test tests/ui.test.mjs — pass'],
+  });
+
+  const expectedReason = result.reasons.find((r) => r.includes('(expected)'));
+  assert.ok(expectedReason, `Expected a reason with (expected), got: ${JSON.stringify(result.reasons)}`);
 });

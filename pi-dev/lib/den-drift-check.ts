@@ -19,6 +19,25 @@ const execFileAsync = promisify(execFile);
 
 export type DriftRiskLevel = "low" | "medium" | "high";
 
+/**
+ * Expected change categories that callers can declare to reduce false-positive
+ * drift noise for legitimate large, generated, fixture, or docs work.
+ *
+ * These categories downgrade matching signals from medium/high to low/medium
+ * and mark them as expected, but do not eliminate them from the output.
+ */
+export const EXPECTED_CHANGE_CATEGORIES = [
+  "large_ui",
+  "docs",
+  "fixtures",
+  "generated",
+  "schema",
+  "config",
+  "tests",
+] as const;
+
+export type ExpectedChangeCategory = typeof EXPECTED_CHANGE_CATEGORIES[number];
+
 export interface DriftChangedPath {
   path: string;
   status?: string;
@@ -34,6 +53,8 @@ export interface DriftExpectedScope {
   globs?: string[];
   /** Human-readable hints captured from the context packet. */
   raw_hints?: string[];
+  /** Expected change categories that should reduce noise for matching signals. */
+  expected_change_categories?: ExpectedChangeCategory[];
 }
 
 export interface DriftCheckInput {
@@ -58,6 +79,8 @@ export interface DriftSignal {
   severity: DriftRiskLevel;
   message: string;
   paths?: string[];
+  /** True when this signal matches an expected change category and has been noise-reduced. */
+  expected?: boolean;
 }
 
 export interface DriftScopeComparison {
@@ -81,6 +104,8 @@ export interface DriftCheckResult {
   signals: DriftSignal[];
   scope: DriftScopeComparison;
   categories: DriftCategorySummary;
+  /** Expected change categories declared for this task, used for noise reduction. */
+  expected_categories: ExpectedChangeCategory[];
   changed_paths: DriftChangedPath[];
   diffstat_summary: string;
   dirty_status: string[];
@@ -229,16 +254,24 @@ export function analyzeDriftCheck(input: DriftCheckInput): DriftCheckResult {
     });
   }
 
-  const risk = maxRisk(signals.map((s) => s.severity));
-  const reasons = signals.map((s) => `${s.severity}: ${s.message}`);
+  // Apply expected change category adjustments to reduce false-positive noise.
+  const expectedCategories = normalizeExpectedCategories(input.expected_scope?.expected_change_categories);
+  const adjustedSignals = applyExpectedCategoryAdjustments(signals, expectedCategories, changedPaths);
+
+  const risk = maxRisk(adjustedSignals.map((s) => s.severity));
+  const reasons = adjustedSignals.map((s) => {
+    const prefix = s.expected ? `${s.severity} (expected)` : s.severity;
+    return `${prefix}: ${s.message}`;
+  });
 
   return {
     risk,
     reasons,
     recommendation: risk === "low" ? "proceed" : "flag-for-review",
-    signals,
+    signals: adjustedSignals,
     scope,
     categories,
+    expected_categories: expectedCategories,
     changed_paths: changedPaths,
     diffstat_summary: summarizeDiffstat(input.diff_stat, changedPaths),
     dirty_status: statusLines,
@@ -331,7 +364,8 @@ export function formatDriftCheckPacketMessage(result: DriftCheckResult): string 
   } else {
     for (const signal of result.signals) {
       const pathSuffix = signal.paths && signal.paths.length > 0 ? ` (${signal.paths.join(", ")})` : "";
-      lines.push(`- **${signal.severity}** \`${signal.code}\`: ${signal.message}${pathSuffix}`);
+      const expectedTag = signal.expected ? " *(expected)*" : "";
+      lines.push(`- **${signal.severity}** \`${signal.code}\`${expectedTag}: ${signal.message}${pathSuffix}`);
     }
   }
   lines.push("");
@@ -343,6 +377,14 @@ export function formatDriftCheckPacketMessage(result: DriftCheckResult): string 
   lines.push(`- Out-of-scope changed paths: ${result.scope.out_of_scope_paths.length}`);
   for (const p of result.scope.out_of_scope_paths) lines.push(`  - \`${p}\``);
   lines.push("");
+
+  if (result.expected_categories.length > 0) {
+    lines.push("## Expected Change Categories", "");
+    for (const cat of result.expected_categories) {
+      lines.push(`- \`${cat}\`: ${expectedCategoryDescription(cat)}`);
+    }
+    lines.push("- Expected does not mean automatically approved; reviewer should still confirm scope.", "");
+  }
 
   lines.push("## Changed Paths", "");
   if (result.changed_paths.length === 0) {
@@ -434,10 +476,14 @@ export function extractExpectedScopeFromContextPacket(content: string): DriftExp
     else paths.add(cleaned);
   }
 
+  // Extract expected change categories from a dedicated section or constraints.
+  const categories = extractExpectedChangeCategories(content);
+
   return {
     paths: [...paths],
     globs: [...globs],
     raw_hints: [...raw],
+    ...(categories.length > 0 ? { expected_change_categories: categories } : {}),
   };
 }
 
@@ -502,6 +548,213 @@ export async function collectGitDriftCheckInput(options: {
     expected_scope: options.expected_scope,
     collection_errors: errors,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Expected change category extraction from context packets
+// ---------------------------------------------------------------------------
+
+/** Extract expected change categories from context packet sections. */
+export function extractExpectedChangeCategories(content: string): ExpectedChangeCategory[] {
+  const valid = new Set(EXPECTED_CHANGE_CATEGORIES);
+  const categories: ExpectedChangeCategory[] = [];
+
+  // Look for a dedicated "Expected change categories" section.
+  const section = extractMarkdownSection(content, /expected\s+change\s+categories?|expected\s+categories?/i);
+  if (section) {
+    for (const value of extractBacktickValues(section)) {
+      const cleaned = value.trim().toLowerCase();
+      if (valid.has(cleaned as ExpectedChangeCategory)) {
+        categories.push(cleaned as ExpectedChangeCategory);
+      }
+    }
+    // Also parse bullet-list items without backticks.
+    for (const line of section.split("\n")) {
+      const bullet = line.trim().match(/^[-*]\s+([a-z_]+)/i);
+      if (bullet) {
+        const cleaned = bullet[1].toLowerCase();
+        if (valid.has(cleaned as ExpectedChangeCategory)) {
+          categories.push(cleaned as ExpectedChangeCategory);
+        }
+      }
+    }
+  }
+
+  // Also look in constraints section for backticked category references.
+  if (categories.length === 0) {
+    const constraints = extractMarkdownSection(content, /constraints|scope\s+boundaries/i);
+    if (constraints) {
+      for (const value of extractBacktickValues(constraints)) {
+        const cleaned = value.trim().toLowerCase();
+        if (valid.has(cleaned as ExpectedChangeCategory)) {
+          categories.push(cleaned as ExpectedChangeCategory);
+        }
+      }
+    }
+  }
+
+  return unique(categories) as ExpectedChangeCategory[];
+}
+
+/** Human-readable description for an expected change category. */
+function expectedCategoryDescription(category: ExpectedChangeCategory): string {
+  switch (category) {
+    case "large_ui": return "Large UI/template/front-end changes expected per task scope.";
+    case "docs": return "Documentation changes expected per task scope.";
+    case "fixtures": return "Test fixture or snapshot updates expected per task scope.";
+    case "generated": return "Generated code or artifact updates expected per task scope.";
+    case "schema": return "Schema or migration changes expected per task scope.";
+    case "config": return "Package/project/dependency configuration changes expected per task scope.";
+    case "tests": return "Test file changes expected per task scope.";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Expected change category adjustments
+// ---------------------------------------------------------------------------
+
+/** Normalize and validate expected change categories. */
+function normalizeExpectedCategories(categories: ExpectedChangeCategory[] | undefined): ExpectedChangeCategory[] {
+  if (!Array.isArray(categories)) return [];
+  const valid = new Set(EXPECTED_CHANGE_CATEGORIES);
+  return unique(categories.filter((c) => valid.has(c))) as ExpectedChangeCategory[];
+}
+
+/** Apply expected change category adjustments to drift signals. */
+export function applyExpectedCategoryAdjustments(
+  signals: DriftSignal[],
+  categories: ExpectedChangeCategory[],
+  changedPaths: DriftChangedPath[],
+): DriftSignal[] {
+  if (categories.length === 0) return signals;
+  const catSet = new Set(categories);
+
+  return signals.map((signal) => {
+    if (signal.expected) return signal;
+
+    switch (signal.code) {
+      case "large_diff": {
+        if (catSet.has("large_ui") || catSet.has("docs")) {
+          return {
+            ...signal,
+            severity: "low",
+            expected: true,
+            message: `${signal.message} Expected per task scope.`,
+          };
+        }
+        break;
+      }
+
+      case "generated_files": {
+        const hasGenerated = catSet.has("generated");
+        const hasFixtures = catSet.has("fixtures");
+        if (hasGenerated && hasFixtures) {
+          return {
+            ...signal,
+            severity: "low",
+            expected: true,
+            message: `${signal.message} Expected per task scope.`,
+          };
+        }
+        if (hasFixtures) {
+          const allFixtures = (signal.paths ?? []).every((p) => isFixturePath(p));
+          if (allFixtures && (signal.paths ?? []).length > 0) {
+            return {
+              ...signal,
+              severity: "low",
+              expected: true,
+              message: `${signal.message} Fixture/snapshot changes expected per task scope.`,
+            };
+          }
+        }
+        if (hasGenerated) {
+          return {
+            ...signal,
+            severity: "low",
+            expected: true,
+            message: `${signal.message} Generated file changes expected per task scope.`,
+          };
+        }
+        break;
+      }
+
+      case "suspicious_files": {
+        if (catSet.has("schema")) {
+          const schemaPaths = (signal.paths ?? []).filter((p) => isSchemaRelatedPath(p));
+          if (schemaPaths.length > 0) {
+            return {
+              ...signal,
+              expected: true,
+              message: `${signal.message} Schema changes expected per task scope; reviewer should still confirm scope.`,
+            };
+          }
+        }
+        break;
+      }
+
+      case "test_or_scoring_harness_changes": {
+        if (catSet.has("tests")) {
+          if (signal.severity === "high") {
+            // High-risk harness changes stay elevated but are marked expected.
+            return {
+              ...signal,
+              severity: "medium",
+              expected: true,
+              message: `${signal.message} Test harness changes expected per task scope; reviewer should confirm.`,
+            };
+          }
+          return {
+            ...signal,
+            severity: "low",
+            expected: true,
+            message: `${signal.message} Test changes expected per task scope.`,
+          };
+        }
+        // Also handle fixtures expected category for fixture-like test files.
+        if (catSet.has("fixtures") && (signal.paths ?? []).some((p) => isFixturePath(p))) {
+          return {
+            ...signal,
+            severity: "low",
+            expected: true,
+            message: `${signal.message} Fixture changes expected per task scope.`,
+          };
+        }
+        break;
+      }
+
+      case "package_project_dependency_changes": {
+        if (catSet.has("config")) {
+          return {
+            ...signal,
+            severity: "medium",
+            expected: true,
+            message: `${signal.message} Dependency/config changes expected per task scope; reviewer should confirm.`,
+          };
+        }
+        break;
+      }
+    }
+
+    return signal;
+  });
+}
+
+/** Check if a path looks like a test fixture or snapshot file. */
+function isFixturePath(pathValue: string): boolean {
+  const p = normalizePath(pathValue).toLowerCase();
+  return p.includes("/fixtures/")
+    || p.includes("/__fixtures__/")
+    || p.includes("/__snapshots__/")
+    || p.endsWith(".snap")
+    || /\.fixture\./.test(p);
+}
+
+/** Check if a path is schema-related (migrations, schema dirs). */
+function isSchemaRelatedPath(pathValue: string): boolean {
+  const p = normalizePath(pathValue).toLowerCase();
+  return /(^|\/)migrations?\//.test(p)
+    || /(^|\/)schemas?\//.test(p)
+    || p.includes("schema");
 }
 
 // ---------------------------------------------------------------------------
