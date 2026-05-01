@@ -868,3 +868,252 @@ test('buildPacketMissingNoticeMeta produces correct metadata', () => {
   assert.ok(meta.packet_missing_fields.length > 0,
     'Should list missing fields');
 });
+
+// ---------------------------------------------------------------------------
+// Task #1097: Partial packet policy boundary
+//
+// These tests encode the decision that only prompt-like partial outputs are
+// routed to implementation_packet_missing. Non-prompt partial outputs
+// (those with structured content but missing required fields) remain as
+// partial implementation_packet messages to preserve useful coder output.
+// ---------------------------------------------------------------------------
+
+test('detectIncompleteCoderPrompt does not flag prompt phrase inside a complete packet', () => {
+  // A complete packet that happens to contain the prompt phrase in the
+  // Risk Notes section must NOT be flagged. The heading-count guard
+  // (>= 3 required headings) prevents this false positive.
+  const output = `
+## Branch
+
+task/1097-partial-packet-policy
+
+## Head Commit
+
+abc123def456
+
+## Summary
+
+Evaluated the partial packet boundary and added tests.
+
+## Files Changed
+
+- pi-dev/lib/den-implementation-packet.ts
+- tests/PiExtension.Tests/den-implementation-packet.test.mjs
+
+## Tests Run
+
+All 52 tests pass.
+
+## Acceptance Checklist
+
+- ✅ Policy boundary documented and tested.
+
+## Known Gaps
+
+None.
+
+## Risk Notes
+
+Now post the implementation packet to the Den task thread for review.
+`;
+
+  assert.equal(
+    detectIncompleteCoderPrompt(output),
+    false,
+    'Complete packet with prompt phrase in Risk Notes must not be flagged'
+  );
+
+  const result = extractImplementationPacket(output);
+  assert.equal(result.incomplete_prompt_detected, false,
+    'Extraction must not flag complete packet with prompt phrase');
+  assert.equal(result.completeness, 'complete');
+});
+
+test('detectIncompleteCoderPrompt does not flag prompt phrase inside a partial packet with 3+ headings', () => {
+  // A partial packet with 3+ required headings but containing the prompt
+  // phrase in a section body must NOT be flagged. It is a real (partial)
+  // packet, not an incomplete prompt.
+  const output = `
+## Branch
+
+task/1097-partial-packet-policy
+
+## Head Commit
+
+abc123def456
+
+## Summary
+
+Now post the implementation packet to the Den task thread.
+`;
+
+  assert.equal(
+    detectIncompleteCoderPrompt(output),
+    false,
+    'Partial packet with 3 headings and prompt phrase in summary must not be flagged'
+  );
+
+  const result = extractImplementationPacket(output);
+  assert.equal(result.incomplete_prompt_detected, false);
+  assert.equal(result.completeness, 'partial');
+  assert.ok(result.missing_fields.includes('files_changed'));
+  assert.ok(result.missing_fields.includes('tests_run'));
+});
+
+test('detectIncompleteCoderPrompt flags prompt-only output with 2 headings', () => {
+  // An output with only 2 headings where the content is just an instruction
+  // to post the packet should be flagged as an incomplete prompt.
+  const output = `
+## Summary
+
+Now post the implementation packet to the Den task thread:
+
+## Files Changed
+
+- some-file.ts
+`;
+
+  assert.equal(
+    detectIncompleteCoderPrompt(output),
+    true,
+    'Output with only 2 headings and prompt phrase must be flagged'
+  );
+
+  const result = extractImplementationPacket(output);
+  assert.equal(result.incomplete_prompt_detected, true);
+});
+
+test('non-prompt partial packets preserve useful structured content as implementation_packet', () => {
+  // A partial output without any prompt phrase but with some structured
+  // content must be extracted as a partial packet (not packet_missing).
+  // This preserves useful coder output like branch, summary, and files.
+  const output = `
+## Branch
+
+task/1097-partial-packet-policy
+
+## Head Commit
+
+abc123def456
+
+## Summary
+
+Made progress on the implementation but ran out of context.
+
+## Files Changed
+
+- pi-dev/lib/den-implementation-packet.ts
+`;
+
+  const result = extractImplementationPacket(output);
+
+  // Not flagged as incomplete prompt — this is real structured content.
+  assert.equal(result.incomplete_prompt_detected, false);
+
+  // Partial completeness preserves useful output.
+  assert.equal(result.completeness, 'partial');
+  assert.equal(result.packet.branch, 'task/1097-partial-packet-policy');
+  assert.equal(result.packet.head_commit, 'abc123def456');
+  assert.ok(result.packet.summary?.includes('ran out of context'));
+  assert.ok(Array.isArray(result.packet.files_changed));
+  assert.equal(result.packet.files_changed?.length, 1);
+
+  // Missing fields clearly reported.
+  assert.ok(result.missing_fields.includes('tests_run'));
+  assert.ok(result.missing_fields.includes('acceptance_checklist'));
+  assert.ok(result.missing_fields.includes('known_gaps'));
+  assert.ok(result.missing_fields.includes('risk_notes'));
+});
+
+test('partial implementation_packet message includes drift warning for non-prompt partials', () => {
+  // Non-prompt partial packets should include the standard drift warning
+  // listing missing fields, so the orchestrator and reviewer can clearly see
+  // what the coder did not provide.
+  const output = `
+## Branch
+
+task/1097-test
+
+## Summary
+
+Partial work done.
+`;
+  const extraction = extractImplementationPacket(output);
+  const msg = formatImplementationPacketMessage(
+    { run_id: 'run-partial', role: 'coder', task_id: 1097 },
+    extraction,
+  );
+
+  assert.ok(msg.includes('**Completeness:** partial'));
+  assert.ok(msg.includes('⚠️'));
+  assert.ok(msg.includes('Missing fields:'));
+  assert.ok(msg.includes('branch: `task/1097-test`')
+    || msg.includes('`task/1097-test`'),
+    'Useful branch info preserved in partial packet message');
+  assert.ok(msg.includes('Partial work done'),
+    'Useful summary preserved in partial packet message');
+});
+
+test('multiline regex anchoring: prompt phrase on middle line without headings is flagged', () => {
+  // The multiline `m` flag makes `^` match any line start. This test
+  // verifies that a prompt phrase appearing on a middle line (not the first)
+  // is still detected when there are no structured headings.
+  const output = 'I completed the task.\nNow post the implementation packet to the Den task thread:';
+
+  assert.equal(
+    detectIncompleteCoderPrompt(output),
+    true,
+    'Prompt phrase on middle line without headings must be flagged'
+  );
+
+  const result = extractImplementationPacket(output);
+  assert.equal(result.incomplete_prompt_detected, true);
+});
+
+test('multiline regex anchoring: prompt phrase on last line of complete packet is not flagged', () => {
+  // Verifies that the heading-count guard prevents false positives when
+  // the prompt phrase appears on the last line of a complete packet.
+  const output = `
+## Branch
+
+task/test
+
+## Head Commit
+
+abc123
+
+## Summary
+
+Done.
+
+## Files Changed
+
+- a.ts
+
+## Tests Run
+
+Pass.
+
+## Acceptance Checklist
+
+Done.
+
+## Known Gaps
+
+None.
+
+## Risk Notes
+
+Low. Now post the implementation packet.
+`;
+
+  assert.equal(
+    detectIncompleteCoderPrompt(output),
+    false,
+    'Prompt phrase on last line of complete packet must not be flagged'
+  );
+
+  const result = extractImplementationPacket(output);
+  assert.equal(result.incomplete_prompt_detected, false);
+  assert.equal(result.completeness, 'complete');
+});

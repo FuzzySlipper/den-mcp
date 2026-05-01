@@ -186,6 +186,20 @@ const INCOMPLETE_PROMPT_PATTERNS: RegExp[] = [
  * Detect when a coder's final output appears to be an incomplete prompt
  * for posting an implementation packet rather than the actual packet content.
  *
+ * ## Policy boundary (task #1097)
+ *
+ * Only prompt-like partial outputs are routed to `implementation_packet_missing`.
+ * Non-prompt partial outputs (those with some structured section headings but
+ * missing required fields) remain as partial `implementation_packet` messages
+ * so that useful coder output (branch, summary, files changed) is preserved.
+ *
+ * Rationale:
+ * - Non-prompt partials still contain useful diagnostic content.
+ * - `packet_completeness: "partial"` + `packet_missing_fields` clearly
+ *   communicate incompleteness to the orchestrator and reviewer.
+ * - Routing ALL partials to `implementation_packet_missing` would discard
+ *   useful structured coder output without a clear benefit.
+ *
  * Returns true when the output starts with or primarily consists of an
  * instruction to post the packet, but lacks the structured section headings
  * that would indicate actual packet content.
@@ -195,19 +209,28 @@ export function detectIncompleteCoderPrompt(text: string): boolean {
   if (!trimmed) return false;
 
   // Check if the text matches known incomplete prompt patterns.
+  // Note: patterns use multiline `m` flag so `^` matches any line start.
+  // The heading-count guard below prevents false positives on real packets
+  // that happen to contain the prompt phrase inside a section.
   const matchesPattern = INCOMPLETE_PROMPT_PATTERNS.some((p) => p.test(trimmed));
   if (!matchesPattern) return false;
 
-  // If the text has substantial structured content beyond the prompt pattern,
-  // it's likely a complete packet that happens to start with a heading.
-  // Check for at least 3 of the required section headings.
+  // Heading-count guard: if the text has at least 3 required section headings,
+  // it's a real (possibly partial) packet — even if the prompt phrase appears
+  // somewhere in the content. This prevents false positives on legitimate
+  // coder output that mentions "post the implementation packet" in a section.
+  //
+  // Example: a Risk Notes section saying "Now post the implementation packet"
+  // should NOT be flagged if the output also has Branch, Summary, and Files
+  // Changed headings.
   const foundHeadings = REQUIRED_FIELDS.filter((field) => {
     const section = SECTION_PATTERNS.find((s) => s.field === field);
     if (!section) return false;
     return section.headings.some((h) => h.test(trimmed));
   });
 
-  // If we found most required headings, this is likely a real packet.
+  // If we found enough required headings, this is a real packet (complete or
+  // partial) — route it as implementation_packet, not implementation_packet_missing.
   return foundHeadings.length < 3;
 }
 
