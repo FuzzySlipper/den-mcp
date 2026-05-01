@@ -68,6 +68,7 @@ import {
   CODER_PROMPT_SLUG,
   REVIEWER_PROMPT_SLUG,
   buildReviewerIdentity,
+  ensureReviewerIdentitySection,
   fallbackPrompt,
   renderTemplate,
   summarizeTaskContext,
@@ -1400,7 +1401,7 @@ async function runPromptedSubagent(
   const task = await getTask(cfg, options.taskId);
   const reviewContext: Partial<RunContextOptions> = role === "reviewer" ? resolveReviewerRunContext(task, options) : {};
   const promptDoc = await resolvePromptDoc(cfg, role === "coder" ? CODER_PROMPT_SLUG : REVIEWER_PROMPT_SLUG);
-  const prompt = renderTemplate(promptDoc.content, {
+  let prompt = renderTemplate(promptDoc.content, {
     project_id: cfg.projectId,
     task_id: String(options.taskId),
     task_title: String(task.task?.title ?? task.title ?? ""),
@@ -1411,6 +1412,9 @@ async function runPromptedSubagent(
     reviewer_identity: role === "reviewer" ? buildReviewerIdentity(cfg.agent, "reviewer") : "",
     role,
   });
+  if (role === "reviewer") {
+    prompt = ensureReviewerIdentitySection(prompt, buildReviewerIdentity(cfg.agent, "reviewer"));
+  }
 
   return runDenSubagent(
     cfg,

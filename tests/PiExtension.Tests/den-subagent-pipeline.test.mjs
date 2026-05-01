@@ -20,8 +20,10 @@ import {
   CODER_PROMPT_SLUG,
   REVIEWER_PROMPT_SLUG,
   buildReviewerIdentity,
+  ensureReviewerIdentitySection,
   fallbackPrompt,
   renderTemplate,
+  reviewerIdentityGuidanceSection,
   summarizeTaskContext,
   taskMessages,
 } from '../../pi-dev/lib/den-prompt-templates.ts';
@@ -695,6 +697,98 @@ test('reviewer prompt renders with reviewer identity substituted', () => {
   assert.match(prompt, /set_review_verdict.*pi-reviewer/s);
   assert.match(prompt, /post_review_findings.*pi-reviewer/s);
   assert.match(prompt, /Do not use the parent orchestrator identity/);
+});
+
+test('reviewerIdentityGuidanceSection produces consistent guidance with placeholder', () => {
+  const section = reviewerIdentityGuidanceSection();
+
+  // Starts with the heading.
+  assert.match(section, /^## Reviewer Identity$/m);
+  assert.match(section, /\{\{reviewer_identity\}\}/);
+
+  // Covers all key review tool fields.
+  assert.match(section, /create_review_finding.*created_by/s);
+  assert.match(section, /set_review_verdict.*decided_by/s);
+  assert.match(section, /respond_to_review_finding.*responded_by/s);
+  assert.match(section, /set_review_finding_status.*updated_by/s);
+  assert.match(section, /post_review_findings.*sender/s);
+  assert.match(section, /request_review.*requested_by/s);
+  assert.match(section, /Do not use the parent orchestrator identity/);
+});
+
+test('ensureReviewerIdentitySection injects guidance into custom prompts without identity section', () => {
+  // Simulate a custom project reviewer prompt that does NOT include the identity section.
+  const customPrompt = [
+    '# Custom Reviewer Prompt',
+    '',
+    'Review the code for task #{{task_id}}.',
+    '',
+    '## Task Context',
+    '',
+    '{{task_context}}',
+  ].join('\n');
+
+  // Render with reviewer_identity substituted.
+  const rendered = renderTemplate(customPrompt, {
+    project_id: 'den-mcp',
+    task_id: '999',
+    task_title: 'Test',
+    task_description: '',
+    task_context: 'Some context',
+    review_target: '',
+    extra_notes: '',
+    reviewer_identity: 'pi-reviewer',
+    role: 'reviewer',
+  });
+
+  const result = ensureReviewerIdentitySection(rendered, 'pi-reviewer');
+
+  // Identity section is injected after the first heading.
+  assert.match(result, /^## Reviewer Identity$/m);
+  assert.match(result, /Your reviewer identity is: `pi-reviewer`/);
+  assert.match(result, /Do not use the parent orchestrator identity/);
+
+  // Original content is preserved.
+  assert.match(result, /Custom Reviewer Prompt/);
+  assert.match(result, /Review the code for task #999/);
+  assert.match(result, /Some context/);
+
+  // Identity section comes before ## Task Context.
+  const identityIdx = result.indexOf('## Reviewer Identity');
+  const taskCtxIdx = result.indexOf('## Task Context');
+  assert.ok(identityIdx < taskCtxIdx, 'Reviewer Identity should come before Task Context');
+});
+
+test('ensureReviewerIdentitySection is idempotent when prompt already has identity section', () => {
+  const prompt = renderTemplate(fallbackPrompt(REVIEWER_PROMPT_SLUG), {
+    project_id: 'den-mcp',
+    task_id: '999',
+    task_title: 'Test',
+    task_description: '',
+    task_context: '',
+    review_target: '',
+    extra_notes: '',
+    reviewer_identity: 'pi-reviewer',
+    role: 'reviewer',
+  });
+
+  const result = ensureReviewerIdentitySection(prompt, 'pi-reviewer');
+
+  // No duplicate sections — returned as-is. — returned as-is.
+  assert.equal(result, prompt);
+});
+
+test('ensureReviewerIdentitySection injects into headingless prompt by prepending', () => {
+  const plainPrompt = 'Just a plain reviewer prompt with no markdown headings.';
+  const result = ensureReviewerIdentitySection(plainPrompt, 'pi-reviewer');
+
+  assert.match(result, /^## Reviewer Identity/m);
+  assert.match(result, /Just a plain reviewer prompt/);
+
+  // Identity section comes first.
+  const identityIdx = result.indexOf('## Reviewer Identity');
+  const plainIdx = result.indexOf('Just a plain');
+  assert.ok(identityIdx < plainIdx, 'Identity section should be prepended');
 });
 
 test('taskMessages extracts messages from task detail with multiple key conventions', () => {

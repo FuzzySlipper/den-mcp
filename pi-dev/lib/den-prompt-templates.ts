@@ -103,20 +103,7 @@ export function fallbackPrompt(slug: string): string {
     "Project: {{project_id}}",
     "Task: #{{task_id}} {{task_title}}",
     "",
-    "## Reviewer Identity",
-    "",
-    "Your reviewer identity is: `{{reviewer_identity}}`",
-    "",
-    "When calling Den review tools, use this identity consistently:",
-    "- `create_review_finding`: pass `created_by` as `{{reviewer_identity}}`.",
-    "- `set_review_verdict`: pass `decided_by` as `{{reviewer_identity}}`.",
-    "- `respond_to_review_finding`: pass `responded_by` as `{{reviewer_identity}}` (only when responding as reviewer; implementers use their own identity).",
-    "- `set_review_finding_status`: pass `updated_by` as `{{reviewer_identity}}`.",
-    "- `post_review_findings`: pass `sender` as `{{reviewer_identity}}`.",
-    "- `request_review`: pass `requested_by` as `{{reviewer_identity}}` (only when the reviewer initiates a re-review; implementer reviews use implementer identity).",
-    "",
-    "Do not use the parent orchestrator identity (e.g. `pi`) for these fields. The reviewer identity makes audit trails distinguishable from parent orchestrator actions.",
-    "",
+    reviewerIdentityGuidanceSection(),
     "## Task Intent",
     "",
     "{{task_description}}",
@@ -153,6 +140,50 @@ export function fallbackPrompt(slug: string): string {
     "- Packet-vs-diff accuracy notes.",
     "- Tests or validation you ran, if any.",
   ].join("\n");
+}
+
+/**
+ * Build the reviewer identity/audit guidance section markdown.
+ * Uses `{{reviewer_identity}}` as a mustache-style placeholder that will be
+ * substituted by `renderTemplate` before the prompt reaches the sub-agent.
+ */
+export function reviewerIdentityGuidanceSection(): string {
+  return [
+    "## Reviewer Identity",
+    "",
+    "Your reviewer identity is: `{{reviewer_identity}}`",
+    "",
+    "When calling Den review tools, use this identity consistently:",
+    "- `create_review_finding`: pass `created_by` as `{{reviewer_identity}}`.",
+    "- `set_review_verdict`: pass `decided_by` as `{{reviewer_identity}}`.",
+    "- `respond_to_review_finding`: pass `responded_by` as `{{reviewer_identity}}` (only when responding as reviewer; implementers use their own identity).",
+    "- `set_review_finding_status`: pass `updated_by` as `{{reviewer_identity}}`.",
+    "- `post_review_findings`: pass `sender` as `{{reviewer_identity}}`.",
+    "- `request_review`: pass `requested_by` as `{{reviewer_identity}}` (only when the reviewer initiates a re-review; implementer reviews use implementer identity).",
+    "",
+    "Do not use the parent orchestrator identity (e.g. `pi`) for these fields. The reviewer identity makes audit trails distinguishable from parent orchestrator actions.",
+    "",
+  ].join("\n");
+}
+
+/**
+ * Ensure a rendered reviewer prompt includes reviewer identity/audit guidance.
+ * If the prompt already contains a "## Reviewer Identity" heading, returns it as-is.
+ * Otherwise, injects the guidance section after the first heading line, with the
+ * reviewer identity already substituted.
+ */
+export function ensureReviewerIdentitySection(prompt: string, reviewerIdentity?: string): string {
+  if (/^## Reviewer Identity$/m.test(prompt)) return prompt;
+  const identity = reviewerIdentity ?? "";
+  const section = renderTemplate(reviewerIdentityGuidanceSection(), { reviewer_identity: identity });
+  // Insert after the first top-level heading (the prompt title).
+  const headingMatch = prompt.match(/^#.*$/m);
+  if (headingMatch?.index !== undefined) {
+    const insertAt = headingMatch.index + headingMatch[0].length;
+    return prompt.slice(0, insertAt) + "\n\n" + section + prompt.slice(insertAt);
+  }
+  // No heading found — prepend.
+  return section + "\n\n" + prompt;
 }
 
 /**
