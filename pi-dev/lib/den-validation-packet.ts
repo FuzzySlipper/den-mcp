@@ -372,6 +372,104 @@ export function formatValidationPacketMessage(result: ValidationRunResult): stri
 }
 
 /**
+ * Format a concise one-line-per-command validation summary for model-facing tool
+ * results.  This is the compact alternative to `formatValidationPacketMessage`
+ * which retains full detail in the posted Den packet.
+ *
+ * Includes:
+ * - Overall status, command counts, total duration
+ * - One line per command with status icon, command (truncated), duration
+ * - For failed/blocked commands: a short failure note (first non-empty line of
+ *   stderr or error, truncated)
+ * - Message/artifact reference when available
+ */
+export function formatCompactValidationSummary(
+  result: ValidationRunResult,
+  options?: {
+    message_id?: number | null;
+  },
+): string {
+  const passCount = result.command_results.filter((r) => r.status === "pass").length;
+  const failCount = result.command_results.filter((r) => r.status === "fail").length;
+  const blockedCount = result.command_results.filter((r) => r.status === "blocked").length;
+  const statusIcon = result.status === "pass" ? "✅" : result.status === "fail" ? "❌" : "⚠️";
+
+  const counts = [
+    passCount > 0 ? `${passCount} pass` : undefined,
+    failCount > 0 ? `${failCount} fail` : undefined,
+    blockedCount > 0 ? `${blockedCount} blocked` : undefined,
+  ].filter(Boolean).join(", ") || "0 pass";
+
+  const lines: string[] = [];
+  lines.push(
+    `Validation: ${statusIcon} ${result.status} | ${result.command_results.length} command${result.command_results.length !== 1 ? "s" : ""} (${counts}) | ${formatDuration(result.total_duration_ms)}`,
+  );
+
+  if (options?.message_id) {
+    lines.push(`Packet: message #${options.message_id}`);
+  }
+
+  // Per-command lines
+  if (result.command_results.length > 0) {
+    lines.push("");
+    for (const cmd of result.command_results) {
+      const icon = cmd.status === "pass" ? "✅" : cmd.status === "fail" ? "❌" : "⚠️";
+      const cmdDisplay = truncate(cmd.command, 100);
+      const exitSuffix = cmd.exit_code !== null && cmd.exit_code !== 0 ? ` exit ${cmd.exit_code}` : "";
+      const durationSuffix = ` ${formatDuration(cmd.duration_ms)}`;
+      let line = `${icon} \`${cmdDisplay}\` — ${cmd.status}${exitSuffix}${durationSuffix}`;
+
+      // Short failure note for non-passing commands
+      if (cmd.status !== "pass") {
+        const note = classifyFailureNote(cmd);
+        if (note) line += `: ${note}`;
+      }
+
+      lines.push(line);
+    }
+  }
+
+  if (result.infrastructure_errors.length > 0) {
+    lines.push("");
+    lines.push(`⚠️ ${result.infrastructure_errors.length} infrastructure error(s).`);
+  }
+
+  lines.push("");
+  if (options?.message_id) {
+    lines.push("Full stdout/stderr details in the posted validation packet.");
+  } else {
+    lines.push("Full stdout/stderr details are available by rerunning with verbose=true; no validation packet message was posted.");
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Extract a short failure classification note from a failed/blocked command result.
+ * Returns the first non-empty line of stderr or the error field, truncated to 120 chars.
+ */
+export function classifyFailureNote(cmd: ValidationCommandResult): string {
+  // Prefer the structured error field for blocked commands.
+  if (cmd.error) {
+    return truncate(cmd.error, 120);
+  }
+
+  // Try stderr first line.
+  if (cmd.stderr_preview) {
+    const firstLine = cmd.stderr_preview.split("\n").map((l) => l.trim()).find((l) => l.length > 0);
+    if (firstLine) return truncate(firstLine, 120);
+  }
+
+  // Try stdout as last resort.
+  if (cmd.stdout_preview) {
+    const firstLine = cmd.stdout_preview.split("\n").map((l) => l.trim()).find((l) => l.length > 0);
+    if (firstLine) return truncate(firstLine, 120);
+  }
+
+  return "";
+}
+
+/**
  * Build stable metadata for a posted validation_packet.
  */
 export function buildValidationPacketMeta(result: ValidationRunResult): ValidationPacketMeta {
@@ -418,6 +516,8 @@ export interface ParsedValidationArgs {
   timeout_ms?: number;
   /** Don't post to Den. */
   post_result?: boolean;
+  /** Return full stdout/stderr previews (tool result / CLI). */
+  verbose?: boolean;
 }
 
 /**
@@ -428,7 +528,7 @@ export function parseValidationArgs(args: string | undefined): ParsedValidationA
   const taskToken = tokens.shift();
   const taskId = Number(taskToken);
   if (!Number.isInteger(taskId) || taskId <= 0) {
-    throw new Error("Usage: /den-validate <task_id> [--commands <json|text>] [--timeout <ms>] [--cwd <path>] [--branch <name>] [--base-commit <sha>] [--head-commit <sha>] [--no-post]");
+    throw new Error("Usage: /den-validate <task_id> [--commands <json|text>] [--timeout <ms>] [--cwd <path>] [--branch <name>] [--base-commit <sha>] [--head-commit <sha>] [--verbose] [--no-post]");
   }
 
   const parsed: ParsedValidationArgs = { task_id: taskId };
@@ -437,6 +537,10 @@ export function parseValidationArgs(args: string | undefined): ParsedValidationA
     const token = tokens[i];
     if (token === "--no-post") {
       parsed.post_result = false;
+      continue;
+    }
+    if (token === "--verbose") {
+      parsed.verbose = true;
       continue;
     }
     const value = tokens[++i];

@@ -106,6 +106,8 @@ import {
 } from "../lib/den-drift-cmd-helpers.ts";
 import {
   buildValidationPacketMeta,
+  classifyFailureNote,
+  formatCompactValidationSummary,
   formatValidationPacketMessage,
   normalizeDeclaredValidationCommands,
   parseValidationArgs as parseValidationArgsImpl,
@@ -500,12 +502,16 @@ export default function denSubagent(pi: ExtensionAPI) {
   // -----------------------------------------------------------------------
 
   pi.registerCommand("den-validate", {
-    description: "Run validation commands for a task and post a validation_packet. Usage: /den-validate <task_id> [--commands <json>] [--timeout <ms>] [--no-post]",
+    description: "Run validation commands for a task and post a validation_packet. Usage: /den-validate <task_id> [--commands <json>] [--timeout <ms>] [--verbose] [--no-post]",
     handler: async (args, ctx) => {
       const cfg = await resolveConfig(ctx);
       const parsed = parseValidationArgs(args);
       const result = await runAndMaybePostValidation(cfg, parsed, ctx.cwd);
-      ctx.ui.setWidget("den-subagent", [`Validation: ${result.run_result.status}`, `Message #${result.message_id ?? (parsed.post_result === false ? "not posted" : "posted")}`, ...result.run_result.command_results.map((r) => `${r.status}: ${r.command}`).slice(0, 5)]);
+      if (parsed.verbose) {
+        ctx.ui.setWidget("den-subagent", [`Validation: ${result.run_result.status}`, `Message #${result.message_id ?? (parsed.post_result === false ? "not posted" : "posted")}`, result.content.slice(0, 2000)]);
+      } else {
+        ctx.ui.setWidget("den-subagent", formatCompactValidationSummary(result.run_result, { message_id: result.message_id }).split("\n"));
+      }
       ctx.ui.notify(`Validation for task #${parsed.task_id}: ${result.run_result.status}.`, result.run_result.status === "pass" ? "info" : "error");
     },
   });
@@ -523,6 +529,7 @@ export default function denSubagent(pi: ExtensionAPI) {
       commands: Type.Optional(Type.String({ description: "JSON array or newline-separated list of test/validation commands to execute." })),
       timeout_ms: Type.Optional(Type.Number({ description: "Timeout per command in milliseconds. Default: 120000." })),
       post_result: Type.Optional(Type.Boolean({ description: "Post validation_packet to Den. Defaults true." })),
+      verbose: Type.Optional(Type.Boolean({ description: "Return full stdout/stderr previews in the tool result. Default: false (compact summary)." })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const cfg = await resolveConfig(ctx);
@@ -536,9 +543,13 @@ export default function denSubagent(pi: ExtensionAPI) {
         timeout_ms: typeof params.timeout_ms === "number" ? params.timeout_ms : undefined,
         post_result: typeof params.post_result === "boolean" ? params.post_result : undefined,
       }, ctx.cwd);
+      const verbose = params.verbose === true;
+      const text = verbose
+        ? `${result.content.slice(0, 4000)}${result.message_id ? `\n\nPosted message #${result.message_id}.` : ""}`
+        : formatCompactValidationSummary(result.run_result, { message_id: result.message_id });
       return {
-        content: [{ type: "text", text: `${result.content.slice(0, 4000)}${result.message_id ? `\n\nPosted message #${result.message_id}.` : ""}` }],
-        details: { status: result.run_result.status, message_id: result.message_id ?? null },
+        content: [{ type: "text", text }],
+        details: { status: result.run_result.status, message_id: result.message_id ?? null, verbose },
       };
     },
   });

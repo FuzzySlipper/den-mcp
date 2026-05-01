@@ -7,8 +7,10 @@ import test from 'node:test';
 import { promisify } from 'node:util';
 import {
   buildValidationPacketMeta,
+  classifyFailureNote,
   deriveValidationStatus,
   executeValidationCommand,
+  formatCompactValidationSummary,
   formatValidationPacketMessage,
   normalizeDeclaredValidationCommand,
   normalizeDeclaredValidationCommands,
@@ -416,4 +418,203 @@ test('parseValidationArgs rejects missing task_id', () => {
 
 test('parseValidationArgs rejects unknown flags', () => {
   assert.throws(() => parseValidationArgs('957 --unknown-flag value'), /Unknown validation flag/);
+});
+
+// ---------------------------------------------------------------------------
+// formatCompactValidationSummary
+// ---------------------------------------------------------------------------
+
+test('formatCompactValidationSummary produces concise pass summary', () => {
+  const result = {
+    task_id: 1108,
+    branch: 'task/1108-test',
+    head_commit: 'abc1234',
+    status: 'pass',
+    command_results: [
+      { command: 'node --test tests/PiExtension.Tests/den-validation-packet.test.mjs', status: 'pass', exit_code: 0, duration_ms: 200, stdout_preview: 'ok', stderr_preview: '' },
+      { command: 'git diff --check', status: 'pass', exit_code: 0, duration_ms: 50, stdout_preview: '', stderr_preview: '' },
+    ],
+    total_duration_ms: 250,
+    timestamp: '2026-04-30T12:00:00.000Z',
+    infrastructure_errors: [],
+  };
+
+  const summary = formatCompactValidationSummary(result, { message_id: 42 });
+
+  // Header line
+  assert.match(summary, /Validation: ✅ pass \| 2 commands/);
+  assert.match(summary, /2 pass/);
+  assert.match(summary, /250ms/);
+  assert.match(summary, /Packet: message #42/);
+
+  // Per-command lines
+  assert.match(summary, /✅ `node --test/);
+  assert.match(summary, /✅ `git diff --check/);
+
+  // Does NOT include stdout/stderr previews
+  assert.doesNotMatch(summary, /stdout preview/);
+  assert.doesNotMatch(summary, /stderr preview/);
+  assert.doesNotMatch(summary, /<details>/);
+
+  // References posted packet for full details
+  assert.match(summary, /Full stdout\/stderr details in the posted validation packet/);
+
+  // Should be compact - well under 1000 chars
+  assert.ok(summary.length < 1000, `compact summary should be short, got ${summary.length}`);
+});
+
+test('formatCompactValidationSummary includes short failure note for failed commands', () => {
+  const result = {
+    status: 'fail',
+    command_results: [
+      { command: 'node --test foo.test.mjs', status: 'pass', exit_code: 0, duration_ms: 100, stdout_preview: '', stderr_preview: '' },
+      { command: 'node --test bar.test.mjs', status: 'fail', exit_code: 1, duration_ms: 80, stdout_preview: '', stderr_preview: 'not ok 1 - test something\n  ---\n  actual: false' },
+    ],
+    total_duration_ms: 180,
+    timestamp: '2026-04-30T12:00:00.000Z',
+    infrastructure_errors: [],
+  };
+
+  const summary = formatCompactValidationSummary(result, { message_id: 43 });
+
+  assert.match(summary, /Validation: ❌ fail/);
+  assert.match(summary, /1 pass, 1 fail/);
+  assert.match(summary, /❌ `node --test bar.test.mjs` — fail exit 1/);
+  // Should include the first line of stderr as a failure note
+  assert.match(summary, /not ok 1 - test something/);
+
+  // Does not include full stderr
+  assert.doesNotMatch(summary, /actual: false/);
+});
+
+test('formatCompactValidationSummary handles blocked commands with error note', () => {
+  const result = {
+    status: 'blocked',
+    command_results: [
+      { command: 'missing-tool', status: 'blocked', exit_code: null, duration_ms: 10, stdout_preview: '', stderr_preview: '', error: 'Command timed out after 5000ms' },
+    ],
+    total_duration_ms: 10,
+    timestamp: '2026-04-30T12:00:00.000Z',
+    infrastructure_errors: [],
+  };
+
+  const summary = formatCompactValidationSummary(result);
+
+  assert.match(summary, /Validation: ⚠️ blocked/);
+  assert.match(summary, /1 blocked/);
+  assert.match(summary, /⚠️ `missing-tool` — blocked/);
+  assert.match(summary, /Command timed out/);
+  assert.match(summary, /rerunning with verbose=true/);
+});
+
+test('formatCompactValidationSummary handles empty commands', () => {
+  const result = {
+    status: 'blocked',
+    command_results: [],
+    total_duration_ms: 0,
+    timestamp: '2026-04-30T12:00:00.000Z',
+    infrastructure_errors: [],
+  };
+
+  const summary = formatCompactValidationSummary(result);
+
+  assert.match(summary, /0 commands/);
+  assert.match(summary, /0 pass/);
+  assert.match(summary, /rerunning with verbose=true/);
+  assert.match(summary, /no validation packet message was posted/);
+});
+
+test('formatCompactValidationSummary is much shorter than full packet message', () => {
+  const longStdout = 'line\n'.repeat(100);
+  const result = {
+    task_id: 1108,
+    status: 'fail',
+    command_results: [
+      { command: 'node --test large.test.mjs', status: 'fail', exit_code: 1, duration_ms: 500, stdout_preview: longStdout, stderr_preview: longStdout },
+    ],
+    total_duration_ms: 500,
+    timestamp: '2026-04-30T12:00:00.000Z',
+    infrastructure_errors: [],
+  };
+
+  const fullMessage = formatValidationPacketMessage(result);
+  const compactSummary = formatCompactValidationSummary(result, { message_id: 99 });
+
+  // Compact should be dramatically shorter
+  assert.ok(compactSummary.length < fullMessage.length / 5,
+    `compact (${compactSummary.length}) should be < 1/5 of full (${fullMessage.length})`);
+
+  // Full message includes the large preview
+  assert.ok(fullMessage.length > 1000, 'full packet should include stdout/stderr');
+
+  // Compact does NOT include the repetitive stdout
+  assert.doesNotMatch(compactSummary, /line\nline/);
+});
+
+// ---------------------------------------------------------------------------
+// classifyFailureNote
+// ---------------------------------------------------------------------------
+
+test('classifyFailureNote returns error field for blocked commands', () => {
+  const note = classifyFailureNote({
+    command: 'timeout-cmd',
+    status: 'blocked',
+    exit_code: null,
+    duration_ms: 5000,
+    stdout_preview: '',
+    stderr_preview: '',
+    error: 'Command timed out after 120000ms',
+  });
+  assert.equal(note, 'Command timed out after 120000ms');
+});
+
+test('classifyFailureNote returns first non-empty stderr line for failed commands', () => {
+  const note = classifyFailureNote({
+    command: 'failing-test',
+    status: 'fail',
+    exit_code: 1,
+    duration_ms: 100,
+    stdout_preview: '',
+    stderr_preview: 'not ok 1 - test foo\n  ---\n  actual: false',
+  });
+  assert.equal(note, 'not ok 1 - test foo');
+});
+
+test('classifyFailureNote falls back to stdout if no stderr', () => {
+  const note = classifyFailureNote({
+    command: 'test-cmd',
+    status: 'fail',
+    exit_code: 1,
+    duration_ms: 50,
+    stdout_preview: 'FAIL: expected 42 got 0\nmore output',
+    stderr_preview: '',
+  });
+  assert.equal(note, 'FAIL: expected 42 got 0');
+});
+
+test('classifyFailureNote truncates long notes', () => {
+  const longError = 'x'.repeat(200);
+  const note = classifyFailureNote({
+    command: 'cmd',
+    status: 'blocked',
+    exit_code: null,
+    duration_ms: 10,
+    stdout_preview: '',
+    stderr_preview: '',
+    error: longError,
+  });
+  assert.ok(note.length <= 140, `note should be truncated, got ${note.length}`); // 120 + '... (truncated)'
+  assert.match(note, /\.\.\./);
+});
+
+test('classifyFailureNote returns empty string when no error/stderr/stdout', () => {
+  const note = classifyFailureNote({
+    command: 'echo ok',
+    status: 'pass',
+    exit_code: 0,
+    duration_ms: 10,
+    stdout_preview: '',
+    stderr_preview: '',
+  });
+  assert.equal(note, '');
 });
