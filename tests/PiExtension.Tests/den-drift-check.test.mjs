@@ -428,6 +428,85 @@ test('schema expected category marks suspicious schema files as expected but kee
   assert.ok(suspSignal.message.includes('Schema changes expected'));
 });
 
+test('schema expected category marks all-schema suspicious paths as expected', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [
+      { status: 'M', path: 'src/migrations/001_create_users.sql', additions: 10, deletions: 0 },
+      { status: 'M', path: 'src/schemas/order.json', additions: 5, deletions: 0 },
+    ],
+    expected_scope: {
+      expected_change_categories: ['schema'],
+    },
+    declared_tests: ['node --test tests/api.test.ts — pass'],
+  });
+
+  const suspSignal = result.signals.find((s) => s.code === 'suspicious_files');
+  assert.ok(suspSignal);
+  assert.equal(suspSignal.expected, true);
+  assert.ok(suspSignal.message.includes('Schema changes expected'));
+});
+
+test('schema expected category does NOT mark mixed schema/non-schema suspicious paths as expected', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [
+      { status: 'M', path: 'src/migrations/001_create_users.sql', additions: 10, deletions: 0 },
+      { status: 'M', path: 'AGENTS.md', additions: 5, deletions: 0 },
+    ],
+    expected_scope: {
+      expected_change_categories: ['schema'],
+    },
+    declared_tests: ['node --test tests/api.test.ts — pass'],
+  });
+
+  const suspSignal = result.signals.find((s) => s.code === 'suspicious_files');
+  assert.ok(suspSignal);
+  // Mixed paths: schema + non-schema (AGENTS.md) → NOT expected
+  assert.equal(suspSignal.expected, undefined);
+  assert.ok(!suspSignal.message.includes('Schema changes expected'));
+  // AGENTS.md is high-suspicion so severity should be high
+  assert.equal(suspSignal.severity, 'high');
+});
+
+test('schema expected category does NOT mark suspicious paths when only non-schema paths present', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [
+      { status: 'M', path: 'AGENTS.md', additions: 5, deletions: 0 },
+      { status: 'M', path: 'deploy-cli.sh', additions: 3, deletions: 0 },
+    ],
+    expected_scope: {
+      expected_change_categories: ['schema'],
+    },
+    declared_tests: ['node --test tests/api.test.ts — pass'],
+  });
+
+  const suspSignal = result.signals.find((s) => s.code === 'suspicious_files');
+  assert.ok(suspSignal);
+  assert.equal(suspSignal.expected, undefined);
+});
+
+test('schema expected category with secrets among schema paths does NOT mark expected', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [
+      { status: 'M', path: 'src/migrations/001_create_users.sql', additions: 10, deletions: 0 },
+      { status: 'M', path: 'src/secret-key.pem', additions: 5, deletions: 0 },
+    ],
+    expected_scope: {
+      expected_change_categories: ['schema'],
+    },
+    declared_tests: ['node --test tests/api.test.ts — pass'],
+  });
+
+  const suspSignal = result.signals.find((s) => s.code === 'suspicious_files');
+  assert.ok(suspSignal);
+  // secret-key.pem contains "secret" so it's suspicious but NOT schema-related
+  assert.equal(suspSignal.expected, undefined);
+  assert.equal(suspSignal.severity, 'high');
+});
+
 test('without expected categories, large_diff stays at medium', () => {
   const result = analyzeDriftCheck({
     head_commit: 'abc1234',

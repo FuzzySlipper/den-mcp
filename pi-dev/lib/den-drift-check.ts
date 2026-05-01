@@ -695,8 +695,9 @@ export function applyExpectedCategoryAdjustments(
 
       case "suspicious_files": {
         if (catSet.has("schema")) {
-          const schemaPaths = (signal.paths ?? []).filter((p) => isSchemaRelatedPath(p));
-          if (schemaPaths.length > 0) {
+          const paths = signal.paths ?? [];
+          const allSchema = paths.length > 0 && paths.every((p) => isSchemaRelatedPath(p));
+          if (allSchema) {
             return {
               ...signal,
               expected: true,
