@@ -1,10 +1,21 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import test from 'node:test';
-import { SessionManager } from '/usr/lib/node_modules/@mariozechner/pi-coding-agent/dist/core/session-manager.js';
-import { convertToLlm } from '/usr/lib/node_modules/@mariozechner/pi-coding-agent/dist/core/messages.js';
-import { serializeConversation } from '/usr/lib/node_modules/@mariozechner/pi-coding-agent/dist/core/compaction/utils.js';
-import { convertResponsesMessages } from '/usr/lib/node_modules/@mariozechner/pi-coding-agent/node_modules/@mariozechner/pi-ai/dist/providers/openai-responses-shared.js';
 import { buildSubagentParentToolResult } from '../../pi-dev/lib/den-subagent-parent-tool-result.ts';
+
+const piAgentRoot = process.env.PI_CODING_AGENT_ROOT
+  ?? (existsSync('/home/patch/.bun/install/global/node_modules/@mariozechner/pi-coding-agent')
+    ? '/home/patch/.bun/install/global/node_modules/@mariozechner/pi-coding-agent'
+    : '/usr/lib/node_modules/@mariozechner/pi-coding-agent');
+const piAiRoot = process.env.PI_AI_ROOT
+  ?? (existsSync('/home/patch/.bun/install/global/node_modules/@mariozechner/pi-ai')
+    ? '/home/patch/.bun/install/global/node_modules/@mariozechner/pi-ai'
+    : `${piAgentRoot}/node_modules/@mariozechner/pi-ai`);
+
+const { SessionManager } = await import(`${piAgentRoot}/dist/core/session-manager.js`);
+const { convertToLlm } = await import(`${piAgentRoot}/dist/core/messages.js`);
+const { serializeConversation } = await import(`${piAgentRoot}/dist/core/compaction/utils.js`);
+const { convertResponsesMessages } = await import(`${piAiRoot}/dist/providers/openai-responses-shared.js`);
 
 const BASE_ARTIFACTS = {
   dir: '/tmp/den-subagent-runs/run-test',
@@ -183,6 +194,8 @@ test('sub-agent parent tool return includes recovery guidance for aborted coder 
   const text = toolResult.content[0].text;
   assert.match(text, /Recovery guidance:/);
   assert.match(text, /Sub-agent was aborted/);
+  assert.equal((text.match(/Sub-agent was aborted/g) ?? []).length, 1, 'failure summary should not be duplicated in recovery guidance');
+  assert.doesNotMatch(toolResult.details.recovery_guidance, /Sub-agent was aborted/);
   assert.match(text, /Branch: task\/1078-subagent-abort-recovery/);
   assert.match(text, /Worktree: dirty/);
   assert.match(text, /do NOT auto-reset or delete the branch/);

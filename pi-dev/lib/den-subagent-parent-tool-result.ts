@@ -258,9 +258,8 @@ function determineRecoveryActions(result: SubagentResult, state: RecoveryState):
   return actions;
 }
 
-function formatRecoveryGuidanceText(result: SubagentResult, state: RecoveryState, actions: string[]): string {
+function formatRecoveryGuidanceText(_result: SubagentResult, state: RecoveryState, actions: string[]): string {
   const parts: string[] = [];
-  parts.push(formatFailureSummary(result));
 
   const branchLine = state.branch ? `Branch: ${state.branch}` : null;
   const headLine = state.head_commit ? `Head: ${state.head_commit}` : null;
