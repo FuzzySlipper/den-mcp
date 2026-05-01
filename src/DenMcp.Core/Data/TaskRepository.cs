@@ -10,6 +10,7 @@ public interface ITaskRepository
     Task<ProjectTask> CreateAsync(ProjectTask task, int[]? dependsOn = null);
     Task<ProjectTask?> GetByIdAsync(int id);
     Task<TaskDetail> GetDetailAsync(int id);
+    Task<TaskWorkflowSummary> GetWorkflowSummaryAsync(int id);
     Task<List<TaskSummary>> ListAsync(string projectId, TaskStatus[]? statuses = null,
         string? assignedTo = null, string[]? tags = null, int? maxPriority = null, int? parentId = null,
         bool includeAll = false);
@@ -203,6 +204,260 @@ public sealed class TaskRepository : ITaskRepository
                 openReviewFindings,
                 resolvedReviewFindings)
         };
+    }
+
+    public async Task<TaskWorkflowSummary> GetWorkflowSummaryAsync(int id)
+    {
+        await using var conn = await _db.CreateConnectionAsync();
+
+        // Main task
+        await using var taskCmd = conn.CreateCommand();
+        taskCmd.CommandText = "SELECT id, project_id, parent_id, title, description, status, priority, assigned_to, tags, created_at, updated_at FROM tasks WHERE id = @id";
+        taskCmd.Parameters.AddWithValue("@id", id);
+        await using var taskReader = await taskCmd.ExecuteReaderAsync();
+        if (!await taskReader.ReadAsync())
+            throw new KeyNotFoundException($"Task {id} not found");
+        var task = ReadTask(taskReader);
+        await taskReader.CloseAsync();
+
+        // Dependencies
+        await using var depCmd = conn.CreateCommand();
+        depCmd.CommandText = """
+            SELECT t.id, t.title, t.status
+            FROM task_dependencies td
+            JOIN tasks t ON t.id = td.depends_on
+            WHERE td.task_id = @id
+            """;
+        depCmd.Parameters.AddWithValue("@id", id);
+        var deps = new List<TaskDependencyInfo>();
+        await using var depReader = await depCmd.ExecuteReaderAsync();
+        while (await depReader.ReadAsync())
+        {
+            deps.Add(new TaskDependencyInfo
+            {
+                TaskId = depReader.GetInt32(0),
+                Title = depReader.GetString(1),
+                Status = EnumExtensions.ParseTaskStatus(depReader.GetString(2))
+            });
+        }
+        await depReader.CloseAsync();
+
+        // Subtasks (compact)
+        await using var subCmd = conn.CreateCommand();
+        subCmd.CommandText = """
+            SELECT t.id, t.title, t.status, t.priority
+            FROM tasks t WHERE t.parent_id = @id ORDER BY t.priority, t.id
+            """;
+        subCmd.Parameters.AddWithValue("@id", id);
+        var subtasks = new List<CompactSubtaskEntry>();
+        await using var subReader = await subCmd.ExecuteReaderAsync();
+        while (await subReader.ReadAsync())
+        {
+            subtasks.Add(new CompactSubtaskEntry
+            {
+                Id = subReader.GetInt32(0),
+                Title = subReader.GetString(1),
+                Status = EnumExtensions.ParseTaskStatus(subReader.GetString(2)).ToDbValue(),
+                Priority = subReader.GetInt32(3)
+            });
+        }
+        await subReader.CloseAsync();
+
+        // Recent messages — only header fields, no content body
+        await using var msgCmd = conn.CreateCommand();
+        msgCmd.CommandText = """
+            SELECT id, sender, intent, metadata, thread_id, created_at, content
+            FROM messages WHERE task_id = @id
+            ORDER BY created_at DESC LIMIT 10
+            """;
+        msgCmd.Parameters.AddWithValue("@id", id);
+        var messageHeaders = new List<CompactMessageHeader>();
+        await using var msgReader = await msgCmd.ExecuteReaderAsync();
+        while (await msgReader.ReadAsync())
+        {
+            var metaJson = msgReader.IsDBNull(3) ? null : msgReader.GetString(3);
+            var content = msgReader.IsDBNull(6) ? "" : msgReader.GetString(6);
+            var firstLine = ExtractFirstLine(content);
+
+            string? metadataType = null;
+            string? metadataBranch = null;
+            string? metadataHeadCommit = null;
+            string? metadataReviewRoundId = null;
+
+            if (metaJson is not null)
+            {
+                var meta = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(metaJson);
+                if (meta.TryGetProperty("type", out var typeEl)) metadataType = typeEl.GetString();
+                if (meta.TryGetProperty("branch", out var branchEl)) metadataBranch = branchEl.GetString();
+                if (meta.TryGetProperty("head_commit", out var hcEl)) metadataHeadCommit = hcEl.GetString();
+                if (meta.TryGetProperty("review_round_id", out var rrEl))
+                    metadataReviewRoundId = rrEl.ValueKind == System.Text.Json.JsonValueKind.Number
+                        ? rrEl.GetInt32().ToString()
+                        : rrEl.GetString();
+            }
+
+            messageHeaders.Add(new CompactMessageHeader
+            {
+                Id = msgReader.GetInt32(0),
+                Sender = msgReader.GetString(1),
+                Intent = msgReader.IsDBNull(2) ? null : EnumExtensions.ParseMessageIntent(msgReader.GetString(2)).ToDbValue(),
+                MetadataType = metadataType,
+                MetadataBranch = metadataBranch,
+                MetadataHeadCommit = metadataHeadCommit,
+                MetadataReviewRoundId = metadataReviewRoundId,
+                FirstLine = firstLine,
+                ThreadId = msgReader.IsDBNull(4) ? null : msgReader.GetInt32(4),
+                CreatedAt = DateTime.Parse(msgReader.GetString(5))
+            });
+        }
+        await msgReader.CloseAsync();
+
+        // Review rounds
+        await using var reviewCmd = conn.CreateCommand();
+        reviewCmd.CommandText = """
+            SELECT id, task_id, round_number, requested_by, branch, base_branch, base_commit,
+                   head_commit, last_reviewed_head_commit, commits_since_last_review, tests_run,
+                   notes, preferred_diff_base_ref, preferred_diff_base_commit, preferred_diff_head_ref,
+                   preferred_diff_head_commit, alternate_diff_base_ref, alternate_diff_base_commit,
+                   alternate_diff_head_ref, alternate_diff_head_commit, delta_base_commit,
+                   inherited_commit_count, task_local_commit_count, verdict, verdict_by, verdict_notes,
+                   requested_at, verdict_at
+            FROM review_rounds WHERE task_id = @id
+            ORDER BY round_number ASC
+            """;
+        reviewCmd.Parameters.AddWithValue("@id", id);
+        var reviewRounds = new List<ReviewRound>();
+        await using var reviewReader = await reviewCmd.ExecuteReaderAsync();
+        while (await reviewReader.ReadAsync())
+            reviewRounds.Add(ReviewRoundRepository.ReadReviewRound(reviewReader));
+        await reviewReader.CloseAsync();
+
+        // Review findings — split open vs resolved
+        await using var findingCmd = conn.CreateCommand();
+        findingCmd.CommandText = """
+            SELECT rf.id, rf.finding_key, rf.task_id, rf.review_round_id, rf.finding_number, rf.created_by,
+                   rf.category, rf.summary, rf.notes, rf.file_references, rf.test_commands, rf.status,
+                   rf.status_updated_by, rf.status_notes, rf.status_updated_at, rf.response_by,
+                   rf.response_notes, rf.response_at, rf.follow_up_task_id, rf.created_at, rf.updated_at,
+                   rr.round_number
+            FROM review_findings rf
+            JOIN review_rounds rr ON rr.id = rf.review_round_id
+            WHERE rf.task_id = @id
+            ORDER BY rf.finding_number ASC
+            """;
+        findingCmd.Parameters.AddWithValue("@id", id);
+        var openFindings = new List<ReviewFinding>();
+        var resolvedFindings = new List<ReviewFinding>();
+        await using var findingReader = await findingCmd.ExecuteReaderAsync();
+        while (await findingReader.ReadAsync())
+        {
+            var finding = ReviewFindingRepository.ReadReviewFinding(findingReader);
+            if (finding.Status.IsResolved())
+                resolvedFindings.Add(finding);
+            else
+                openFindings.Add(finding);
+        }
+        await findingReader.CloseAsync();
+
+        // Build compact review workflow
+        var allFindings = openFindings.Concat(resolvedFindings).ToList();
+        var findingsByRound = allFindings
+            .GroupBy(f => f.ReviewRoundId)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        var currentRound = reviewRounds
+            .OrderByDescending(r => r.RoundNumber)
+            .FirstOrDefault();
+
+        var timeline = reviewRounds
+            .OrderByDescending(r => r.RoundNumber)
+            .Select(r =>
+            {
+                var rf = findingsByRound.GetValueOrDefault(r.Id, []);
+                return new CompactReviewRoundRef
+                {
+                    ReviewRoundId = r.Id,
+                    ReviewRoundNumber = r.RoundNumber,
+                    Branch = r.Branch,
+                    HeadCommit = r.HeadCommit,
+                    Verdict = r.Verdict?.ToDbValue(),
+                    TotalFindingCount = rf.Count,
+                    OpenFindingCount = rf.Count(f => !f.Status.IsResolved()),
+                    ResolvedFindingCount = rf.Count(f => f.Status.IsResolved())
+                };
+            })
+            .ToList();
+
+        var compactWorkflow = new CompactReviewWorkflow
+        {
+            ReviewRoundCount = reviewRounds.Count,
+            CurrentVerdict = currentRound?.Verdict?.ToDbValue(),
+            CurrentRound = currentRound is not null
+                ? new CompactReviewRoundRef
+                {
+                    ReviewRoundId = currentRound.Id,
+                    ReviewRoundNumber = currentRound.RoundNumber,
+                    Branch = currentRound.Branch,
+                    HeadCommit = currentRound.HeadCommit,
+                    Verdict = currentRound.Verdict?.ToDbValue(),
+                    TotalFindingCount = findingsByRound.GetValueOrDefault(currentRound.Id, []).Count,
+                    OpenFindingCount = findingsByRound.GetValueOrDefault(currentRound.Id, []).Count(f => !f.Status.IsResolved()),
+                    ResolvedFindingCount = findingsByRound.GetValueOrDefault(currentRound.Id, []).Count(f => f.Status.IsResolved())
+                }
+                : null,
+            UnresolvedFindingCount = openFindings.Count,
+            ResolvedFindingCount = resolvedFindings.Count,
+            AddressedFindingCount = allFindings.Count(f =>
+                f.ResponseAt is not null || f.Status != ReviewFindingStatus.Open),
+            Timeline = timeline
+        };
+
+        // Unresolved findings (compact)
+        var unresolvedEntries = openFindings.Select(f => new CompactFindingEntry
+        {
+            Id = f.Id,
+            FindingKey = f.FindingKey,
+            Category = f.Category.ToDbValue(),
+            Summary = f.Summary,
+            Status = f.Status.ToDbValue(),
+            ReviewRoundId = f.ReviewRoundId,
+            ReviewRoundNumber = f.ReviewRoundNumber
+        }).ToList();
+
+        return new TaskWorkflowSummary
+        {
+            Id = task.Id,
+            ProjectId = task.ProjectId,
+            Title = task.Title,
+            Status = task.Status.ToDbValue(),
+            Priority = task.Priority,
+            AssignedTo = task.AssignedTo,
+            ParentId = task.ParentId,
+            Tags = task.Tags,
+            Dependencies = deps,
+            Subtasks = subtasks,
+            ReviewWorkflow = compactWorkflow,
+            RecentMessages = messageHeaders,
+            UnresolvedFindings = unresolvedEntries,
+            DeepReadHint = $"Use get_task(task_id={id}) or get_thread(thread_id=...) for full content."
+        };
+    }
+
+    private static string? ExtractFirstLine(string? content)
+    {
+        if (string.IsNullOrEmpty(content))
+            return null;
+
+        // Find first newline
+        var newlineIdx = content.IndexOf('\n');
+        var firstLine = newlineIdx >= 0 ? content[..newlineIdx] : content;
+
+        // Truncate to a reasonable length for header display
+        const int maxLength = 120;
+        if (firstLine.Length > maxLength)
+            firstLine = string.Concat(firstLine.AsSpan(0, maxLength - 1), "…");
+
+        return string.IsNullOrWhiteSpace(firstLine) ? null : firstLine.Trim();
     }
 
     public async Task<List<TaskSummary>> ListAsync(string projectId, TaskStatus[]? statuses = null,

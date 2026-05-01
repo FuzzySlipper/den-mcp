@@ -104,6 +104,15 @@ public sealed class TaskTools
         return JsonSerializer.Serialize(detail, JsonOpts.Default);
     }
 
+    [McpServerTool(Name = "get_task_workflow_summary"), Description("Get a compact task workflow summary for orchestrator startup/drain. Returns task status, current review state, latest packet headers (without full bodies), unresolved findings/actions, and links/message IDs. Use get_task for full detail.")]
+    public static async Task<string> GetTaskWorkflowSummary(
+        ITaskRepository repo,
+        [Description("Task ID.")] int task_id)
+    {
+        var summary = await repo.GetWorkflowSummaryAsync(task_id);
+        return JsonSerializer.Serialize(summary, JsonOpts.Default);
+    }
+
     [McpServerTool(Name = "list_tasks"), Description("List tasks in a project with optional filters. Returns summaries without descriptions.")]
     public static async Task<string> ListTasks(
         ITaskRepository repo,
