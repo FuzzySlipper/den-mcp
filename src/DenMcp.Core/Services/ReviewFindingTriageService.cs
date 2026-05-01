@@ -212,7 +212,7 @@ public sealed class ReviewFindingTriageService : IReviewFindingTriageService
             sb.AppendLine();
             sb.AppendLine($"**Summary**: {finding.Summary}");
             sb.AppendLine($"**Finding ID**: {finding.Id}");
-            sb.AppendLine($"**Status at split**: {finding.Status.ToDbValue()}");
+            sb.AppendLine($"**Original status**: {finding.Status.ToDbValue()}");
             sb.AppendLine($"**Review round**: {finding.ReviewRoundNumber}");
 
             if (!string.IsNullOrWhiteSpace(finding.Notes))

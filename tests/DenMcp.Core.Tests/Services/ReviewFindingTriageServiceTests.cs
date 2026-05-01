@@ -244,6 +244,8 @@ public class ReviewFindingTriageServiceTests : IAsyncLifetime
         var desc = result.FollowUpTask.Description!;
         Assert.Contains($"**Finding ID**: {f.Id}", desc);
         Assert.Contains("acceptance_gap", desc);
+        Assert.Contains("**Original status**: open", desc);
+        Assert.DoesNotContain("Status at split", desc);
         Assert.Contains($"**Review round**: {f.ReviewRoundNumber}", desc);
     }
 
