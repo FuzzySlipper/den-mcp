@@ -16,7 +16,8 @@ public sealed class BlackboardTools
         [Description("Entry title.")] string title,
         [Description("Markdown entry content.")] string content,
         [Description("JSON array of string tags.")] string? tags = null,
-        [Description("Optional idle TTL in seconds. If set, the entry expires when not accessed for this many seconds.")] int? idle_ttl_seconds = null)
+        [Description("Optional idle TTL in seconds. If set, the entry expires when not accessed for this many seconds.")] int? idle_ttl_seconds = null,
+        [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
         var parsedTags = tags is not null ? JsonSerializer.Deserialize<List<string>>(tags) : null;
         var entry = await repo.UpsertAsync(new BlackboardEntry
@@ -27,7 +28,9 @@ public sealed class BlackboardTools
             Tags = parsedTags,
             IdleTtlSeconds = idle_ttl_seconds
         });
-        return JsonSerializer.Serialize(entry, JsonOpts.Default);
+        return verbose
+            ? JsonSerializer.Serialize(entry, JsonOpts.Default)
+            : ConciseResponse.StoredBlackboardEntry(entry);
     }
 
     [McpServerTool(Name = "get_blackboard_entry"), Description("Get a cross-project shared blackboard entry by slug. Access refreshes idle TTL.")]

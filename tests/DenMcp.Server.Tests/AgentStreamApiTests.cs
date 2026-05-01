@@ -1051,7 +1051,8 @@ public class AgentStreamApiTests : IAsyncLifetime
             event_type: "answer",
             body: "Yes, proceed.",
             recipient_instance_id: "codex-reviewer-2",
-            delivery_mode: "wake");
+            delivery_mode: "wake",
+            verbose: true);
 
         var result = JsonSerializer.Deserialize<AgentStreamMessageCreateResult>(json, JsonOpts);
         Assert.NotNull(result);

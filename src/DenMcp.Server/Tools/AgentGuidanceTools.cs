@@ -38,7 +38,8 @@ public sealed class AgentGuidanceTools
         [Description("Importance: required or important. Default: important.")] string importance = "important",
         [Description("Optional comma-separated audience labels, e.g. 'pi,conductor'.")] string? audience = null,
         [Description("Deterministic sort order within the scope. Lower comes first. Default: 0.")] int sort_order = 0,
-        [Description("Optional notes for why this document is included.")] string? notes = null)
+        [Description("Optional notes for why this document is included.")] string? notes = null,
+        [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
         var docProjectId = document_project_id ?? project_id;
         var doc = await documents.GetAsync(docProjectId, document_slug);
@@ -56,7 +57,9 @@ public sealed class AgentGuidanceTools
             SortOrder = sort_order,
             Notes = notes
         });
-        return JsonSerializer.Serialize(entry, JsonOpts.Default);
+        return verbose
+            ? JsonSerializer.Serialize(entry, JsonOpts.Default)
+            : ConciseResponse.AddedAgentGuidanceEntry(entry);
     }
 
     [McpServerTool(Name = "delete_agent_guidance_entry"), Description("Delete a first-class agent guidance entry by project scope and ID.")]

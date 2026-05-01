@@ -17,7 +17,8 @@ public sealed class DocumentTools
         [Description("Document title.")] string title,
         [Description("Document content (markdown).")] string content,
         [Description("Document type: prd, spec, adr, convention, reference, note. Default: spec.")] string doc_type = "spec",
-        [Description("JSON array of string tags.")] string? tags = null)
+        [Description("JSON array of string tags.")] string? tags = null,
+        [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
         var parsedTags = tags is not null ? JsonSerializer.Deserialize<List<string>>(tags) : null;
         var doc = await repo.UpsertAsync(new Document
@@ -29,7 +30,9 @@ public sealed class DocumentTools
             DocType = EnumExtensions.ParseDocType(doc_type),
             Tags = parsedTags
         });
-        return JsonSerializer.Serialize(doc, JsonOpts.Default);
+        return verbose
+            ? JsonSerializer.Serialize(doc, JsonOpts.Default)
+            : ConciseResponse.StoredDocument(doc);
     }
 
     [McpServerTool(Name = "get_document"), Description("Get a document's full content by project ID and slug.")]

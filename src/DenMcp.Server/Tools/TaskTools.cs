@@ -23,7 +23,8 @@ public sealed class TaskTools
         [Description("JSON array of string tags, e.g. [\"core\",\"api\"].")] string? tags = null,
         [Description("Agent identity to assign this task to.")] string? assigned_to = null,
         [Description("Comma-separated task IDs this task depends on.")] string? depends_on = null,
-        [Description("Parent task ID to create this as a subtask.")] int? parent_id = null)
+        [Description("Parent task ID to create this as a subtask.")] int? parent_id = null,
+        [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
         var parsedTags = tags is not null ? JsonSerializer.Deserialize<List<string>>(tags) : null;
         var depIds = depends_on?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -40,7 +41,9 @@ public sealed class TaskTools
             ParentId = parent_id
         }, depIds);
 
-        return JsonSerializer.Serialize(task, JsonOpts.Default);
+        return verbose
+            ? JsonSerializer.Serialize(task, JsonOpts.Default)
+            : ConciseResponse.CreatedTask(task);
     }
 
     [McpServerTool(Name = "update_task"), Description("Update a task's fields. Records changes in audit history.")]
@@ -57,7 +60,8 @@ public sealed class TaskTools
         [Description("New priority 1-5.")] int? priority = null,
         [Description("New assigned agent.")] string? assigned_to = null,
         [Description("JSON array of string tags.")] string? tags = null,
-        [Description("New parent task ID.")] int? parent_id = null)
+        [Description("New parent task ID.")] int? parent_id = null,
+        [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
         var current = await repo.GetByIdAsync(task_id);
         var oldStatus = current?.Status.ToDbValue();
@@ -85,7 +89,9 @@ public sealed class TaskTools
             }
         }
 
-        return JsonSerializer.Serialize(updated, JsonOpts.Default);
+        return verbose
+            ? JsonSerializer.Serialize(updated, JsonOpts.Default)
+            : ConciseResponse.UpdatedTask(updated, changes);
     }
 
     [McpServerTool(Name = "get_task"), Description("Get full task details including dependencies, subtasks, and recent messages.")]
@@ -141,7 +147,8 @@ public sealed class TaskTools
         [Description("Optional alternate/global diff head commit. Defaults to head_commit when alternate diff is provided.")] string? alternate_diff_head_commit = null,
         [Description("Optional explicit delta base commit. Defaults to last_reviewed_head_commit or the previous round's head.")] string? delta_base_commit = null,
         [Description("Optional count of inherited commits from unmerged parent work.")] int? inherited_commit_count = null,
-        [Description("Optional count of task-local commits on top of inherited work.")] int? task_local_commit_count = null)
+        [Description("Optional count of task-local commits on top of inherited work.")] int? task_local_commit_count = null,
+        [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
         var parsedTests = tests_run is not null ? JsonSerializer.Deserialize<List<string>>(tests_run) : null;
         var round = await repo.CreateAsync(new CreateReviewRoundInput
@@ -168,7 +175,9 @@ public sealed class TaskTools
             InheritedCommitCount = inherited_commit_count,
             TaskLocalCommitCount = task_local_commit_count
         });
-        return JsonSerializer.Serialize(round, JsonOpts.Default);
+        return verbose
+            ? JsonSerializer.Serialize(round, JsonOpts.Default)
+            : ConciseResponse.CreatedReviewRound(round);
     }
 
     [McpServerTool(Name = "list_review_rounds"), Description("List review rounds for a task in chronological order.")]
@@ -186,7 +195,8 @@ public sealed class TaskTools
         [Description("Review round ID.")] int review_round_id,
         [Description("Verdict: changes_requested, looks_good, follow_up_needed, blocked_by_dependency.")] string verdict,
         [Description("Agent or user setting the verdict.")] string decided_by,
-        [Description("Optional verdict notes.")] string? notes = null)
+        [Description("Optional verdict notes.")] string? notes = null,
+        [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
         var result = await workflow.SetReviewVerdictAsync(new SetReviewVerdictInput
         {
@@ -195,7 +205,9 @@ public sealed class TaskTools
             DecidedBy = decided_by,
             Notes = notes
         });
-        return JsonSerializer.Serialize(result.ReviewRound, JsonOpts.Default);
+        return verbose
+            ? JsonSerializer.Serialize(result.ReviewRound, JsonOpts.Default)
+            : ConciseResponse.SetReviewVerdict(result.ReviewRound);
     }
 
     [McpServerTool(Name = "create_review_finding"), Description("Create a structured finding for a review round.")]
@@ -207,7 +219,8 @@ public sealed class TaskTools
         [Description("Short finding summary.")] string summary,
         [Description("Optional detailed reviewer notes.")] string? notes = null,
         [Description("Optional JSON array of file refs such as [\"src/Foo.cs:42\"].")] string? file_references = null,
-        [Description("Optional JSON array of test commands relevant to the finding.")] string? test_commands = null)
+        [Description("Optional JSON array of test commands relevant to the finding.")] string? test_commands = null,
+        [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
         var parsedFileRefs = file_references is not null ? JsonSerializer.Deserialize<List<string>>(file_references) : null;
         var parsedTestCommands = test_commands is not null ? JsonSerializer.Deserialize<List<string>>(test_commands) : null;
@@ -221,7 +234,9 @@ public sealed class TaskTools
             FileReferences = parsedFileRefs,
             TestCommands = parsedTestCommands
         });
-        return JsonSerializer.Serialize(finding, JsonOpts.Default);
+        return verbose
+            ? JsonSerializer.Serialize(finding, JsonOpts.Default)
+            : ConciseResponse.CreatedReviewFinding(finding);
     }
 
     [McpServerTool(Name = "list_review_findings"), Description("List review findings for a task or a specific review round.")]
@@ -258,7 +273,8 @@ public sealed class TaskTools
         [Description("Optional implementer response notes; stored separately from reviewer/status verification notes.")] string? response_notes = null,
         [Description("Optional status update: open, claimed_fixed, verified_fixed, not_fixed, superseded, split_to_follow_up.")] string? status = null,
         [Description("Optional notes explaining this status transition; use for current verification/status evidence.")] string? status_notes = null,
-        [Description("Optional follow-up task ID. Required for split_to_follow_up and rejected for all other statuses.")] int? follow_up_task_id = null)
+        [Description("Optional follow-up task ID. Required for split_to_follow_up and rejected for all other statuses.")] int? follow_up_task_id = null,
+        [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
         var parsedStatus = status is not null ? EnumExtensions.ParseReviewFindingStatus(status) : (ReviewFindingStatus?)null;
         ValidateFollowUpStatusCombination(parsedStatus, follow_up_task_id);
@@ -272,7 +288,9 @@ public sealed class TaskTools
             StatusNotes = status_notes,
             FollowUpTaskId = follow_up_task_id
         });
-        return JsonSerializer.Serialize(updated, JsonOpts.Default);
+        return verbose
+            ? JsonSerializer.Serialize(updated, JsonOpts.Default)
+            : ConciseResponse.RespondedToReviewFinding(updated);
     }
 
     [McpServerTool(Name = "set_review_finding_status"), Description("Update the status for a review finding. Notes are status/verification evidence and do not replace implementer response_notes. Use follow_up_task_id only with split_to_follow_up; non-split status transitions clear any old follow-up link.")]
@@ -283,7 +301,8 @@ public sealed class TaskTools
         [Description("New status: open, claimed_fixed, verified_fixed, not_fixed, superseded, split_to_follow_up.")] string status,
         [Description("Agent or user updating the finding status.")] string updated_by,
         [Description("Optional status/verification notes for this transition.")] string? notes = null,
-        [Description("Optional follow-up task ID. Required for split_to_follow_up and rejected for all other statuses.")] int? follow_up_task_id = null)
+        [Description("Optional follow-up task ID. Required for split_to_follow_up and rejected for all other statuses.")] int? follow_up_task_id = null,
+        [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
         var parsedStatus = EnumExtensions.ParseReviewFindingStatus(status);
         ValidateFollowUpStatusCombination(parsedStatus, follow_up_task_id);
@@ -296,7 +315,9 @@ public sealed class TaskTools
             Notes = notes,
             FollowUpTaskId = follow_up_task_id
         });
-        return JsonSerializer.Serialize(updated, JsonOpts.Default);
+        return verbose
+            ? JsonSerializer.Serialize(updated, JsonOpts.Default)
+            : ConciseResponse.UpdatedReviewFindingStatus(updated);
     }
 
     [McpServerTool(Name = "request_review"), Description("Create a review round and post a standardized review request or rereview packet to the task thread.")]
@@ -324,7 +345,8 @@ public sealed class TaskTools
         [Description("Optional explicit delta base commit. Defaults to last_reviewed_head_commit or the previous round's head.")] string? delta_base_commit = null,
         [Description("Optional count of inherited commits from unmerged parent work.")] int? inherited_commit_count = null,
         [Description("Optional count of task-local commits on top of inherited work.")] int? task_local_commit_count = null,
-        [Description("Optional task-thread message to reply to.")] int? thread_id = null)
+        [Description("Optional task-thread message to reply to.")] int? thread_id = null,
+        [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
         var parsedTests = tests_run is not null ? JsonSerializer.Deserialize<List<string>>(tests_run) : null;
         var result = await workflow.RequestReviewAsync(project_id, new RequestReviewInput
@@ -352,7 +374,9 @@ public sealed class TaskTools
             TaskLocalCommitCount = task_local_commit_count,
             ThreadId = thread_id
         });
-        return JsonSerializer.Serialize(result, JsonOpts.Default);
+        return verbose
+            ? JsonSerializer.Serialize(result, JsonOpts.Default)
+            : ConciseResponse.RequestedReview(result);
     }
 
     [McpServerTool(Name = "post_review_findings"), Description("Post a standardized reviewer findings packet for a review round back to the task thread.")]
@@ -363,7 +387,8 @@ public sealed class TaskTools
         [Description("Review round ID.")] int review_round_id,
         [Description("Agent or user posting the findings packet.")] string sender,
         [Description("Optional task-thread message to reply to.")] int? thread_id = null,
-        [Description("Optional summary note to append to the packet.")] string? notes = null)
+        [Description("Optional summary note to append to the packet.")] string? notes = null,
+        [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
         var result = await workflow.PostReviewFindingsAsync(project_id, new PostReviewFindingsInput
         {
@@ -373,7 +398,9 @@ public sealed class TaskTools
             ThreadId = thread_id,
             Notes = notes
         });
-        return JsonSerializer.Serialize(result, JsonOpts.Default);
+        return verbose
+            ? JsonSerializer.Serialize(result, JsonOpts.Default)
+            : ConciseResponse.PostedReviewFindings(result);
     }
 
     [McpServerTool(Name = "next_task"), Description("Get the next unblocked task to work on. Checks subtasks of in-progress parents first, then top-level planned tasks. Ranks by priority, then fewer dependencies, then lower ID.")]

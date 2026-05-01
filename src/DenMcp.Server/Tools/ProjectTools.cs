@@ -15,7 +15,8 @@ public sealed class ProjectTools
         [Description("Unique project ID slug, e.g. 'my-project'. Typically the directory name.")] string id,
         [Description("Human-readable display name.")] string name,
         [Description("Absolute path to the project root on disk.")] string? root_path = null,
-        [Description("Short description of the project.")] string? description = null)
+        [Description("Short description of the project.")] string? description = null,
+        [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
         var project = await repo.CreateAsync(new Project
         {
@@ -24,7 +25,9 @@ public sealed class ProjectTools
             RootPath = root_path,
             Description = description
         });
-        return JsonSerializer.Serialize(project, JsonOpts.Default);
+        return verbose
+            ? JsonSerializer.Serialize(project, JsonOpts.Default)
+            : ConciseResponse.CreatedProject(project);
     }
 
     [McpServerTool(Name = "list_projects"), Description("List all registered projects.")]

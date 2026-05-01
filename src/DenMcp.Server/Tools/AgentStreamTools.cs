@@ -89,7 +89,8 @@ public sealed class AgentStreamTools
         [Description("Optional exact target instance id.")] string? recipient_instance_id = null,
         [Description("Optional delivery mode: record_only, notify, or wake. Defaults to record_only for note and notify otherwise.")] string? delivery_mode = null,
         [Description("Optional metadata JSON object string.")] string? metadata = null,
-        [Description("Optional dedup key for retry-safe appends.")] string? dedup_key = null)
+        [Description("Optional dedup key for retry-safe appends.")] string? dedup_key = null,
+        [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
         AgentStreamDeliveryMode? parsedDeliveryMode = null;
         if (!string.IsNullOrWhiteSpace(delivery_mode))
@@ -137,7 +138,9 @@ public sealed class AgentStreamTools
                 DedupKey = dedup_key
             });
 
-            return JsonSerializer.Serialize(result, JsonOpts.Default);
+            return verbose
+                ? JsonSerializer.Serialize(result, JsonOpts.Default)
+                : ConciseResponse.SentAgentStreamMessage(result.Entry);
         }
         catch (InvalidOperationException ex)
         {

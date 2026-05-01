@@ -230,7 +230,8 @@ public class MessageApiTests : IAsyncLifetime
             ProjectId,
             "codex",
             "Canonical handoff",
-            intent: "handoff");
+            intent: "handoff",
+            verbose: true);
 
         var created = JsonSerializer.Deserialize<Message>(createdJson, JsonOpts);
         Assert.NotNull(created);

@@ -22,7 +22,8 @@ public sealed class MessageTools
         [Description("Attach to a task by ID.")] int? task_id = null,
         [Description("Reply to an existing message (forms a thread).")] int? thread_id = null,
         [Description("Optional JSON metadata, e.g. {\"type\":\"review_request\"}.")] string? metadata = null,
-        [Description("Optional canonical intent, e.g. review_feedback or handoff.")] string? intent = null)
+        [Description("Optional canonical intent, e.g. review_feedback or handoff.")] string? intent = null,
+        [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
         var parsedIntent = ParseIntent(intent);
         var msg = new Message
@@ -45,7 +46,9 @@ public sealed class MessageTools
         {
             logger.LogError(ex, "Dispatch detection failed for message {MessageId}", created.Id);
         }
-        return JsonSerializer.Serialize(created, JsonOpts.Default);
+        return verbose
+            ? JsonSerializer.Serialize(created, JsonOpts.Default)
+            : ConciseResponse.SentMessage(created);
     }
 
     [McpServerTool(Name = "get_messages"), Description("Get messages in a project, with optional filters. Returns newest first.")]

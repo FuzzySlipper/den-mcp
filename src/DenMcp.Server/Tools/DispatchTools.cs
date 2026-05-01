@@ -57,12 +57,15 @@ public sealed class DispatchTools
     public static async Task<string> ApproveDispatch(
         IDispatchRepository repo,
         [Description("Dispatch entry ID to approve.")] int dispatch_id,
-        [Description("Identity of who is approving (e.g. 'user').")] string decided_by)
+        [Description("Identity of who is approving (e.g. 'user').")] string decided_by,
+        [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
         try
         {
             var entry = await repo.ApproveAsync(dispatch_id, decided_by);
-            return JsonSerializer.Serialize(entry, JsonOpts.Default);
+            return verbose
+                ? JsonSerializer.Serialize(entry, JsonOpts.Default)
+                : ConciseResponse.ApprovedDispatch(entry);
         }
         catch (InvalidOperationException ex)
         {
@@ -74,12 +77,15 @@ public sealed class DispatchTools
     public static async Task<string> RejectDispatch(
         IDispatchRepository repo,
         [Description("Dispatch entry ID to reject.")] int dispatch_id,
-        [Description("Identity of who is rejecting (e.g. 'user').")] string decided_by)
+        [Description("Identity of who is rejecting (e.g. 'user').")] string decided_by,
+        [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
         try
         {
             var entry = await repo.RejectAsync(dispatch_id, decided_by);
-            return JsonSerializer.Serialize(entry, JsonOpts.Default);
+            return verbose
+                ? JsonSerializer.Serialize(entry, JsonOpts.Default)
+                : ConciseResponse.RejectedDispatch(entry);
         }
         catch (InvalidOperationException ex)
         {
@@ -91,12 +97,15 @@ public sealed class DispatchTools
     public static async Task<string> CompleteDispatch(
         IDispatchRepository repo,
         [Description("Dispatch entry ID to complete.")] int dispatch_id,
-        [Description("Identity of who completed (e.g. the agent identity).")] string? completed_by = null)
+        [Description("Identity of who completed (e.g. the agent identity).")] string? completed_by = null,
+        [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
         try
         {
             var entry = await repo.CompleteAsync(dispatch_id, completed_by);
-            return JsonSerializer.Serialize(entry, JsonOpts.Default);
+            return verbose
+                ? JsonSerializer.Serialize(entry, JsonOpts.Default)
+                : ConciseResponse.CompletedDispatch(entry);
         }
         catch (InvalidOperationException ex)
         {
