@@ -72,9 +72,9 @@ public class ConciseResponseTests : IAsyncLifetime
         Assert.True(root.TryGetProperty("status", out var status));
         Assert.Equal("planned", status.GetString());
 
-        // Must NOT contain echoed description or title
-        Assert.DoesNotContain("Implement feature X", json);
-        Assert.DoesNotContain("very long description", json);
+        // Must NOT contain echoed description or title (absent properties)
+        Assert.False(root.TryGetProperty("title", out _));
+        Assert.False(root.TryGetProperty("description", out _));
     }
 
     [Fact]
@@ -152,8 +152,8 @@ public class ConciseResponseTests : IAsyncLifetime
         var changes = root.GetProperty("changes").EnumerateArray().Select(e => e.GetString()).ToList();
         Assert.Contains("status", changes);
 
-        // Must NOT contain the task title
-        Assert.DoesNotContain("Original title", json);
+        // Must NOT contain the task title (absent property)
+        Assert.False(root.TryGetProperty("title", out _));
     }
 
     [Fact]
@@ -230,7 +230,8 @@ public class ConciseResponseTests : IAsyncLifetime
         var root = doc.RootElement;
 
         var summary = root.GetProperty("summary").GetString()!;
-        Assert.Contains("created finding ", summary);
+        // This replaces the old raw-JSON DoesNotContain for the finding summary text
+        Assert.StartsWith("created finding ", summary);
         Assert.Contains($"round #{round.Id}", summary);
         Assert.Contains("blocking_bug", summary);
 
@@ -239,10 +240,9 @@ public class ConciseResponseTests : IAsyncLifetime
         Assert.Equal(round.Id, root.GetProperty("review_round_id").GetInt32());
         Assert.Equal("blocking_bug", root.GetProperty("category").GetString());
 
-        // Must NOT contain the full notes
-        Assert.DoesNotContain("Very detailed reviewer notes", json);
-        // Must NOT contain the full summary text
-        Assert.DoesNotContain("Wrong diff selected", json);
+        // Must NOT contain the full notes (absent property)
+        Assert.False(root.TryGetProperty("notes", out _));
+        // (finding summary coverage: Assert.StartsWith above)
     }
 
     [Fact]
@@ -296,8 +296,8 @@ public class ConciseResponseTests : IAsyncLifetime
         Assert.True(root.TryGetProperty("finding_key", out _));
         Assert.Equal("verified_fixed", root.GetProperty("status").GetString());
 
-        // Must NOT contain the notes
-        Assert.DoesNotContain("Detailed verification notes", json);
+        // Must NOT contain the notes (absent property)
+        Assert.False(root.TryGetProperty("notes", out _));
     }
 
     [Fact]
@@ -355,9 +355,9 @@ public class ConciseResponseTests : IAsyncLifetime
         Assert.Equal("claimed_fixed", root.GetProperty("status").GetString());
         Assert.Equal("claude-code", root.GetProperty("response_by").GetString());
 
-        // Must NOT contain the response notes or status notes
-        Assert.DoesNotContain("comprehensive refactor", json);
-        Assert.DoesNotContain("Ready for rereview", json);
+        // Must NOT contain the response notes or status notes (absent properties)
+        Assert.False(root.TryGetProperty("response_notes", out _));
+        Assert.False(root.TryGetProperty("status_notes", out _));
     }
 
     [Fact]
@@ -418,8 +418,8 @@ public class ConciseResponseTests : IAsyncLifetime
         Assert.Equal(1, root.GetProperty("round_number").GetInt32());
         Assert.Equal("task/999-test", root.GetProperty("branch").GetString());
 
-        // Must NOT contain the notes
-        Assert.DoesNotContain("Detailed review notes", json);
+        // Must NOT contain the notes (absent property)
+        Assert.False(root.TryGetProperty("notes", out _));
     }
 
     [Fact]
@@ -486,8 +486,8 @@ public class ConciseResponseTests : IAsyncLifetime
         Assert.True(root.TryGetProperty("message_id", out var msgId));
         Assert.True(msgId.GetInt32() > 0);
 
-        // Must NOT contain the notes
-        Assert.DoesNotContain("Long notes", json);
+        // Must NOT contain the notes (absent property)
+        Assert.False(root.TryGetProperty("notes", out _));
     }
 
     [Fact]
@@ -556,8 +556,8 @@ public class ConciseResponseTests : IAsyncLifetime
         Assert.True(root.TryGetProperty("message_id", out var msgId));
         Assert.True(msgId.GetInt32() > 0);
 
-        // Must NOT contain the notes
-        Assert.DoesNotContain("Summary note", json);
+        // Must NOT contain the notes (absent property)
+        Assert.False(root.TryGetProperty("notes", out _));
     }
 
     [Fact]
@@ -624,8 +624,8 @@ public class ConciseResponseTests : IAsyncLifetime
         Assert.Equal(task.Id, root.GetProperty("task_id").GetInt32());
         Assert.Equal("pi", root.GetProperty("sender").GetString());
 
-        // Must NOT contain the message body
-        Assert.DoesNotContain("long message body", json);
+        // Must NOT contain the message body (absent property)
+        Assert.False(root.TryGetProperty("content", out _));
     }
 
     [Fact]
@@ -675,8 +675,8 @@ public class ConciseResponseTests : IAsyncLifetime
         Assert.Equal("changes_requested", root.GetProperty("verdict").GetString());
         Assert.Equal("codex", root.GetProperty("decided_by").GetString());
 
-        // Must NOT contain the notes
-        Assert.DoesNotContain("Detailed feedback", json);
+        // Must NOT contain the notes (absent property)
+        Assert.False(root.TryGetProperty("notes", out _));
     }
 
     [Fact]
@@ -766,8 +766,8 @@ public class ConciseResponseTests : IAsyncLifetime
         Assert.Equal("secondary-test-proj", root.GetProperty("id").GetString());
         Assert.Equal("Secondary Test Project", root.GetProperty("name").GetString());
 
-        // Must NOT contain the description
-        Assert.DoesNotContain("very long project description", json);
+        // Must NOT contain the description (absent property)
+        Assert.False(root.TryGetProperty("description", out _));
     }
 
     [Fact]
@@ -822,8 +822,8 @@ public class ConciseResponseTests : IAsyncLifetime
         Assert.Equal("Test Specification", root.GetProperty("title").GetString());
         Assert.Equal("spec", root.GetProperty("doc_type").GetString());
 
-        // Must NOT contain the content
-        Assert.DoesNotContain("Very Long Content", json);
+        // Must NOT contain the content (absent property)
+        Assert.False(root.TryGetProperty("content", out _));
     }
 
     [Fact]
@@ -889,8 +889,8 @@ public class ConciseResponseTests : IAsyncLifetime
         Assert.Equal("guidance-doc", root.GetProperty("document_slug").GetString());
         Assert.Equal("required", root.GetProperty("importance").GetString());
 
-        // Must NOT contain the notes
-        Assert.DoesNotContain("Detailed notes about why", json);
+        // Must NOT contain the notes (absent property)
+        Assert.False(root.TryGetProperty("notes", out _));
     }
 
     [Fact]
@@ -948,8 +948,8 @@ public class ConciseResponseTests : IAsyncLifetime
         Assert.Equal("test-blackboard-entry", root.GetProperty("slug").GetString());
         Assert.Equal("Test Entry", root.GetProperty("title").GetString());
 
-        // Must NOT contain the content
-        Assert.DoesNotContain("Very Long Blackboard Content", json);
+        // Must NOT contain the content (absent property)
+        Assert.False(root.TryGetProperty("content", out _));
     }
 
     [Fact]
@@ -997,8 +997,9 @@ public class ConciseResponseTests : IAsyncLifetime
         Assert.Equal("test-agent", root.GetProperty("target_agent").GetString());
         Assert.Equal("approved", root.GetProperty("status").GetString());
 
-        // Must NOT contain the context_prompt or context_json
-        Assert.DoesNotContain("context", json);
+        // Must NOT contain context_prompt or context_json (absent properties)
+        Assert.False(root.TryGetProperty("context_prompt", out _));
+        Assert.False(root.TryGetProperty("context_json", out _));
     }
 
     [Fact]
@@ -1143,8 +1144,8 @@ public class ConciseResponseTests : IAsyncLifetime
         Assert.Equal("note", root.GetProperty("event_type").GetString());
         Assert.Equal("codex", root.GetProperty("recipient_agent").GetString());
 
-        // Must NOT contain the body
-        Assert.DoesNotContain("note body that should not appear", json);
+        // Must NOT contain the body (absent property)
+        Assert.False(root.TryGetProperty("body", out _));
     }
 
     [Fact]
@@ -1214,8 +1215,8 @@ public class ConciseResponseTests : IAsyncLifetime
         Assert.Equal("codex", root.GetProperty("recipient_agent").GetString());
         Assert.Equal("resolved", root.GetProperty("wake_resolution_status").GetString());
 
-        // Must NOT contain the body
-        Assert.DoesNotContain("Can you check this?", json);
+        // Must NOT contain the body (absent property)
+        Assert.False(root.TryGetProperty("body", out _));
     }
 
     [Fact]
