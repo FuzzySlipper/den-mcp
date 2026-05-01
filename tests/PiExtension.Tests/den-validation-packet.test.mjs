@@ -551,6 +551,104 @@ test('formatCompactValidationSummary is much shorter than full packet message', 
   assert.doesNotMatch(compactSummary, /line\nline/);
 });
 
+test('formatCompactValidationSummary shows partial status for mixed pass and blocked', () => {
+  const result = {
+    task_id: 1113,
+    branch: 'task/1113-test',
+    head_commit: 'abc1234',
+    status: 'partial',
+    command_results: [
+      { command: 'node --test tests/foo.test.mjs', status: 'pass', exit_code: 0, duration_ms: 200, stdout_preview: 'ok', stderr_preview: '' },
+      { command: 'node --test tests/bar.test.mjs', status: 'blocked', exit_code: null, duration_ms: 5000, stdout_preview: '', stderr_preview: '', error: 'Command timed out after 5000ms' },
+      { command: 'git diff --check', status: 'pass', exit_code: 0, duration_ms: 50, stdout_preview: '', stderr_preview: '' },
+    ],
+    total_duration_ms: 5250,
+    timestamp: '2026-05-01T12:00:00.000Z',
+    infrastructure_errors: [],
+  };
+
+  const summary = formatCompactValidationSummary(result, { message_id: 100 });
+
+  // Header shows partial status
+  assert.match(summary, /Validation: ⚠️ partial/);
+  assert.match(summary, /3 commands/);
+  assert.match(summary, /2 pass, 1 blocked/);
+  assert.match(summary, /5\.3s/);
+  assert.match(summary, /Packet: message #100/);
+
+  // Per-command lines show correct icons and includes failure note for blocked
+  assert.match(summary, /✅ `node --test tests\/foo.test.mjs`/);
+  assert.match(summary, /⚠️ `node --test tests\/bar.test.mjs` — blocked/);
+  assert.match(summary, /Command timed out after 5000ms/);
+  assert.match(summary, /✅ `git diff --check`/);
+
+  // Does NOT include infrastructure errors section
+  assert.doesNotMatch(summary, /infrastructure error/);
+
+  // Should still be compact
+  assert.ok(summary.length < 1000, `compact partial summary should be short, got ${summary.length}`);
+});
+
+test('formatCompactValidationSummary includes infrastructure errors section when present', () => {
+  const result = {
+    status: 'pass',
+    command_results: [
+      { command: 'node --test tests/foo.test.mjs', status: 'pass', exit_code: 0, duration_ms: 200, stdout_preview: 'ok', stderr_preview: '' },
+    ],
+    total_duration_ms: 200,
+    timestamp: '2026-05-01T12:00:00.000Z',
+    infrastructure_errors: ['error1', 'error2'],
+  };
+
+  const summary = formatCompactValidationSummary(result);
+
+  // Normal pass summary still works
+  assert.match(summary, /Validation: ✅ pass/);
+  assert.match(summary, /1 command/);
+  assert.match(summary, /1 pass/);
+
+  // Infrastructure errors section appears
+  assert.match(summary, /⚠️ 2 infrastructure error\(s\)\./);
+
+  // Shows rerunning hint (no message_id)
+  assert.match(summary, /rerunning with verbose=true/);
+  assert.doesNotMatch(summary, /posted validation packet/);
+
+  // Should still be compact
+  assert.ok(summary.length < 1000, `compact summary with infra errors should be short, got ${summary.length}`);
+});
+
+test('formatCompactValidationSummary shows infrastructure errors alongside partial status', () => {
+  const result = {
+    task_id: 1113,
+    status: 'partial',
+    command_results: [
+      { command: 'echo ok', status: 'pass', exit_code: 0, duration_ms: 10, stdout_preview: '', stderr_preview: '' },
+      { command: 'broken-cmd', status: 'blocked', exit_code: null, duration_ms: 5, stdout_preview: '', stderr_preview: '', error: 'not found' },
+    ],
+    total_duration_ms: 15,
+    timestamp: '2026-05-01T12:00:00.000Z',
+    infrastructure_errors: ['broken-cmd: command not found'],
+  };
+
+  const summary = formatCompactValidationSummary(result);
+
+  // Header shows partial status with mixed counts
+  assert.match(summary, /Validation: ⚠️ partial/);
+  assert.match(summary, /2 commands/);
+  assert.match(summary, /1 pass, 1 blocked/);
+
+  // Per-command lines
+  assert.match(summary, /✅ `echo ok`/);
+  assert.match(summary, /⚠️ `broken-cmd`/);
+
+  // Infrastructure errors line
+  assert.match(summary, /⚠️ 1 infrastructure error\(s\)\./);
+
+  // Should still be compact
+  assert.ok(summary.length < 1000, `compact partial+infra summary should be short, got ${summary.length}`);
+});
+
 // ---------------------------------------------------------------------------
 // classifyFailureNote
 // ---------------------------------------------------------------------------
