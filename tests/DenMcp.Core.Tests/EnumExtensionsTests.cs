@@ -1,6 +1,6 @@
 using DenMcp.Core.Models;
 
-namespace DenMcp.Core.Tests.ModelTests;
+namespace DenMcp.Core.Tests;
 
 public class EnumExtensionsTests
 {
