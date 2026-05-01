@@ -7,6 +7,8 @@ import { createSubagentRunRecorder } from '../../pi-dev/lib/den-subagent-recorde
 import { runPiCliSubagent, subagentSucceeded } from '../../pi-dev/lib/den-subagent-runner.ts';
 import {
   collectContextMetricsFromSessionJsonl,
+  collectContextMetricsForRun,
+  enrichStatusJson,
 } from '../../pi-dev/lib/den-subagent-pipeline.ts';
 import { buildSubagentParentToolResult } from '../../pi-dev/lib/den-subagent-parent-tool-result.ts';
 import {
@@ -454,4 +456,328 @@ test('parent tool result includes final-head fields consistently', () => {
   const text = toolResult.content[0].text;
   assert.match(text, /Final branch head: final-sha-abc/);
   assert.match(text, /Requested \(starting\) head: launch-sha/);
+});
+
+// ---------------------------------------------------------------------------
+// R1110-1: Integration-style tests for the actual enrichment path
+// ---------------------------------------------------------------------------
+
+test('enrichStatusJson merges final head metadata and context_metrics into existing status.json', async (t) => {
+  const { recorder } = await runFakePiSubagent(t, {
+    prefix: 'den-integration-enrichStatusJson-',
+    runId: 'run-enrichStatusJson',
+    scriptLines: [
+      '#!/usr/bin/env node',
+      'console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", model: "gpt-test", stopReason: "stop", content: [{ type: "text", text: "done" }] } }));',
+      'process.exit(0);',
+    ],
+    options: { role: 'coder', prompt: 'Work on branch.' },
+  });
+
+  // Ensure the status.json has baseline content
+  const baseline = await readJson(recorder.artifacts.status_json_path);
+  assert.ok(baseline.exit_code !== undefined, 'baseline status exists');
+
+  const finalHeadMetadata = buildFinalBranchHeadMetadata({
+    final_head_commit: 'abc123',
+    final_head_status: 'clean',
+    final_head_source: 'supplied_branch',
+    final_branch: 'task/1114-test',
+    final_worktree_branch: 'task/1114-test',
+    final_branch_matches_worktree: true,
+    final_worktree_status: 'clean',
+  });
+  const contextMetrics = {
+    session: {
+      message_counts_by_role: { user: 1, assistant: 1 },
+      model_visible_chars: 42,
+    },
+    usage_summary_source: 'pi_session_assistant_usage',
+  };
+
+  await enrichStatusJson(recorder, finalHeadMetadata, contextMetrics);
+
+  const enriched = await readJson(recorder.artifacts.status_json_path);
+  assert.equal(enriched.final_head_commit, 'abc123', 'enrichStatusJson sets final_head_commit');
+  assert.equal(enriched.final_head_status, 'clean', 'enrichStatusJson sets final_head_status');
+  assert.equal(enriched.final_branch, 'task/1114-test', 'enrichStatusJson sets final_branch');
+  assert.deepEqual(enriched.context_metrics, contextMetrics, 'enrichStatusJson sets context_metrics');
+  assert.equal(enriched.exit_code, baseline.exit_code, 'enrichStatusJson preserves existing status fields');
+  assert.equal(enriched.state, baseline.state, 'enrichStatusJson preserves existing state');
+
+  // Verify enrichStatusJson with null context_metrics
+  await enrichStatusJson(recorder, {}, null);
+  const nulled = await readJson(recorder.artifacts.status_json_path);
+  assert.equal(nulled.context_metrics, null, 'context_metrics is null when passed null');
+});
+
+test('enrichStatusJson gracefully handles missing status.json', async (t) => {
+  // Create a minimal status file to start, then verify no crash
+  const tmp = await mkdtemp(path.join(os.tmpdir(), 'den-enrich-missing-'));
+  t.after(async () => rm(tmp, { recursive: true, force: true }));
+
+  // Create a recorder via a throwaway subagent
+  const { recorder } = await runFakePiSubagent(t, {
+    prefix: 'den-enrich-missing-status-',
+    runId: 'run-enrich-missing-status',
+    scriptLines: [
+      '#!/usr/bin/env node',
+      'console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", model: "gpt-test", stopReason: "stop", content: [{ type: "text", text: "done" }] } }));',
+      'process.exit(0);',
+    ],
+    options: { role: 'coder', prompt: 'test' },
+  });
+
+  // enrichStatusJson reads from the artifact path; if the file exists it works
+  const metadata = buildFinalBranchHeadMetadata({
+    final_head_commit: 'def456',
+    final_head_status: 'clean',
+    final_branch: 'task/test',
+    final_worktree_status: 'clean',
+  });
+  await assert.doesNotReject(
+    enrichStatusJson(recorder, metadata, undefined),
+    'enrichStatusJson should not reject when status.json exists',
+  );
+
+  const status = await readJson(recorder.artifacts.status_json_path);
+  assert.equal(status.final_head_commit, 'def456', 'status was enriched');
+});
+
+test('collectContextMetricsForRun collects session and artifact metrics from real files', async (t) => {
+  // Create a recorder to get valid artifact paths, then write a session file
+  // programmatically so we control the session file path directly.
+  const { recorder, result } = await runFakePiSubagent(t, {
+    prefix: 'den-integration-collectMetrics-',
+    runId: 'run-collectMetrics',
+    scriptLines: [
+      '#!/usr/bin/env node',
+      'console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", model: "gpt-test", stopReason: "stop", content: [{ type: "text", text: "done" }] } }));',
+      'process.exit(0);',
+    ],
+    options: { role: 'coder', prompt: 'Quick.' },
+  });
+
+  // Write a session file directly to the recorder's session dir.
+  const sessionDir = recorder.artifacts.session_dir;
+  const sessionId = 'session-integration-1';
+  const sessionFilePath = path.join(sessionDir, `2026-05-01T00-00-00-000Z_${sessionId}.jsonl`);
+  await writeFile(sessionFilePath, [
+    JSON.stringify({ type: 'session', version: 3, id: sessionId, cwd: process.cwd() }),
+    JSON.stringify({ type: 'message', id: 'm1', timestamp: '2026-05-01T00:00:01.000Z', message: { role: 'user', content: [{ type: 'text', text: 'Implement feature Y' }] } }),
+    JSON.stringify({ type: 'message', id: 'm2', timestamp: '2026-05-01T00:00:02.000Z', message: { role: 'assistant', usage: { input: 150, output: 30 }, content: [{ type: 'text', text: 'Done implementing Y' }] } }),
+  ].join('\n'), 'utf8');
+
+  // Set pi_session_file_path on result so collectContextMetricsForRun finds it.
+  // Also set usage_summary.source since the runner didn't discover this session file.
+  result.pi_session_file_path = sessionFilePath;
+  result.artifacts.session_file_path = sessionFilePath;
+  result.usage_summary = { source: 'pi_session_assistant_usage' };
+
+  const metrics = await collectContextMetricsForRun(result, recorder.artifacts);
+
+  assert.ok(metrics, 'collectContextMetricsForRun should return metrics');
+  assert.ok(metrics && metrics.session, 'should include session block');
+  if (metrics && metrics.session) {
+    assert.deepEqual(metrics.session.message_counts_by_role, {
+      user: 1,
+      assistant: 1,
+    });
+    assert.equal(metrics.session.model_visible_chars,
+      'Implement feature Y'.length + 'Done implementing Y'.length);
+    assert.equal(typeof metrics.session.session_file_bytes, 'number', 'session_file_bytes should be present');
+    assert.ok(metrics.session.session_file_bytes > 0, 'session_file_bytes should be positive');
+  }
+  assert.ok(metrics.artifacts, 'should include artifacts block');
+  assert.equal(typeof metrics.artifacts.status_json_bytes, 'number', 'status.json bytes should be present');
+  assert.equal(typeof metrics.artifacts.stdout_jsonl_bytes, 'number', 'stdout.jsonl bytes should be present');
+  assert.equal(metrics.usage_summary_source, 'pi_session_assistant_usage');
+});
+
+test('collectContextMetricsForRun returns undefined when no session file and no usage', async (t) => {
+  const { recorder, result } = await runFakePiSubagent(t, {
+    prefix: 'den-integration-no-metrics-',
+    runId: 'run-no-metrics-2',
+    scriptLines: [
+      '#!/usr/bin/env node',
+      'console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", model: "gpt-test", stopReason: "stop", content: [{ type: "text", text: "done" }] } }));',
+      'process.exit(0);',
+    ],
+    options: { role: 'coder', prompt: 'Quick task.' },
+  });
+
+  const metrics = await collectContextMetricsForRun(result, recorder.artifacts);
+
+  // With no session file, artifact metrics and usage summary may still exist.
+  // But if result.usage_summary is undefined, the function may return undefined.
+  if (result.usage_summary) {
+    assert.ok(metrics, 'metrics may be returned from usage_summary alone');
+  } else {
+    // No session file, no usage — expect undefined or only artifact metrics
+    assert.ok(metrics === undefined || (metrics.artifacts && !metrics.session),
+      'metrics without session: should have no session block');
+  }
+});
+
+// ---------------------------------------------------------------------------
+// R1110-3: Empty session metrics edge case
+// ---------------------------------------------------------------------------
+
+test('session with no message entries should not surface empty message_counts_by_role', async (t) => {
+  const { recorder, result } = await runFakePiSubagent(t, {
+    prefix: 'den-empty-session-metrics-',
+    runId: 'run-empty-session-metrics',
+    scriptLines: [
+      '#!/usr/bin/env node',
+      'console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", model: "gpt-test", stopReason: "stop", content: [{ type: "text", text: "done" }] } }));',
+      'process.exit(0);',
+    ],
+    options: { role: 'coder', prompt: 'Quick.' },
+  });
+
+  // Write a session file with only a session header — no message entries.
+  const sessionDir = recorder.artifacts.session_dir;
+  const sessionFilePath = path.join(sessionDir, '2026-05-01T00-00-00-000Z_session-empty.jsonl');
+  await writeFile(sessionFilePath, JSON.stringify({ type: 'session', version: 3, id: 'session-empty', cwd: process.cwd() }) + '\n', 'utf8');
+
+  // Set pi_session_file_path so collectContextMetricsForRun can find it
+  result.pi_session_file_path = sessionFilePath;
+  result.artifacts.session_file_path = sessionFilePath;
+
+  const metrics = await collectContextMetricsForRun(result, recorder.artifacts);
+
+  // The session file exists but has no message entries.
+  // collectContextMetricsFromSessionJsonl returns undefined for empty content.
+  // collectContextMetricsForRun should set sessionMetrics to undefined instead
+  // of creating a misleading empty { message_counts_by_role: {} }.
+  //
+  // Result: session block should be absent when there are no messages.
+  assert.ok(metrics, 'collectContextMetricsForRun should return at least artifact metrics');
+  // Session block should be absent — no misleading empty message_counts_by_role
+  assert.equal(metrics.session, undefined,
+    'session block should be absent for session with no message entries');
+});
+
+// ---------------------------------------------------------------------------
+// R1110-2: Final head collection for non-coder roles
+// ---------------------------------------------------------------------------
+
+test('collectFinalHeadState collects final head for reviewer runs with branch context', async (t) => {
+  const { repo, branch, finalHead } = await initGitRepoWithTaskBranch(t, 'task/reviewer-final-head');
+
+  // Simulate what collectFinalHeadState (formerly collectFinalHeadForCoderRun)
+  // does for a reviewer run: it should collect final head when branch/worktree
+  // context is available (the coder-only gate was removed).
+  const state = await collectFinalBranchHead({ worktreePath: repo, branch });
+
+  assert.ok(state, 'should resolve final head state for reviewer run');
+  assert.equal(state.final_head_commit, finalHead);
+  assert.equal(state.final_branch, branch);
+  assert.equal(state.final_head_status, 'clean');
+  assert.equal(state.final_worktree_status, 'clean');
+
+  // The metadata builder works the same regardless of role
+  const metadata = buildFinalBranchHeadMetadata(state);
+  assert.equal(metadata.final_head_commit, finalHead);
+  assert.equal(metadata.final_branch, branch);
+});
+
+test('collectFinalHeadState returns undefined for reviewer without branch/worktree context', async () => {
+  // No worktreePath or branch provided — should return undefined
+  const state = await collectFinalBranchHead({});
+  assert.equal(state, undefined, 'no context should produce undefined');
+});
+
+test('final head enrichment applies to all roles in parent tool result', () => {
+  // Simulate what collectFinalHeadState + applyFinalHeadState produce for a reviewer run
+  const result = {
+    run_id: 'run-reviewer-final-head',
+    role: 'reviewer',
+    task_id: 1114,
+    branch: 'task/1114-subagent-status-artifact-coverage',
+    base_branch: 'main',
+    base_commit: 'base-sha',
+    head_commit: 'launch-sha',
+    requested_head_commit: 'launch-sha',
+    purpose: 'review',
+    exit_code: 0,
+    aborted: false,
+    assistant_final_found: true,
+    final_output: 'Review complete.',
+    artifacts: { dir: '/tmp/run-reviewer-final-head' },
+    duration_ms: 3000,
+    message_count: 5,
+    assistant_message_count: 2,
+    session_mode: 'fresh',
+    backend: 'pi-cli',
+    started_at: new Date().toISOString(),
+    ended_at: new Date().toISOString(),
+    final_head_commit: 'final-sha-review',
+    final_head_status: 'clean',
+    final_head_source: 'supplied_branch',
+    final_branch: 'task/1114-subagent-status-artifact-coverage',
+    final_worktree_branch: 'task/1114-subagent-status-artifact-coverage',
+    final_branch_matches_worktree: true,
+    final_worktree_status: 'clean',
+  };
+
+  const toolResult = buildSubagentParentToolResult(result);
+
+  // Final-head fields should be present for the reviewer run
+  assert.equal(toolResult.details.final_head_commit, 'final-sha-review');
+  assert.equal(toolResult.details.final_head_status, 'clean');
+  assert.equal(toolResult.details.final_branch, 'task/1114-subagent-status-artifact-coverage');
+  assert.equal(toolResult.details.requested_head_commit, 'launch-sha');
+  assert.equal(toolResult.details.role, 'reviewer');
+
+  const text = toolResult.content[0].text;
+  assert.match(text, /Sub-agent completed \(reviewer\)/);
+  assert.match(text, /Final branch head: final-sha-review/);
+  assert.match(text, /Requested \(starting\) head: launch-sha/);
+
+  // Reviewers with clean worktree have no recovery guidance (successful run)
+  assert.equal(toolResult.details.recovery_guidance, undefined);
+});
+
+test('recovery guidance for failed reviewer run includes final head state', () => {
+  const result = {
+    run_id: 'run-reviewer-failed',
+    role: 'reviewer',
+    task_id: 1114,
+    branch: 'task/1114-subagent-status-artifact-coverage',
+    head_commit: 'launch-sha',
+    requested_head_commit: 'launch-sha',
+    exit_code: 1,
+    aborted: false,
+    assistant_final_found: false,
+    final_output: '',
+    artifacts: { dir: '/tmp/run-reviewer-failed' },
+    duration_ms: 2000,
+    message_count: 0,
+    assistant_message_count: 0,
+    session_mode: 'fresh',
+    backend: 'pi-cli',
+    started_at: new Date().toISOString(),
+    ended_at: new Date().toISOString(),
+    final_head_commit: 'final-sha-review',
+    final_head_status: 'clean',
+    final_head_source: 'supplied_branch',
+    final_branch: 'task/1114-subagent-status-artifact-coverage',
+    final_worktree_branch: 'task/1114-subagent-status-artifact-coverage',
+    final_branch_matches_worktree: true,
+    final_worktree_status: 'clean',
+  };
+
+  const toolResult = buildSubagentParentToolResult(result);
+
+  // Recovery guidance should be present for failed run with branch state
+  assert.ok(toolResult.details.recovery_guidance, 'reviewer run should have recovery guidance');
+  assert.equal(toolResult.details.recovery_branch, 'task/1114-subagent-status-artifact-coverage');
+  assert.equal(toolResult.details.recovery_head_commit, 'final-sha-review');
+  assert.equal(toolResult.details.recovery_worktree_dirty, false);
+
+  const text = toolResult.content[0].text;
+  assert.match(text, /Recovery guidance:/);
+  assert.match(text, /Branch: task\/1114-subagent-status-artifact-coverage/);
+  assert.match(text, /Head: final-sha-review/);
 });

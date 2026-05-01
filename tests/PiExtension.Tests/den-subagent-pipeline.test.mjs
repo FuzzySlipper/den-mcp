@@ -1462,10 +1462,10 @@ test('coder run that creates new commits records requested_head_commit distinct 
   assert.match(toolResult.content[0].text, new RegExp(`Final branch head: ${finalHead}`));
 });
 
-test('requested_head_commit matches head_commit when no final head collection occurs', async (t) => {
+test('requested_head_commit preserved when no branch/worktree context available', async (t) => {
   const { result } = await runFakePiSubagent(t, {
-    prefix: 'den-subagent-no-final-head-',
-    runId: 'run-no-final-head',
+    prefix: 'den-subagent-no-context-',
+    runId: 'run-no-context',
     scriptLines: [
       '#!/usr/bin/env node',
       'console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", model: "gpt-test", stopReason: "stop", content: [{ type: "text", text: "done" }] } }));',
@@ -1474,13 +1474,13 @@ test('requested_head_commit matches head_commit when no final head collection oc
     options: {
       role: 'reviewer',
       prompt: 'Review the branch.',
+      // No branch or worktreePath — final head collection cannot run.
       headCommit: 'review-head-sha',
-      branch: 'task/test-no-final',
     },
   });
 
-  // Non-coder runs don't collect final head
+  // Without branch/worktree context, no final head collection occurs for any role
   assert.equal(result.head_commit, 'review-head-sha');
   assert.equal(result.requested_head_commit, 'review-head-sha');
-  assert.equal(result.final_head_commit, undefined, 'reviewer runs should not collect final head');
+  assert.equal(result.final_head_commit, undefined, 'no final head when no context');
 });

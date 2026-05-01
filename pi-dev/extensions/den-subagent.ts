@@ -1585,7 +1585,7 @@ async function runDenSubagent(
   }
 
   const finalRequestedModel = fallbackModel ?? effectiveOptions.model;
-  const finalHeadState = await collectFinalHeadForCoderRun(effectiveOptions, result, cwd);
+  const finalHeadState = await collectFinalHeadState(effectiveOptions, result, cwd);
   const finalHeadMetadata = buildFinalBranchHeadMetadata(finalHeadState);
   if (finalHeadState) {
     applyFinalHeadState(result, finalHeadState);
@@ -1742,15 +1742,16 @@ async function runDenSubagent(
   return result;
 }
 
-async function collectFinalHeadForCoderRun(
+async function collectFinalHeadState(
   options: RunOptions,
-  result: SubagentResult,
+  _result: SubagentResult,
   cwd: string,
 ): Promise<FinalBranchHeadState | undefined> {
-  // Collect final head state for all coder runs with branch/worktree context,
-  // including failed and aborted runs. This enables recovery guidance in the
-  // parent tool result so the orchestrator can see partial branch state.
-  if (options.role.toLowerCase() !== "coder") return undefined;
+  // Collect final head state for runs with branch/worktree context, including
+  // failed and aborted runs. This enables recovery guidance in the parent tool
+  // result so the orchestrator can see partial branch state after any sub-agent
+  // run. Previously gated on coder role only; now collected for all roles when
+  // branch/worktree context is available so parent tool results are consistent.
   if (!options.worktreePath && !options.branch) return undefined;
   try {
     return await collectFinalBranchHead({
@@ -2521,92 +2522,8 @@ function isPathInside(cwd: string, rootPath: string): boolean {
 // Context metrics collection
 // ---------------------------------------------------------------------------
 
-async function collectContextMetricsForRun(
-  result: SubagentResult,
-  artifacts: SubagentArtifacts,
-): Promise<ContextMetrics | undefined> {
-  // Session metrics from session JSONL
-  let sessionMetrics: ContextMetrics["session"];
-  if (result.pi_session_file_path) {
-    try {
-      const sessionContent = await readFile(result.pi_session_file_path, "utf8");
-      const sessionFileStats = await stat(result.pi_session_file_path);
-      const parsed = collectContextMetricsFromSessionJsonl(sessionContent);
-      sessionMetrics = parsed
-        ? { ...parsed.session, session_file_bytes: sessionFileStats.size }
-        : { message_counts_by_role: {}, model_visible_chars: 0, session_file_bytes: sessionFileStats.size };
-    } catch {
-      // Session metrics are optional
-    }
-  }
-
-  // Artifact sizes
-  let artifactMetrics: ContextMetrics["artifacts"];
-  try {
-    const sizes = await Promise.all([
-      statOrUndefined(artifacts.stdout_jsonl_path),
-      statOrUndefined(artifacts.events_jsonl_path),
-      statOrUndefined(artifacts.status_json_path),
-      statOrUndefined(artifacts.stderr_log_path),
-    ]);
-    artifactMetrics = {
-      stdout_jsonl_bytes: sizes[0]?.size,
-      events_jsonl_bytes: sizes[1]?.size,
-      status_json_bytes: sizes[2]?.size,
-      stderr_log_bytes: sizes[3]?.size,
-    };
-  } catch {
-    // Artifact metrics are optional
-  }
-
-  const usageSummarySource = result.usage_summary?.source;
-  if (!sessionMetrics && !artifactMetrics && !usageSummarySource) return undefined;
-
-  return omitContextUndefined({
-    session: sessionMetrics,
-    artifacts: artifactMetrics,
-    usage_summary_source: usageSummarySource,
-  });
-}
-
-async function statOrUndefined(filePath: string): Promise<{ size: number } | undefined> {
-  try {
-    return await stat(filePath);
-  } catch {
-    return undefined;
-  }
-}
-
-function omitContextUndefined(value: Record<string, unknown>): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (entry !== undefined) result[key] = entry;
-  }
-  return result;
-}
-
-// ---------------------------------------------------------------------------
-// Status artifact enrichment
-// ---------------------------------------------------------------------------
-
-async function enrichStatusJson(
-  recorder: SubagentRunRecorder,
-  finalHeadMetadata: JsonObject,
-  contextMetrics: ContextMetrics | undefined,
-): Promise<void> {
-  try {
-    const currentText = await readFile(recorder.artifacts.status_json_path, "utf8");
-    const current = JSON.parse(currentText);
-    const enriched = {
-      ...current,
-      ...finalHeadMetadata,
-      context_metrics: contextMetrics ?? null,
-    };
-    await recorder.writeStatus(enriched);
-  } catch {
-    // Status enrichment is best-effort; the runner's final status write remains the fallback.
-  }
-}
+// collectContextMetricsForRun and enrichStatusJson moved to den-subagent-pipeline.ts
+// for cross-module access without typebox extension dependencies.
 
 function esc(value: string): string {
   return encodeURIComponent(value);
