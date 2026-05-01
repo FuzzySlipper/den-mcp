@@ -371,7 +371,7 @@ test('tests expected category downgrades non-high test changes to low', () => {
   assert.equal(testSignal.expected, true);
 });
 
-test('tests expected category still keeps high-risk harness at medium', () => {
+test('tests expected category keeps high-risk harness at high severity', () => {
   const result = analyzeDriftCheck({
     head_commit: 'abc1234',
     changed_paths: [
@@ -385,12 +385,12 @@ test('tests expected category still keeps high-risk harness at medium', () => {
 
   const testSignal = result.signals.find((s) => s.code === 'test_or_scoring_harness_changes');
   assert.ok(testSignal);
-  // High-risk harness is downgraded from high to medium (not to low)
-  assert.equal(testSignal.severity, 'medium');
+  // High-risk harness keeps high severity even when expected; only marked expected.
+  assert.equal(testSignal.severity, 'high');
   assert.equal(testSignal.expected, true);
 });
 
-test('config expected category downgrades package changes from high to medium', () => {
+test('config expected category keeps package changes at high severity but marks expected', () => {
   const result = analyzeDriftCheck({
     head_commit: 'abc1234',
     changed_paths: [
@@ -404,7 +404,8 @@ test('config expected category downgrades package changes from high to medium', 
 
   const pkgSignal = result.signals.find((s) => s.code === 'package_project_dependency_changes');
   assert.ok(pkgSignal);
-  assert.equal(pkgSignal.severity, 'medium');
+  // Package/dependency changes keep high severity even when expected.
+  assert.equal(pkgSignal.severity, 'high');
   assert.equal(pkgSignal.expected, true);
   assert.ok(pkgSignal.message.includes('expected per task scope'));
 });
@@ -659,4 +660,215 @@ test('reasons include expected tag for adjusted signals', () => {
 
   const expectedReason = result.reasons.find((r) => r.includes('(expected)'));
   assert.ok(expectedReason, `Expected a reason with (expected), got: ${JSON.stringify(result.reasons)}`);
+});
+
+// ---------------------------------------------------------------------------
+// Regression: blocking signals must not be reduced below high
+// ---------------------------------------------------------------------------
+
+test('tests_skipped_or_failed severity is never reduced by expected categories', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [{ status: 'M', path: 'src/lib/foo.ts', additions: 10, deletions: 0 }],
+    expected_scope: {
+      expected_change_categories: ['tests', 'large_ui', 'fixtures', 'generated', 'config', 'schema', 'docs'],
+    },
+    declared_tests: ['Tests not run — blocked'],
+  });
+
+  const skipSignal = result.signals.find((s) => s.code === 'tests_skipped_or_failed');
+  assert.ok(skipSignal);
+  assert.equal(skipSignal.severity, 'high');
+  assert.equal(skipSignal.expected, undefined);
+});
+
+test('outside_expected_scope severity is never reduced by expected categories', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [
+      { status: 'M', path: 'src/ui/App.tsx', additions: 10, deletions: 0 },
+      { status: 'M', path: 'src/out/of/scope.ts', additions: 5, deletions: 0 },
+    ],
+    expected_scope: {
+      paths: ['src/ui/App.tsx'],
+      expected_change_categories: ['tests', 'large_ui', 'fixtures', 'generated', 'config', 'schema', 'docs'],
+    },
+    declared_tests: ['node --test tests/foo.test.ts — pass'],
+  });
+
+  const oosSignal = result.signals.find((s) => s.code === 'outside_expected_scope');
+  assert.ok(oosSignal);
+  assert.equal(oosSignal.severity, 'medium');
+  assert.equal(oosSignal.expected, undefined);
+});
+
+test('dirty_worktree severity is never reduced by expected categories', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    git_status_short: [' M src/lib/foo.ts'],
+    changed_paths: [{ status: 'M', path: 'src/lib/foo.ts', additions: 5, deletions: 0 }],
+    expected_scope: {
+      expected_change_categories: ['tests', 'large_ui', 'fixtures', 'generated', 'config', 'schema', 'docs'],
+    },
+    declared_tests: ['node --test tests/foo.test.ts — pass'],
+  });
+
+  const dirtySignal = result.signals.find((s) => s.code === 'dirty_worktree');
+  assert.ok(dirtySignal);
+  assert.equal(dirtySignal.severity, 'high');
+  assert.equal(dirtySignal.expected, undefined);
+});
+
+test('high-risk harness with tests expected keeps high severity (not medium)', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [
+      { status: 'M', path: '.github/workflows/ci.yml', additions: 5, deletions: 0 },
+      { status: 'M', path: 'tests/scoring/harness.ts', additions: 5, deletions: 0 },
+    ],
+    expected_scope: {
+      expected_change_categories: ['tests'],
+    },
+    declared_tests: ['node --test tests/api.test.ts — pass'],
+  });
+
+  const testSignal = result.signals.find((s) => s.code === 'test_or_scoring_harness_changes');
+  assert.ok(testSignal);
+  assert.equal(testSignal.severity, 'high');
+  assert.equal(testSignal.expected, true);
+  // Overall risk should be high
+  assert.equal(result.risk, 'high');
+});
+
+test('package changes with config expected keeps high severity', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [
+      { status: 'M', path: 'package.json', additions: 1, deletions: 1 },
+      { status: 'M', path: 'package-lock.json', additions: 10, deletions: 0 },
+    ],
+    expected_scope: {
+      expected_change_categories: ['config'],
+    },
+    declared_tests: ['node --test tests/api.test.ts — pass'],
+  });
+
+  const pkgSignal = result.signals.find((s) => s.code === 'package_project_dependency_changes');
+  assert.ok(pkgSignal);
+  assert.equal(pkgSignal.severity, 'high');
+  assert.equal(pkgSignal.expected, true);
+  assert.equal(result.risk, 'high');
+});
+
+// ---------------------------------------------------------------------------
+// Regression: fixture/test downgrades require ALL paths to be fixture-like
+// ---------------------------------------------------------------------------
+
+test('fixtures category does not downgrade test_or_scoring_harness when only some paths are fixtures', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [
+      { status: 'M', path: 'tests/__fixtures__/data.json', additions: 10, deletions: 0 },
+      { status: 'M', path: 'tests/unit/api.test.ts', additions: 5, deletions: 0 },
+    ],
+    expected_scope: {
+      expected_change_categories: ['fixtures'],
+    },
+    declared_tests: ['node --test tests/api.test.ts — pass'],
+  });
+
+  const testSignal = result.signals.find((s) => s.code === 'test_or_scoring_harness_changes');
+  assert.ok(testSignal);
+  // Should NOT be reduced because not ALL paths are fixtures
+  assert.equal(testSignal.expected, undefined);
+});
+
+test('fixtures category does not downgrade generated_files when only some paths are fixtures', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [
+      { status: 'M', path: 'tests/__snapshots__/api.test.mjs.snap', additions: 10, deletions: 0 },
+      { status: 'M', path: 'dist/bundle.min.js', additions: 500, deletions: 0 },
+    ],
+    expected_scope: {
+      expected_change_categories: ['fixtures'],
+    },
+    declared_tests: ['node --test tests/api.test.ts — pass'],
+  });
+
+  const genSignal = result.signals.find((s) => s.code === 'generated_files');
+  assert.ok(genSignal);
+  // Not all generated paths are fixtures, so should not be reduced
+  assert.equal(genSignal.expected, undefined);
+});
+
+test('fixtures category downgrades test harness when ALL paths are fixtures and non-high-risk', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [
+      { status: 'M', path: 'tests/__fixtures__/data.json', additions: 10, deletions: 0 },
+      { status: 'M', path: 'tests/__snapshots__/api.test.mjs.snap', additions: 5, deletions: 0 },
+    ],
+    expected_scope: {
+      expected_change_categories: ['fixtures'],
+    },
+    declared_tests: ['node --test tests/api.test.ts — pass'],
+  });
+
+  const testSignal = result.signals.find((s) => s.code === 'test_or_scoring_harness_changes');
+  assert.ok(testSignal);
+  // ALL paths are fixtures and none are high-risk, so downgrade is OK
+  assert.equal(testSignal.severity, 'low');
+  assert.equal(testSignal.expected, true);
+});
+
+test('fixtures category does not downgrade when high-risk harness path is present', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [
+      { status: 'M', path: 'tests/__fixtures__/data.json', additions: 10, deletions: 0 },
+      { status: 'M', path: 'tests/scoring/harness.ts', additions: 5, deletions: 0 },
+    ],
+    expected_scope: {
+      expected_change_categories: ['fixtures'],
+    },
+    declared_tests: ['node --test tests/api.test.ts — pass'],
+  });
+
+  const testSignal = result.signals.find((s) => s.code === 'test_or_scoring_harness_changes');
+  assert.ok(testSignal);
+  // scoring/harness is high-risk, so should not be reduced even though some paths are fixtures
+  assert.equal(testSignal.expected, undefined);
+});
+
+test('combined blocking signals stay high even with all expected categories', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [
+      { status: 'M', path: 'package.json', additions: 1, deletions: 1 },
+      { status: 'M', path: '.github/workflows/ci.yml', additions: 5, deletions: 0 },
+    ],
+    declared_tests: ['Tests not run'],
+    expected_scope: {
+      expected_change_categories: ['tests', 'config'],
+    },
+  });
+
+  // All three blocking signals must stay high
+  assert.equal(result.risk, 'high');
+
+  const pkgSignal = result.signals.find((s) => s.code === 'package_project_dependency_changes');
+  assert.ok(pkgSignal);
+  assert.equal(pkgSignal.severity, 'high');
+  assert.equal(pkgSignal.expected, true);
+
+  const testSignal = result.signals.find((s) => s.code === 'test_or_scoring_harness_changes');
+  assert.ok(testSignal);
+  assert.equal(testSignal.severity, 'high');
+  assert.equal(testSignal.expected, true);
+
+  const skipSignal = result.signals.find((s) => s.code === 'tests_skipped_or_failed');
+  assert.ok(skipSignal);
+  assert.equal(skipSignal.severity, 'high');
+  assert.equal(skipSignal.expected, undefined);
 });

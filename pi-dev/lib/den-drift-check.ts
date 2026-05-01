@@ -621,6 +621,15 @@ function normalizeExpectedCategories(categories: ExpectedChangeCategory[] | unde
 }
 
 /** Apply expected change category adjustments to drift signals. */
+/** Signal codes that must never have their severity reduced by expected categories. */
+const BLOCKING_SIGNAL_CODES: ReadonlySet<string> = new Set([
+  "tests_skipped_or_failed",
+  "outside_expected_scope",
+  "collection_error",
+  "dirty_worktree",
+  "missing_head_commit",
+]);
+
 export function applyExpectedCategoryAdjustments(
   signals: DriftSignal[],
   categories: ExpectedChangeCategory[],
@@ -631,6 +640,9 @@ export function applyExpectedCategoryAdjustments(
 
   return signals.map((signal) => {
     if (signal.expected) return signal;
+
+    // Blocking signals are never severity-reduced; they can only be marked expected.
+    if (BLOCKING_SIGNAL_CODES.has(signal.code)) return signal;
 
     switch (signal.code) {
       case "large_diff": {
@@ -657,8 +669,11 @@ export function applyExpectedCategoryAdjustments(
           };
         }
         if (hasFixtures) {
-          const allFixtures = (signal.paths ?? []).every((p) => isFixturePath(p));
-          if (allFixtures && (signal.paths ?? []).length > 0) {
+          // Only downgrade when ALL paths are fixture-like and none are high-risk harness.
+          const paths = signal.paths ?? [];
+          const allFixtures = paths.length > 0 && paths.every((p) => isFixturePath(p));
+          const anyHighRisk = paths.some((p) => isHighRiskHarnessPath(p));
+          if (allFixtures && !anyHighRisk) {
             return {
               ...signal,
               severity: "low",
@@ -695,10 +710,10 @@ export function applyExpectedCategoryAdjustments(
       case "test_or_scoring_harness_changes": {
         if (catSet.has("tests")) {
           if (signal.severity === "high") {
-            // High-risk harness changes stay elevated but are marked expected.
+            // High-risk harness changes keep high severity; only mark expected.
             return {
               ...signal,
-              severity: "medium",
+              severity: "high",
               expected: true,
               message: `${signal.message} Test harness changes expected per task scope; reviewer should confirm.`,
             };
@@ -710,23 +725,30 @@ export function applyExpectedCategoryAdjustments(
             message: `${signal.message} Test changes expected per task scope.`,
           };
         }
-        // Also handle fixtures expected category for fixture-like test files.
-        if (catSet.has("fixtures") && (signal.paths ?? []).some((p) => isFixturePath(p))) {
-          return {
-            ...signal,
-            severity: "low",
-            expected: true,
-            message: `${signal.message} Fixture changes expected per task scope.`,
-          };
+        // Handle fixtures expected category for fixture-like test files.
+        // Only downgrade when ALL signal paths are fixture-like and none are high-risk.
+        if (catSet.has("fixtures")) {
+          const paths = signal.paths ?? [];
+          const allFixtures = paths.length > 0 && paths.every((p) => isFixturePath(p));
+          const anyHighRisk = paths.some((p) => isHighRiskHarnessPath(p));
+          if (allFixtures && !anyHighRisk) {
+            return {
+              ...signal,
+              severity: "low",
+              expected: true,
+              message: `${signal.message} Fixture changes expected per task scope.`,
+            };
+          }
         }
         break;
       }
 
       case "package_project_dependency_changes": {
         if (catSet.has("config")) {
+          // Package/project/dependency changes keep high severity; only mark expected.
           return {
             ...signal,
-            severity: "medium",
+            severity: "high",
             expected: true,
             message: `${signal.message} Dependency/config changes expected per task scope; reviewer should confirm.`,
           };
