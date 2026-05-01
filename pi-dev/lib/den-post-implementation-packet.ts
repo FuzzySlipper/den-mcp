@@ -16,6 +16,7 @@
  * @module den-post-implementation-packet
  */
 
+import { optionalNumber } from "./den-string-utils.ts";
 import {
   extractImplementationPacket,
   formatImplementationPacketMessage,
@@ -67,10 +68,6 @@ export interface PacketPostingParams {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function optionalNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
 
 function metadataString(entry: unknown, key: string): string | undefined {
   const val = (entry as any)?.[key];

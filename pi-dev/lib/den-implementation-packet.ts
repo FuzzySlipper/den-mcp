@@ -10,6 +10,8 @@
  * @module den-implementation-packet
  */
 
+import { optionalNumber } from "./den-string-utils.ts";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -572,10 +574,6 @@ function metadataObject(value: unknown): Record<string, any> {
     }
   }
   return value && typeof value === "object" ? value as Record<string, any> : {};
-}
-
-function optionalNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function extractSection(text: string, headingPatterns: RegExp[]): string | undefined {

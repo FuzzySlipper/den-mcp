@@ -70,7 +70,7 @@ import {
   summarizeTaskContext,
   taskMessages,
 } from "../lib/den-prompt-templates.ts";
-import { normalizeString, oneLine } from "../lib/den-string-utils.ts";
+import { normalizeString, oneLine, optionalNumber } from "../lib/den-string-utils.ts";
 import {
   formatCoderContextPacket,
   buildCoderContextPacketMeta,
@@ -2499,10 +2499,6 @@ function makeRunId(cfg: DenConfig, options: RunOptions): string {
     .update(`${Date.now()}:${cfg.instanceId}:${options.role}:${options.taskId ?? ""}:${options.prompt}`)
     .digest("hex")
     .slice(0, 16);
-}
-
-function optionalNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function normalizeBaseUrl(value: string): string {

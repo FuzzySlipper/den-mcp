@@ -17,7 +17,7 @@ import {
   loadMergedDenExtensionConfig,
   reasoningCaptureOptionsFromConfig,
 } from "../lib/den-extension-config.ts";
-import { errorMessage, normalizeString } from "../lib/den-string-utils.ts";
+import { errorMessage, normalizeString, optionalNumber } from "../lib/den-string-utils.ts";
 import {
   compileResponse,
   formatSessionSummary,
@@ -1655,10 +1655,6 @@ async function collabCompileResponse(
 // ---------------------------------------------------------------------------
 // Collaboration command handlers
 // ---------------------------------------------------------------------------
-
-function optionalNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
 
 export function buildPiSourceContext(cfg: DenConfig, ctx: any, extra: Record<string, unknown> = {}): Record<string, unknown> {
   return compactJsonObject({

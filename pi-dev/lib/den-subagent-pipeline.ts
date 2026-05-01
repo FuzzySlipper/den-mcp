@@ -391,7 +391,7 @@ export function normalizePiWorkEvent(event: any, now = Date.now(), context: PiWo
         ...workContextMetadata(context),
         session_id: normalizeString(event.id),
         cwd: normalizeString(event.cwd),
-        version: finiteNumber(event.version),
+        version: optionalNumber(event.version),
       });
     case "agent_start":
       return omitUndefined({
@@ -665,7 +665,7 @@ function summarizeReasoningActivity(event: any, message: any, options?: Reasonin
     ? rawReasoningText.length
     : typeof providerVisibleSummaryText === "string"
       ? providerVisibleSummaryText.length
-      : finiteNumber(event?.assistantMessageEvent?.chars ?? event?.assistantMessageEvent?.length);
+      : optionalNumber(event?.assistantMessageEvent?.chars ?? event?.assistantMessageEvent?.length);
   const sourceRedacted = hasRedactedReasoning(message);
   const exposeRaw = capture.captureRawLocalPreviews && !sourceRedacted && Boolean(rawReasoningText);
   return omitUndefined({
@@ -971,10 +971,6 @@ function eventTimestamp(event: any, fallback: number): number {
   return fallback;
 }
 
-function finiteNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
 function finiteNonNegativeNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
@@ -1040,6 +1036,7 @@ function normalizeForEchoDetection(value: string): string {
 // ---------------------------------------------------------------------------
 
 import { readFile, stat } from "node:fs/promises";
+import { optionalNumber } from "./den-string-utils.ts";
 
 export type ContextMetricsRecorder = {
   artifacts: { status_json_path: string };
