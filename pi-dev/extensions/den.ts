@@ -446,6 +446,124 @@ export default function denExtension(pi: ExtensionAPI) {
   });
 
   // -----------------------------------------------------------------------
+  // Tmp cleanup command and tool
+  // -----------------------------------------------------------------------
+
+  pi.registerCommand("den-tmp-cleanup", {
+    description: "Preview or clean project tmp artifacts under /tmp/<project-id>/. " +
+      "Dry-run by default; pass --destructive to delete after active-agent check, or --force to delete without that check. " +
+      "Usage: /den-tmp-cleanup [--destructive] [--force] [--project <id>]",
+    handler: async (args, ctx) => {
+      const cfg = await requireConfig(ctx);
+      const argsStr = (args ?? "").trim();
+      const force = argsStr.includes("--force");
+      const destructive = force || argsStr.includes("--destructive");
+      const projectId = normalizeString(argsStr.match(/--project\s+(\S+)/)?.[1]) ?? cfg.projectId;
+
+      const { planTmpCleanup, executeTmpCleanup, formatCleanupResult } = await import("../lib/den-tmp-cleanup.ts");
+
+      const plan = await planTmpCleanup({ projectId });
+
+      // Check active agents on the project
+      let activeAgents: { agent: string; role?: string }[] | undefined;
+      if (destructive && !force) {
+        try {
+          const agents = await denFetch(cfg, `/api/agents/active?${query({ projectId })}`);
+          activeAgents = Array.isArray(agents) ? agents : undefined;
+        } catch (error) {
+          const message = `Tmp cleanup refused: could not check active agents (${errorMessage(error)}). Re-run with --force to override.`;
+          ctx.ui.notify(message, "error");
+          ctx.ui.setWidget("den-tmp-cleanup", [message]);
+          return;
+        }
+      }
+
+      const result = await executeTmpCleanup(plan, {
+        destructive,
+        force,
+        currentAgent: cfg.agent,
+        activeAgents,
+      });
+
+      const lines = formatCleanupResult(result);
+      ctx.ui.setWidget("den-tmp-cleanup", lines);
+      ctx.ui.notify(lines.join("\n"), result.blockedByActiveAgents ? "warning" : result.dryRun ? "info" : "success");
+    },
+  });
+
+  pi.registerTool({
+    name: "den_tmp_cleanup",
+    label: "Den Tmp Cleanup",
+    description: "Preview or clean project tmp artifacts under /tmp/<project-id>/. " +
+      "Dry-run by default (preview). Pass destructive=true and optionally force=true to actually delete. " +
+      "Checks Den active agents before destructive deletion unless force=true.",
+    parameters: {
+      type: "object",
+      properties: {
+        project_id: {
+          type: "string",
+          description: "Project ID for root tmp dir resolution. Default: current bound project.",
+        },
+        root_dir: {
+          type: "string",
+          description: "Explicit root directory override, e.g. /tmp/other-project.",
+        },
+        include_legacy_patterns: {
+          type: "boolean",
+          description: "Include known safe legacy patterns like /tmp/den-mcp-test-*. Default: true.",
+        },
+        destructive: {
+          type: "boolean",
+          description: "Actually delete files. Default: false (dry-run preview).",
+        },
+        recursive: {
+          type: "boolean",
+          description: "Scan and clean nested files/directories under the project tmp root. Default: true.",
+        },
+        force: {
+          type: "boolean",
+          description: "Skip active-agent check. Default: false.",
+        },
+      },
+      additionalProperties: false,
+    },
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const cfg = await requireConfig(ctx);
+      const { planTmpCleanup, executeTmpCleanup, buildTmpCleanupToolResult } = await import("../lib/den-tmp-cleanup.ts");
+
+      const projectId = normalizeString(params?.project_id) ?? cfg.projectId;
+      const destructive = params?.destructive === true;
+      const force = params?.force === true;
+
+      const plan = await planTmpCleanup({
+        projectId,
+        rootDir: normalizeString(params?.root_dir),
+        includeLegacyPatterns: params?.include_legacy_patterns !== false,
+        recursive: params?.recursive !== false,
+      });
+
+      let activeAgents: { agent: string; role?: string }[] | undefined;
+      if (destructive && !force) {
+        try {
+          const agents = await denFetch(cfg, `/api/agents/active?${query({ projectId })}`);
+          activeAgents = Array.isArray(agents) ? agents : undefined;
+        } catch (error) {
+          throw new Error(`Tmp cleanup refused: could not check active agents (${errorMessage(error)}). Re-run with force=true to override.`);
+        }
+      }
+
+      const result = await executeTmpCleanup(plan, {
+        destructive,
+        force,
+        currentAgent: cfg.agent,
+        activeAgents,
+      });
+
+      return buildTmpCleanupToolResult(result);
+    },
+  });
+
+  // -----------------------------------------------------------------------
   // Collaboration session tools and commands
   // -----------------------------------------------------------------------
 
