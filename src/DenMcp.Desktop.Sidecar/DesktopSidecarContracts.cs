@@ -58,6 +58,9 @@ public static class DesktopSidecarProtocol
     // Tasks/orchestrator dashboard projection (task #1028)
     public const string TasksGetDashboardSnapshotCommand = "den_desktop.tasks.get_dashboard_snapshot";
 
+    // Messages tab projection (task #1092)
+    public const string MessagesGetSnapshotCommand = "den_desktop.messages.get_snapshot";
+
     // Collaboration response delivery (task #920)
     public const string CollaborationSendCompiledResponseCommand = "den_desktop.collaboration.send_compiled_response";
 

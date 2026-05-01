@@ -11,7 +11,7 @@ import type {
   SaveOperatorSettingsRequest,
 } from '../desktop/tauriApi.ts';
 import type { SidecarBridgeClient } from './sidecarProtocol.ts';
-import { createSidecarBridgeFacade, type SidecarHealthResponse, type SidecarCapabilitiesResponse, type ConsoleCommandDefinition, type ConsoleCommandRunRequest, type ConsoleCommandRunResponse, type ConsoleCommandListResponse, type TerminalAckOutputRequest, type TerminalAttachRequest, type TerminalCreateSessionRequest, type TerminalDetachRequest, type TerminalListSessionsRequest, type TerminalReadActivityRequest, type TerminalReconnectRequest, type TerminalResizeRequest, type TerminalResponse, type TerminalEventPayload, type TerminalSendInputRequest, type TerminalTerminateRequest, type AppAgentBuildContextRequest, type AppAgentCancelRequest, type AppAgentInvokeToolRequest, type AppAgentListToolsRequest, type AppAgentResponse, type TasksDashboardSnapshotRequest, type TasksDashboardSnapshot, type CollaborationSendCompiledResponseRequest, type CollaborationSendCompiledResponseResponse, type CollaborationDeliveryEventPayload } from './sidecarProtocol.ts';
+import { createSidecarBridgeFacade, type SidecarHealthResponse, type SidecarCapabilitiesResponse, type ConsoleCommandDefinition, type ConsoleCommandRunRequest, type ConsoleCommandRunResponse, type ConsoleCommandListResponse, type TerminalAckOutputRequest, type TerminalAttachRequest, type TerminalCreateSessionRequest, type TerminalDetachRequest, type TerminalListSessionsRequest, type TerminalReadActivityRequest, type TerminalReconnectRequest, type TerminalResizeRequest, type TerminalResponse, type TerminalEventPayload, type TerminalSendInputRequest, type TerminalTerminateRequest, type AppAgentBuildContextRequest, type AppAgentCancelRequest, type AppAgentInvokeToolRequest, type AppAgentListToolsRequest, type AppAgentResponse, type TasksDashboardSnapshotRequest, type TasksDashboardSnapshot, type CollaborationSendCompiledResponseRequest, type CollaborationSendCompiledResponseResponse, type CollaborationDeliveryEventPayload, type MessagesSnapshotRequest, type MessagesSnapshot } from './sidecarProtocol.ts';
 
 export interface ShellAppearanceSettings {
   theme: string;
@@ -50,6 +50,7 @@ export interface DenDesktopSidecarApi {
   appAgentCancelRequest(request: AppAgentCancelRequest): Promise<AppAgentResponse>;
   collaborationSendCompiledResponse(request: CollaborationSendCompiledResponseRequest): Promise<CollaborationSendCompiledResponseResponse>;
   tasksGetDashboardSnapshot(request: TasksDashboardSnapshotRequest): Promise<TasksDashboardSnapshot>;
+  messagesGetSnapshot(request: MessagesSnapshotRequest): Promise<MessagesSnapshot>;
   terminalCreateSession(request: TerminalCreateSessionRequest): Promise<TerminalResponse>;
   terminalListSessions(request?: TerminalListSessionsRequest): Promise<TerminalResponse>;
   terminalReadActivity(request: TerminalReadActivityRequest): Promise<TerminalResponse>;
@@ -108,6 +109,7 @@ export function createDenDesktopSidecarApi(
     appAgentCancelRequest: (request: AppAgentCancelRequest) => facade.appAgentCancelRequest(request),
     collaborationSendCompiledResponse: (request: CollaborationSendCompiledResponseRequest) => facade.collaborationSendCompiledResponse(request),
     tasksGetDashboardSnapshot: (request: TasksDashboardSnapshotRequest) => facade.tasksGetDashboardSnapshot(request),
+    messagesGetSnapshot: (request: MessagesSnapshotRequest) => facade.messagesGetSnapshot(request),
     terminalCreateSession: (request: TerminalCreateSessionRequest) => facade.terminalCreateSession(request),
     terminalListSessions: (request?: TerminalListSessionsRequest) => facade.terminalListSessions(request ?? {}),
     terminalReadActivity: (request: TerminalReadActivityRequest) => facade.terminalReadActivity(request),

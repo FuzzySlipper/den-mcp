@@ -2,6 +2,7 @@ import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 're
 import { AgentPane } from './components/AgentPane';
 import { CollaborationPane } from './components/CollaborationPane';
 import { TasksDashboardPane } from './components/TasksDashboardPane';
+import { MessagesPane } from './components/MessagesPane';
 import { useCollaborationState } from './desktop/useCollaborationState';
 import { AppShell } from './components/AppShell';
 import { ConnectionPanel } from './components/ConnectionPanel';
@@ -249,6 +250,7 @@ export function App() {
     operator: operatorTab,
     agent: <AgentPane selection={agentSelection} />,
     tasks: <TasksDashboardPane projectId={activeSnapshot?.scope.projectId ?? null} parentTaskId={activeSnapshot?.scope.taskId ?? null} />,
+    messages: <MessagesPane projectId={activeSnapshot?.scope.projectId ?? null} taskId={activeSnapshot?.scope.taskId ?? null} />,
     git: gitTab,
     compare: <StubSurface eyebrow="Compare" title="Multi-worktree compare" description="Routed surface reserved for pinned worktree panes and side-by-side terminal/output comparison without making renderer state authoritative." />,
     terminals: terminalsTab,

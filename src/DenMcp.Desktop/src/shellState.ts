@@ -2,6 +2,7 @@ export const shellTabs = [
   { id: 'operator', label: 'operator', icon: '⌬', badge: null },
   { id: 'agent', label: 'agent', icon: '◎', badge: null },
   { id: 'tasks', label: 'tasks', icon: '◫', badge: null },
+  { id: 'messages', label: 'messages', icon: '✉', badge: null },
   { id: 'git', label: 'git', icon: '⋔', badge: null },
   { id: 'compare', label: 'compare', icon: '⫶⫶', badge: null },
   { id: 'terminals', label: 'terminals', icon: '>_', badge: null },

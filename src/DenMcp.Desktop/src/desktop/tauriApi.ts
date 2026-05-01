@@ -59,6 +59,7 @@ interface DenDesktopSidecarRuntimeApi {
   terminalReconnect(request: TerminalReconnectRequest): Promise<TerminalAttachResponse>;
   terminalAckOutput(request: TerminalAckOutputRequest): Promise<TerminalAckOutputResponse>;
   tasksGetDashboardSnapshot(request: TasksDashboardSnapshotRequest): Promise<TasksDashboardSnapshot>;
+  messagesGetSnapshot(request: MessagesGetSnapshotRequest): Promise<MessagesGetSnapshotResponse>;
   appAgentBuildContext(request?: AppAgentBuildContextRequest): Promise<AppAgentResponse>;
   appAgentListTools(request?: AppAgentListToolsRequest): Promise<AppAgentResponse>;
   appAgentInvokeTool(request: AppAgentInvokeToolRequest): Promise<AppAgentResponse>;
@@ -767,6 +768,56 @@ export interface TasksDashboardGetSnapshotRequest {
 
 export type TasksDashboardGetSnapshotResponse = TasksDashboardSnapshot;
 
+// ── Messages tab snapshot (task #1092) ──────────────────────────────────────
+
+export interface MessagesGetSnapshotRequest {
+  project_id: string;
+  task_id?: number | null;
+  thread_id?: number | null;
+  since?: string | null;
+  limit?: number;
+  unread_for?: string | null;
+}
+
+export interface MessagesMessageRow {
+  id: number;
+  sender: string;
+  content: string;
+  intent: string | null;
+  metadata: Record<string, unknown> | null;
+  metadata_type: string | null;
+  task_id: number | null;
+  thread_id: number | null;
+  created_at: string | null;
+  is_unread: boolean;
+  content_summary: string;
+}
+
+export interface MessagesFreshness {
+  source: string;
+  generated_at: string | null;
+  is_partial: boolean;
+  warnings: string[];
+  errors: string[];
+}
+
+export interface MessagesGetSnapshotResponse {
+  snapshot_id: string;
+  project_id: string;
+  task_id: number | null;
+  thread_id: number | null;
+  generated_at: string;
+  messages: MessagesMessageRow[];
+  thread_root: MessagesMessageRow | null;
+  unread_count: number;
+  total_count: number;
+  freshness: MessagesFreshness;
+}
+
 export async function tasksGetDashboardSnapshot(request: TasksDashboardGetSnapshotRequest): Promise<TasksDashboardGetSnapshotResponse> {
   return callSidecar('tasksGetDashboardSnapshot', () => sidecarApi().tasksGetDashboardSnapshot(request as TasksDashboardSnapshotRequest));
+}
+
+export async function messagesGetSnapshot(request: MessagesGetSnapshotRequest): Promise<MessagesGetSnapshotResponse> {
+  return callSidecar('messagesGetSnapshot', () => sidecarApi().messagesGetSnapshot(request));
 }

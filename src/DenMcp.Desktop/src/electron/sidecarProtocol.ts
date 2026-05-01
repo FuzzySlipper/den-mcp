@@ -190,6 +190,52 @@ export interface TasksDashboardSnapshot {
   freshness: TasksDashboardFreshness;
 }
 
+// ── Messages tab projection (task #1092) ──────────────────────────────────
+
+export interface MessagesSnapshotRequest extends Record<string, JsonValue | undefined> {
+  project_id: string;
+  task_id?: number | null;
+  thread_id?: number | null;
+  since?: string | null;
+  limit?: number;
+  unread_for?: string | null;
+}
+
+export interface MessagesSnapshot {
+  snapshot_id: string;
+  project_id: string;
+  task_id?: number | null;
+  thread_id?: number | null;
+  generated_at: string;
+  messages: MessagesMessageRow[];
+  thread_root: MessagesMessageRow | null;
+  unread_count: number;
+  total_count: number;
+  freshness: MessagesFreshness;
+}
+
+export interface MessagesMessageRow {
+  id: number;
+  sender: string;
+  content: string;
+  intent: string | null;
+  metadata: Record<string, JsonValue> | null;
+  metadata_type: string | null;
+  task_id: number | null;
+  thread_id: number | null;
+  created_at: string | null;
+  is_unread: boolean;
+  content_summary: string;
+}
+
+export interface MessagesFreshness {
+  source: string;
+  generated_at: string | null;
+  is_partial: boolean;
+  warnings: string[];
+  errors: string[];
+}
+
 export interface TasksDashboardHeader {
   state: string;
   task_count: number;
@@ -414,6 +460,12 @@ export const sidecarCommands: Record<string, BridgeCommandSpec<JsonValue, JsonVa
     responseSchema: 'den_desktop.tasks.get_dashboard_snapshot.response',
     supportsCancellation: true,
   },
+  messagesGetSnapshot: {
+    command: 'den_desktop.messages.get_snapshot',
+    requestSchema: 'den_desktop.messages.get_snapshot.request',
+    responseSchema: 'den_desktop.messages.get_snapshot.response',
+    supportsCancellation: true,
+  },
   getHealth: {
     command: 'bridge.get_health',
     requestSchema: 'bridge.get_health.request',
@@ -567,6 +619,8 @@ export function createSidecarBridgeFacade(client: SidecarBridgeClient) {
       facade.collaborationSendCompiledResponse(request as unknown as JsonValue) as Promise<TResponse>,
     tasksGetDashboardSnapshot: async <TResponse = TasksDashboardSnapshot>(request: TasksDashboardSnapshotRequest): Promise<TResponse> =>
       facade.tasksGetDashboardSnapshot(request as JsonValue) as Promise<TResponse>,
+    messagesGetSnapshot: async <TResponse = MessagesSnapshot>(request: MessagesSnapshotRequest): Promise<TResponse> =>
+      facade.messagesGetSnapshot(request as JsonValue) as Promise<TResponse>,
     terminalCreateSession: async <TResponse = TerminalResponse>(request: TerminalCreateSessionRequest): Promise<TResponse> =>
       facade.terminalCreateSession(request as JsonValue) as Promise<TResponse>,
     terminalListSessions: async <TResponse = TerminalResponse>(request: TerminalListSessionsRequest = {}): Promise<TResponse> =>

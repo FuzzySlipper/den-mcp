@@ -40,6 +40,7 @@ public static class DesktopSidecarBridge
         services.AddSingleton<AppAgentService>();
         services.AddSingleton<CollaborationResponseDeliveryService>();
         services.AddSingleton<TasksDashboardProjectionService>();
+        services.AddSingleton<MessagesProjectionService>();
         services.AddBridgeHost(
             ConfigureRegistry,
             host =>
@@ -49,7 +50,7 @@ public static class DesktopSidecarBridge
                 host.SchemaVersion = DesktopSidecarProtocol.SchemaVersion;
                 host.SchemaBundleId = DesktopSidecarProtocol.SchemaBundleId;
                 host.SupportedTransports = new[] { WebSocketBridgeTransportNames.LoopbackWebSocket };
-                host.FeatureFlags = new[] { "operator_runtime", "typed_runtime_bridge", "tmux_operator_sessions", "direct_pty_operator_sessions", "app_agent_bridge_foundation", "tasks_dashboard_projection" };
+                host.FeatureFlags = new[] { "operator_runtime", "typed_runtime_bridge", "tmux_operator_sessions", "direct_pty_operator_sessions", "app_agent_bridge_foundation", "tasks_dashboard_projection", "messages_tab_projection" };
             });
 
         return services.BuildServiceProvider(validateScopes: true);
@@ -122,6 +123,10 @@ public static class DesktopSidecarBridge
                 DesktopSidecarProtocol.AppAgentCancelRequestCommand)
             .RegisterCommand<TasksDashboardSnapshotRequest, TasksDashboardSnapshot, TasksDashboardSnapshotHandler>(
                 DesktopSidecarProtocol.TasksGetDashboardSnapshotCommand,
+                config => { config.SupportsCancellation = true; })
+            // Messages tab projection (task #1092)
+            .RegisterCommand<MessagesSnapshotRequest, MessagesSnapshot, MessagesSnapshotHandler>(
+                DesktopSidecarProtocol.MessagesGetSnapshotCommand,
                 config => { config.SupportsCancellation = true; })
             // Collaboration response delivery (task #920)
             .RegisterCommand<CollaborationSendCompiledResponseRequest, CollaborationSendCompiledResponseResponse, CollaborationSendCompiledResponseHandler>(
@@ -263,6 +268,8 @@ public static class DesktopSidecarBridge
             Schema(DesktopSidecarProtocol.AppAgentCancelRequestCommand + ".response", AppAgentCancelResponseSchema),
             Schema(DesktopSidecarProtocol.TasksGetDashboardSnapshotCommand + ".request", TasksDashboardSnapshotRequestSchema),
             Schema(DesktopSidecarProtocol.TasksGetDashboardSnapshotCommand + ".response", TasksDashboardSnapshotResponseSchema),
+            Schema(DesktopSidecarProtocol.MessagesGetSnapshotCommand + ".request", MessagesSnapshotRequestSchema),
+            Schema(DesktopSidecarProtocol.MessagesGetSnapshotCommand + ".response", MessagesSnapshotResponseSchema),
             Schema(DesktopSidecarProtocol.AppAgentRunStateEvent + ".payload", AppAgentRunStateEventSchema),
             Schema(DesktopSidecarProtocol.AppAgentToolCallStateEvent + ".payload", AppAgentToolCallStateEventSchema),
             // Collaboration response delivery schemas (task #920)
@@ -445,6 +452,14 @@ public static class DesktopSidecarBridge
 
     private const string TasksDashboardSnapshotResponseSchema = """
         {"type":"object","additionalProperties":true,"required":["snapshot_id","project_id","generated_at","header","tasks","waves","lanes","freshness"],"properties":{"snapshot_id":{"type":"string"},"project_id":{"type":"string"},"parent_task_id":{"type":["integer","null"]},"focused_task_id":{"type":["integer","null"]},"generated_at":{"type":"string"},"header":{"type":"object","additionalProperties":true,"required":["state","task_count","completion_percent"],"properties":{"state":{"type":"string"},"task_count":{"type":"integer"},"completion_percent":{"type":"integer"},"total_tokens":{"type":["integer","null"]},"total_cost":{"type":["number","null"]}}},"tasks":{"type":"array","items":{"type":"object","additionalProperties":true,"required":["id","project_id","title","status","computed_state","dependencies","packets","review","run_summary","agent_lifecycle","session_chips"],"properties":{"id":{"type":"integer"},"project_id":{"type":"string"},"title":{"type":"string"},"status":{"type":"string"},"computed_state":{"type":"string"},"dependencies":{"type":"array","items":{"type":"object","additionalProperties":true}},"packets":{"type":"array","items":{"type":"object","additionalProperties":true}},"review":{"type":"object","additionalProperties":true},"run_summary":{"type":"object","additionalProperties":true},"agent_lifecycle":{"type":"object","additionalProperties":true},"session_chips":{"type":"array","items":{"type":"object","additionalProperties":true}}}}},"waves":{"type":"array","items":{"type":"object","additionalProperties":true}},"lanes":{"type":"array","items":{"type":"object","additionalProperties":true}},"freshness":{"type":"object","additionalProperties":false,"required":["source","is_partial","warnings","errors"],"properties":{"source":{"type":"string"},"generated_at":{"type":["string","null"]},"is_partial":{"type":"boolean"},"warnings":{"type":"array","items":{"type":"string"}},"errors":{"type":"array","items":{"type":"string"}}}}}}
+        """;
+
+    private const string MessagesSnapshotRequestSchema = """
+        {"type":"object","additionalProperties":false,"required":["project_id"],"properties":{"project_id":{"type":"string"},"task_id":{"type":["integer","null"]},"thread_id":{"type":["integer","null"]},"since":{"type":["string","null"]},"limit":{"type":"integer"},"unread_for":{"type":["string","null"]}}}
+        """;
+
+    private const string MessagesSnapshotResponseSchema = """
+        {"type":"object","additionalProperties":true,"required":["snapshot_id","project_id","generated_at","messages","unread_count","total_count","freshness"],"properties":{"snapshot_id":{"type":"string"},"project_id":{"type":"string"},"task_id":{"type":["integer","null"]},"thread_id":{"type":["integer","null"]},"generated_at":{"type":"string"},"messages":{"type":"array","items":{"type":"object","additionalProperties":true,"required":["id","sender","content","content_summary"],"properties":{"id":{"type":"integer"},"sender":{"type":"string"},"content":{"type":"string"},"intent":{"type":["string","null"]},"metadata_type":{"type":["string","null"]},"task_id":{"type":["integer","null"]},"thread_id":{"type":["integer","null"]},"created_at":{"type":["string","null"]},"is_unread":{"type":"boolean"},"content_summary":{"type":"string"}}}},"thread_root":{"type":["object","null"]},"unread_count":{"type":"integer"},"total_count":{"type":"integer"},"freshness":{"type":"object","additionalProperties":false,"required":["source","is_partial","warnings","errors"],"properties":{"source":{"type":"string"},"generated_at":{"type":["string","null"]},"is_partial":{"type":"boolean"},"warnings":{"type":"array","items":{"type":"string"}},"errors":{"type":"array","items":{"type":"string"}}}}}}
         """;
 
     private const string AppAgentRunStateEventSchema = """

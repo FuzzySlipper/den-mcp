@@ -32,6 +32,7 @@ public class DesktopSidecarBridgeTests
             DesktopSidecarProtocol.GetOperatorStatusCommand,
             DesktopSidecarProtocol.ListLocalGitSnapshotsCommand,
             DesktopSidecarProtocol.ListLocalSessionSnapshotsCommand,
+            DesktopSidecarProtocol.MessagesGetSnapshotCommand,
             DesktopSidecarProtocol.RefreshNowCommand,
             DesktopSidecarProtocol.SaveAppearanceSettingsCommand,
             DesktopSidecarProtocol.SaveSettingsCommand,
