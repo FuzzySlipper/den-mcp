@@ -162,6 +162,52 @@ public class PiSessionSnapshotBuilderTests
     }
 
     [Fact]
+    public void ScanPiSessionSnapshots_FallsBackToRepoRootShortNameWhenAbsoluteRootDiffers()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var alternateCheckout = Path.Combine(root, "server", "den-mcp");
+            var nestedCwd = Path.Combine(alternateCheckout, "src", "DenMcp.Server");
+            Directory.CreateDirectory(nestedCwd);
+            Directory.CreateDirectory(Path.Combine(alternateCheckout, ".git"));
+            CreateRun(root, "alternate-root", new { cwd = nestedCwd, state = "running" });
+
+            var result = BuilderForRoot(root).ScanPiSessionSnapshots(
+                Settings(),
+                [Project("den-mcp", rootPath: Path.Combine(root, "dev", "den-mcp")), Project("other", rootPath: Path.Combine(root, "dev", "other"))]);
+
+            var snapshot = Assert.Single(result.Snapshots);
+            Assert.Equal("den-mcp", snapshot.ProjectId);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ScanPiSessionSnapshots_FallsBackToPathSegmentShortNameWhenCwdIsNotVisible()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            CreateRun(root, "unmounted-root", new { cwd = "/not-mounted/server/den-mcp/src/DenMcp.Server", state = "running" });
+
+            var result = BuilderForRoot(root).ScanPiSessionSnapshots(
+                Settings(),
+                [Project("den-mcp", rootPath: "/home/patch/dev/den-mcp"), Project("other", rootPath: "/home/patch/dev/other")]);
+
+            var snapshot = Assert.Single(result.Snapshots);
+            Assert.Equal("den-mcp", snapshot.ProjectId);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ScanPiSessionSnapshots_UsesSingleProjectFallbackAndFallbackRunSessionIds()
     {
         var root = CreateTempDirectory();

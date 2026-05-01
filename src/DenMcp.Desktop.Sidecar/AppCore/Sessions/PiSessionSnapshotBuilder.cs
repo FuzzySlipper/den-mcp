@@ -290,9 +290,99 @@ public sealed class PiSessionSnapshotBuilder
             {
                 return match.Project.Id;
             }
+
+            var shortPathMatch = ProjectIdFromRepoShortPath(cwd, projects);
+            if (shortPathMatch is not null)
+            {
+                return shortPathMatch;
+            }
         }
 
         return projects.Count == 1 ? projects[0].Id : null;
+    }
+
+    private static string? ProjectIdFromRepoShortPath(string cwd, IReadOnlyList<DenProject> projects)
+    {
+        var repoName = RepositoryRootName(cwd);
+        if (repoName is not null)
+        {
+            var match = MatchProjectShortName(repoName, projects);
+            if (match is not null)
+            {
+                return match;
+            }
+        }
+
+        foreach (var segment in PathSegments(cwd).Reverse())
+        {
+            var match = MatchProjectShortName(segment, projects);
+            if (match is not null)
+            {
+                return match;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? MatchProjectShortName(string shortName, IReadOnlyList<DenProject> projects)
+    {
+        var idMatch = projects.FirstOrDefault(project =>
+            string.Equals(project.Id, shortName, PathComparison));
+        if (idMatch is not null)
+        {
+            return idMatch.Id;
+        }
+
+        var rootNameMatch = projects.FirstOrDefault(project =>
+        {
+            var rootPath = TrimToOption(project.RootPath);
+            var rootShortName = rootPath is null ? null : ShortNameFromPath(rootPath);
+            return rootShortName is not null && string.Equals(rootShortName, shortName, PathComparison);
+        });
+        return rootNameMatch?.Id;
+    }
+
+    private static string? ShortNameFromPath(string path)
+    {
+        try
+        {
+            return Path.GetFileName(NormalizePathForPrefix(path));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
+    }
+
+    private static string? RepositoryRootName(string cwd)
+    {
+        try
+        {
+            var current = new DirectoryInfo(Path.GetFullPath(cwd));
+            while (current is not null)
+            {
+                var gitPath = Path.Combine(current.FullName, ".git");
+                if (Directory.Exists(gitPath) || File.Exists(gitPath))
+                {
+                    return current.Name;
+                }
+
+                current = current.Parent;
+            }
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> PathSegments(string path)
+    {
+        var separators = new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar };
+        return path.Split(separators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 
     internal static (JsonElement Item, string? LatestTool)? ActivityFromJsonlLine(string line)

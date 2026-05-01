@@ -59,11 +59,34 @@ public sealed class CommandRouter
     public bool HasFlag(string name) =>
         _args.Any(a => a == $"--{name}" || a == $"-{name[0]}");
 
-    public string? Project => GetFlag("project") ?? GetFlag("p") ?? DetectProject();
+    public string? Project => GetFlag("project") ?? GetFlag("p") ?? DetectProjectId();
 
-    private static string? DetectProject()
+    public static string? DetectProjectId(string? currentDirectory = null)
     {
-        var dir = Directory.GetCurrentDirectory();
-        return Path.GetFileName(dir);
+        var dir = currentDirectory ?? Directory.GetCurrentDirectory();
+        var repoRoot = FindRepositoryRoot(dir);
+        return Path.GetFileName(repoRoot ?? dir);
+    }
+
+    private static string? FindRepositoryRoot(string directory)
+    {
+        try
+        {
+            var current = new DirectoryInfo(Path.GetFullPath(directory));
+            while (current is not null)
+            {
+                var gitPath = Path.Combine(current.FullName, ".git");
+                if (Directory.Exists(gitPath) || File.Exists(gitPath))
+                    return current.FullName;
+
+                current = current.Parent;
+            }
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
+
+        return null;
     }
 }

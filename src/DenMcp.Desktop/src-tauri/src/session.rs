@@ -264,9 +264,10 @@ fn project_id_for_status(status: &RunStatus, projects: &[Project]) -> Option<Str
     projects
         .iter()
         .filter_map(|project| project.root_path.as_ref().map(|root| (project, root)))
-        .filter(|(_, root)| !root.trim().is_empty() && cwd.starts_with(root.as_str()))
-        .max_by_key(|(_, root)| root.len())
+        .filter(|(_, root)| !root.trim().is_empty() && path_has_prefix(cwd, root))
+        .max_by_key(|(_, root)| normalized_path_len(root))
         .map(|(project, _)| project.id.clone())
+        .or_else(|| project_id_from_repo_short_path(cwd, projects))
         .or_else(|| {
             if projects.len() == 1 {
                 Some(projects[0].id.clone())
@@ -274,6 +275,61 @@ fn project_id_for_status(status: &RunStatus, projects: &[Project]) -> Option<Str
                 None
             }
         })
+}
+
+fn project_id_from_repo_short_path(cwd: &str, projects: &[Project]) -> Option<String> {
+    if let Some(repo_name) = repository_root_name(cwd) {
+        if let Some(project_id) = match_project_short_name(&repo_name, projects) {
+            return Some(project_id);
+        }
+    }
+
+    Path::new(cwd)
+        .components()
+        .filter_map(|component| component.as_os_str().to_str())
+        .rev()
+        .find_map(|segment| match_project_short_name(segment, projects))
+}
+
+fn match_project_short_name(short_name: &str, projects: &[Project]) -> Option<String> {
+    projects
+        .iter()
+        .find(|project| project.id == short_name)
+        .or_else(|| {
+            projects.iter().find(|project| {
+                project
+                    .root_path
+                    .as_deref()
+                    .and_then(path_file_name)
+                    .is_some_and(|name| name == short_name)
+            })
+        })
+        .map(|project| project.id.clone())
+}
+
+fn repository_root_name(cwd: &str) -> Option<String> {
+    Path::new(cwd)
+        .ancestors()
+        .find(|path| path.join(".git").exists())
+        .and_then(|path| path.file_name())
+        .and_then(|name| name.to_str())
+        .map(|name| name.to_string())
+}
+
+fn path_has_prefix(cwd: &str, root: &str) -> bool {
+    let cwd_path = Path::new(cwd);
+    let root_path = Path::new(root.trim());
+    cwd_path == root_path || cwd_path.starts_with(root_path)
+}
+
+fn normalized_path_len(path: &str) -> usize {
+    path.trim_end_matches(['/', '\\']).len()
+}
+
+fn path_file_name(path: &str) -> Option<&str> {
+    Path::new(path.trim_end_matches(['/', '\\']))
+        .file_name()
+        .and_then(|name| name.to_str())
 }
 
 fn run_candidates(root: &Path) -> Result<Vec<RunCandidate>, std::io::Error> {
@@ -464,6 +520,75 @@ mod tests {
     }
 
     #[test]
+    fn project_matching_falls_back_to_repo_root_short_name() {
+        let temp = std::env::temp_dir().join(format!("den-tauri-session-{}", uuid_like()));
+        let repo = temp.join("server").join("den-mcp");
+        let cwd = repo.join("src").join("DenMcp.Desktop");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::create_dir_all(&cwd).unwrap();
+        let status = RunStatus {
+            run_id: Some("run-1".to_string()),
+            role: None,
+            task_id: Some(882),
+            cwd: Some(cwd.to_string_lossy().to_string()),
+            state: None,
+            backend: None,
+            pid: None,
+            started_at: None,
+            ended_at: None,
+            exit_code: None,
+            current_command: None,
+            current_phase: None,
+            pi_session_id: None,
+            pi_session_file_path: None,
+            workspace_id: None,
+            artifacts: None,
+        };
+        let projects = vec![
+            project("den-mcp", Some("/home/patch/dev/den-mcp")),
+            project("other", Some("/home/patch/dev/other")),
+        ];
+
+        assert_eq!(
+            project_id_for_status(&status, &projects).as_deref(),
+            Some("den-mcp")
+        );
+
+        let _ = std::fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn project_matching_falls_back_to_path_segment_short_name() {
+        let status = RunStatus {
+            run_id: Some("run-1".to_string()),
+            role: None,
+            task_id: Some(882),
+            cwd: Some("/not-mounted/server/den-mcp/src/DenMcp.Desktop".to_string()),
+            state: None,
+            backend: None,
+            pid: None,
+            started_at: None,
+            ended_at: None,
+            exit_code: None,
+            current_command: None,
+            current_phase: None,
+            pi_session_id: None,
+            pi_session_file_path: None,
+            workspace_id: None,
+            artifacts: None,
+        };
+        let projects = vec![
+            project("den-mcp", Some("/home/patch/dev/den-mcp")),
+            project("other", Some("/home/patch/dev/other")),
+        ];
+
+        assert_eq!(
+            project_id_for_status(&status, &projects).as_deref(),
+            Some("den-mcp")
+        );
+    }
+
+    #[test]
     fn project_matching_prefers_longest_visible_root() {
         let status = RunStatus {
             run_id: Some("run-1".to_string()),
@@ -484,26 +609,31 @@ mod tests {
             artifacts: None,
         };
         let projects = vec![
-            Project {
-                id: "dev".to_string(),
-                name: "Dev".to_string(),
-                root_path: Some("/home/patch/dev".to_string()),
-                description: None,
-                created_at: None,
-                updated_at: None,
-            },
-            Project {
-                id: "den-mcp".to_string(),
-                name: "Den MCP".to_string(),
-                root_path: Some("/home/patch/dev/den-mcp".to_string()),
-                description: None,
-                created_at: None,
-                updated_at: None,
-            },
+            project("dev", Some("/home/patch/dev")),
+            project("den-mcp", Some("/home/patch/dev/den-mcp")),
         ];
         assert_eq!(
             project_id_for_status(&status, &projects).as_deref(),
             Some("den-mcp")
         );
+    }
+
+    fn project(id: &str, root_path: Option<&str>) -> Project {
+        Project {
+            id: id.to_string(),
+            name: id.to_string(),
+            root_path: root_path.map(str::to_string),
+            description: None,
+            created_at: None,
+            updated_at: None,
+        }
+    }
+
+    fn uuid_like() -> String {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+            .to_string()
     }
 }
