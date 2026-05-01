@@ -640,6 +640,10 @@ test('den prompt template fallbacks enforce delegated coder and reviewer guardra
   assert.match(reviewerPrompt, /scope drift/i);
   assert.match(reviewerPrompt, /test\/scoring harness/i);
   assert.match(reviewerPrompt, /blocking.*follow-up.*informational/s);
+  assert.match(reviewerPrompt, /structured review findings only for actionable issues/i);
+  assert.match(reviewerPrompt, /positive summaries.*verdict\/notes text/is);
+  assert.match(reviewerPrompt, /genuine follow-up candidates/i);
+  assert.match(reviewerPrompt, /do not create structured findings for positive summaries or non-actionable notes/i);
 });
 
 test('reviewer prompt template includes reviewer identity guidance and attribution instructions', () => {
