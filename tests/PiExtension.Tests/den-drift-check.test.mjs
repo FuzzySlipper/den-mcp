@@ -141,6 +141,150 @@ test('compareExpectedScope supports exact paths, directory prefixes, and globs',
   assert.deepEqual(comparison.out_of_scope_paths, ['docs/out-of-scope.md']);
 });
 
+// ---------------------------------------------------------------------------
+// Directory glob hints in paths array — regression for #1124
+// ---------------------------------------------------------------------------
+
+test('compareExpectedScope matches directory globs in paths array (docs/**)', () => {
+  const comparison = compareExpectedScope([
+    { path: 'docs/pi-orchestrator-context-status.md' },
+    { path: 'docs/api/spec.md' },
+    { path: 'src/lib/foo.ts' },
+  ], {
+    paths: ['docs/**'],
+  });
+
+  assert.equal(comparison.has_expected_scope, true);
+  assert.deepEqual(comparison.in_scope_paths, [
+    'docs/pi-orchestrator-context-status.md',
+    'docs/api/spec.md',
+  ]);
+  assert.deepEqual(comparison.out_of_scope_paths, ['src/lib/foo.ts']);
+});
+
+test('compareExpectedScope matches directory globs in paths array (tests/**)', () => {
+  const comparison = compareExpectedScope([
+    { path: 'tests/PiExtension.Tests/den-drift-check.test.mjs' },
+    { path: 'tests/PiExtension.Tests/subdir/helper.mjs' },
+    { path: 'src/lib/foo.ts' },
+  ], {
+    paths: ['tests/PiExtension.Tests/**'],
+  });
+
+  assert.equal(comparison.has_expected_scope, true);
+  assert.deepEqual(comparison.in_scope_paths, [
+    'tests/PiExtension.Tests/den-drift-check.test.mjs',
+    'tests/PiExtension.Tests/subdir/helper.mjs',
+  ]);
+  assert.deepEqual(comparison.out_of_scope_paths, ['src/lib/foo.ts']);
+});
+
+test('compareExpectedScope matches mixed exact paths and globs in paths array', () => {
+  const comparison = compareExpectedScope([
+    { path: 'pi-dev/lib/den-drift-check.ts' },
+    { path: 'docs/readme.md' },
+    { path: 'docs/api/spec.md' },
+    { path: 'src/unexpected.ts' },
+  ], {
+    paths: ['pi-dev/lib/den-drift-check.ts', 'docs/**'],
+  });
+
+  assert.equal(comparison.has_expected_scope, true);
+  assert.deepEqual(comparison.in_scope_paths, [
+    'pi-dev/lib/den-drift-check.ts',
+    'docs/readme.md',
+    'docs/api/spec.md',
+  ]);
+  assert.deepEqual(comparison.out_of_scope_paths, ['src/unexpected.ts']);
+});
+
+test('compareExpectedScope handles rename where old_path matches expected scope', () => {
+  const comparison = compareExpectedScope([
+    // Rename: docs/old.md -> docs/new.md; both in docs/** so both in scope
+    { path: 'docs/new.md', status: 'R100', old_path: 'docs/old.md' },
+    // Rename: unexpected move from in-scope to out-of-scope via old_path
+    { path: 'src/moved.ts', status: 'R100', old_path: 'docs/original.ts' },
+    // Completely out of scope
+    { path: 'lib/unrelated.ts' },
+  ], {
+    paths: ['docs/**'],
+  });
+
+  assert.equal(comparison.has_expected_scope, true);
+  // docs/new.md matches docs/** directly; src/moved.ts matches via old_path docs/original.ts
+  assert.deepEqual(comparison.in_scope_paths, ['docs/new.md', 'src/moved.ts']);
+  assert.deepEqual(comparison.out_of_scope_paths, ['lib/unrelated.ts']);
+});
+
+test('compareExpectedScope does not flag rename when BOTH path and old_path are out of scope', () => {
+  const comparison = compareExpectedScope([
+    { path: 'lib/foo.ts', status: 'R100', old_path: 'lib/bar.ts' },
+  ], {
+    paths: ['docs/**'],
+  });
+
+  assert.equal(comparison.has_expected_scope, true);
+  assert.deepEqual(comparison.in_scope_paths, []);
+  assert.deepEqual(comparison.out_of_scope_paths, ['lib/foo.ts']);
+});
+
+test('analyzeDriftCheck does not flag directory glob paths as out-of-scope (regression #1124)', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [
+      { status: 'M', path: 'docs/pi-orchestrator-context-status.md' },
+      { status: 'M', path: 'tests/PiExtension.Tests/den-drift-check.test.mjs' },
+      { status: 'M', path: 'pi-dev/lib/den-drift-check.ts' },
+    ],
+    expected_scope: {
+      paths: ['pi-dev/lib/den-drift-check.ts', 'docs/**', 'tests/PiExtension.Tests/**'],
+    },
+    declared_tests: ['node --test tests/PiExtension.Tests/den-drift-check.test.mjs — pass'],
+  });
+
+  // All paths should be in scope, so no outside_expected_scope signal
+  assert.ok(!result.signals.some((s) => s.code === 'outside_expected_scope'),
+    `Unexpected out-of-scope signal: ${JSON.stringify(result.signals.filter(s => s.code === 'outside_expected_scope'))}`);
+  assert.deepEqual(result.scope.out_of_scope_paths, []);
+});
+
+test('analyzeDriftCheck reports out-of-scope when glob does not match', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [
+      { status: 'M', path: 'src/DenMcp.Server/Program.cs' },
+      { status: 'M', path: 'docs/readme.md' },
+    ],
+    expected_scope: {
+      paths: ['docs/**'],
+    },
+    declared_tests: ['node --test tests/api.test.mjs — pass'],
+  });
+
+  assert.ok(result.signals.some((s) => s.code === 'outside_expected_scope'));
+  assert.deepEqual(result.scope.out_of_scope_paths, ['src/DenMcp.Server/Program.cs']);
+});
+
+test('analyzeDriftCheck handles rename with old_path matching scope (regression #1124)', () => {
+  const result = analyzeDriftCheck({
+    head_commit: 'abc1234',
+    changed_paths: [
+      { status: 'R100', path: 'src/renamed.ts', old_path: 'docs/original.ts', additions: 0, deletions: 0 },
+      { status: 'M', path: 'pi-dev/lib/den-drift-check.ts', additions: 5, deletions: 0 },
+    ],
+    expected_scope: {
+      paths: ['pi-dev/lib/den-drift-check.ts', 'docs/**'],
+    },
+    declared_tests: ['node --test tests/foo.test.mjs — pass'],
+  });
+
+  // Both paths should be in scope (src/renamed.ts via old_path docs/original.ts)
+  assert.ok(!result.signals.some((s) => s.code === 'outside_expected_scope'),
+    `Unexpected out-of-scope signal: ${JSON.stringify(result.signals.filter(s => s.code === 'outside_expected_scope'))}`);
+  assert.deepEqual(result.scope.out_of_scope_paths, []);
+  assert.deepEqual(result.scope.in_scope_paths, ['src/renamed.ts', 'pi-dev/lib/den-drift-check.ts']);
+});
+
 test('extractExpectedScopeFromContextPacket reads likely file path hints', () => {
   const packet = `
 # Coder Context Packet — task 937

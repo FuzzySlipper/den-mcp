@@ -293,7 +293,7 @@ export function compareExpectedScope(
   expectedScope?: DriftExpectedScope,
 ): DriftScopeComparison {
   const hints = normalizeExpectedHints(expectedScope);
-  const normalizedPaths = normalizeChangedPaths(changedPaths).map((p) => p.path);
+  const nChangedPaths = normalizeChangedPaths(changedPaths);
   if (hints.paths.length === 0 && hints.globs.length === 0) {
     return {
       has_expected_scope: false,
@@ -305,9 +305,18 @@ export function compareExpectedScope(
 
   const inScope: string[] = [];
   const outOfScope: string[] = [];
-  for (const changedPath of normalizedPaths) {
-    if (matchesExpectedPath(changedPath, hints.paths, hints.globs)) inScope.push(changedPath);
-    else outOfScope.push(changedPath);
+  for (const entry of nChangedPaths) {
+    const changedPath = entry.path;
+    // Check path first, then old_path for renames.
+    // A rename should be considered in-scope if either the source or
+    // destination matches expected scope.
+    if (matchesExpectedPath(changedPath, hints.paths, hints.globs)) {
+      inScope.push(changedPath);
+    } else if (entry.old_path && matchesExpectedPath(entry.old_path, hints.paths, hints.globs)) {
+      inScope.push(changedPath);
+    } else {
+      outOfScope.push(changedPath);
+    }
   }
 
   return {
@@ -808,10 +817,22 @@ function statusPath(statusLine: string): string {
 }
 
 function normalizeExpectedHints(scope?: DriftExpectedScope): { paths: string[]; globs: string[]; raw: string[] } {
-  const paths = unique((scope?.paths ?? []).map(cleanHint).filter(Boolean));
-  const globs = unique((scope?.globs ?? []).map(cleanHint).filter(Boolean));
+  const rawPaths = unique((scope?.paths ?? []).map(cleanHint).filter(Boolean));
+  const rawGlobs = unique((scope?.globs ?? []).map(cleanHint).filter(Boolean));
+
+  // Move glob-like patterns (containing *) from paths into globs so they are
+  // matched with globToRegExp instead of literal/directory-prefix comparison.
+  // This handles cases like docs/** or tests/PiExtension.Tests/** passed via
+  // --expected-paths without requiring the caller to separate globs manually.
+  const paths: string[] = [];
+  const globs: string[] = [...rawGlobs];
+  for (const hint of rawPaths) {
+    if (hint.includes("*")) globs.push(hint);
+    else paths.push(hint);
+  }
+
   const raw = unique([...(scope?.raw_hints ?? []), ...paths, ...globs].map(cleanHint).filter(Boolean));
-  return { paths, globs, raw };
+  return { paths: unique(paths), globs: unique(globs), raw };
 }
 
 function matchesExpectedPath(changedPath: string, paths: string[], globs: string[]): boolean {
