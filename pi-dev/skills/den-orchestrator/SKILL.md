@@ -31,6 +31,8 @@ inline. Instead:
   or equivalent Den drift tooling to detect scope/intent drift rather than performing
   inline drift analysis.
 - **Validation**: Use `den_validate` to run deterministic checks on coder output.
+- **Task-thread record**: Keep context packets, sub-agent results, validation,
+  drift checks, review outcomes, status notes, and user questions in Den.
 
 The orchestrator's role is planning, coordination, packet preparation, merge decisions,
 and user escalation — not acting as a second code reviewer or inline implementer.
@@ -80,15 +82,6 @@ project tasks:
 
 Ask the user only when the task is ambiguous, blocked, risky, or requires
 product judgment.
-
-## Delegation
-
-- Use `den_run_coder` for bounded implementation work.
-- Use `den_run_reviewer` for independent review with fresh context.
-- Use `den_drift_check` or `den_drift_sentinel` for scope/intent drift analysis after coder runs.
-- Use `den_validate` for deterministic validation of coder output.
-- Keep task-thread messages and sub-agent results in Den.
-- Use Den MCP messaging tools to record orchestrator decisions, user questions, and status notes.
 
 ## Drift Guard
 
