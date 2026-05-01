@@ -285,6 +285,47 @@ test('sub-agent parent tool return recovery guidance for abort with partial assi
   assert.match(text, /continue manually or rerun/);
 });
 
+test('sub-agent parent tool return shows requested head distinct from final head in text', () => {
+  const toolResult = buildSubagentParentToolResult(subagentResult({
+    head_commit: 'launch-sha-abc123',
+    requested_head_commit: 'launch-sha-abc123',
+    final_head_commit: 'final-sha-def456',
+    final_head_status: 'clean',
+    final_head_source: 'supplied_branch',
+    final_branch: 'task/851-slim-subagent-tool-returns',
+    final_worktree_branch: 'task/851-slim-subagent-tool-returns',
+    final_branch_matches_worktree: true,
+    final_worktree_status: 'clean',
+  }));
+
+  const text = toolResult.content[0].text;
+  assert.match(text, /Final branch head: final-sha-def456/);
+  assert.match(text, /Requested \(starting\) head: launch-sha-abc123/);
+  assert.equal(toolResult.details.requested_head_commit, 'launch-sha-abc123');
+  assert.equal(toolResult.details.final_head_commit, 'final-sha-def456');
+  assert.equal(toolResult.isError, false);
+});
+
+test('sub-agent parent tool return omits requested head line when it matches final head', () => {
+  const toolResult = buildSubagentParentToolResult(subagentResult({
+    head_commit: 'same-sha',
+    requested_head_commit: 'same-sha',
+    final_head_commit: 'same-sha',
+    final_head_status: 'clean',
+    final_head_source: 'supplied_branch',
+    final_branch: 'task/851',
+    final_worktree_branch: 'task/851',
+    final_branch_matches_worktree: true,
+    final_worktree_status: 'clean',
+  }));
+
+  const text = toolResult.content[0].text;
+  assert.match(text, /Final branch head: same-sha/);
+  assert.doesNotMatch(text, /Requested \(starting\) head/);
+  assert.equal(toolResult.details.requested_head_commit, 'same-sha');
+  assert.equal(toolResult.details.final_head_commit, 'same-sha');
+});
+
 test('Pi parent session stores tool-result details, while compaction/provider payloads use content only', () => {
   const sentinel = 'DETAILS_SENTINEL_SHOULD_NOT_REACH_PROVIDER_PAYLOAD';
   const toolMessage = {

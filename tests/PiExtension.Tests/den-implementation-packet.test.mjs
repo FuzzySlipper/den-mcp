@@ -390,6 +390,27 @@ test('buildImplementationPacketMeta prefers final head commit over launch head f
   assert.equal(meta.head_commit, 'final456');
 });
 
+test('buildImplementationPacketMeta includes requested_head_commit distinct from final head', () => {
+  const extraction = extractImplementationPacket('no structured output');
+  const meta = buildImplementationPacketMeta(
+    { run_id: 'run6', role: 'coder', head_commit: 'launch-sha', final_head_commit: 'final-sha', requested_head_commit: 'launch-sha' },
+    extraction,
+  );
+  // head_commit prefers final
+  assert.equal(meta.head_commit, 'final-sha');
+  // requested_head_commit preserves the starting head
+  assert.equal(meta.requested_head_commit, 'launch-sha');
+});
+
+test('buildImplementationPacketMeta falls back requested_head_commit to head_commit when not explicit', () => {
+  const extraction = extractImplementationPacket('no structured output');
+  const meta = buildImplementationPacketMeta(
+    { run_id: 'run7', role: 'coder', head_commit: 'launch-sha' },
+    extraction,
+  );
+  assert.equal(meta.requested_head_commit, 'launch-sha');
+});
+
 // ---------------------------------------------------------------------------
 // findDuplicateImplementationPacketMessage
 // ---------------------------------------------------------------------------

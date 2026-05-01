@@ -1227,3 +1227,99 @@ test('infrastructure failures are classified before fallback retry', () => {
   ), 'extension_runtime');
   assert.equal(isSubagentInfrastructureFailure({}), false);
 });
+
+test('requested_head_commit alias is set on subagent result from run context', async (t) => {
+  const { result } = await runFakePiSubagent(t, {
+    prefix: 'den-subagent-requested-head-alias-',
+    runId: 'run-requested-head-alias',
+    scriptLines: [
+      '#!/usr/bin/env node',
+      'console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", model: "gpt-test", stopReason: "stop", content: [{ type: "text", text: "done" }] } }));',
+      'process.exit(0);',
+    ],
+    options: {
+      role: 'coder',
+      prompt: 'Work on the branch.',
+      headCommit: 'launch-sha-abc123',
+      branch: 'task/test-requested-head',
+    },
+  });
+
+  assert.equal(result.head_commit, 'launch-sha-abc123');
+  assert.equal(result.requested_head_commit, 'launch-sha-abc123');
+});
+
+test('coder run that creates new commits records requested_head_commit distinct from final_head_commit', async (t) => {
+  const { repo, branch, launchHead, finalHead } = await initGitRepoWithTaskBranch(t, 'task/new-commits');
+
+  // Simulate a result where head_commit = launch head (requested)
+  // and final_head_commit = the actual final head after commits.
+  const result = {
+    run_id: 'run-new-commits',
+    role: 'coder',
+    task_id: 1080,
+    branch,
+    head_commit: launchHead,
+    exit_code: 0,
+    aborted: false,
+    assistant_final_found: true,
+    final_output: 'Made changes and committed.',
+    artifacts: { dir: '/tmp/run-new-commits' },
+    duration_ms: 5000,
+    message_count: 3,
+    assistant_message_count: 2,
+    session_mode: 'fresh',
+    backend: 'pi-cli',
+    started_at: new Date().toISOString(),
+    ended_at: new Date().toISOString(),
+  };
+
+  // Simulate what applyFinalHeadState does
+  const finalHeadState = await collectFinalBranchHead({ worktreePath: repo, branch });
+  result.requested_head_commit = result.requested_head_commit ?? result.head_commit;
+  result.final_head_commit = finalHeadState.final_head_commit;
+  result.final_head_status = finalHeadState.final_head_status;
+  result.final_branch = finalHeadState.final_branch;
+  result.final_worktree_branch = finalHeadState.final_worktree_branch;
+  result.final_branch_matches_worktree = finalHeadState.final_branch_matches_worktree;
+  result.final_worktree_status = finalHeadState.final_worktree_status;
+
+  // Verify the two heads are distinct
+  assert.notEqual(result.requested_head_commit, result.final_head_commit,
+    'requested and final heads should differ for a coder run that committed');
+  assert.equal(result.requested_head_commit, launchHead,
+    'requested_head_commit should be the launch head');
+  assert.equal(result.final_head_commit, finalHead,
+    'final_head_commit should be the branch tip after commits');
+
+  // Verify parent tool result includes both heads
+  const { buildSubagentParentToolResult } = await import('../../pi-dev/lib/den-subagent-parent-tool-result.ts');
+  const toolResult = buildSubagentParentToolResult(result);
+  assert.equal(toolResult.details.requested_head_commit, launchHead);
+  assert.equal(toolResult.details.final_head_commit, finalHead);
+  assert.match(toolResult.content[0].text, new RegExp(`Requested \\(starting\\) head: ${launchHead}`));
+  assert.match(toolResult.content[0].text, new RegExp(`Final branch head: ${finalHead}`));
+});
+
+test('requested_head_commit matches head_commit when no final head collection occurs', async (t) => {
+  const { result } = await runFakePiSubagent(t, {
+    prefix: 'den-subagent-no-final-head-',
+    runId: 'run-no-final-head',
+    scriptLines: [
+      '#!/usr/bin/env node',
+      'console.log(JSON.stringify({ type: "message_end", message: { role: "assistant", model: "gpt-test", stopReason: "stop", content: [{ type: "text", text: "done" }] } }));',
+      'process.exit(0);',
+    ],
+    options: {
+      role: 'reviewer',
+      prompt: 'Review the branch.',
+      headCommit: 'review-head-sha',
+      branch: 'task/test-no-final',
+    },
+  });
+
+  // Non-coder runs don't collect final head
+  assert.equal(result.head_commit, 'review-head-sha');
+  assert.equal(result.requested_head_commit, 'review-head-sha');
+  assert.equal(result.final_head_commit, undefined, 'reviewer runs should not collect final head');
+});

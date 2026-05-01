@@ -62,7 +62,10 @@ export type SubagentResult = {
   branch?: string;
   base_branch?: string;
   base_commit?: string;
+  /** Starting/requested head commit from run options (the HEAD before the sub-agent began work). */
   head_commit?: string;
+  /** Alias for head_commit — makes the starting/requested semantics explicit. */
+  requested_head_commit?: string;
   purpose?: string;
   final_head_commit?: string;
   final_head_status?: FinalHeadStatus;
@@ -452,6 +455,7 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
     base_branch: metadataString(contextMetadata.base_branch),
     base_commit: metadataString(contextMetadata.base_commit),
     head_commit: metadataString(contextMetadata.head_commit),
+    requested_head_commit: metadataString(contextMetadata.head_commit),
     purpose: metadataString(contextMetadata.purpose),
     session_mode: sessionMode,
     session: options.session,

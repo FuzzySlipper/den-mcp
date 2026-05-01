@@ -1761,6 +1761,8 @@ async function collectFinalHeadForCoderRun(
 }
 
 function applyFinalHeadState(result: SubagentResult, state: FinalBranchHeadState) {
+  // Capture the starting/requested head before overwriting with final state.
+  result.requested_head_commit = result.requested_head_commit ?? result.head_commit;
   result.final_head_commit = state.final_head_commit;
   result.final_head_status = state.final_head_status;
   result.final_head_source = state.final_head_source;

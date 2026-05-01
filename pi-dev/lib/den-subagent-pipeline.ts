@@ -187,6 +187,7 @@ export function buildSubagentRunContextMetadata(context: SubagentRunContext = {}
     branch: normalizeContextString(context.branch) ?? null,
     base_branch: normalizeContextString(context.baseBranch) ?? null,
     base_commit: normalizeContextString(context.baseCommit) ?? null,
+    /** Starting/requested head commit — the HEAD before the sub-agent begins work. */
     head_commit: normalizeContextString(context.headCommit) ?? null,
     purpose: normalizeSubagentRunPurpose(context.purpose) ?? null,
   };

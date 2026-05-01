@@ -58,7 +58,10 @@ export interface ImplementationPacketMeta {
   role: string;
   task_id: number | null;
   branch: string | null;
+  /** The final observed HEAD commit (preferred). Falls back to requested head if final is unavailable. */
   head_commit: string | null;
+  /** The starting/requested head commit from run context — distinct from final observed head. */
+  requested_head_commit: string | null;
   purpose: string | null;
 }
 
@@ -74,7 +77,10 @@ export interface PacketMissingNoticeMeta {
   role: string;
   task_id: number | null;
   branch: string | null;
+  /** The final observed HEAD commit (preferred). Falls back to requested head if final is unavailable. */
   head_commit: string | null;
+  /** The starting/requested head commit from run context. */
+  requested_head_commit: string | null;
   purpose: string | null;
   incomplete_prompt_detected: true;
 }
@@ -85,6 +91,7 @@ export type ImplementationPacketDuplicateCandidate = Pick<
 > & {
   final_branch?: string | null;
   final_head_commit?: string | null;
+  requested_head_commit?: string | null;
 };
 
 /** Result of extracting and validating a packet. */
@@ -209,7 +216,7 @@ export function detectIncompleteCoderPrompt(text: string): boolean {
  * when the coder's final output does not contain a usable implementation packet.
  */
 export function formatPacketMissingNoticeMessage(
-  result: { run_id: string; role: string; task_id?: number; branch?: string; head_commit?: string; final_branch?: string; final_head_commit?: string; purpose?: string; final_output?: string },
+  result: { run_id: string; role: string; task_id?: number; branch?: string; head_commit?: string; final_branch?: string; final_head_commit?: string; requested_head_commit?: string; purpose?: string; final_output?: string },
   extraction: ExtractionResult,
 ): string {
   const lines: string[] = [
@@ -253,7 +260,7 @@ export function formatPacketMissingNoticeMessage(
  * Build metadata for a packet-missing notice.
  */
 export function buildPacketMissingNoticeMeta(
-  result: { run_id: string; role: string; task_id?: number; branch?: string; head_commit?: string; final_branch?: string; final_head_commit?: string; purpose?: string },
+  result: { run_id: string; role: string; task_id?: number; branch?: string; head_commit?: string; final_branch?: string; final_head_commit?: string; requested_head_commit?: string; purpose?: string },
   extraction: ExtractionResult,
 ): PacketMissingNoticeMeta {
   return {
@@ -268,6 +275,7 @@ export function buildPacketMissingNoticeMeta(
     task_id: result.task_id ?? null,
     branch: extraction.packet.branch ?? result.final_branch ?? result.branch ?? null,
     head_commit: extraction.packet.head_commit ?? result.final_head_commit ?? result.head_commit ?? null,
+    requested_head_commit: result.requested_head_commit ?? result.head_commit ?? null,
     purpose: result.purpose ?? null,
     incomplete_prompt_detected: true,
   };
@@ -465,7 +473,7 @@ export function formatImplementationPacketMessage(
  * Build the stable metadata object for a posted implementation packet.
  */
 export function buildImplementationPacketMeta(
-  result: { run_id: string; role: string; task_id?: number; branch?: string; head_commit?: string; final_head_commit?: string; purpose?: string },
+  result: { run_id: string; role: string; task_id?: number; branch?: string; head_commit?: string; final_head_commit?: string; requested_head_commit?: string; purpose?: string },
   extraction: ExtractionResult,
 ): ImplementationPacketMeta {
   return {
@@ -480,6 +488,7 @@ export function buildImplementationPacketMeta(
     task_id: result.task_id ?? null,
     branch: extraction.packet.branch ?? result.branch ?? null,
     head_commit: extraction.packet.head_commit ?? result.final_head_commit ?? result.head_commit ?? null,
+    requested_head_commit: result.requested_head_commit ?? result.head_commit ?? null,
     purpose: result.purpose ?? null,
   };
 }

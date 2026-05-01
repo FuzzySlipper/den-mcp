@@ -65,6 +65,8 @@ function formatParentToolResultText(
     !result.pi_session_file_path && result.pi_session_dir ? `Pi session dir: ${result.pi_session_dir}` : null,
     result.final_head_commit ? `Final branch head: ${result.final_head_commit}${result.final_head_status ? ` (${result.final_head_status})` : ""}` : null,
     !result.final_head_commit && result.final_head_status ? `Final branch head: ${result.final_head_status}${result.final_head_error ? ` (${result.final_head_error})` : ""}` : null,
+    result.requested_head_commit && result.final_head_commit && result.requested_head_commit !== result.final_head_commit
+      ? `Requested (starting) head: ${result.requested_head_commit}` : null,
     "",
     state === "completed" ? "Final summary (bounded parent copy):" : "Failure summary (bounded parent copy):",
     summary.text,
@@ -100,6 +102,7 @@ function buildSubagentParentToolDetails(
     base_branch: result.base_branch,
     base_commit: result.base_commit,
     head_commit: result.head_commit,
+    requested_head_commit: result.requested_head_commit,
     purpose: result.purpose,
     final_head_commit: result.final_head_commit,
     final_head_status: result.final_head_status,
