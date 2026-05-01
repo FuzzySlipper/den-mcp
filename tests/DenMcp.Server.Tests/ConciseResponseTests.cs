@@ -1,0 +1,618 @@
+using System.Text.Json;
+using DenMcp.Core.Data;
+using DenMcp.Core.Llm;
+using DenMcp.Core.Models;
+using DenMcp.Core.Services;
+using DenMcp.Server.Tools;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
+namespace DenMcp.Server.Tests;
+
+/// <summary>
+/// Regression tests ensuring MCP mutation tools return concise summaries by default
+/// and full records only when verbose=true is requested.
+/// </summary>
+public class ConciseResponseTests : IAsyncLifetime
+{
+    private ConciseAppFactory _factory = null!;
+    private const string ProjectId = "concise-test";
+
+    private static readonly JsonSerializerOptions JsonOpts = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        PropertyNameCaseInsensitive = true,
+        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter(JsonNamingPolicy.SnakeCaseLower) }
+    };
+
+    public async Task InitializeAsync()
+    {
+        _factory = new ConciseAppFactory();
+        using var scope = _factory.Services.CreateScope();
+        var projects = scope.ServiceProvider.GetRequiredService<IProjectRepository>();
+        await projects.CreateAsync(new Project { Id = ProjectId, Name = "Concise Response Test" });
+    }
+
+    public Task DisposeAsync()
+    {
+        _factory.Dispose();
+        return Task.CompletedTask;
+    }
+
+    // ─── Task create ─────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task CreateTask_ConciseDefault_ReturnsSummaryWithIdAndStatus()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+
+        var json = await TaskTools.CreateTask(
+            repo, ProjectId, "Implement feature X",
+            description: "A very long description that should not appear in concise output. ".PadRight(500, 'x'),
+            priority: 2,
+            tags: """["core","api"]""",
+            verbose: false);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        Assert.True(root.TryGetProperty("summary", out var summary));
+        var summaryText = summary.GetString()!;
+        Assert.Contains("created task #", summaryText);
+        Assert.Contains("planned", summaryText);
+
+        Assert.True(root.TryGetProperty("id", out var id));
+        Assert.True(id.GetInt32() > 0);
+        Assert.True(root.TryGetProperty("status", out var status));
+        Assert.Equal("planned", status.GetString());
+
+        // Must NOT contain echoed description or title
+        Assert.DoesNotContain("Implement feature X", json);
+        Assert.DoesNotContain("very long description", json);
+    }
+
+    [Fact]
+    public async Task CreateTask_ConciseDefault_IncludesParentIdWhenSubtask()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+
+        var parent = await repo.CreateAsync(new ProjectTask { ProjectId = ProjectId, Title = "Parent" });
+
+        var json = await TaskTools.CreateTask(
+            repo, ProjectId, "Subtask Y",
+            parent_id: parent.Id,
+            verbose: false);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        var summary = root.GetProperty("summary").GetString()!;
+        Assert.Contains($"parent #{parent.Id}", summary);
+        Assert.Equal(parent.Id, root.GetProperty("parent_id").GetInt32());
+    }
+
+    [Fact]
+    public async Task CreateTask_VerboseTrue_ReturnsFullRecord()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+
+        var json = await TaskTools.CreateTask(
+            repo, ProjectId, "Full record task",
+            description: "Detailed acceptance criteria",
+            priority: 1,
+            tags: """["urgent"]""",
+            verbose: true);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        // Verbose returns full ProjectTask, so title and description must be present
+        Assert.Equal("Full record task", root.GetProperty("title").GetString());
+        Assert.Equal("Detailed acceptance criteria", root.GetProperty("description").GetString());
+        Assert.Equal(1, root.GetProperty("priority").GetInt32());
+        Assert.True(root.TryGetProperty("id", out _));
+    }
+
+    // ─── Task update ─────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task UpdateTask_ConciseDefault_ReturnsSummaryWithChangedFields()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+        var detection = scope.ServiceProvider.GetRequiredService<IDispatchDetectionService>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<TaskTools>>();
+
+        var task = await repo.CreateAsync(new ProjectTask { ProjectId = ProjectId, Title = "Original title" });
+
+        var json = await TaskTools.UpdateTask(
+            repo, detection, logger,
+            task.Id, "codex",
+            status: "in_progress",
+            verbose: false);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        var summary = root.GetProperty("summary").GetString()!;
+        Assert.Contains($"updated task #{task.Id}", summary);
+        Assert.Contains("status=in_progress", summary);
+
+        Assert.Equal(task.Id, root.GetProperty("id").GetInt32());
+        Assert.Equal("in_progress", root.GetProperty("status").GetString());
+
+        var changes = root.GetProperty("changes").EnumerateArray().Select(e => e.GetString()).ToList();
+        Assert.Contains("status", changes);
+
+        // Must NOT contain the task title
+        Assert.DoesNotContain("Original title", json);
+    }
+
+    [Fact]
+    public async Task UpdateTask_VerboseTrue_ReturnsFullRecord()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+        var detection = scope.ServiceProvider.GetRequiredService<IDispatchDetectionService>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<TaskTools>>();
+
+        var task = await repo.CreateAsync(new ProjectTask { ProjectId = ProjectId, Title = "Verbose task" });
+
+        var json = await TaskTools.UpdateTask(
+            repo, detection, logger,
+            task.Id, "codex",
+            title: "Updated verbose task",
+            status: "review",
+            verbose: true);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        Assert.Equal("Updated verbose task", root.GetProperty("title").GetString());
+        Assert.Equal("review", root.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task UpdateTask_ConciseDefault_ListsAllChangedFields()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+        var detection = scope.ServiceProvider.GetRequiredService<IDispatchDetectionService>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<TaskTools>>();
+
+        var task = await repo.CreateAsync(new ProjectTask { ProjectId = ProjectId, Title = "Multi-change task" });
+
+        var json = await TaskTools.UpdateTask(
+            repo, detection, logger,
+            task.Id, "codex",
+            title: "New title",
+            priority: 1,
+            assigned_to: "claude-code",
+            tags: """["urgent"]""",
+            verbose: false);
+
+        using var doc = JsonDocument.Parse(json);
+        var changes = doc.RootElement.GetProperty("changes").EnumerateArray().Select(e => e.GetString()).ToHashSet();
+
+        Assert.Contains("title", changes);
+        Assert.Contains("priority", changes);
+        Assert.Contains("assigned_to", changes);
+        Assert.Contains("tags", changes);
+    }
+
+    // ─── Create review finding ───────────────────────────────────────────
+
+    [Fact]
+    public async Task CreateReviewFinding_ConciseDefault_ReturnsSummaryWithKeyAndCategory()
+    {
+        var (task, round) = await CreateRoundAsync();
+
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IReviewFindingRepository>();
+
+        var json = await TaskTools.CreateReviewFinding(
+            repo,
+            round.Id, "codex", "blocking_bug",
+            "Wrong diff selected",
+            notes: "Very detailed reviewer notes that should not be echoed. ".PadRight(500, 'x'),
+            file_references: """["src/Foo.cs:42"]""",
+            verbose: false);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        var summary = root.GetProperty("summary").GetString()!;
+        Assert.Contains("created finding ", summary);
+        Assert.Contains($"round #{round.Id}", summary);
+        Assert.Contains("blocking_bug", summary);
+
+        Assert.True(root.TryGetProperty("id", out _));
+        Assert.True(root.TryGetProperty("finding_key", out _));
+        Assert.Equal(round.Id, root.GetProperty("review_round_id").GetInt32());
+        Assert.Equal("blocking_bug", root.GetProperty("category").GetString());
+
+        // Must NOT contain the full notes
+        Assert.DoesNotContain("Very detailed reviewer notes", json);
+        // Must NOT contain the full summary text
+        Assert.DoesNotContain("Wrong diff selected", json);
+    }
+
+    [Fact]
+    public async Task CreateReviewFinding_VerboseTrue_ReturnsFullRecord()
+    {
+        var (task, round) = await CreateRoundAsync();
+
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IReviewFindingRepository>();
+
+        var json = await TaskTools.CreateReviewFinding(
+            repo,
+            round.Id, "codex", "acceptance_gap",
+            "Missing error handling",
+            notes: "Need try/catch around the call",
+            verbose: true);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        Assert.Equal("Missing error handling", root.GetProperty("summary").GetString());
+        Assert.Equal("Need try/catch around the call", root.GetProperty("notes").GetString());
+    }
+
+    // ─── Set review finding status ───────────────────────────────────────
+
+    [Fact]
+    public async Task SetReviewFindingStatus_ConciseDefault_ReturnsSummaryWithStatus()
+    {
+        var (task, round) = await CreateRoundAsync();
+        var finding = await CreateFindingAsync(task.Id, round.Id);
+
+        using var scope = _factory.Services.CreateScope();
+        var findingRepo = scope.ServiceProvider.GetRequiredService<IReviewFindingRepository>();
+        var taskRepo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+
+        var json = await TaskTools.SetReviewFindingStatus(
+            findingRepo, taskRepo,
+            finding.Id, "verified_fixed", "codex",
+            notes: "Detailed verification notes",
+            verbose: false);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        var summary = root.GetProperty("summary").GetString()!;
+        Assert.Contains("updated finding ", summary);
+        Assert.Contains("status=verified_fixed", summary);
+
+        Assert.Equal(finding.Id, root.GetProperty("id").GetInt32());
+        Assert.True(root.TryGetProperty("finding_key", out _));
+        Assert.Equal("verified_fixed", root.GetProperty("status").GetString());
+
+        // Must NOT contain the notes
+        Assert.DoesNotContain("Detailed verification notes", json);
+    }
+
+    [Fact]
+    public async Task SetReviewFindingStatus_VerboseTrue_ReturnsFullRecord()
+    {
+        var (task, round) = await CreateRoundAsync();
+        var finding = await CreateFindingAsync(task.Id, round.Id);
+
+        using var scope = _factory.Services.CreateScope();
+        var findingRepo = scope.ServiceProvider.GetRequiredService<IReviewFindingRepository>();
+        var taskRepo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+
+        var json = await TaskTools.SetReviewFindingStatus(
+            findingRepo, taskRepo,
+            finding.Id, "claimed_fixed", "codex",
+            notes: "Fixed in commit abc123",
+            verbose: true);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        Assert.Equal("claimed_fixed", root.GetProperty("status").GetString());
+        // Verbose returns full ReviewFinding
+        Assert.True(root.TryGetProperty("summary", out _));
+    }
+
+    // ─── Respond to review finding ───────────────────────────────────────
+
+    [Fact]
+    public async Task RespondToReviewFinding_ConciseDefault_ReturnsSummaryWithStatus()
+    {
+        var (task, round) = await CreateRoundAsync();
+        var finding = await CreateFindingAsync(task.Id, round.Id);
+
+        using var scope = _factory.Services.CreateScope();
+        var findingRepo = scope.ServiceProvider.GetRequiredService<IReviewFindingRepository>();
+        var taskRepo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+
+        var json = await TaskTools.RespondToReviewFinding(
+            findingRepo, taskRepo,
+            finding.Id, "claude-code",
+            response_notes: "Addressed on the branch with a comprehensive refactor that should not appear",
+            status: "claimed_fixed",
+            status_notes: "Ready for rereview",
+            verbose: false);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        var summary = root.GetProperty("summary").GetString()!;
+        Assert.Contains("responded to finding ", summary);
+        Assert.Contains("status=claimed_fixed", summary);
+
+        Assert.Equal(finding.Id, root.GetProperty("id").GetInt32());
+        Assert.Equal("claimed_fixed", root.GetProperty("status").GetString());
+        Assert.Equal("claude-code", root.GetProperty("response_by").GetString());
+
+        // Must NOT contain the response notes or status notes
+        Assert.DoesNotContain("comprehensive refactor", json);
+        Assert.DoesNotContain("Ready for rereview", json);
+    }
+
+    [Fact]
+    public async Task RespondToReviewFinding_VerboseTrue_ReturnsFullRecord()
+    {
+        var (task, round) = await CreateRoundAsync();
+        var finding = await CreateFindingAsync(task.Id, round.Id);
+
+        using var scope = _factory.Services.CreateScope();
+        var findingRepo = scope.ServiceProvider.GetRequiredService<IReviewFindingRepository>();
+        var taskRepo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+
+        var json = await TaskTools.RespondToReviewFinding(
+            findingRepo, taskRepo,
+            finding.Id, "claude-code",
+            response_notes: "Fix details here",
+            status: "claimed_fixed",
+            verbose: true);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        Assert.Equal("Fix details here", root.GetProperty("response_notes").GetString());
+        Assert.Equal("claimed_fixed", root.GetProperty("status").GetString());
+    }
+
+    // ─── Send message ────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task SendMessage_ConciseDefault_ReturnsSummaryWithId()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+        var detection = scope.ServiceProvider.GetRequiredService<IDispatchDetectionService>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<MessageTools>>();
+        var taskRepo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+        var task = await taskRepo.CreateAsync(new ProjectTask { ProjectId = ProjectId, Title = "Message host" });
+
+        var json = await MessageTools.SendMessage(
+            repo, detection, logger,
+            ProjectId, "pi",
+            "A long message body with implementation details that should not be echoed in concise mode",
+            task_id: task.Id,
+            verbose: false);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        var summary = root.GetProperty("summary").GetString()!;
+        Assert.Contains("sent message #", summary);
+        Assert.Contains($"on task #{task.Id}", summary);
+
+        Assert.True(root.TryGetProperty("id", out _));
+        Assert.Equal(ProjectId, root.GetProperty("project_id").GetString());
+        Assert.Equal(task.Id, root.GetProperty("task_id").GetInt32());
+        Assert.Equal("pi", root.GetProperty("sender").GetString());
+
+        // Must NOT contain the message body
+        Assert.DoesNotContain("long message body", json);
+    }
+
+    [Fact]
+    public async Task SendMessage_VerboseTrue_ReturnsFullRecord()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+        var detection = scope.ServiceProvider.GetRequiredService<IDispatchDetectionService>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<MessageTools>>();
+
+        var json = await MessageTools.SendMessage(
+            repo, detection, logger,
+            ProjectId, "pi",
+            "Full message content",
+            verbose: true);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        Assert.Equal("Full message content", root.GetProperty("content").GetString());
+        Assert.Equal("pi", root.GetProperty("sender").GetString());
+    }
+
+    // ─── Set review verdict ──────────────────────────────────────────────
+
+    [Fact]
+    public async Task SetReviewVerdict_ConciseDefault_ReturnsSummaryWithVerdict()
+    {
+        var (task, round) = await CreateRoundAsync();
+
+        using var scope = _factory.Services.CreateScope();
+        var workflow = scope.ServiceProvider.GetRequiredService<IReviewWorkflowService>();
+
+        var json = await TaskTools.SetReviewVerdict(
+            workflow, round.Id, "changes_requested", "codex",
+            notes: "Detailed feedback that should not appear",
+            verbose: false);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        var summary = root.GetProperty("summary").GetString()!;
+        Assert.Contains($"round #{round.Id}", summary);
+        Assert.Contains("changes_requested", summary);
+
+        Assert.Equal(round.Id, root.GetProperty("id").GetInt32());
+        Assert.Equal("changes_requested", root.GetProperty("verdict").GetString());
+        Assert.Equal("codex", root.GetProperty("decided_by").GetString());
+
+        // Must NOT contain the notes
+        Assert.DoesNotContain("Detailed feedback", json);
+    }
+
+    [Fact]
+    public async Task SetReviewVerdict_VerboseTrue_ReturnsFullRecord()
+    {
+        var (task, round) = await CreateRoundAsync();
+
+        using var scope = _factory.Services.CreateScope();
+        var workflow = scope.ServiceProvider.GetRequiredService<IReviewWorkflowService>();
+
+        var json = await TaskTools.SetReviewVerdict(
+            workflow, round.Id, "looks_good", "codex",
+            notes: "Approved with minor nit",
+            verbose: true);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        Assert.Equal("looks_good", root.GetProperty("verdict").GetString());
+        // Verbose returns full ReviewRound record
+        Assert.True(root.TryGetProperty("round_number", out _));
+        Assert.True(root.TryGetProperty("branch", out _));
+    }
+
+    // ─── Concise response structure invariants ───────────────────────────
+
+    [Fact]
+    public async Task ConciseResponse_AlwaysContainsSummaryAndId()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+
+        // Test create
+        var createJson = await TaskTools.CreateTask(repo, ProjectId, "Invariant check", verbose: false);
+        using var createDoc = JsonDocument.Parse(createJson);
+        Assert.True(createDoc.RootElement.TryGetProperty("summary", out _));
+        Assert.True(createDoc.RootElement.TryGetProperty("id", out _));
+
+        // Test update
+        var detection = scope.ServiceProvider.GetRequiredService<IDispatchDetectionService>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<TaskTools>>();
+        var task = await repo.CreateAsync(new ProjectTask { ProjectId = ProjectId, Title = "Update target" });
+        var updateJson = await TaskTools.UpdateTask(repo, detection, logger, task.Id, "codex", status: "done", verbose: false);
+        using var updateDoc = JsonDocument.Parse(updateJson);
+        Assert.True(updateDoc.RootElement.TryGetProperty("summary", out _));
+        Assert.True(updateDoc.RootElement.TryGetProperty("id", out _));
+        Assert.True(updateDoc.RootElement.TryGetProperty("changes", out _));
+    }
+
+    [Fact]
+    public async Task ConciseResponse_SummaryDoesNotExceedReasonableLength()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+
+        var json = await TaskTools.CreateTask(
+            repo, ProjectId,
+            "A very long title that goes on and on with lots of detail about what the task is supposed to accomplish",
+            description: "Even longer description ".PadRight(2000, 'd'),
+            verbose: false);
+
+        // Concise response should be short — well under 2000 chars even with long inputs
+        Assert.True(json.Length < 500, $"Concise response too long: {json.Length} chars");
+    }
+
+    // ─── Helpers ─────────────────────────────────────────────────────────
+
+    private async Task<(ProjectTask Task, ReviewRound Round)> CreateRoundAsync()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var taskRepo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+        var roundRepo = scope.ServiceProvider.GetRequiredService<IReviewRoundRepository>();
+
+        var task = await taskRepo.CreateAsync(new ProjectTask { ProjectId = ProjectId, Title = "Review target" });
+        var round = await roundRepo.CreateAsync(new CreateReviewRoundInput
+        {
+            TaskId = task.Id,
+            RequestedBy = "codex",
+            Branch = $"task/{task.Id}-test",
+            BaseBranch = "main",
+            BaseCommit = "aaa111",
+            HeadCommit = "bbb222"
+        });
+
+        return (task, round);
+    }
+
+    private async Task<ReviewFinding> CreateFindingAsync(int taskId, int roundId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IReviewFindingRepository>();
+
+        return await repo.CreateAsync(new CreateReviewFindingInput
+        {
+            ReviewRoundId = roundId,
+            CreatedBy = "codex",
+            Category = ReviewFindingCategory.BlockingBug,
+            Summary = "Test finding"
+        });
+    }
+
+    // ─── Test app factory ────────────────────────────────────────────────
+
+    private sealed class ConciseAppFactory : WebApplicationFactory<Program>
+    {
+        private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"den-mcp-concise-{Guid.NewGuid()}.db");
+
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            builder.UseEnvironment("Testing");
+            builder.ConfigureAppConfiguration((_, config) =>
+            {
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["DenMcp:DatabasePath"] = _dbPath,
+                    ["DenMcp:Llm:Endpoint"] = "",
+                    ["DenMcp:Llm:Model"] = "test-model"
+                });
+            });
+
+            builder.ConfigureServices(services =>
+            {
+                var initializer = new DatabaseInitializer(_dbPath,
+                    NullLogger<DatabaseInitializer>.Instance);
+                initializer.InitializeAsync().GetAwaiter().GetResult();
+
+                services.RemoveAll<DbConnectionFactory>();
+                services.AddSingleton(new DbConnectionFactory(initializer.ConnectionString));
+
+                services.RemoveAll<ILlmClient>();
+                services.AddSingleton<ILlmClient>(new NoOpLlmClient());
+            });
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            if (disposing && File.Exists(_dbPath))
+                File.Delete(_dbPath);
+        }
+
+        private sealed class NoOpLlmClient : ILlmClient
+        {
+            public Task<string> CompleteAsync(string systemPrompt, string userMessage, CancellationToken ct = default)
+                => Task.FromResult("{}");
+        }
+    }
+}
