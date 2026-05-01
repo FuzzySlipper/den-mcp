@@ -283,6 +283,7 @@ public sealed class DenHttpClient
         string projectId,
         long? taskId = null,
         int limit = 20,
+        string? unreadFor = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
@@ -294,6 +295,10 @@ public sealed class DenHttpClient
         if (taskId is { } id)
         {
             query.Add(new QueryParameter("taskId", id.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        }
+        if (!string.IsNullOrWhiteSpace(unreadFor))
+        {
+            query.Add(new QueryParameter("unreadFor", unreadFor));
         }
 
         var path = $"/api/projects/{EscapePathSegment(projectId)}/messages";
@@ -313,6 +318,35 @@ public sealed class DenHttpClient
             return await ReadJsonAsync<List<DenMessage>>(
                 response,
                 "Unable to parse Den messages",
+                cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    public async Task<DenMessage?> GetMessageAsync(
+        string baseUrl,
+        string projectId,
+        long messageId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+
+        var path = $"/api/projects/{EscapePathSegment(projectId)}/messages/{messageId}";
+        var response = await SendAsync(
+            () => new HttpRequestMessage(HttpMethod.Get, JoinUrl(baseUrl, path)),
+            $"Unable to fetch Den message {messageId}",
+            cancellationToken).ConfigureAwait(false);
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await ReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+                throw new DenHttpClientException($"Den message {messageId} returned HTTP {(int)response.StatusCode}: {body}");
+            }
+
+            return await ReadJsonAsync<DenMessage>(
+                response,
+                $"Unable to parse Den message {messageId}",
                 cancellationToken).ConfigureAwait(false);
         }
     }

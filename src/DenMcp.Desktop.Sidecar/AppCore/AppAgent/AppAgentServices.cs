@@ -352,7 +352,7 @@ public sealed class AppAgentContextBuilder
                 .ConfigureAwait(false);
             var messages = detail.RecentMessages.Count > 0
                 ? detail.RecentMessages
-                : await _den.ListMessagesAsync(settings.DenBaseUrl, request.Selection.ProjectId, request.Selection.TaskId, request.MessageLimit, cancellationToken)
+                : await _den.ListMessagesAsync(settings.DenBaseUrl, request.Selection.ProjectId, request.Selection.TaskId, request.MessageLimit, cancellationToken: cancellationToken)
                     .ConfigureAwait(false);
 
             return new AppAgentTaskSummary
@@ -712,7 +712,7 @@ public sealed class AppAgentService
         var taskId = OptionalLong(request.Input, "task_id") ?? request.Selection.TaskId;
         var limit = OptionalInt(request.Input, "limit") ?? AppAgentConstants.DefaultMessageLimit;
         var settings = await _runtime.GetSettingsAsync(cancellationToken).ConfigureAwait(false);
-        var messages = await _den.ListMessagesAsync(settings.DenBaseUrl, projectId, taskId, limit, cancellationToken).ConfigureAwait(false);
+        var messages = await _den.ListMessagesAsync(settings.DenBaseUrl, projectId, taskId, limit, cancellationToken: cancellationToken).ConfigureAwait(false);
         return messages.Select(AppAgentContextBuilder.ToMessageSummary).ToList();
     }
 

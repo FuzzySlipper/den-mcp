@@ -46,33 +46,42 @@ public sealed class MessagesProjectionService
         var limit = Math.Clamp(request.Limit, 1, 100);
 
         var messages = await TryAsync(
-            () => _den.ListMessagesAsync(baseUrl, request.ProjectId, request.TaskId, limit, cancellationToken),
+            () => _den.ListMessagesAsync(baseUrl, request.ProjectId, request.TaskId, limit, cancellationToken: cancellationToken),
             errors,
             "Unable to load messages",
             Array.Empty<DenMessage>()).ConfigureAwait(false);
+
+        // Determine unread state when unreadFor is provided
+        HashSet<long>? unreadIds = null;
+        var unreadFor = request.UnreadFor;
+        if (!string.IsNullOrWhiteSpace(unreadFor))
+        {
+            var unreadMessages = await TryAsync(
+                () => _den.ListMessagesAsync(baseUrl, request.ProjectId, request.TaskId, limit, unreadFor, cancellationToken),
+                errors,
+                "Unable to load unread messages",
+                Array.Empty<DenMessage>()).ConfigureAwait(false);
+            unreadIds = unreadMessages.Select(m => m.Id).ToHashSet();
+        }
 
         // Build thread root if thread_id specified
         MessagesMessageRow? threadRoot = null;
         if (request.ThreadId is { } threadId)
         {
-            var threadMessages = await TryAsync(
-                () => _den.ListMessagesAsync(baseUrl, request.ProjectId, null, 1, cancellationToken),
+            var rootMessage = await TryAsync<DenMessage?>(
+                () => _den.GetMessageAsync(baseUrl, request.ProjectId, threadId, cancellationToken),
                 errors,
                 $"Unable to load thread root {threadId}",
-                Array.Empty<DenMessage>()).ConfigureAwait(false);
+                null).ConfigureAwait(false);
 
-            threadRoot = threadMessages
-                .Where(m => m.Id == threadId)
-                .Select(ToRow)
-                .FirstOrDefault();
+            threadRoot = rootMessage is not null ? ToRow(rootMessage, unreadIds) : null;
         }
 
-        var rows = messages.Select(ToRow).ToList();
+        var rows = messages.Select(m => ToRow(m, unreadIds)).ToList();
 
-        var unreadFor = request.UnreadFor;
-        var unreadCount = string.IsNullOrWhiteSpace(unreadFor)
-            ? 0
-            : rows.Count(m => m.IsUnread);
+        var unreadCount = unreadIds is not null
+            ? rows.Count(m => m.IsUnread)
+            : 0;
 
         return new MessagesSnapshot
         {
@@ -95,10 +104,11 @@ public sealed class MessagesProjectionService
         };
     }
 
-    private static MessagesMessageRow ToRow(DenMessage message)
+    private static MessagesMessageRow ToRow(DenMessage message, HashSet<long>? unreadIds = null)
     {
         var contentSummary = BoundSummary(message.Content, MaxSummaryLength);
         var metadataType = TryGetMetadataType(message.Metadata);
+        var isUnread = unreadIds is not null && unreadIds.Contains(message.Id);
 
         return new MessagesMessageRow
         {
@@ -108,10 +118,10 @@ public sealed class MessagesProjectionService
             Intent = message.Intent,
             Metadata = message.Metadata,
             MetadataType = metadataType,
-            TaskId = null,
-            ThreadId = null,
+            TaskId = message.TaskId,
+            ThreadId = message.ThreadId,
             CreatedAt = message.CreatedAt,
-            IsUnread = false,
+            IsUnread = isUnread,
             ContentSummary = contentSummary,
         };
     }

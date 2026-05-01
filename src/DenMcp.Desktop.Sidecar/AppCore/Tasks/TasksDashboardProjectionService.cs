@@ -117,7 +117,7 @@ public sealed class TasksDashboardProjectionService
             }
 
             messagesByTask[taskId] = await TryAsync(
-                () => _den.ListMessagesAsync(baseUrl, request.ProjectId, taskId, 100, cancellationToken),
+                () => _den.ListMessagesAsync(baseUrl, request.ProjectId, taskId, 100, cancellationToken: cancellationToken),
                 errors,
                 $"Unable to load task-thread messages for {taskId}",
                 Array.Empty<DenMessage>()).ConfigureAwait(false);

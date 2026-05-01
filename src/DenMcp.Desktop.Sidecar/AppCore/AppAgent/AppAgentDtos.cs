@@ -603,6 +603,15 @@ public sealed record DenMessage
     [JsonPropertyName("id")]
     public long Id { get; init; }
 
+    [JsonPropertyName("project_id")]
+    public string? ProjectId { get; init; }
+
+    [JsonPropertyName("task_id")]
+    public long? TaskId { get; init; }
+
+    [JsonPropertyName("thread_id")]
+    public long? ThreadId { get; init; }
+
     [JsonPropertyName("sender")]
     public string Sender { get; init; } = string.Empty;
 
