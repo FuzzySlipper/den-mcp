@@ -174,6 +174,8 @@ export function taskThreadPacketOperatorEvent(packetType: unknown): string | und
       return "validation_completed";
     case "drift_check_packet":
       return "drift_check_completed";
+    case "implementation_packet_missing":
+      return "implementation_packet_missing_posted";
     default:
       return undefined;
   }

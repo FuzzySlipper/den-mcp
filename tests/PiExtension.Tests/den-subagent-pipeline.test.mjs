@@ -477,6 +477,7 @@ test('subagent run schema helpers emit canonical metadata and event mapping', ()
   assert.equal(taskThreadPacketOperatorEvent('implementation_packet'), 'implementation_packet_posted');
   assert.equal(taskThreadPacketOperatorEvent('validation_packet'), 'validation_completed');
   assert.equal(taskThreadPacketOperatorEvent('drift_check_packet'), 'drift_check_completed');
+  assert.equal(taskThreadPacketOperatorEvent('implementation_packet_missing'), 'implementation_packet_missing_posted');
   assert.equal(subagentEventVisibility('subagent_work_tool_start'), 'debug');
   assert.equal(subagentEventVisibility('subagent_completed'), 'summary');
   assert.deepEqual(buildSubagentLifecycleMetadata('implementation_packet_posted', { message_id: 42 }), {
