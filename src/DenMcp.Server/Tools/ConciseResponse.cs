@@ -260,22 +260,38 @@ public static class ConciseResponse
 
     // Agent stream operations
 
-    public static string SentAgentStreamMessage(AgentStreamEntry entry)
+    public static string SentAgentStreamMessage(AgentStreamMessageCreateResult result)
     {
+        var entry = result.Entry;
         var recipientText = entry.RecipientAgent is not null
             ? $" to '{entry.RecipientAgent}'"
             : entry.RecipientRole is not null
                 ? $" to role '{entry.RecipientRole}'"
                 : "";
+
+        var wakeStatus = result.WakeResolution is not null
+            ? ToApiValue(result.WakeResolution.Status)
+            : (string?)null;
+
         return Serialize(new
         {
             summary = $"sent agent stream message #{entry.Id} ({entry.EventType}){recipientText}",
             id = entry.Id,
             event_type = entry.EventType,
             recipient_agent = entry.RecipientAgent,
-            recipient_role = entry.RecipientRole
+            recipient_role = entry.RecipientRole,
+            wake_resolution_status = wakeStatus
         });
     }
+
+    private static string ToApiValue(AgentRecipientResolutionStatus status) => status switch
+    {
+        AgentRecipientResolutionStatus.Resolved => "resolved",
+        AgentRecipientResolutionStatus.MissingRecipient => "missing_recipient",
+        AgentRecipientResolutionStatus.MissingBinding => "missing_binding",
+        AgentRecipientResolutionStatus.Ambiguous => "ambiguous",
+        _ => throw new ArgumentOutOfRangeException(nameof(status), status, "Unknown agent recipient resolution status.")
+    };
 
     // Review workflow operations
 

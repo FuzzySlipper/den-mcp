@@ -142,7 +142,7 @@ public sealed class AgentStreamTools
 
             return verbose
                 ? JsonSerializer.Serialize(result, JsonOpts.Default)
-                : ConciseResponse.SentAgentStreamMessage(result.Entry);
+                : ConciseResponse.SentAgentStreamMessage(result);
         }
         catch (InvalidOperationException ex)
         {

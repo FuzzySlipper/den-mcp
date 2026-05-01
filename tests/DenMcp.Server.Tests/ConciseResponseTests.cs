@@ -1114,6 +1114,174 @@ public class ConciseResponseTests : IAsyncLifetime
         Assert.True(root.TryGetProperty("completed_by", out _));
     }
 
+    // ─── Send agent stream message ───────────────────────────────────────
+
+    [Fact]
+    public async Task SendAgentStreamMessage_ConciseDefault_ReturnsSummaryWithId()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IAgentStreamMessageService>();
+
+        var json = await AgentStreamTools.SendAgentStreamMessage(
+            service,
+            sender: "user",
+            event_type: "note",
+            body: "A note body that should not appear in concise output",
+            project_id: ProjectId,
+            recipient_agent: "codex",
+            verbose: false);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        var summary = root.GetProperty("summary").GetString()!;
+        Assert.Contains("sent agent stream message #", summary);
+        Assert.Contains("note", summary);
+        Assert.Contains("codex", summary);
+
+        Assert.True(root.TryGetProperty("id", out _));
+        Assert.Equal("note", root.GetProperty("event_type").GetString());
+        Assert.Equal("codex", root.GetProperty("recipient_agent").GetString());
+
+        // Must NOT contain the body
+        Assert.DoesNotContain("note body that should not appear", json);
+    }
+
+    [Fact]
+    public async Task SendAgentStreamMessage_ConciseDefault_RecordOnly_OmitsWakeResolution()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IAgentStreamMessageService>();
+
+        var json = await AgentStreamTools.SendAgentStreamMessage(
+            service,
+            sender: "user",
+            event_type: "note",
+            body: "FYI note",
+            project_id: ProjectId,
+            recipient_agent: "codex",
+            delivery_mode: "record_only",
+            verbose: false);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        // Record-only messages have no wake resolution; the field is omitted when null
+        Assert.False(root.TryGetProperty("wake_resolution_status", out _));
+    }
+
+    [Fact]
+    public async Task SendAgentStreamMessage_ConciseDefault_WakeResolved_IncludesWakeResolutionStatus()
+    {
+        // Register an active binding so wake resolves to "resolved"
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var bindings = scope.ServiceProvider.GetRequiredService<IAgentInstanceBindingRepository>();
+            await bindings.UpsertAsync(new AgentInstanceBinding
+            {
+                InstanceId = "codex-concise-test-1",
+                ProjectId = ProjectId,
+                AgentIdentity = "codex",
+                AgentFamily = "codex",
+                Role = "implementer",
+                TransportKind = "local_adapter",
+                Status = AgentInstanceBindingStatus.Active
+            });
+        }
+
+        using var serviceScope = _factory.Services.CreateScope();
+        var service = serviceScope.ServiceProvider.GetRequiredService<IAgentStreamMessageService>();
+
+        var json = await AgentStreamTools.SendAgentStreamMessage(
+            service,
+            sender: "user",
+            event_type: "question",
+            body: "Can you check this?",
+            project_id: ProjectId,
+            recipient_agent: "codex",
+            delivery_mode: "wake",
+            verbose: false);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        var summary = root.GetProperty("summary").GetString()!;
+        Assert.Contains("sent agent stream message #", summary);
+        Assert.Contains("question", summary);
+
+        Assert.True(root.TryGetProperty("id", out _));
+        Assert.Equal("question", root.GetProperty("event_type").GetString());
+        Assert.Equal("codex", root.GetProperty("recipient_agent").GetString());
+        Assert.Equal("resolved", root.GetProperty("wake_resolution_status").GetString());
+
+        // Must NOT contain the body
+        Assert.DoesNotContain("Can you check this?", json);
+    }
+
+    [Fact]
+    public async Task SendAgentStreamMessage_ConciseDefault_WakeMissingBinding_IncludesWakeResolutionStatus()
+    {
+        using var serviceScope = _factory.Services.CreateScope();
+        var service = serviceScope.ServiceProvider.GetRequiredService<IAgentStreamMessageService>();
+
+        var json = await AgentStreamTools.SendAgentStreamMessage(
+            service,
+            sender: "user",
+            event_type: "nudge",
+            body: "Wake up",
+            project_id: ProjectId,
+            recipient_agent: "unknown-agent",
+            delivery_mode: "wake",
+            verbose: false);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        Assert.Equal("nudge", root.GetProperty("event_type").GetString());
+        Assert.Equal("missing_binding", root.GetProperty("wake_resolution_status").GetString());
+    }
+
+    [Fact]
+    public async Task SendAgentStreamMessage_VerboseTrue_ReturnsFullRecord()
+    {
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var bindings = scope.ServiceProvider.GetRequiredService<IAgentInstanceBindingRepository>();
+            await bindings.UpsertAsync(new AgentInstanceBinding
+            {
+                InstanceId = "codex-concise-verbose-1",
+                ProjectId = ProjectId,
+                AgentIdentity = "codex",
+                AgentFamily = "codex",
+                Role = "implementer",
+                TransportKind = "local_adapter",
+                Status = AgentInstanceBindingStatus.Active
+            });
+        }
+
+        using var serviceScope = _factory.Services.CreateScope();
+        var service = serviceScope.ServiceProvider.GetRequiredService<IAgentStreamMessageService>();
+
+        var json = await AgentStreamTools.SendAgentStreamMessage(
+            service,
+            sender: "user",
+            event_type: "answer",
+            body: "Yes, proceed.",
+            project_id: ProjectId,
+            recipient_agent: "codex",
+            delivery_mode: "wake",
+            verbose: true);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        // Verbose returns full AgentStreamMessageCreateResult
+        Assert.True(root.TryGetProperty("entry", out var entry));
+        Assert.Equal("answer", entry.GetProperty("event_type").GetString());
+        Assert.True(root.TryGetProperty("wake_resolution", out var wakeRes));
+        Assert.Equal("resolved", wakeRes.GetProperty("status").GetString());
+    }
+
     // ─── Helpers ─────────────────────────────────────────────────────────
 
     private async Task<(ProjectTask Task, ReviewRound Round)> CreateRoundAsync()
