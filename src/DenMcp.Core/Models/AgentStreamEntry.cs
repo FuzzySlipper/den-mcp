@@ -36,5 +36,10 @@ public sealed class AgentStreamListOptions
     public string? RecipientRole { get; set; }
     public string? RecipientInstanceId { get; set; }
     public string? MetadataRunId { get; set; }
+    /// <summary>
+    /// When false (default), exclude entries whose metadata.event_visibility is "debug"
+    /// or whose event_type starts with "subagent_work_". Set to true to include all entries.
+    /// </summary>
+    public bool IncludeDebug { get; set; }
     public int Limit { get; set; } = 50;
 }

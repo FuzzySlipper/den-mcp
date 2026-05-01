@@ -23,6 +23,7 @@ public static class AgentStreamRoutes
             string? recipientRole,
             string? recipientInstanceId,
             string? metadataRunId,
+            bool? includeDebug,
             int? limit) =>
         {
             var parsedKind = TryParseKind(streamKind, out var kind, out var error);
@@ -42,6 +43,7 @@ public static class AgentStreamRoutes
                 RecipientRole = recipientRole,
                 RecipientInstanceId = recipientInstanceId,
                 MetadataRunId = metadataRunId,
+                IncludeDebug = includeDebug ?? false,
                 Limit = limit ?? 50
             });
 
@@ -113,6 +115,7 @@ public static class AgentStreamRoutes
             string? recipientRole,
             string? recipientInstanceId,
             string? metadataRunId,
+            bool? includeDebug,
             int? limit) =>
         {
             var parsedKind = TryParseKind(streamKind, out var kind, out var error);
@@ -132,6 +135,7 @@ public static class AgentStreamRoutes
                 RecipientRole = recipientRole,
                 RecipientInstanceId = recipientInstanceId,
                 MetadataRunId = metadataRunId,
+                IncludeDebug = includeDebug ?? false,
                 Limit = limit ?? 50
             });
 

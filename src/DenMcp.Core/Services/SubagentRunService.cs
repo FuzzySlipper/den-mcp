@@ -126,6 +126,7 @@ public sealed class SubagentRunService : ISubagentRunService
             ProjectId = options.ProjectId,
             TaskId = options.TaskId,
             StreamKind = AgentStreamKind.Ops,
+            IncludeDebug = true,
             Limit = Math.Clamp(options.SourceLimit, 1, 200)
         });
 
@@ -147,6 +148,7 @@ public sealed class SubagentRunService : ISubagentRunService
             TaskId = options.TaskId,
             StreamKind = AgentStreamKind.Ops,
             MetadataRunId = runId,
+            IncludeDebug = true,
             Limit = Math.Clamp(options.SourceLimit, 1, 200)
         });
 

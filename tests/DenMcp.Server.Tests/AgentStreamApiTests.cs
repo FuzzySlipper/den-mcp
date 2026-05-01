@@ -1061,6 +1061,146 @@ public class AgentStreamApiTests : IAsyncLifetime
         Assert.Equal(AgentRecipientResolutionStatus.Resolved, result.WakeResolution!.Status);
     }
 
+    [Fact]
+    public async Task RestAgentStream_DefaultExcludesDebugEntries()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IAgentStreamRepository>();
+
+        var summaryEntry = await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_started",
+            ProjectId = ProjectId,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly
+        });
+
+        await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_work_tool_start",
+            ProjectId = ProjectId,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+            Metadata = Metadata("""{"event_visibility":"debug","run_id":"run-debug"}""")
+        });
+
+        await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_work_turn_end",
+            ProjectId = ProjectId,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly
+        });
+
+        // Default (no includeDebug) — only summary entries
+        var response = await _client.GetAsync($"/api/projects/{ProjectId}/agent-stream");
+        response.EnsureSuccessStatusCode();
+        var entries = await response.Content.ReadFromJsonAsync<List<AgentStreamEntry>>(JsonOpts);
+        var entry = Assert.Single(entries!);
+        Assert.Equal(summaryEntry.Id, entry.Id);
+        Assert.Equal("subagent_started", entry.EventType);
+    }
+
+    [Fact]
+    public async Task RestAgentStream_IncludeDebugTrueReturnsAllEntries()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IAgentStreamRepository>();
+
+        await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_started",
+            ProjectId = ProjectId,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly
+        });
+
+        await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_work_tool_start",
+            ProjectId = ProjectId,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly
+        });
+
+        // includeDebug=true — all entries
+        var response = await _client.GetAsync($"/api/projects/{ProjectId}/agent-stream?includeDebug=true");
+        response.EnsureSuccessStatusCode();
+        var entries = await response.Content.ReadFromJsonAsync<List<AgentStreamEntry>>(JsonOpts);
+        Assert.Equal(2, entries!.Count);
+    }
+
+    [Fact]
+    public async Task McpAgentStreamTools_DefaultExcludesDebugEntries()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IAgentStreamRepository>();
+
+        var summaryEntry = await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_completed",
+            ProjectId = ProjectId,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly
+        });
+
+        await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_work_message_end",
+            ProjectId = ProjectId,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly
+        });
+
+        // Default include_debug=false
+        var listJson = await AgentStreamTools.ListAgentStream(
+            repo,
+            project_id: ProjectId);
+        var list = JsonSerializer.Deserialize<List<AgentStreamEntry>>(listJson, JsonOpts);
+        var entry = Assert.Single(list!);
+        Assert.Equal(summaryEntry.Id, entry.Id);
+    }
+
+    [Fact]
+    public async Task McpAgentStreamTools_IncludeDebugTrueReturnsAllEntries()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IAgentStreamRepository>();
+
+        await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_completed",
+            ProjectId = ProjectId,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly
+        });
+
+        await repo.AppendAsync(new AgentStreamEntry
+        {
+            StreamKind = AgentStreamKind.Ops,
+            EventType = "subagent_work_message_end",
+            ProjectId = ProjectId,
+            Sender = "pi",
+            DeliveryMode = AgentStreamDeliveryMode.RecordOnly
+        });
+
+        // include_debug=true
+        var listJson = await AgentStreamTools.ListAgentStream(
+            repo,
+            project_id: ProjectId,
+            include_debug: true);
+        var list = JsonSerializer.Deserialize<List<AgentStreamEntry>>(listJson, JsonOpts);
+        Assert.Equal(2, list!.Count);
+    }
+
     private sealed class AgentStreamAppFactory : WebApplicationFactory<Program>
     {
         private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"den-mcp-agent-stream-api-{Guid.NewGuid()}.db");

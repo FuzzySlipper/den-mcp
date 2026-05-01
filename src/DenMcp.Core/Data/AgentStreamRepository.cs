@@ -251,6 +251,11 @@ public sealed class AgentStreamRepository : IAgentStreamRepository
             cmd.Parameters.AddWithValue("@metadataRunId", options.MetadataRunId);
         }
 
+        if (!options.IncludeDebug)
+        {
+            where.Add("(COALESCE(json_extract(metadata, '$.event_visibility'), '') <> 'debug' AND event_type NOT LIKE 'subagent_work_%')");
+        }
+
         var whereClause = where.Count > 0 ? $"WHERE {string.Join(" AND ", where)}" : string.Empty;
         cmd.CommandText = $"""
             SELECT
