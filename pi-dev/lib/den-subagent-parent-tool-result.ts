@@ -7,6 +7,7 @@ import {
   isSubagentInfrastructureFailure,
   type JsonObject,
 } from "./den-subagent-pipeline.ts";
+import type { FinalBranchHeadState } from "./den-subagent-final-head.ts";
 
 const SUBAGENT_PARENT_TOOL_RESULT_SCHEMA = "den_subagent_parent_tool_result";
 const SUBAGENT_PARENT_TOOL_RESULT_SCHEMA_VERSION = 1;
@@ -26,11 +27,12 @@ export function buildSubagentParentToolResult(result: SubagentResult) {
   const state = subagentParentState(result);
   const finalSummary = boundedParentText(result.final_output || "(no assistant final output)", PARENT_TOOL_SUMMARY_MAX_CHARS);
   const failureSummary = ok ? undefined : boundedParentText(buildParentFailureSummary(result), PARENT_TOOL_SUMMARY_MAX_CHARS);
+  const recovery = ok ? undefined : buildRecoveryGuidance(result);
 
   const parentSummary = ok || !failureSummary ? finalSummary : failureSummary;
   return {
-    content: [{ type: "text", text: formatParentToolResultText(result, state, parentSummary) }],
-    details: buildSubagentParentToolDetails(result, state, finalSummary, failureSummary),
+    content: [{ type: "text", text: formatParentToolResultText(result, state, parentSummary, recovery) }],
+    details: buildSubagentParentToolDetails(result, state, finalSummary, failureSummary, recovery),
     isError: !ok,
   };
 }
@@ -44,6 +46,7 @@ function formatParentToolResultText(
   result: SubagentResult,
   state: ParentSubagentState,
   summary: BoundedText,
+  recovery?: RecoveryGuidance,
 ): string {
   const lines = [
     `Sub-agent ${state.replace(/_/g, " ")} (${result.role})`,
@@ -66,6 +69,9 @@ function formatParentToolResultText(
     state === "completed" ? "Final summary (bounded parent copy):" : "Failure summary (bounded parent copy):",
     summary.text,
   ];
+  if (recovery) {
+    lines.push("", "Recovery guidance:", recovery.guidance);
+  }
   return lines.filter((line): line is string => line !== null).join("\n");
 }
 
@@ -74,6 +80,7 @@ function buildSubagentParentToolDetails(
   state: ParentSubagentState,
   finalSummary: BoundedText,
   failureSummary: BoundedText | undefined,
+  recovery?: RecoveryGuidance,
 ): JsonObject {
   const childError = result.child_error_message
     ? boundedParentText(result.child_error_message, PARENT_TOOL_DETAIL_PREVIEW_MAX_CHARS)
@@ -136,6 +143,12 @@ function buildSubagentParentToolDetails(
     child_error_preview: childError?.text,
     child_error_chars: childError?.originalChars,
     child_error_truncated: childError?.truncated,
+    recovery_guidance: recovery?.guidance,
+    recovery_branch: recovery?.state.branch,
+    recovery_head_commit: recovery?.state.head_commit,
+    recovery_worktree_dirty: recovery?.state.worktree_dirty,
+    recovery_artifacts_dir: recovery?.state.artifacts_dir,
+    recovery_actions: recovery?.actions,
     artifacts: compactSubagentArtifacts(result),
   });
 }
@@ -174,6 +187,85 @@ function boundedParentText(raw: string, maxChars: number): BoundedText {
     truncated: true,
     originalChars: raw.length,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Recovery guidance for failed/aborted runs
+// ---------------------------------------------------------------------------
+
+type RecoveryState = {
+  branch?: string;
+  head_commit?: string;
+  worktree_dirty?: boolean;
+  artifacts_dir: string;
+};
+
+type RecoveryGuidance = {
+  guidance: string;
+  state: RecoveryState;
+  actions: string[];
+};
+
+function buildRecoveryGuidance(result: SubagentResult): RecoveryGuidance | undefined {
+  const state = collectRecoveryState(result);
+  if (!state) return undefined;
+
+  const actions = determineRecoveryActions(result, state);
+  const guidance = formatRecoveryGuidanceText(result, state, actions);
+  return { guidance, state, actions };
+}
+
+function collectRecoveryState(result: SubagentResult): RecoveryState | undefined {
+  const hasBranchState = Boolean(result.final_head_commit || result.final_branch || result.final_worktree_branch);
+  const hasWorktreeState = result.final_worktree_status !== undefined && result.final_worktree_status !== "unavailable";
+  if (!hasBranchState && !hasWorktreeState) return undefined;
+
+  return {
+    branch: result.final_branch ?? result.branch,
+    head_commit: result.final_head_commit,
+    worktree_dirty: result.final_worktree_status === "dirty_uncommitted",
+    artifacts_dir: result.artifacts.dir,
+  };
+}
+
+function determineRecoveryActions(result: SubagentResult, state: RecoveryState): string[] {
+  const actions: string[] = [];
+
+  if (result.assistant_final_found) {
+    actions.push(`Inspect branch ${state.branch ?? "(unknown)"} for partial work and commits.`);
+    if (state.worktree_dirty) {
+      actions.push("Worktree has uncommitted changes — review before deciding next step.");
+    }
+    actions.push("If work is usable, continue manually or rerun from this branch.");
+    actions.push("Do NOT auto-discard or reset the worktree — policy requires explicit user/instruction.");
+  } else if (state.head_commit) {
+    actions.push(`Inspect commits on branch ${state.branch ?? "(unknown)"} up to ${state.head_commit.slice(0, 12)} for partial work.`);
+    if (state.worktree_dirty) {
+      actions.push("Worktree has uncommitted changes — inspect artifacts and worktree state.");
+    }
+    actions.push("If partial work is useful, continue manually or rerun from this branch.");
+    actions.push("Only discard if the user explicitly instructs; do NOT auto-reset or delete the branch.");
+  } else {
+    actions.push(`Check branch ${state.branch ?? "(unknown)"} for any partial commits.`);
+    actions.push("If no useful commits exist, the branch may be empty — ask the user before discarding.");
+  }
+
+  actions.push(`Review artifacts at ${state.artifacts_dir} for full session transcript and work events.`);
+  return actions;
+}
+
+function formatRecoveryGuidanceText(result: SubagentResult, state: RecoveryState, actions: string[]): string {
+  const parts: string[] = [];
+  parts.push(formatFailureSummary(result));
+
+  const branchLine = state.branch ? `Branch: ${state.branch}` : null;
+  const headLine = state.head_commit ? `Head: ${state.head_commit}` : null;
+  const dirtyLine = state.worktree_dirty !== undefined ? `Worktree: ${state.worktree_dirty ? "dirty (uncommitted changes)" : "clean"}` : null;
+  const contextLine = [branchLine, headLine, dirtyLine].filter(Boolean).join(" | ");
+  if (contextLine) parts.push(contextLine);
+
+  parts.push(...actions.map((a) => `- ${a}`));
+  return parts.join("\n");
 }
 
 function formatFailureSummary(result: SubagentResult): string {

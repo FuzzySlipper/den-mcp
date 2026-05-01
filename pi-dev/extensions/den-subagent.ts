@@ -1532,7 +1532,7 @@ async function runDenSubagent(
   }
 
   const finalRequestedModel = fallbackModel ?? effectiveOptions.model;
-  const finalHeadState = await collectFinalHeadForSuccessfulCoderRun(effectiveOptions, result, cwd);
+  const finalHeadState = await collectFinalHeadForCoderRun(effectiveOptions, result, cwd);
   const finalHeadMetadata = buildFinalBranchHeadMetadata(finalHeadState);
   if (finalHeadState) {
     applyFinalHeadState(result, finalHeadState);
@@ -1735,12 +1735,14 @@ async function runDenSubagent(
   return result;
 }
 
-async function collectFinalHeadForSuccessfulCoderRun(
+async function collectFinalHeadForCoderRun(
   options: RunOptions,
   result: SubagentResult,
   cwd: string,
 ): Promise<FinalBranchHeadState | undefined> {
-  if (!subagentSucceeded(result)) return undefined;
+  // Collect final head state for all coder runs with branch/worktree context,
+  // including failed and aborted runs. This enables recovery guidance in the
+  // parent tool result so the orchestrator can see partial branch state.
   if (options.role.toLowerCase() !== "coder") return undefined;
   if (!options.worktreePath && !options.branch) return undefined;
   try {

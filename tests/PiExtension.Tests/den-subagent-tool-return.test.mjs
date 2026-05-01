@@ -148,6 +148,143 @@ test('sub-agent parent tool return keeps artifact paths without artifact content
   assert.doesNotMatch(serialized, /RAW_ARTIFACT_WORK_EVENT_CONTENT_SENTINEL/);
 });
 
+test('sub-agent parent tool return includes recovery guidance for aborted coder run with branch state', () => {
+  const toolResult = buildSubagentParentToolResult(subagentResult({
+    exit_code: 143,
+    signal: 'SIGTERM',
+    aborted: true,
+    assistant_final_found: false,
+    output_status: 'no_assistant_final',
+    final_output: '',
+    final_head_commit: 'abc123def456789',
+    final_head_status: 'dirty_uncommitted',
+    final_head_source: 'supplied_branch',
+    final_branch: 'task/1078-subagent-abort-recovery',
+    final_worktree_branch: 'task/1078-subagent-abort-recovery',
+    final_branch_matches_worktree: true,
+    final_worktree_status: 'dirty_uncommitted',
+    final_worktree_status_short: ' M pi-dev/lib/example.ts',
+  }));
+
+  assert.equal(toolResult.isError, true);
+  // aborted → classifySubagentInfrastructureFailure returns 'aborted' → infrastructure_failed
+  assert.equal(toolResult.details.state, 'infrastructure_failed');
+  assert.equal(toolResult.details.aborted, true);
+
+  // Recovery guidance fields present in details
+  assert.ok(toolResult.details.recovery_guidance, 'should have recovery_guidance');
+  assert.equal(toolResult.details.recovery_branch, 'task/1078-subagent-abort-recovery');
+  assert.equal(toolResult.details.recovery_head_commit, 'abc123def456789');
+  assert.equal(toolResult.details.recovery_worktree_dirty, true);
+  assert.ok(Array.isArray(toolResult.details.recovery_actions), 'should have recovery_actions array');
+  assert.ok(toolResult.details.recovery_actions.length > 0, 'should have at least one recovery action');
+
+  // Text output includes recovery guidance
+  const text = toolResult.content[0].text;
+  assert.match(text, /Recovery guidance:/);
+  assert.match(text, /Sub-agent was aborted/);
+  assert.match(text, /Branch: task\/1078-subagent-abort-recovery/);
+  assert.match(text, /Worktree: dirty/);
+  assert.match(text, /do NOT auto-reset or delete the branch/);
+  assert.match(text, /artifacts/);
+
+  // Verify artifact path is referenced
+  assert.match(text, new RegExp(BASE_ARTIFACTS.dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
+
+test('sub-agent parent tool return includes recovery guidance for failed coder run with clean branch', () => {
+  const toolResult = buildSubagentParentToolResult(subagentResult({
+    exit_code: 1,
+    aborted: false,
+    assistant_final_found: false,
+    output_status: 'no_assistant_final',
+    final_output: '',
+    final_head_commit: 'deadbeef12345678',
+    final_head_status: 'clean',
+    final_head_source: 'supplied_branch',
+    final_branch: 'task/1078-test',
+    final_worktree_branch: 'task/1078-test',
+    final_branch_matches_worktree: true,
+    final_worktree_status: 'clean',
+    final_worktree_status_short: undefined,
+    child_error_message: 'Process crashed with unhandled exception',
+  }));
+
+  assert.equal(toolResult.isError, true);
+  // child_error_message → classifySubagentInfrastructureFailure returns 'child_error' → infrastructure_failed
+  assert.equal(toolResult.details.state, 'infrastructure_failed');
+
+  // Recovery guidance present
+  assert.ok(toolResult.details.recovery_guidance, 'should have recovery_guidance');
+  assert.equal(toolResult.details.recovery_branch, 'task/1078-test');
+  assert.equal(toolResult.details.recovery_head_commit, 'deadbeef12345678');
+  assert.equal(toolResult.details.recovery_worktree_dirty, false);
+
+  const text = toolResult.content[0].text;
+  assert.match(text, /Recovery guidance:/);
+  assert.match(text, /Worktree: clean/);
+  assert.match(text, /Branch: task\/1078-test/);
+  assert.match(text, /Head: deadbeef12345678/);
+});
+
+test('sub-agent parent tool return omits recovery guidance for successful run', () => {
+  const toolResult = buildSubagentParentToolResult(subagentResult());
+
+  assert.equal(toolResult.isError, false);
+  assert.equal(toolResult.details.recovery_guidance, undefined);
+  assert.equal(toolResult.details.recovery_actions, undefined);
+
+  const text = toolResult.content[0].text;
+  assert.doesNotMatch(text, /Recovery guidance:/);
+});
+
+test('sub-agent parent tool return omits recovery guidance when no branch state is available', () => {
+  const toolResult = buildSubagentParentToolResult(subagentResult({
+    exit_code: 1,
+    aborted: true,
+    assistant_final_found: false,
+    output_status: 'no_assistant_final',
+    final_output: '',
+    // No final_head_commit, no final_branch, no final_worktree_status
+    final_head_commit: undefined,
+    final_head_status: undefined,
+    final_branch: undefined,
+    final_worktree_branch: undefined,
+    final_worktree_status: undefined,
+  }));
+
+  assert.equal(toolResult.isError, true);
+  assert.equal(toolResult.details.recovery_guidance, undefined);
+  assert.equal(toolResult.details.recovery_actions, undefined);
+
+  const text = toolResult.content[0].text;
+  assert.doesNotMatch(text, /Recovery guidance:/);
+});
+
+test('sub-agent parent tool return recovery guidance for abort with partial assistant output', () => {
+  const toolResult = buildSubagentParentToolResult(subagentResult({
+    exit_code: 143,
+    signal: 'SIGTERM',
+    aborted: true,
+    assistant_final_found: true,
+    output_status: 'assistant_final',
+    final_output: 'Partial implementation: added recovery helper but tests not yet run.',
+    final_head_commit: 'cafe0123456789',
+    final_head_status: 'dirty_uncommitted',
+    final_branch: 'task/1078-test',
+    final_worktree_branch: 'task/1078-test',
+    final_worktree_status: 'dirty_uncommitted',
+  }));
+
+  assert.equal(toolResult.isError, true);
+
+  const text = toolResult.content[0].text;
+  assert.match(text, /Recovery guidance:/);
+  // With assistant_final_found, guidance should say "partial work and commits"
+  assert.match(text, /partial work and commits/);
+  assert.match(text, /continue manually or rerun/);
+});
+
 test('Pi parent session stores tool-result details, while compaction/provider payloads use content only', () => {
   const sentinel = 'DETAILS_SENTINEL_SHOULD_NOT_REACH_PROVIDER_PAYLOAD';
   const toolMessage = {
