@@ -1,6 +1,5 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
@@ -45,7 +44,8 @@ import {
   subagentOperatorEventForOpsEvent,
   taskThreadPacketOperatorEvent,
   subagentOpsEventTypeForEvent,
-  collectContextMetricsFromSessionJsonl,
+  collectContextMetricsForRun,
+  enrichStatusJson,
   type ContextMetrics,
   type JsonObject,
   type SubagentArtifacts,
