@@ -14,7 +14,7 @@ Den previously carried several direct-agent bridge experiments:
   dispatch routing was a normal workflow.
 
 Those pieces are no longer supported runtime behavior. The current operator path
-is Den web plus Pi/conductor runs, task-thread messages, review workflow records,
+is Den web plus Pi/orchestrator runs, task-thread messages, review workflow records,
 agent-stream ops/control events, and AgentRun state.
 
 What remains supported:
@@ -30,4 +30,4 @@ What remains supported:
 
 Future local desktop/agent companion work should be designed as an explicit
 adapter boundary that consumes Den-owned attention/run/task context. It should
-not revive dispatch prompt injection as the default conductor workflow.
+not revive dispatch prompt injection as the default orchestrator workflow.

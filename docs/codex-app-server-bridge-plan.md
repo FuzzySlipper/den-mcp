@@ -2,16 +2,16 @@
 
 Date: 2026-04-20
 
-Status update, 2026-04-26: this dispatch-centered Codex app-server bridge plan is historical/legacy context. The `den-codex-bridge` and `den-agent` binaries were removed from the active runtime in task `#812`; the canonical conductor workflow now uses Pi/Den web plus task/thread messages and agent-stream/run state. Signal/Telegram mobile bridges are also retired from the supported runtime. See [ADR: Retire dispatches from the canonical conductor workflow](dispatch-retirement-adr.md), [Legacy Mobile Bridge Integrations](legacy-mobile-bridges.md), and [Legacy Codex/Claude Bridge Notes](legacy-codex-claude-bridges.md).
+Status update, 2026-04-26: this dispatch-centered Codex app-server bridge plan is historical/legacy context. The `den-codex-bridge` and `den-agent` binaries were removed from the active runtime in task `#812`; the canonical orchestrator workflow now uses Pi/Den web plus task/thread messages and agent-stream/run state. Signal/Telegram mobile bridges are also retired from the supported runtime. See [ADR: Retire dispatches from the canonical orchestrator workflow](dispatch-retirement-adr.md), [Legacy Mobile Bridge Integrations](legacy-mobile-bridges.md), and [Legacy Codex/Claude Bridge Notes](legacy-codex-claude-bridges.md).
 
-This note replaces the earlier tmux-conductor direction for the current
+This note replaces the earlier tmux-orchestrator direction for the current
 experimentation path. The new goal is to validate a per-project Codex
 app-server bridge that can accept wake-ups from Telegram, queue work while
 Codex is busy, and load real task context from Den when the agent is ready.
 
 ## Why pivot
 
-The tmux-backed conductor solved "how do we notice work and launch agents," but
+The tmux-backed orchestrator solved "how do we notice work and launch agents," but
 it still treated terminal/session control as the main integration seam.
 
 For Codex specifically, the stronger seam is now the app-server transport:

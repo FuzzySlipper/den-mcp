@@ -4,12 +4,12 @@ Date: 2026-04-24
 Task: `#757`
 
 This spike starts the pivot from per-vendor live-session bridges toward one
-project-facing Pi conductor with Den-backed state.
+project-facing Pi orchestrator with Den-backed state.
 
 For the stabilized sub-agent runner, observability, control, and smoke-test
 contract after task `#785`, see `docs/pi-subagent-infrastructure.md`.
 
-Status update, 2026-04-26: dispatches are retired from the normal Pi conductor path; see `docs/dispatch-retirement-adr.md`. Older dispatch command notes below are legacy/debug context.
+Status update, 2026-04-26: dispatches are retired from the normal Pi orchestrator path; see `docs/dispatch-retirement-adr.md`. Older dispatch command notes below are legacy/debug context.
 
 The first git-tracked Pi resources live at:
 
@@ -25,7 +25,7 @@ Pi starts inside this repo.
 
 ## Goals for this slice
 
-- Bind a running Pi session to Den as one project-level conductor.
+- Bind a running Pi session to Den as one project-level orchestrator.
 - Keep Den as the durable source of tasks, messages, stream entries, run records,
   and review records.
 - Expose a tiny Den command/tool surface inside Pi without replacing MCP or the
@@ -46,7 +46,7 @@ On `session_start`, the extension:
 - registers an `agent_instance_binding` with:
   - `agent_family`: `pi`
   - `agent_identity`: `pi` by default
-  - `role`: `conductor` by default
+  - `role`: `conductor` by default  <!-- backward-compatible value -->
   - `transport_kind`: `pi_extension`
 - resolves Den-native agent guidance from `/api/projects/{projectId}/agent-guidance`
   and appends the packet to Pi's system prompt when guidance sources exist
@@ -56,7 +56,7 @@ On `session_start`, the extension:
 It also updates the binding metadata on Pi agent start/end with a lightweight
 `state` value of `busy` or `idle`. In unbound mode, project-specific commands
 fail with an actionable message; `/den-status` explains how to bind, and
-`/den-conductor-guidance` can still load global conductor guidance.
+`/den-conductor-guidance` can still load global orchestrator guidance.  <!-- command name kept for backward compatibility -->
 
 ## Commands
 
@@ -150,7 +150,7 @@ suspicious harness/CI/package/dependency changes while preserving the existing
 Den review-loop thread metadata and finding severities.
 
 The `den-conductor` Pi skill is the user/agent-invokable entry point for
-conductor mode. It does not duplicate the policy text. It tells Pi to use Den
+orchestrator mode (called conductor in older/internal tooling). It does not duplicate the policy text. It tells Pi to use Den
 MCP document tools to resolve project document `pi-conductor-guidance`, then
 `_global/pi-conductor-guidance-default`, then this skill's built-in fallback.
 
@@ -170,7 +170,7 @@ DEN_MCP_URL             default http://192.168.1.10:5199
 DEN_MCP_BASE_URL        fallback if DEN_MCP_URL is unset
 DEN_PI_PROJECT_ID       optional explicit project id; when unset, bind by registered project root_path
 DEN_PI_AGENT            default pi
-DEN_PI_ROLE             default conductor
+DEN_PI_ROLE             default conductor  <!-- backward-compatible value -->
 DEN_PI_INSTANCE_ID      optional stable instance id
 ```
 
@@ -304,16 +304,16 @@ Then try:
 
 The intended next shape is:
 
-- one user-facing, durable Pi conductor per project
+- one user-facing, durable Pi orchestrator per project
 - implementation and review work run as bounded sub-agent sessions
 - reviewer sessions use fresh context and a different provider/model
 - Den task messages and review rounds stay the source of truth
-- the conductor reads coder/reviewer communication for intent drift, not as a
+- the orchestrator reads coder/reviewer communication for intent drift, not as a
   second code reviewer
 - user escalation happens through Den task-thread questions and targeted stream
-  entries when the conductor detects a decision outside agent authority
+  entries when the orchestrator detects a decision outside agent authority
 
-The important distinction is user-facing conductor versus non-user-facing
+The important distinction is user-facing orchestrator versus non-user-facing
 sub-agent run, not "coder terminal" versus "reviewer terminal."
 
 ## Collaboration Sessions
@@ -487,9 +487,9 @@ the Pi runtime session ID when available.
   `agent_runs` table after the stream-ops spike proves useful.
 - Add parallel fanout, worktree isolation, and richer role-specific defaults
   beyond model/tools for coder/reviewer runs.
-- Add conductor prompts for drift detection using task intent, acceptance
+- Add orchestrator prompts for drift detection using task intent, acceptance
   criteria, review findings, and coder responses.
-- Decide whether the long-term Den agent identity should be `pi`, `conductor`,
+- Decide whether the long-term Den agent identity should be `pi`, `orchestrator`,
   or project-configurable per repo.
 - Collaboration: threaded follow-up annotations per segment; parallel
   human/agent editing; delivery of compiled responses to agent input.

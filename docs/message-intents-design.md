@@ -4,7 +4,7 @@ Task #617 proposes promoting message intent from optional `metadata.type`
 convention into a first-class `messages.intent` field. This note captures the
 recommended taxonomy, migration plan, and implementation split.
 
-Status update, 2026-04-26: dispatch creation described here is now legacy bridge behavior and is disabled unless `dispatch-routing` explicitly sets `defaults.legacy_dispatch_enabled: true`. The canonical path is task/thread messages plus agent-stream ops/review records; see [ADR: Retire dispatches from the canonical conductor workflow](dispatch-retirement-adr.md).
+Status update, 2026-04-26: dispatch creation described here is now legacy bridge behavior and is disabled unless `dispatch-routing` explicitly sets `defaults.legacy_dispatch_enabled: true`. The canonical path is task/thread messages plus agent-stream ops/review records; see [ADR: Retire dispatches from the canonical orchestrator workflow](dispatch-retirement-adr.md).
 
 ## Why
 
@@ -299,7 +299,7 @@ Dispatch routing is now opt-in compatibility mode. When a project explicitly set
 - do not auto-dispatch every `review_request` / `question` / `task_blocked`
   message solely because the intent exists
 
-Intent should make routing possible and explicit, not magical. Projects that still need legacy dispatch bridges can opt into stronger intent-based rules in `dispatch-routing`; normal conductor work should use task/thread messages and agent-stream attention instead.
+Intent should make routing possible and explicit, not magical. Projects that still need legacy dispatch bridges can opt into stronger intent-based rules in `dispatch-routing`; normal orchestrator work should use task/thread messages and agent-stream attention instead.
 
 ## Producer Changes
 

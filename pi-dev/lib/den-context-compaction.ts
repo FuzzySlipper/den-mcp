@@ -15,7 +15,7 @@ export type DenContextCompactionOptions = {
 };
 
 export const DEFAULT_RESUME_PROMPT =
-  "Conductor context compaction completed. Re-read your current Den task/thread state (use den_get_task, den_get_messages) and continue with the next step.";
+  "Orchestrator context compaction completed. Re-read your current Den task/thread state (use den_get_task, den_get_messages) and continue with the next step.";
 
 export type DenContextCompactionResult = {
   schema: typeof DEN_CONTEXT_COMPACTION_SCHEMA;
@@ -49,10 +49,10 @@ export function requestDenContextCompaction(
   const resumeAfterCompaction = request.resumeAfterCompaction !== false;
   const sendResume = resumeAfterCompaction && typeof options?.sendResumeMessage === "function";
   const resumeNote = sendResume
-    ? `A follow-up prompt will be sent automatically after compaction to resume the conductor session.`
+    ? `A follow-up prompt will be sent automatically after compaction to resume the orchestrator session.`
     : resumeAfterCompaction
-      ? `Resume requested but no sendResumeMessage callback available. The conductor session will be suspended after compaction until the operator manually sends a prompt.`
-      : `Resume not requested. The conductor session will be suspended after compaction until the operator manually sends a prompt.`;
+      ? `Resume requested but no sendResumeMessage callback available. The orchestrator session will be suspended after compaction until the operator manually sends a prompt.`
+      : `Resume not requested. The orchestrator session will be suspended after compaction until the operator manually sends a prompt.`;
 
   if (request.durableContextPosted !== true) {
     return {
@@ -60,7 +60,7 @@ export function requestDenContextCompaction(
       schema_version: DEN_CONTEXT_COMPACTION_SCHEMA_VERSION,
       requested: false,
       status: "blocked",
-      reason: "Refusing to compact until the conductor confirms durable Den context has been posted or is already up to date.",
+      reason: "Refusing to compact until the orchestrator confirms durable Den context has been posted or is already up to date.",
       custom_instructions: customInstructions,
       safe_point_notes: safePointNotes,
       resume_configured: false,
@@ -88,7 +88,7 @@ export function requestDenContextCompaction(
     ctx.compact({
       customInstructions,
       onComplete: () => {
-        ctx?.ui?.notify?.("Den conductor context compaction completed.", "info");
+        ctx?.ui?.notify?.("Den orchestrator context compaction completed.", "info");
         if (sendResume) {
           try {
             Promise.resolve(options!.sendResumeMessage!(DEFAULT_RESUME_PROMPT)).catch((resumeError) => {
@@ -100,7 +100,7 @@ export function requestDenContextCompaction(
         }
       },
       onError: (error: unknown) => {
-        ctx?.ui?.notify?.(`Den conductor context compaction failed: ${errorMessage(error)}`, "error");
+        ctx?.ui?.notify?.(`Den orchestrator context compaction failed: ${errorMessage(error)}`, "error");
       },
     });
     return {
@@ -159,7 +159,7 @@ export function compactionGuardrails(): string[] {
     "Post or verify durable Den handoff/status context before compacting.",
     "Prefer task boundaries or just after a merge/review handoff; avoid mid-critical merge, review, or unresolved user-decision points.",
     "Compaction via ctx.compact() is fire-and-forget: the tool/command returns immediately and compaction runs asynchronously after the current turn ends.",
-    "After compaction, the conductor session will be suspended until a follow-up prompt resumes it. When resume_after_compaction is enabled, the extension sends a resume prompt automatically.",
+    "After compaction, the orchestrator session will be suspended until a follow-up prompt resumes it. When resume_after_compaction is enabled, the extension sends a resume prompt automatically.",
     "If the extension/session reloads between compaction start and completion, the captured resume callback may be stale; the resume failure is reported and the operator can manually resume.",
     "After compaction (manual or auto-resume), re-check Den task/messages before starting the next substantial task.",
   ];

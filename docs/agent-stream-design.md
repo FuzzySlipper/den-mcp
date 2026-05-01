@@ -2,7 +2,7 @@
 
 Date: 2026-04-23
 
-Status update, 2026-04-26: dispatches are no longer the canonical wake/work queue. See [ADR: Retire dispatches from the canonical conductor workflow](dispatch-retirement-adr.md). Signal/Telegram mobile bridges and Codex/Claude dispatch bridges are retired from the supported runtime; see [Legacy Mobile Bridge Integrations](legacy-mobile-bridges.md) and [Legacy Codex/Claude Bridge Notes](legacy-codex-claude-bridges.md). Historical dispatch/bridge references in this document describe the original bridge design; the current normal path is Pi/Den web plus task/thread records and agent-stream ops/run state.
+Status update, 2026-04-26: dispatches are no longer the canonical wake/work queue. See [ADR: Retire dispatches from the canonical orchestrator workflow](dispatch-retirement-adr.md). Signal/Telegram mobile bridges and Codex/Claude dispatch bridges are retired from the supported runtime; see [Legacy Mobile Bridge Integrations](legacy-mobile-bridges.md) and [Legacy Codex/Claude Bridge Notes](legacy-codex-claude-bridges.md). Historical dispatch/bridge references in this document describe the original bridge design; the current normal path is Pi/Den web plus task/thread records and agent-stream ops/run state.
 
 This note proposes a Den-native global agent stream for thin operational
 handoffs and targeted lightweight messages across all projects.
@@ -102,7 +102,7 @@ The stream records that a handoff or attention-worthy event happened. Bridges sh
 
 The stream is Den-owned. Delivery remains adapter-specific:
 
-- Pi/conductor runs and Den web/operator views are the supported active path.
+- Pi/orchestrator runs and Den web/operator views are the supported active path.
 - Retired Codex/Claude bridge experiments (`den-codex-bridge`, `den-agent`, Claude channel snippets) are historical examples only.
 - Future adapters should consume Den-owned stream/attention/task context rather than becoming a workflow record.
 
@@ -224,7 +224,7 @@ CREATE INDEX idx_agent_bindings_family_project
 
 This is what allows a single global stream to coexist with:
 
-- multiple Pi/conductor or future adapter instances
+- multiple Pi/orchestrator or future adapter instances
 - multiple projects
 - project-local reviewer/implementer pairings
 
@@ -346,7 +346,7 @@ The intended relationship between task messages and stream entries is:
 1. Implementer posts a full review request on the task thread.
 2. Den emits a compact `review_requested` ops entry linked to the same
    `task_id` and `thread_id`.
-3. Reviewer/conductor attention is represented through agent-stream/run state,
+3. Reviewer/orchestrator attention is represented through agent-stream/run state,
    role-aware targeted messages, or future first-class attention items.
 4. Reviewer posts detailed findings or approval on the task thread.
 5. Den emits `changes_requested` or `review_approved` plus the appropriate

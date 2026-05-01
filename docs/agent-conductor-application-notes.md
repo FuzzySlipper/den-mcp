@@ -1,11 +1,11 @@
-# Agent Conductor Application Notes
+# Agent Orchestrator Application Notes
 
 Date: 2026-04-25
 
-Status update, 2026-04-26: dispatches are retired from the canonical conductor path; see [ADR: Retire dispatches from the canonical conductor workflow](dispatch-retirement-adr.md). Treat older dispatch language in this note as historical bridge context unless it explicitly says legacy/debug.
+Status update, 2026-04-26: dispatches are retired from the canonical orchestrator path; see [ADR: Retire dispatches from the canonical orchestrator workflow](dispatch-retirement-adr.md). Treat older dispatch language in this note as historical bridge context unless it explicitly says legacy/debug.
 
 This note captures a research sanity check on turning Den from "MCP plus task
-storage" into a more explicit agent conductor and observation application.
+storage" into a more explicit agent orchestrator and observation application.
 
 The immediate motivation is that chat/task streams become inadequate once
 sub-agent delegation is a meaningful part of the workflow. A high-volume stream
@@ -74,7 +74,7 @@ operator questions:
 
 ## Terminal Ownership
 
-Den should own the session/run lifecycle for conductor-created work. Terminals
+Den should own the session/run lifecycle for orchestrator-created work. Terminals
 should own presentation and human interaction.
 
 Recommended split:
@@ -103,7 +103,7 @@ This mode is less authoritative because the terminal/client can disappear before
 Den sees the full lifecycle.
 
 Zellij, tmux, foot server mode, web terminals, and local terminal windows are
-best treated as attachable views, not as the conductor brain.
+best treated as attachable views, not as the orchestrator brain.
 
 Suggested model:
 
@@ -492,7 +492,7 @@ chat.
 
 ## Bottom Line
 
-The right move is not "more web frontend to MCP." It is "Den as an agent conductor
+The right move is not "more web frontend to MCP." It is "Den as an agent orchestrator
 application with MCP as one interface."
 
 The web UI is still the best operator surface, but the backend needs to own the

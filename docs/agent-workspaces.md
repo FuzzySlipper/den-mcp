@@ -1,6 +1,6 @@
 # Agent Workspaces
 
-Agent workspaces are the minimal durable backend record for conductor work that spans a task branch, worktree, run, diff, preview, and review lifecycle.
+Agent workspaces are the minimal durable backend record for orchestrator work that spans a task branch, worktree, run, diff, preview, and review lifecycle.
 
 This slice intentionally adds only the backend record, repository, REST surface, tests, and invariants. It does **not** create git worktrees, spawn terminals, proxy previews, or manage desktop/terminal UI.
 
@@ -13,7 +13,7 @@ Required fields:
 - `id` — stable workspace id. REST creation may generate `ws_<guid>` when omitted.
 - `project_id` — Den project scope.
 - `task_id` — task the workspace is for.
-- `branch` — task branch or other branch under conductor control.
+- `branch` — task branch or other branch under orchestrator control.
 - `worktree_path` — local path expected to contain the working tree.
 - `base_branch` — intended diff/merge base branch.
 - `state` — one of `planned`, `active`, `review`, `complete`, `failed`, `archived`.

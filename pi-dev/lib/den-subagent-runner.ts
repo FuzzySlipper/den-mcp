@@ -569,7 +569,7 @@ export async function runPiCliSubagent(input: SubagentBackendInput): Promise<Sub
 export function buildSubagentPrompt(cfg: DenConfig, options: RunOptions): string {
   const taskLine = options.taskId ? `Den task: #${options.taskId}\n` : "";
   return [
-    `You are a fresh ${options.role} sub-agent launched by the Den Pi conductor.`,
+    `You are a fresh ${options.role} sub-agent launched by the Den Pi orchestrator.`,
     `Project: ${cfg.projectId}`,
     taskLine.trim(),
     "",

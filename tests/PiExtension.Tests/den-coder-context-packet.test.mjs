@@ -92,7 +92,7 @@ test('formatCoderContextPacket produces markdown with all sections from full inp
   assert.ok(md.includes('## Constraints / scope boundaries'));
   assert.ok(md.includes('## Suggested file pointers'));
   assert.ok(md.includes('## Validation commands'));
-  assert.ok(md.includes('## Extra conductor notes'));
+  assert.ok(md.includes('## Extra orchestrator notes'));
 
   // Dependency content
   assert.ok(md.includes('`#933`'));
@@ -132,7 +132,7 @@ test('formatCoderContextPacket handles minimal input with just task_id', () => {
   assert.ok(!md.includes('## Constraints'));
   assert.ok(!md.includes('## Suggested file pointers'));
   assert.ok(!md.includes('## Validation commands'));
-  assert.ok(!md.includes('## Extra conductor notes'));
+  assert.ok(!md.includes('## Extra orchestrator notes'));
 });
 
 test('formatCoderContextPacket always renders Packet conventions and Expected output sections', () => {

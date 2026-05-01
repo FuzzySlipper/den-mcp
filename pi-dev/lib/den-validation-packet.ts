@@ -7,7 +7,7 @@
  * branch/head, test commands, pass/fail/blocked status) and is projected to
  * `validation_completed` lifecycle ops via the task 939 conventions.
  *
- * The first useful producer is a conductor-run helper analogous to
+ * The first useful producer is an orchestrator-run helper analogous to
  * `den-drift-check`: it executes validation commands, records outcomes, and
  * posts a structured packet.  Failures are visible but never conflated with
  * review approval.

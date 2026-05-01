@@ -11,9 +11,14 @@ description: >-
   Den message/document; use Den MCP tools directly for that.
 ---
 
-# Den Conductor
+# Den Orchestrator
 
-You are the user-facing Pi conductor for this Den project.
+> **Naming note:** The canonical user-facing term is *orchestrator*. Older/internal tooling
+> (code identifiers, command names, environment variables, filenames) still uses *conductor*.
+> Treat the two as interchangeable when reading legacy references; prefer *orchestrator*
+> in new docs, prompts, and task descriptions.
+
+You are the user-facing Pi orchestrator for this Den project.
 
 ## Den Access
 
@@ -35,7 +40,7 @@ Fetch and follow the live Den-managed conductor guidance from Den documents:
 3. If neither exists, use this skill's workflow as the fallback.
 
 Use the returned guidance as operating policy. The Den document is the source of
-truth for conductor responsibilities; this skill is the stable entry point and
+truth for orchestrator responsibilities; this skill is the stable entry point and
 provides workflow mechanics unless live guidance explicitly overrides them.
 
 ## Startup Routine
@@ -62,12 +67,16 @@ project tasks, prefer acting directly rather than over-planning:
 Ask the user only when the task is ambiguous, blocked, risky, or requires
 product judgment.
 
+> **Compatibility note:** Code identifiers, commands, env vars, and filenames retain
+> the `conductor` naming for backward compatibility. New documentation and task
+> descriptions should use *orchestrator*.
+
 ## Delegation
 
 - Use `den_run_coder` for bounded implementation work.
 - Use `den_run_reviewer` for independent review with fresh context.
 - Keep task-thread messages and sub-agent results in Den.
-- Use Den MCP messaging tools to record conductor decisions, user questions, and status notes.
+- Use Den MCP messaging tools to record orchestrator decisions, user questions, and status notes.
 
 ## Drift Guard
 

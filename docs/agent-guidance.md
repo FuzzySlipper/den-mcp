@@ -12,8 +12,8 @@ A guidance entry points at an existing Den document:
   projects; use a normal project id for project-local guidance.
 - `document_project_id` and `document_slug` — the referenced Den document.
 - `importance` — `required` or `important`.
-- `audience` — optional labels such as `pi`, `conductor`, `coder`, or
-  `reviewer`.
+- `audience` — optional labels such as `pi`, `orchestrator`, `coder`, or
+  `reviewer`.  (Legacy references may use `conductor` instead of `orchestrator`.)
 - `sort_order` — deterministic ordering within the scope; lower values come
   first.
 - `notes` — optional operator context explaining why the document is included.
@@ -56,7 +56,7 @@ Content-Type: application/json
   "importance": "required",
   "audience": ["pi", "conductor"],
   "sort_order": 10,
-  "notes": "Default conductor operating policy"
+  "notes": "Default orchestrator operating policy"
 }
 ```
 
@@ -70,7 +70,7 @@ DELETE /api/projects/{projectId}/agent-guidance/entries/{entryId}
 
 - `get_agent_guidance(project_id)` resolves the packet.
 - `list_agent_guidance_entries(project_id, include_global)` lists entries.
-- `add_agent_guidance_entry(...)` adds or updates an entry; its `audience` argument is a comma-separated string such as `pi,conductor`.
+- `add_agent_guidance_entry(...)` adds or updates an entry; its `audience` argument is a comma-separated string such as `pi,orchestrator`.
 - `delete_agent_guidance_entry(project_id, entry_id)` removes an entry scoped to the owning project.
 
 ## CLI
