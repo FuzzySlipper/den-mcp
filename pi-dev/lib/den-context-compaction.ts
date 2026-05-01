@@ -30,7 +30,7 @@ export type DenContextCompactionResult = {
   guardrails: string[];
 };
 
-export function defaultConductorCompactionInstructions(): string {
+export function defaultOrchestratorCompactionInstructions(): string {
   return [
     "Preserve durable Den workflow state: current task(s), branch/head commits, review status, tests run, decisions, open findings, blockers, and next steps.",
     "Preserve user preferences and architectural/product decisions that affect upcoming work.",
@@ -43,7 +43,7 @@ export function requestDenContextCompaction(
   request: DenContextCompactionRequest,
   options?: DenContextCompactionOptions,
 ): DenContextCompactionResult {
-  const customInstructions = normalizeString(request.customInstructions) ?? defaultConductorCompactionInstructions();
+  const customInstructions = normalizeString(request.customInstructions) ?? defaultOrchestratorCompactionInstructions();
   const safePointNotes = normalizeString(request.safePointNotes) ?? null;
   const guardrails = compactionGuardrails();
   const resumeAfterCompaction = request.resumeAfterCompaction !== false;

@@ -16,7 +16,7 @@ The first git-tracked Pi resources live at:
 ```text
 pi-dev/extensions/den.ts
 pi-dev/extensions/den-subagent.ts
-pi-dev/skills/den-conductor/SKILL.md
+pi-dev/skills/den-orchestrator/SKILL.md
 ```
 
 Keep these resources outside project-local `.pi` discovery so they can be
@@ -46,7 +46,7 @@ On `session_start`, the extension:
 - registers an `agent_instance_binding` with:
   - `agent_family`: `pi`
   - `agent_identity`: `pi` by default
-  - `role`: `conductor` by default  <!-- backward-compatible value; user-facing term is *orchestrator* -->
+  - `role`: `orchestrator` by default
   - `transport_kind`: `pi_extension`
 - resolves Den-native agent guidance from `/api/projects/{projectId}/agent-guidance`
   and appends the packet to Pi's system prompt when guidance sources exist
@@ -56,7 +56,7 @@ On `session_start`, the extension:
 It also updates the binding metadata on Pi agent start/end with a lightweight
 `state` value of `busy` or `idle`. In unbound mode, project-specific commands
 fail with an actionable message; `/den-status` explains how to bind, and
-`/den-conductor-guidance` can still load global orchestrator guidance.  <!-- command slug kept for backward compatibility; content uses *orchestrator* nomenclature -->
+`/den-orchestrator-guidance` can still load global orchestrator guidance.
 
 ## Commands
 
@@ -72,7 +72,7 @@ fail with an actionable message; `/den-status` explains how to bind, and
 /den-mark-read <message_id> [message_id...]
 /den-complete-dispatch <dispatch_id>
 /den-agent-guidance
-/den-conductor-guidance
+/den-orchestrator-guidance
 /den-run-subagent [--continue|--fork <session>|--session <session>] <role> <task_id|-> <prompt>
 /den-run-coder [--continue|--fork <session>|--session <session>] <task_id> [extra notes]
 /den-run-reviewer [--fork <session>|--session <session>] <task_id> [review target/notes]
@@ -149,13 +149,11 @@ criteria, packet-vs-diff accuracy, scope drift against the context packet, and
 suspicious harness/CI/package/dependency changes while preserving the existing
 Den review-loop thread metadata and finding severities.
 
-The `den-conductor` Pi skill is the user/agent-invokable entry point for
-orchestrator mode. (The skill directory name and command slug retain the legacy
-`conductor` naming for backward compatibility.) It does not duplicate the policy
+The `den-orchestrator` Pi skill is the user/agent-invokable entry point for
+orchestrator mode. It does not duplicate the policy
 text. It tells Pi to use Den MCP document tools to resolve project document
-`pi-conductor-guidance`, then `_global/pi-conductor-guidance-default`, then
-this skill's built-in fallback. The resolved guidance uses *orchestrator*
-nomenclature in user-facing text.
+`pi-orchestrator-guidance`, then `_global/pi-orchestrator-guidance-default`, then
+this skill's built-in fallback.
 
 Den-native guidance is the broader project guidance path. Operators mark Den
 documents as required or important with first-class guidance entries, then Pi
@@ -173,7 +171,7 @@ DEN_MCP_URL             default http://192.168.1.10:5199
 DEN_MCP_BASE_URL        fallback if DEN_MCP_URL is unset
 DEN_PI_PROJECT_ID       optional explicit project id; when unset, bind by registered project root_path
 DEN_PI_AGENT            default pi
-DEN_PI_ROLE             default conductor  <!-- backward-compatible value; user-facing term is *orchestrator* -->
+DEN_PI_ROLE             default orchestrator
 DEN_PI_INSTANCE_ID      optional stable instance id
 ```
 
@@ -293,9 +291,9 @@ Then try:
 /den-inbox
 /den-next
 /den-claim-next
-/skill:den-conductor
+/skill:den-orchestrator
 /den-agent-guidance
-/den-conductor-guidance
+/den-orchestrator-guidance
 /den-config
 /den-run-subagent planner - "Summarize the next useful Den follow-up task."
 /den-run-subagent --continue coder 123 "Continue from the prior coder run."

@@ -295,7 +295,7 @@ test('buildCoderContextPacketMeta produces correct metadata from full input', ()
   const meta = buildCoderContextPacketMeta(FULL_INPUT);
 
   assert.equal(meta.type, 'coder_context_packet');
-  assert.equal(meta.prepared_by, 'conductor');
+  assert.equal(meta.prepared_by, 'orchestrator');
   assert.equal(meta.workflow, 'expanded_isolation_with_context');
   assert.equal(meta.version, 1);
   assert.equal(meta.parent_task_id, 932);

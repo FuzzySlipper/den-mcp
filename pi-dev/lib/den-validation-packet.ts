@@ -84,7 +84,7 @@ export interface ValidationRunResult {
 /** Stable metadata for a posted validation_packet. */
 export interface ValidationPacketMeta {
   type: "validation_packet";
-  prepared_by: "conductor";
+  prepared_by: "orchestrator";
   workflow: "expanded_isolation_with_context";
   version: 1;
   task_id: number | null;
@@ -479,7 +479,7 @@ export function buildValidationPacketMeta(result: ValidationRunResult): Validati
 
   return {
     type: "validation_packet",
-    prepared_by: "conductor",
+    prepared_by: "orchestrator",
     workflow: "expanded_isolation_with_context",
     version: 1,
     task_id: result.task_id ?? null,

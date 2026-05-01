@@ -62,8 +62,8 @@ const PARENT_REASONING_CONFIG_CACHE_MS = 5_000;
 
 const DEFAULT_BASE_URL = "http://192.168.1.10:5199";
 const HEARTBEAT_SECONDS = 60;
-const CONDUCTOR_GUIDANCE_SLUG = "pi-conductor-guidance";
-const GLOBAL_CONDUCTOR_GUIDANCE_SLUG = "pi-conductor-guidance-default";
+const ORCHESTRATOR_GUIDANCE_SLUG = "pi-orchestrator-guidance";
+const GLOBAL_ORCHESTRATOR_GUIDANCE_SLUG = "pi-orchestrator-guidance-default";
 const COLLAB_ANNOTATION_TYPES = ["note", "skip", "done", "flag"] as const;
 const COLLAB_SESSION_STATUSES = ["active", "resolved", "archived"] as const;
 const EMPTY_TOOL_PARAMETERS = {
@@ -365,14 +365,14 @@ export default function denExtension(pi: ExtensionAPI) {
     },
   });
 
-  pi.registerCommand("den-conductor-guidance", {
+  pi.registerCommand("den-orchestrator-guidance", {
     description: "Load the Den-managed Pi orchestrator guidance.",
     handler: async (_args, ctx) => {
       const cfg = await ensureConfig(ctx);
       const guidance = cfg
-        ? await getConductorGuidance(cfg)
-        : await getGlobalConductorGuidance(baseUrlFromEnv());
-      ctx.ui.setWidget("den-conductor-guidance", guidance.content.split("\n").slice(0, 40));
+        ? await getOrchestratorGuidance(cfg)
+        : await getGlobalOrchestratorGuidance(baseUrlFromEnv());
+      ctx.ui.setWidget("den-orchestrator-guidance", guidance.content.split("\n").slice(0, 40));
       ctx.ui.notify(`Loaded orchestrator guidance from ${guidance.project_id}/${guidance.slug}.`, "info");
     },
   });
@@ -857,7 +857,7 @@ async function resolveConfig(ctx: any): Promise<DenConfig> {
   const baseUrl = baseUrlFromEnv();
   const projectId = await resolveProjectId(baseUrl, ctx.cwd);
   const agent = process.env.DEN_PI_AGENT ?? "pi";
-  const role = process.env.DEN_PI_ROLE ?? "conductor";
+  const role = process.env.DEN_PI_ROLE ?? "orchestrator";
   const cwdHash = createHash("sha256").update(`${projectId}:${ctx.cwd}`).digest("hex").slice(0, 12);
   const instanceId = process.env.DEN_PI_INSTANCE_ID ?? `pi-${projectId}-${cwdHash}`;
   const sessionFile = ctx.sessionManager?.getSessionFile?.() ?? "ephemeral";
@@ -1270,18 +1270,18 @@ async function getAgentGuidance(cfg: DenConfig) {
   return denFetch(cfg, `/api/projects/${esc(cfg.projectId)}/agent-guidance`);
 }
 
-async function getConductorGuidance(cfg: DenConfig) {
-  const projectDoc = await tryGetDocument(cfg, cfg.projectId, CONDUCTOR_GUIDANCE_SLUG);
+async function getOrchestratorGuidance(cfg: DenConfig) {
+  const projectDoc = await tryGetDocument(cfg, cfg.projectId, ORCHESTRATOR_GUIDANCE_SLUG);
   if (projectDoc) return projectDoc;
-  return getGlobalConductorGuidance(cfg.baseUrl, cfg.projectId);
+  return getGlobalOrchestratorGuidance(cfg.baseUrl, cfg.projectId);
 }
 
-async function getGlobalConductorGuidance(baseUrl: string, projectId = "unbound") {
-  const globalDoc = await tryGetDocumentBase(baseUrl, "_global", GLOBAL_CONDUCTOR_GUIDANCE_SLUG);
+async function getGlobalOrchestratorGuidance(baseUrl: string, projectId = "unbound") {
+  const globalDoc = await tryGetDocumentBase(baseUrl, "_global", GLOBAL_ORCHESTRATOR_GUIDANCE_SLUG);
   if (globalDoc) return globalDoc;
   return {
     project_id: projectId,
-    slug: CONDUCTOR_GUIDANCE_SLUG,
+    slug: ORCHESTRATOR_GUIDANCE_SLUG,
     title: "Built-in Pi Orchestrator Guidance",
     content: [
       "# Built-in Pi Orchestrator Guidance",

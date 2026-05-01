@@ -71,7 +71,7 @@ describe("den-packet-intent", () => {
 
     it("returns status_update for metadata without type", () => {
       assert.equal(
-        resolveIntentFromMetadata({ version: 1, prepared_by: "conductor" }),
+        resolveIntentFromMetadata({ version: 1, prepared_by: "orchestrator" }),
         "status_update",
       );
     });

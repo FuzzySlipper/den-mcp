@@ -110,7 +110,7 @@ export interface FilePointer {
 /** Metadata for a posted coder context packet. */
 export interface CoderContextPacketMeta {
   type: "coder_context_packet";
-  prepared_by: "conductor";
+  prepared_by: "orchestrator";
   workflow: "expanded_isolation_with_context";
   version: 1;
   parent_task_id: number | null;
@@ -285,7 +285,7 @@ export function formatCoderContextPacket(input: CoderContextPacketInput): string
 export function buildCoderContextPacketMeta(input: CoderContextPacketInput): CoderContextPacketMeta {
   return {
     type: "coder_context_packet",
-    prepared_by: "conductor",
+    prepared_by: "orchestrator",
     workflow: "expanded_isolation_with_context",
     version: 1,
     parent_task_id: input.parent_task_id ?? null,

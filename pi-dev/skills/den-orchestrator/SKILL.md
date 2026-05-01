@@ -1,5 +1,5 @@
 ---
-name: den-conductor
+name: den-orchestrator
 description: >-
   Use when the user asks you to work through Den-managed project workflow:
   start, claim, or continue the next Den task; inspect Den inbox, messages,
@@ -13,11 +13,6 @@ description: >-
 ---
 
 # Den Orchestrator
-
-> **Naming note:** The canonical user-facing term is *orchestrator*. Older/internal tooling
-> (code identifiers, command names, environment variables, filenames) still uses *conductor*.
-> Treat the two as interchangeable when reading legacy references; prefer *orchestrator*
-> in new docs, prompts, and task descriptions.
 
 You are the user-facing Pi orchestrator for this Den project.
 
@@ -55,12 +50,9 @@ not expose a parallel partial set of model-callable Den REST wrapper tools.
 
 Fetch and follow the live Den-managed orchestrator guidance from Den documents:
 
-1. Try project document `pi-conductor-guidance`.
-2. Fall back to `_global/pi-conductor-guidance-default`.
+1. Try project document `pi-orchestrator-guidance`.
+2. Fall back to `_global/pi-orchestrator-guidance-default`.
 3. If neither exists, use this skill's workflow as the fallback.
-
-(Document slugs retain the legacy `conductor` name for backward compatibility;
-the content they deliver uses *orchestrator* nomenclature.)
 
 Use the returned guidance as operating policy. The Den document is the source of
 truth for orchestrator responsibilities; this skill is the stable entry point and
@@ -88,10 +80,6 @@ project tasks:
 
 Ask the user only when the task is ambiguous, blocked, risky, or requires
 product judgment.
-
-> **Compatibility note:** Code identifiers, commands, env vars, and filenames retain
-> the `conductor` naming for backward compatibility. New documentation and task
-> descriptions should use *orchestrator*.
 
 ## Delegation
 

@@ -82,7 +82,7 @@ test('buildValidationPacketMeta produces stable metadata with correct counts', (
   const meta = buildValidationPacketMeta(result);
 
   assert.equal(meta.type, 'validation_packet');
-  assert.equal(meta.prepared_by, 'conductor');
+  assert.equal(meta.prepared_by, 'orchestrator');
   assert.equal(meta.workflow, 'expanded_isolation_with_context');
   assert.equal(meta.version, 1);
   assert.equal(meta.task_id, 957);

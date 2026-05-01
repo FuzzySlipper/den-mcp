@@ -122,7 +122,7 @@ export interface DriftCheckResult {
 
 export interface DriftCheckPacketMeta {
   type: "drift_check_packet";
-  prepared_by: "conductor";
+  prepared_by: "orchestrator";
   workflow: "expanded_isolation_with_context";
   version: 1;
   task_id: number | null;
@@ -431,7 +431,7 @@ export function formatDriftCheckPacketMessage(result: DriftCheckResult): string 
 export function buildDriftCheckPacketMeta(result: DriftCheckResult): DriftCheckPacketMeta {
   return {
     type: "drift_check_packet",
-    prepared_by: "conductor",
+    prepared_by: "orchestrator",
     workflow: "expanded_isolation_with_context",
     version: 1,
     task_id: result.task_id ?? null,

@@ -1094,7 +1094,7 @@ async function prepareAndPostCoderContext(
   // Post to Den task thread.
   const postResult = await sendTaskMessage(cfg, options.task_id, content, {
     ...metadata,
-    prepared_by: "conductor",
+    prepared_by: "orchestrator",
   });
   await appendPacketLifecycleOps(cfg, options.task_id, "coder_context_packet", optionalNumber(postResult?.id), {
     branch: options.branch ?? null,
@@ -2470,7 +2470,7 @@ async function resolveConfig(ctx: any): Promise<DenConfig> {
   const baseUrl = baseUrlFromEnv();
   const projectId = await resolveProjectId(baseUrl, ctx.cwd);
   const agent = process.env.DEN_PI_AGENT ?? "pi";
-  const role = process.env.DEN_PI_ROLE ?? "conductor";
+  const role = process.env.DEN_PI_ROLE ?? "orchestrator";
   const cwdHash = createHash("sha256").update(`${projectId}:${ctx.cwd}`).digest("hex").slice(0, 12);
   const instanceId = process.env.DEN_PI_INSTANCE_ID ?? `pi-${projectId}-${cwdHash}`;
   return { baseUrl, projectId, agent, role, instanceId };
