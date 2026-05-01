@@ -135,7 +135,7 @@ public sealed class AgentRecipientResolver : IAgentRecipientResolver
 
     private async Task<AgentStreamEntry> RecordWakeDropAsync(AgentStreamEntry sourceEntry, AgentRecipientResolution resolution)
     {
-        var statusValue = ToApiValue(resolution.Status);
+        var statusValue = resolution.Status.ToApiValue();
         var metadata = JsonSerializer.SerializeToElement(new
         {
             source_entry_id = sourceEntry.Id > 0 ? sourceEntry.Id : (int?)null,
@@ -164,5 +164,4 @@ public sealed class AgentRecipientResolver : IAgentRecipientResolver
         });
     }
 
-    private static string ToApiValue(AgentRecipientResolutionStatus status) => status.ToApiValue();
 }
