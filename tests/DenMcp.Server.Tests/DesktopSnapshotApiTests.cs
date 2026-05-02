@@ -221,6 +221,8 @@ public class DesktopSnapshotApiTests : IAsyncLifetime
 
     private static void AssertJsonDateTime(DateTime expected, JsonElement actual)
     {
+        // Snapshot timestamps are serialized as JSON date-times and may round-trip
+        // with a different DateTimeKind, so compare the instants rather than Kind.
         Assert.Equal(expected.ToUniversalTime(), actual.GetDateTime().ToUniversalTime());
     }
 
