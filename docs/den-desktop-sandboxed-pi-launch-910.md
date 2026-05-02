@@ -156,62 +156,110 @@ Follow-up hardening:
 
 The practical prototype is to wrap the existing `pid` behavior behind a typed Den Desktop launch profile rather than exposing arbitrary shell.
 
-### Launch profile DTO sketch
+### Launch profile DTO — hardened design (#1073)
+
+The original #910 DTO sketch defaulted `pi_config` to `host_bind_rw`. Task #1073 hardened this:
+
+- **R910-1 resolved:** `pi_config_strategy` now defaults to `dedicated_per_run`. A fresh per-run Pi config directory is the default sandbox auth strategy. `host_bind_rw` is only permitted with explicit capability warnings and debt metadata explaining why the non-preferred strategy was selected.
+- **R910-2 resolved:** OAuth callback ports are now represented by a typed `SandboxedPiOAuthPortConfig` with an allow-listed strategy (`allow_listed`, `manual_fallback`, or `disabled`), specific port numbers, and a mandatory `127.0.0.1` loopback-only bind address.
+- **Tool profiles** are allow-listed (`coding`, `read_only`, `no_tools`), not arbitrary user-supplied args.
+- **Credential mounts** are allow-listed (`gitconfig`, `ssh`, `gh`), all read-only in v1.
+- No renderer shell strings or generic dispatch.
+
+Hardened DTO example (app-core `SandboxedPiLaunchProfile` record):
 
 ```json
 {
+  "profile_id": "sandbox-pi:den-mcp:abc123",
   "project_id": "den-mcp",
   "task_id": 910,
-  "cwd": "/home/patch/dev/den-mcp",
+  "workspace_id": null,
   "title": "Pi sandbox — task 910",
-  "sandbox": {
-    "kind": "docker_compose_pi",
-    "compose_file": "/home/patch/dev/linux/pi-docker/compose.yaml",
-    "service": "sandbox",
-    "dev_dir": "/home/patch/dev",
-    "container_workdir": "/home/pi/dev/den-mcp",
-    "session_prefix": "den-pi",
-    "network_profile": "unrestricted",
-    "pi_config": "host_bind_rw",
-    "credential_mounts": ["gitconfig:ro", "ssh:ro", "gh:ro"]
+  "sandbox_kind": "docker_compose_pi",
+  "compose_file": "/home/patch/dev/linux/pi-docker/compose.yaml",
+  "service": "sandbox",
+  "dev_dir": "/home/patch/dev",
+  "container_workdir": "/home/pi/dev/den-mcp",
+  "session_prefix": "den-pi",
+  "pi_config_strategy": "dedicated_per_run",
+  "pi_config_dir": "/tmp/den-sandbox-pi/run-abc",
+  "capability_warnings": ["Network is unrestricted — sandbox has full network access."],
+  "debt_metadata": null,
+  "oauth_port_config": {
+    "strategy": "allow_listed",
+    "allowed_ports": [3000, 3001, 8080],
+    "bind_address": "127.0.0.1",
+    "manual_fallback_instructions": null
   },
-  "pi": {
-    "command": "pi",
-    "mode": "interactive_cli",
-    "args": ["--tools", "read,bash,edit,write"],
-    "model": null,
-    "session_dir": null
+  "credential_mounts": ["gitconfig", "ssh", "gh"],
+  "pi_launch_mode": "interactive_cli",
+  "tool_profile": "coding",
+  "model": null,
+  "provider": null,
+  "network_profile": "unrestricted"
+}
+```
+
+#### Host bind-rw DTO (debt variant)
+
+When `host_bind_rw` is selected, capability warnings and debt metadata are required:
+
+```json
+{
+  "pi_config_strategy": "host_bind_rw",
+  "pi_config_dir": null,
+  "capability_warnings": [
+    "Host ~/.pi exposed read-write to sandbox",
+    "Network is unrestricted — sandbox has full network access."
+  ],
+  "debt_metadata": {
+    "reason": "Per-run auth not yet implemented",
+    "tracking_task_id": 1073,
+    "accepted_at": "2026-05-01T00:00:00Z"
   }
 }
 ```
 
+### App-core implementation (#1073)
+
+The typed launch profile is implemented in `src/DenMcp.Desktop.Sidecar/AppCore/Sandbox/`:
+
+- **`SandboxedPiLaunchProfile`** — Immutable record with all profile fields, JSON-serializable. Contains constants for strategies, profiles, and defaults.
+- **`SandboxedPiLaunchProfileBuilder`** — Builder with validation. Enforces allow-lists for compose files, services, tool profiles, credential mounts, and network profiles. Enforces R910-1 constraints (debt metadata + warnings for `host_bind_rw`) and R910-2 constraints (loopback-only OAuth ports, valid port ranges, at least one port for `allow_listed` strategy).
+- **`SandboxedPiCommandBuilder`** — Produces argument vectors (not shell strings) for Docker Compose up, tmux exec, OAuth port publishes, and Pi config volume mounts. All arguments are derived from the validated profile. Includes `BuildSessionConstraints` for `OperatorSession.Capabilities.Constraints` JSON.
+
+Tests are in `tests/DenMcp.Desktop.Sidecar.Tests/SandboxedPiLaunchProfileTests.cs` covering 52 test cases.
+
 ### Host/container command sequence
 
-This is intentionally a fixed command template with validated arguments, not an operator-supplied shell string:
+The `SandboxedPiCommandBuilder` produces argument vectors from the validated `SandboxedPiLaunchProfile`. These are designed for `ProcessStartInfo.ArgumentList` usage — each entry is a separate argument, not a shell-escaped string.
 
-```bash
-# 1. Ensure sandbox container exists and keeps running.
-docker compose -f /home/patch/dev/linux/pi-docker/compose.yaml up -d sandbox
+```text
+# 1. Compose up (from BuildComposeUpArgs)
+["compose", "-f", "<compose_file>", "up", "-d", "sandbox"]
 
-# 2. Create a deterministic tmux session inside the container if missing.
-docker compose -f /home/patch/dev/linux/pi-docker/compose.yaml exec -T \
-  -e TERM=xterm-256color \
-  --workdir /home/pi/dev/den-mcp \
-  sandbox \
-  tmux new-session -d -s den-pi-den-mcp-task-910-<hash> -c /home/pi/dev/den-mcp \
-  pi --tools read,bash,edit,write
+# 2. OAuth port publishes (from BuildOAuthPortArgs, only for allow_listed strategy)
+["--publish", "127.0.0.1:3000:3000", "--publish", "127.0.0.1:3001:3001"]
 
-# 3. Attach/observe through the existing tmux-backed OperatorSession controls.
+# 3. Pi config volume (from BuildPiConfigVolumeArgs)
+["-v", "/tmp/den-sandbox-pi/run-abc:/home/pi/.pi"]
+
+# 4. Tmux exec + Pi launch (from BuildTmuxExecArgs)
+["compose", "-f", "<compose_file>", "exec", "-T",
+ "-e", "TERM=xterm-256color",
+ "--workdir", "/home/pi/dev/den-mcp",
+ "sandbox",
+ "tmux", "new-session", "-d", "-s", "<session_name>", "-c", "/home/pi/dev/den-mcp",
+ "pi", "--tools", "read,bash,edit,write"]
 ```
 
-The app-core implementation should use `ProcessStartInfo.ArgumentList` or an equivalent argument-vector runner. It must validate that:
+Validation is enforced by the builder:
 
-- `compose_file` is one of configured sandbox profiles.
-- `cwd` is inside configured `dev_dir` and maps to the expected container path.
-- `service` is an allow-listed service name.
-- `pi.command` is an allow-listed executable token (`pi` initially).
-- `pi.args` are assembled from an allow-listed launch-policy model, not accepted as raw user input.
+- `compose_file` must be in the configured allow-list.
+- `service` is allow-listed (`sandbox` only in v1).
+- Tool args come from allow-listed `ToolProfiles` constants, not user input.
 - `tmux` session names are generated from bounded project/task/workspace inputs plus a hash.
+- No renderer-supplied shell strings appear anywhere in the argument vectors.
 
 ### OperatorSession mapping
 
@@ -242,14 +290,21 @@ Den snapshots/events should expose only backend-neutral summaries plus `sandbox_
 
 A full implementation was not attempted in #910 because wiring Docker lifecycle, launch profiles, app-core DTOs, tests, and UI would be a separate implementation slice. The bounded launch path above is practical because it reuses the existing `pi-docker` and `pid` behavior, but it needs first-class typed app-core wrappers before it is safe to expose in Den Desktop.
 
-Suggested follow-up implementation:
+### Implementation status (#1073)
 
-1. Add a `SandboxedPiLaunchProfile` settings model with allow-listed compose profile(s).
-2. Add an app-core `SandboxedPiSessionLauncher` with a process-runner seam and argument-vector tests.
-3. Add a bridge command such as `den_desktop.agent.start_sandboxed_pi_session` that accepts project/task/cwd/title/tool-profile, not raw command strings.
-4. On success, register a tmux-backed `OperatorSession` with `kind=agent` and sandbox constraints.
-5. Add tests for path containment, rejected arbitrary args, deterministic session names, no raw terminal publication, and Den event/snapshot metadata.
-6. Only then add a renderer button behind capability state.
+Items completed:
+
+1. ✅ `SandboxedPiLaunchProfile` record with allow-listed compose profile(s), typed Pi config strategy, typed OAuth port config, tool profiles, credential mounts, and network profiles.
+2. ✅ `SandboxedPiLaunchProfileBuilder` with full validation: compose file allow-list, service allow-list, tool profile allow-list, credential mount allow-list, Pi config strategy constraints (R910-1), OAuth port loopback/validation (R910-2), and network profile validation.
+3. ✅ `SandboxedPiCommandBuilder` with argument-vector methods: `BuildComposeUpArgs`, `BuildTmuxExecArgs`, `BuildPiConfigVolumeArgs`, `BuildOAuthPortArgs`, `BuildTmuxSessionName`, `BuildSessionConstraints`.
+4. ✅ 52 test cases covering: builder validation, allow-list enforcement, R910-1 Pi config strategy (dedicated_per_run default, host_bind_rw requires warnings+debt), R910-2 OAuth ports (loopback-only, valid ranges, strategy variants), tool profiles, credential mounts, serialization roundtrip, command builder output, and session constraints JSON.
+
+Remaining follow-up:
+
+5. Wire `SandboxedPiSessionLauncher` with a process-runner seam (actual Docker process execution).
+6. Add a bridge command such as `den_desktop.agent.start_sandboxed_pi_session` that accepts project/task/cwd/title/tool-profile, not raw command strings.
+7. Register a tmux-backed `OperatorSession` with `kind=agent` and sandbox constraints on successful launch.
+8. Add renderer button behind capability state.
 
 ## Open risks
 
