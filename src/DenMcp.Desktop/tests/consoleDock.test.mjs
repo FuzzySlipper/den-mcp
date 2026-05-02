@@ -40,8 +40,12 @@ function makeObserver(overrides = {}) {
   };
 }
 
+// Must match the explicit locale/options contract in consoleLines.ts formatTimestamp.
+const TIMESTAMP_LOCALE = 'en-US';
+const TIMESTAMP_OPTIONS = { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
+
 function expectedTimestamp(isoString) {
-  return new Date(isoString).toLocaleTimeString();
+  return new Date(isoString).toLocaleTimeString(TIMESTAMP_LOCALE, TIMESTAMP_OPTIONS);
 }
 
 const nowMs = Date.parse('2026-04-29T12:05:00.000Z');
