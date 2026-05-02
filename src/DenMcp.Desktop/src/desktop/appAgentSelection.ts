@@ -1,4 +1,4 @@
-import type { AppAgentSelection } from './sidecarBridgeApi.ts';
+import type { AppAgentSelection } from '../electron/sidecarProtocol.ts';
 
 export function normalizeAppAgentSelection(selection: AppAgentSelection): AppAgentSelection {
   return {

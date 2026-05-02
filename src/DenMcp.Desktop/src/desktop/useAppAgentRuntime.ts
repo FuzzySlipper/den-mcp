@@ -183,7 +183,7 @@ export function useAppAgentRuntime(
       if (!mountedRef.current) return;
 
       if (contextResult.status === 'fulfilled') {
-        const response = contextResult.value as unknown as AppAgentBuildContextResponse;
+        const response = contextResult.value;
         setContext(response.context);
         appendAction({
           kind: 'context_loaded',
@@ -199,7 +199,7 @@ export function useAppAgentRuntime(
       }
 
       if (toolsResult.status === 'fulfilled') {
-        const response = toolsResult.value as unknown as AppAgentListToolsResponse;
+        const response = toolsResult.value;
         setTools(response.tools);
       }
     } catch (err) {
@@ -215,10 +215,16 @@ export function useAppAgentRuntime(
     }
   }, [selection, appendAction]);
 
-  // Auto-load when selection changes
+  // Stable ref to refreshContext so the auto-load effect can call the latest
+  // version without adding refreshContext to its dependency array, which would
+  // cause unnecessary re-triggers whenever non-key selection fields change.
+  const refreshContextRef = useRef(refreshContext);
+  refreshContextRef.current = refreshContext;
+
+  // Auto-load when selection key fields change
   useEffect(() => {
     if (selection) {
-      void refreshContext();
+      void refreshContextRef.current();
     }
   }, [selection?.project_id, selection?.task_id, selection?.workspace_id, selection?.session_id]);
 
@@ -240,7 +246,7 @@ export function useAppAgentRuntime(
         input,
         selection: normalizeAppAgentSelection(selection),
       };
-      const response = await appAgentInvokeTool(request) as unknown as AppAgentInvokeToolResponse;
+      const response = await appAgentInvokeTool(request);
 
       if (!mountedRef.current) return response;
 
@@ -276,7 +282,7 @@ export function useAppAgentRuntime(
       const result = await appAgentCancelRequest({
         request_id: activeRequestRef.current,
         reason: 'Operator cancelled from Agent tab',
-      }) as unknown as AppAgentCancelResponse;
+      });
 
       appendAction({
         kind: 'cancel_requested',

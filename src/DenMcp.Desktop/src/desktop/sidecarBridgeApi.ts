@@ -1,4 +1,10 @@
-import type { AppAgentBuildContextRequest, AppAgentCancelRequest, AppAgentInvokeToolRequest, AppAgentListToolsRequest, AppAgentResponse, TasksDashboardSnapshot, TasksDashboardSnapshotRequest } from '../electron/sidecarProtocol.ts';
+import type { AppAgentBuildContextRequest, AppAgentCancelRequest, AppAgentInvokeToolRequest, AppAgentListToolsRequest, AppAgentResponse, AppAgentSelection, TasksDashboardSnapshot, TasksDashboardSnapshotRequest } from '../electron/sidecarProtocol.ts';
+
+import { validateBuildContextResponse, validateCancelResponse, validateInvokeToolResponse, validateListToolsResponse } from './sidecarBridgeValidation.ts';
+
+// Re-export canonical app-agent selection type from the protocol layer
+// so consumers import from a single canonical path.
+export type { AppAgentSelection } from '../electron/sidecarProtocol.ts';
 
 const DEFAULT_INVOKE_TIMEOUT_MS = 12_000;
 const LISTEN_TIMEOUT_MS = 5_000;
@@ -539,17 +545,7 @@ export function onTerminalSessionList(callback: (event: TerminalListSessionsResp
 }
 
 // ── App agent types (task #1023/#908) ──
-
-export interface AppAgentSelection {
-  project_id?: string | null;
-  task_id?: number | null;
-  workspace_id?: string | null;
-  current_route?: string | null;
-  current_tab?: string | null;
-  session_id?: string | null;
-  selected_file_path?: string | null;
-  selected_diff_range?: string | null;
-}
+// AppAgentSelection is re-exported from '../electron/sidecarProtocol.ts' (see top of file).
 
 export interface AppAgentToolDefinition {
   name: string;
@@ -734,19 +730,23 @@ export interface AppAgentToolCallStateEvent {
 }
 
 export async function appAgentBuildContext(request?: AppAgentBuildContextRequest): Promise<AppAgentBuildContextResponse> {
-  return callSidecar('appAgentBuildContext', () => sidecarApi().appAgentBuildContext(request)) as unknown as Promise<AppAgentBuildContextResponse>;
+  const raw = await callSidecar('appAgentBuildContext', () => sidecarApi().appAgentBuildContext(request));
+  return validateBuildContextResponse<AppAgentBuildContextResponse>(raw);
 }
 
 export async function appAgentListTools(request?: AppAgentListToolsRequest): Promise<AppAgentListToolsResponse> {
-  return callSidecar('appAgentListTools', () => sidecarApi().appAgentListTools(request)) as unknown as Promise<AppAgentListToolsResponse>;
+  const raw = await callSidecar('appAgentListTools', () => sidecarApi().appAgentListTools(request));
+  return validateListToolsResponse<AppAgentListToolsResponse>(raw);
 }
 
 export async function appAgentInvokeTool(request: AppAgentInvokeToolRequest): Promise<AppAgentInvokeToolResponse> {
-  return callSidecar('appAgentInvokeTool', () => sidecarApi().appAgentInvokeTool(request)) as unknown as Promise<AppAgentInvokeToolResponse>;
+  const raw = await callSidecar('appAgentInvokeTool', () => sidecarApi().appAgentInvokeTool(request));
+  return validateInvokeToolResponse<AppAgentInvokeToolResponse>(raw);
 }
 
 export async function appAgentCancelRequest(request: AppAgentCancelRequest): Promise<AppAgentCancelResponse> {
-  return callSidecar('appAgentCancelRequest', () => sidecarApi().appAgentCancelRequest(request)) as unknown as Promise<AppAgentCancelResponse>;
+  const raw = await callSidecar('appAgentCancelRequest', () => sidecarApi().appAgentCancelRequest(request));
+  return validateCancelResponse<AppAgentCancelResponse>(raw);
 }
 
 export function onAppAgentRunState(callback: (event: AppAgentRunStateEvent) => void): Promise<() => void> {
