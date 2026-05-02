@@ -242,7 +242,7 @@ public static class DesktopSidecarBridge
                 """),
             Schema(DesktopSidecarProtocol.TerminalTerminateCommand + ".response", TerminalTerminateResponseSchema),
             Schema(DesktopSidecarProtocol.TerminalReconnectCommand + ".request", """
-                {"type":"object","additionalProperties":false,"required":["session_id"],"properties":{"session_id":{"type":"string"},"previous_stream_id":{"type":["string","null"]},"last_seen_cursor":{"type":["string","null"]},"viewport":{"type":["object","null"]}}}
+                {"type":"object","additionalProperties":false,"required":["session_id"],"properties":{"session_id":{"type":"string"},"previous_stream_id":{"type":["string","null"]},"last_seen_cursor":{"type":["string","null"]},"viewport":{"type":["object","null"],"additionalProperties":false,"properties":{"cols":{"type":"integer"},"rows":{"type":"integer"}}}}}
                 """),
             Schema(DesktopSidecarProtocol.TerminalReconnectCommand + ".response", TerminalAttachResponseSchema),
             Schema(DesktopSidecarProtocol.TerminalAckOutputCommand + ".request", """

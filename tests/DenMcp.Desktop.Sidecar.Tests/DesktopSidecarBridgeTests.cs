@@ -261,6 +261,21 @@ public class DesktopSidecarBridgeTests
     }
 
     [Fact]
+    public void SchemaBundle_TerminalReconnectRequestIncludesViewportContract()
+    {
+        using var provider = DesktopSidecarBridge.CreateServiceProvider(DesktopSidecarFixtures.CreateFixtureOptions());
+        var bundle = DesktopSidecarBridge.CreateSchemaBundle(provider);
+        var schema = bundle.Definitions[DesktopSidecarProtocol.TerminalReconnectCommand + ".request"];
+        var properties = schema.GetProperty("properties");
+
+        Assert.True(properties.TryGetProperty("viewport", out var viewport));
+        Assert.False(schema.GetProperty("additionalProperties").GetBoolean());
+        Assert.False(viewport.GetProperty("additionalProperties").GetBoolean());
+        Assert.True(viewport.GetProperty("properties").TryGetProperty("cols", out _));
+        Assert.True(viewport.GetProperty("properties").TryGetProperty("rows", out _));
+    }
+
+    [Fact]
     public void SchemaBundle_TerminalResponseSchemasHavePropertyDefinitions()
     {
         using var provider = DesktopSidecarBridge.CreateServiceProvider(DesktopSidecarFixtures.CreateFixtureOptions());

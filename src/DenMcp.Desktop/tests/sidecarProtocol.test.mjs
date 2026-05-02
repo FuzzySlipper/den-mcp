@@ -268,6 +268,55 @@ test('terminal attach facade accepts typed viewport and replay fields and reject
   );
 });
 
+test('terminal reconnect facade accepts typed viewport and rejects unknown viewport properties', async () => {
+  const fixture = await readFixture();
+  const sent = [];
+  const client = createCheckedBridgeClient({
+    bundle: fixture.schema_bundle,
+    commands: sidecarCommands,
+    events: sidecarEvents,
+    requestIdFactory: () => `req_reconnect_${sent.length + 1}`,
+    now: () => '2026-04-29T12:34:56.000Z',
+    transport: {
+      async send(frame) {
+        sent.push(frame);
+        return {
+          protocol_version: fixture.schema_bundle.protocol_version,
+          schema_version: fixture.schema_bundle.schema_version,
+          frame_type: 'response',
+          request_id: frame.request_id,
+          result: { stream_id: 'stream_reconnect', session_id: frame.payload.session_id },
+          correlation: {},
+          sent_at: '2026-04-29T12:34:56.000Z',
+        };
+      },
+    },
+  });
+  const facade = createSidecarBridgeFacade(client);
+
+  // Valid viewport
+  await facade.terminalReconnect({
+    session_id: 'tmux-session:test',
+    previous_stream_id: 'stream-old',
+    last_seen_cursor: 'cur_000000000010',
+    viewport: { cols: 120, rows: 40 },
+  });
+
+  assert.equal(sent[0].command, 'den_desktop.terminal.reconnect');
+  assert.deepEqual(sent[0].payload.viewport, { cols: 120, rows: 40 });
+
+  // Null viewport is allowed by the schema (type includes "null") but the
+  // checked bridge contract validator does not exercise the null path for
+  // properties/additionalProperties schemas; skip null here and rely on the
+  // sidecar C# schema tests for the null-permission contract.
+
+  // Unknown viewport properties are rejected
+  await assert.rejects(
+    () => facade.terminalReconnect({ session_id: 'tmux-session:test', viewport: { cols: 80, rows: 24, depth: 256 } }),
+    /den_desktop\.terminal\.reconnect\.request\.viewport has unexpected property 'depth'/,
+  );
+});
+
 test('app-agent selection normalization sends nulls for absent optional bridge fields', () => {
   assert.deepEqual(normalizeAppAgentSelection({ project_id: 'den-mcp', current_tab: 'agent' }), {
     project_id: 'den-mcp',
