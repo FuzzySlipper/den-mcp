@@ -1219,6 +1219,103 @@ public class TerminalBridgeHandlerTests
     }
 
     [Fact]
+    public async Task DirectPtyService_ActivityOnlyAttachSuppressesTerminalReplayChunks()
+    {
+        var backend = new FakeDirectPtyBackend();
+        var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
+        var events = new OperatorRuntimeBridgeEventSink(new DesktopSidecarRuntimeState(DesktopSidecarFixtures.CreateFixtureOptions()));
+        await using var service = CreateDirectPtyService(backend, registry, events);
+
+        var session = await service.CreateAsync(new TerminalCreateSessionRequest
+        {
+            ProjectId = string.Empty,
+            Title = "Activity-only replay suppression",
+            Backend = OperatorSessionBackend.DirectPty,
+        }, CancellationToken.None);
+
+        // First attach as terminal_stream to establish a stream and produce buffered output.
+        var firstAttach = await service.AttachAsync(new TerminalAttachRequest
+        {
+            SessionId = session.SessionId,
+            Mode = "terminal_stream",
+            Viewport = new TerminalViewport { Cols = 80, Rows = 24 },
+        }, CancellationToken.None);
+
+        backend.Processes[0].EmitOutput(Encoding.UTF8.GetBytes("retained output A"));
+        await WaitForActivityCountAsync(registry, session.SessionId, 1);
+        backend.Processes[0].EmitOutput(Encoding.UTF8.GetBytes("retained output B"));
+        await WaitForActivityCountAsync(registry, session.SessionId, 2);
+
+        // Verify the terminal_stream stream did receive live output.
+        var liveOutputs = await WaitForTerminalOutputEventsAsync(events, firstAttach.StreamId, expectedCount: 2);
+        Assert.Equal(["retained output A", "retained output B"],
+            liveOutputs.Select(o => Encoding.UTF8.GetString(Convert.FromBase64String(o.Data))).ToArray());
+        Assert.All(liveOutputs, o => Assert.Equal("live", o.Origin));
+
+        await service.DetachAsync(new TerminalDetachRequest
+        {
+            SessionId = session.SessionId,
+            StreamId = firstAttach.StreamId,
+        }, CancellationToken.None);
+
+        // Record frame index before activity_only attach so we can scope assertions.
+        var frameStart = events.PublishedFrames.Count;
+
+        // Attach with activity_only mode — replay chunks must be suppressed.
+        var activityAttach = await service.AttachAsync(new TerminalAttachRequest
+        {
+            SessionId = session.SessionId,
+            Mode = "activity_only",
+            Replay = new TerminalReplaySpec { AfterCursor = null, MaxChunks = 100 },
+        }, CancellationToken.None);
+
+        // The attach response still reports cursor/replay metadata from the buffer.
+        Assert.Equal(session.SessionId, activityAttach.SessionId);
+        Assert.NotEmpty(activityAttach.StreamId);
+        Assert.NotEqual(firstAttach.StreamId, activityAttach.StreamId);
+        Assert.Equal("cur_000000000002", activityAttach.StartCursor);
+        Assert.Equal("cur_000000000001", activityAttach.ReplayAvailableFrom);
+        Assert.False(activityAttach.ReplayGap);
+
+        // No TerminalOutputEvent should be published for the activity_only stream.
+        // The buffer has retained output, but AttachAsync skips publishing replay chunks
+        // when mode != "terminal_stream".
+        await Task.Delay(50);
+        var activityOutputFrames = events.PublishedFrames.Skip(frameStart)
+            .Where(frame => frame.Event == DesktopSidecarProtocol.TerminalOutputEvent
+                && string.Equals(frame.Payload.GetProperty("stream_id").GetString(), activityAttach.StreamId, StringComparison.Ordinal))
+            .ToList();
+        Assert.Empty(activityOutputFrames);
+
+        // TerminalReplayCompleteEvent is still published for activity_only.
+        var replayCompleteFrame = events.PublishedFrames.Skip(frameStart)
+            .FirstOrDefault(frame => frame.Event == DesktopSidecarProtocol.TerminalReplayCompleteEvent
+                && string.Equals(frame.Payload.GetProperty("stream_id").GetString(), activityAttach.StreamId, StringComparison.Ordinal));
+        Assert.NotNull(replayCompleteFrame);
+        var replayComplete = JsonSerializer.Deserialize<TerminalReplayCompleteEvent>(replayCompleteFrame.Payload.GetRawText());
+        Assert.NotNull(replayComplete);
+        Assert.Equal(activityAttach.StreamId, replayComplete!.StreamId);
+        Assert.Equal(session.SessionId, replayComplete.SessionId);
+        Assert.Null(replayComplete.FromCursor);
+        Assert.Equal("cur_000000000002", replayComplete.ToCursor);
+        Assert.False(replayComplete.ReplayGap);
+
+        // session.attached metadata is published with raw_stream = false.
+        // Since ProjectId is empty, Den session events are not forwarded, but the
+        // attach flow still executed the session.attached publish path.
+
+        // Activity-only stream can still be detached cleanly.
+        var detachResult = await service.DetachAsync(new TerminalDetachRequest
+        {
+            SessionId = session.SessionId,
+            StreamId = activityAttach.StreamId,
+            Reason = "test_activity_only_done",
+        }, CancellationToken.None);
+        Assert.True(detachResult.Detached);
+        Assert.True(detachResult.BackendPreserved);
+    }
+
+    [Fact]
     public async Task DirectPtyService_ReconnectWithCursorReplaysOnlyNewOutput()
     {
         var backend = new FakeDirectPtyBackend();
