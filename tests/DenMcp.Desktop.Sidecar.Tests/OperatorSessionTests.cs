@@ -761,6 +761,65 @@ public class TerminalBridgeHandlerTests
         Assert.Equal(0, GetTrackedTmuxStreamCount(service));
     }
 
+    /// <summary>
+    /// Contract test: session.external_attach_info_requested event payload must be
+    /// { mode, raw_stream } with no stream_id field. Verifies #1036 no-stream
+    /// lifecycle behavior for external_attach_info mode.
+    /// </summary>
+    [Fact]
+    public async Task TmuxAttachExternalInfo_EventPayloadHasModeAndRawStreamWithoutStreamId()
+    {
+        var runner = new FakeTmuxCommandRunner();
+        var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
+        var recordingHandler = new RecordingDelegatingHandler();
+        var options = DesktopSidecarFixtures.CreateFixtureOptions();
+        var settings = new OperatorSettingsService(OperatorSettingsStorage.ForPath(Path.Combine(Path.GetTempPath(), "den-tests", Guid.NewGuid().ToString("N"), "settings.json")));
+        var events = new OperatorRuntimeBridgeEventSink(new DesktopSidecarRuntimeState(options));
+        var service = new TmuxOperatorSessionService(
+            runner,
+            registry,
+            events,
+            settings,
+            new DenHttpClient(new HttpClient(recordingHandler)),
+            () => new DateTimeOffset(2026, 4, 29, 12, 0, 0, TimeSpan.Zero));
+
+        var session = await service.CreateAsync(new TerminalCreateSessionRequest { ProjectId = "den-mcp", Title = "Payload Contract" }, CancellationToken.None);
+        recordingHandler.Clear();
+
+        var response = await service.AttachAsync(new TerminalAttachRequest { SessionId = session.SessionId, Mode = "external_attach_info" }, CancellationToken.None);
+
+        Assert.Equal(string.Empty, response.StreamId);
+        Assert.Equal(0, GetTrackedTmuxStreamCount(service));
+
+        // Find the session.external_attach_info_requested event in recorded Den API calls.
+        var eventRequest = recordingHandler.SentRequests
+            .FirstOrDefault(r => r.RelativeUri.Contains("session-events", StringComparison.Ordinal)
+                && r.Body.TryGetProperty("event_type", out var et)
+                && et.GetString() == "session.external_attach_info_requested");
+
+        Assert.True(eventRequest.Body.ValueKind != JsonValueKind.Undefined,
+            "Expected a session.external_attach_info_requested event to be published to Den.");
+
+        // The request body payload field is a JSON string (serialized payload), not a nested object.
+        Assert.True(eventRequest.Body.TryGetProperty("payload", out var payloadStringElement),
+            "Event request must include a payload field.");
+        Assert.Equal(JsonValueKind.String, payloadStringElement.ValueKind);
+
+        var payload = JsonSerializer.Deserialize<JsonElement>(payloadStringElement.GetString()!);
+
+        Assert.True(payload.TryGetProperty("mode", out var modeProp),
+            "Payload must include 'mode' field.");
+        Assert.Equal("external_attach_info", modeProp.GetString());
+
+        Assert.True(payload.TryGetProperty("raw_stream", out var rawStreamProp),
+            "Payload must include 'raw_stream' field.");
+        Assert.False(rawStreamProp.GetBoolean());
+
+        // Explicitly verify stream_id is absent — this is the key contract.
+        Assert.False(payload.TryGetProperty("stream_id", out _),
+            "Payload must NOT include 'stream_id' for external_attach_info mode (no tracked stream is created).");
+    }
+
     [Fact]
     public async Task TmuxAttachTerminalStream_AppliesViewportBeforeCaptureReplay()
     {
