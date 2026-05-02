@@ -124,6 +124,9 @@ contextBridge.exposeInMainWorld('denDesktopSidecar', {
   appAgentInvokeTool: (request: unknown) => callSidecar('appAgentInvokeTool', request),
   appAgentCancelRequest: (request: unknown) => callSidecar('appAgentCancelRequest', request),
 
+  // Collaboration live-delivery bridge (task #1074)
+  collaborationSendCompiledResponse: (request: unknown) => callSidecar('collaborationSendCompiledResponse', request),
+
   // Tasks dashboard
   tasksGetDashboardSnapshot: (request: unknown) => callSidecar('tasksGetDashboardSnapshot', request),
 
@@ -150,6 +153,7 @@ contextBridge.exposeInMainWorld('denDesktopSidecar', {
   onTerminalSessionList: (listener: (event: unknown) => void) => subscribeToEvent('terminalSessionList', listener),
   onAppAgentRunState: (listener: (event: unknown) => void) => subscribeToEvent('appAgentRunState', listener),
   onAppAgentToolCallState: (listener: (event: unknown) => void) => subscribeToEvent('appAgentToolCallState', listener),
+  onCollaborationDelivery: (listener: (event: unknown) => void) => subscribeToEvent('collaborationDelivery', listener),
   onOperatorStatus: (listener: (event: unknown) => void) => subscribeToEvent('operatorStatus', listener),
   onGitSnapshots: (listener: (event: unknown) => void) => subscribeToEvent('gitSnapshots', listener),
   onSessionSnapshots: (listener: (event: unknown) => void) => subscribeToEvent('sessionSnapshots', listener),

@@ -138,9 +138,9 @@ export function CollaborationPane({ state, actions }: Props) {
                         className="btn btn-primary"
                         onClick={() => deliverCompiledResponse()}
                         disabled={delivering}
-                        title="Save compiled response to Den as draft"
+                        title="Save compiled response to Den as draft, and deliver to live session if available"
                       >
-                        {delivering ? 'saving...' : 'save to Den →'}
+                        {delivering ? 'saving...' : 'deliver →'}
                       </button>
                     </div>
                   </div>
@@ -374,7 +374,7 @@ function DeliveryStatus({ deliveryResult }: { deliveryResult: CollaborationDeliv
       case 'capability_denied': return 'capability denied';
       case 'skipped': return 'skipped';
       case 'failed': return 'delivery failed';
-      case 'pending_bridge': return 'saved to Den';
+      case 'draft_only_fallback': return 'saved as draft (too large for live delivery)';
       default: return status;
     }
   };
@@ -383,7 +383,8 @@ function DeliveryStatus({ deliveryResult }: { deliveryResult: CollaborationDeliv
     switch (status) {
       case 'delivered': return 'status-running';
       case 'failed': return 'status-stopped';
-      case 'pending_bridge': case 'skipped': return 'status-idle';
+      case 'draft_only_fallback': return 'status-idle';
+      case 'no_live_session': case 'skipped': return 'status-idle';
       default: return 'status-stopped';
     }
   };

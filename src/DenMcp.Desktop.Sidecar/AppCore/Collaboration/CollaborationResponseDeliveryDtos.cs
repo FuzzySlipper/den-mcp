@@ -8,6 +8,53 @@ namespace DenMcp.Desktop.Sidecar;
 /// specified by task #915 authority model and task #920 acceptance criteria.
 /// </summary>
 
+// ── Delimiter protocol constants ──────────────────────────────────────────
+// The compiled-collaboration-response terminal delimiter protocol:
+//
+//   [compiled-collaboration-response]\n
+//   <compiled markdown text>\n
+//   [/compiled-collaboration-response]\n
+//
+// Delimiters are line-delimited to avoid collision with content. The opening
+// and closing tags are constant strings that must not appear in the compiled
+// text itself. If the compiled response contains a line that exactly matches
+// a delimiter, the agent session must treat the content between the first
+// opening and first closing delimiter as the payload.
+//
+// Size handling:
+// - If the total framed payload (delimiters + content) fits within the
+//   terminal input limit (16 KiB = InputChunkMaxBytes), it is delivered
+//   as a single send-input operation.
+// - If the payload exceeds InputChunkMaxBytes, it is split into chunks
+//   each wrapped in its own delimiter pair with a part indicator:
+//
+//     [compiled-collaboration-response part="1/3"]\n
+//     <chunk 1>\n
+//     [/compiled-collaboration-response]\n
+//
+//   The receiving agent session reassembles by concatenating all parts
+//   in order. The part attribute is 1-indexed.
+// - If the response is too large for reliable delivery even with chunking
+//   (above a safety threshold of 128 KiB), the delivery falls back to
+//   draft-only: the compiled text is saved in Den and the delivery result
+//   indicates the user should send it manually or via a different channel.
+//
+// Delimiter constants:
+public static class CollaborationDelimiterProtocol
+{
+    /// <summary>Opening delimiter for a single-chunk delivery.</summary>
+    public const string OpenTag = "[compiled-collaboration-response]";
+
+    /// <summary>Closing delimiter for a single-chunk delivery.</summary>
+    public const string CloseTag = "[/compiled-collaboration-response]";
+
+    /// <summary>Opening delimiter template for a chunked delivery. Format: part index / total parts.</summary>
+    public const string ChunkOpenTagFormat = "[compiled-collaboration-response part=\"{0}/{1}\"]";
+
+    /// <summary>Maximum total payload size before falling back to draft-only (bytes).</summary>
+    public const int DraftOnlyThresholdBytes = 128 * 1024;
+}
+
 // ── Request ───────────────────────────────────────────────────────────────
 
 public sealed record CollaborationSendCompiledResponseRequest
@@ -132,4 +179,10 @@ public static class CollaborationDeliveryStatus
 
     /// <summary>Live delivery was attempted but failed (backend error, transport failure).</summary>
     public const string Failed = "failed";
+
+    /// <summary>
+    /// Response exceeds the safe delivery threshold and was saved to Den as draft only.
+    /// The user should send the response manually or through a different channel.
+    /// </summary>
+    public const string DraftOnlyFallback = "draft_only_fallback";
 }

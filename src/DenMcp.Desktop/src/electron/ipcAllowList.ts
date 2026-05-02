@@ -3,6 +3,7 @@ export const allowedSidecarCallMethods = Object.freeze([
   'appAgentCancelRequest',
   'appAgentInvokeTool',
   'appAgentListTools',
+  'collaborationSendCompiledResponse',
   'consoleListCommands',
   'consoleRunCommand',
   'getAppearanceSettings',
@@ -33,6 +34,7 @@ export const allowedSidecarCallMethods = Object.freeze([
 export const allowedSidecarSubscriptionEvents = Object.freeze([
   'appAgentRunState',
   'appAgentToolCallState',
+  'collaborationDelivery',
   'gitSnapshots',
   'operatorStatus',
   'sessionSnapshots',

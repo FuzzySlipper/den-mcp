@@ -70,6 +70,7 @@ interface DenDesktopSidecarRuntimeApi {
   appAgentListTools(request?: AppAgentListToolsRequest): Promise<AppAgentResponse>;
   appAgentInvokeTool(request: AppAgentInvokeToolRequest): Promise<AppAgentResponse>;
   appAgentCancelRequest(request: AppAgentCancelRequest): Promise<AppAgentResponse>;
+  collaborationSendCompiledResponse(request: CollaborationSendCompiledResponseRequest): Promise<CollaborationSendCompiledResponseResponse>;
   onTerminalOutput(listener: (event: TerminalOutputEvent) => void): () => void;
   onTerminalStatus(listener: (event: TerminalStatusEvent) => void): () => void;
   onTerminalLifecycle(listener: (event: TerminalLifecycleEvent) => void): () => void;
@@ -77,6 +78,7 @@ interface DenDesktopSidecarRuntimeApi {
   onTerminalSessionList(listener: (event: TerminalListSessionsResponse) => void): () => void;
   onAppAgentRunState(listener: (event: AppAgentResponse) => void): () => void;
   onAppAgentToolCallState(listener: (event: AppAgentResponse) => void): () => void;
+  onCollaborationDelivery(listener: (event: CollaborationDeliveryBridgeEvent) => void): () => void;
   onOperatorStatus(listener: (status: OperatorStatus) => void): () => void;
   onGitSnapshots(listener: (snapshots: LocalGitSnapshot[]) => void): () => void;
   onSessionSnapshots(listener: (snapshots: LocalSessionSnapshot[]) => void): () => void;
@@ -816,4 +818,67 @@ export async function tasksGetDashboardSnapshot(request: TasksDashboardGetSnapsh
 
 export async function messagesGetSnapshot(request: MessagesGetSnapshotRequest): Promise<MessagesGetSnapshotResponse> {
   return callSidecar('messagesGetSnapshot', () => sidecarApi().messagesGetSnapshot(request));
+}
+
+// ── Collaboration live-delivery bridge (task #1074) ─────────────────────────
+
+/** Delimiter protocol constants for compiled response terminal framing. */
+export const COLLABORATION_RESPONSE_DELIMITER_OPEN = '[compiled-collaboration-response]';
+export const COLLABORATION_RESPONSE_DELIMITER_CLOSE = '[/compiled-collaboration-response]';
+
+/** Maximum compiled response size before chunking is required (bytes). */
+export const COLLABORATION_RESPONSE_MAX_SINGLE_CHUNK_BYTES = 14_000;
+
+export interface CollaborationSendCompiledResponseRequest {
+  session_id: number;
+  compiled_text?: string | null;
+  target_session_id?: string | null;
+  post_to_den?: boolean;
+  requested_by?: string | null;
+}
+
+export interface CollaborationDenPostResult {
+  posted: boolean;
+  draft_id?: number | null;
+  project_id?: string | null;
+  error?: string | null;
+}
+
+export interface CollaborationDeliveryResultBridge {
+  status: string;
+  target_session_id?: string | null;
+  target_session_status?: string | null;
+  can_deliver: boolean;
+  reason?: string | null;
+  error?: string | null;
+}
+
+export interface CollaborationSendCompiledResponseResponse {
+  compiled_text: string;
+  den_post: CollaborationDenPostResult;
+  delivery: CollaborationDeliveryResultBridge;
+  session_id: number;
+  target_session_id?: string | null;
+}
+
+export interface CollaborationDeliveryBridgeEvent {
+  session_id: string;
+  status: string;
+  compiled_text_length: number;
+  reason?: string | null;
+  observed_at: string;
+}
+
+export async function collaborationSendCompiledResponse(
+  request: CollaborationSendCompiledResponseRequest,
+): Promise<CollaborationSendCompiledResponseResponse> {
+  return callSidecar(
+    'collaborationSendCompiledResponse',
+    () => sidecarApi().collaborationSendCompiledResponse(request),
+    30_000, // longer timeout for Den + live delivery
+  );
+}
+
+export function onCollaborationDelivery(callback: (event: CollaborationDeliveryBridgeEvent) => void): Promise<() => void> {
+  return listenSidecar('collaboration delivery', () => sidecarApi().onCollaborationDelivery((event: unknown) => callback(event as CollaborationDeliveryBridgeEvent)));
 }

@@ -10,10 +10,10 @@ import type {
   OperatorStatus,
   SaveOperatorSettingsRequest,
 } from '../desktop/sidecarBridgeApi.ts';
-// Note: collaborationSendCompiledResponse types were removed from
-// sidecarProtocol.ts in task #1087. The renderer compiles collaboration
-// responses locally via denCollaborationApi.ts (Den REST), not through
-// the sidecar bridge.
+// Collaboration send-compiled-response bridge: re-introduced (task #1074) as
+// a typed, allow-listed live-delivery path. The renderer saves to Den first
+// (Den-post-first), then optionally delivers through this bridge command when
+// running under Electron with a live session target.
 import type { SidecarBridgeClient } from './sidecarProtocol.ts';
 import { createSidecarBridgeFacade, type SidecarHealthResponse, type SidecarCapabilitiesResponse, type ConsoleCommandDefinition, type ConsoleCommandRunRequest, type ConsoleCommandRunResponse, type ConsoleCommandListResponse, type TerminalAckOutputRequest, type TerminalAttachRequest, type TerminalCreateSessionRequest, type TerminalDetachRequest, type TerminalListSessionsRequest, type TerminalReadActivityRequest, type TerminalReconnectRequest, type TerminalResizeRequest, type TerminalResponse, type TerminalEventPayload, type TerminalSendInputRequest, type TerminalTerminateRequest, type AppAgentBuildContextRequest, type AppAgentCancelRequest, type AppAgentInvokeToolRequest, type AppAgentListToolsRequest, type AppAgentResponse, type TasksDashboardSnapshotRequest, type TasksDashboardSnapshot, type MessagesSnapshotRequest, type MessagesSnapshot } from './sidecarProtocol.ts';
 
@@ -52,7 +52,9 @@ export interface DenDesktopSidecarApi {
   appAgentListTools(request?: AppAgentListToolsRequest): Promise<AppAgentResponse>;
   appAgentInvokeTool(request: AppAgentInvokeToolRequest): Promise<AppAgentResponse>;
   appAgentCancelRequest(request: AppAgentCancelRequest): Promise<AppAgentResponse>;
-  // collaborationSendCompiledResponse removed (task #1087) — renderer uses Den REST directly.
+  // Collaboration live-delivery bridge: typed path for delivering compiled
+  // responses through the sidecar when running under Electron (task #1074).
+  collaborationSendCompiledResponse(request: Record<string, unknown>): Promise<Record<string, unknown>>;
   tasksGetDashboardSnapshot(request: TasksDashboardSnapshotRequest): Promise<TasksDashboardSnapshot>;
   messagesGetSnapshot(request: MessagesSnapshotRequest): Promise<MessagesSnapshot>;
   terminalCreateSession(request: TerminalCreateSessionRequest): Promise<TerminalResponse>;
@@ -72,7 +74,7 @@ export interface DenDesktopSidecarApi {
   onTerminalSessionList(listener: (event: TerminalResponse) => void): () => void;
   onAppAgentRunState(listener: (event: AppAgentResponse) => void): () => void;
   onAppAgentToolCallState(listener: (event: AppAgentResponse) => void): () => void;
-  // onCollaborationDelivery removed (task #1087) — renderer does not subscribe to this event.
+  onCollaborationDelivery(listener: (event: Record<string, unknown>) => void): () => void;
   onOperatorStatus(listener: (status: OperatorStatus) => void): () => void;
   onGitSnapshots(listener: (snapshots: LocalGitSnapshot[]) => void): () => void;
   onSessionSnapshots(listener: (snapshots: LocalSessionSnapshot[]) => void): () => void;
@@ -111,7 +113,9 @@ export function createDenDesktopSidecarApi(
     appAgentListTools: (request?: AppAgentListToolsRequest) => facade.appAgentListTools(request ?? {}),
     appAgentInvokeTool: (request: AppAgentInvokeToolRequest) => facade.appAgentInvokeTool(request),
     appAgentCancelRequest: (request: AppAgentCancelRequest) => facade.appAgentCancelRequest(request),
-    // collaborationSendCompiledResponse removed (task #1087).
+    collaborationSendCompiledResponse: (request: Record<string, unknown>) =>
+      facade.collaborationSendCompiledResponse(request as Record<string, import('../bridge/contract.ts').JsonValue>) as Promise<Record<string, unknown>>,
+    // collaborationSendCompiledResponse: typed live-delivery path (task #1074).
     tasksGetDashboardSnapshot: (request: TasksDashboardSnapshotRequest) => facade.tasksGetDashboardSnapshot(request),
     messagesGetSnapshot: (request: MessagesSnapshotRequest) => facade.messagesGetSnapshot(request),
     terminalCreateSession: (request: TerminalCreateSessionRequest) => facade.terminalCreateSession(request),
@@ -183,7 +187,13 @@ export function createDenDesktopSidecarApi(
         listener(frame.payload as unknown as AppAgentResponse);
       });
     },
-    // onCollaborationDelivery removed (task #1087).
+    onCollaborationDelivery(listener: (event: Record<string, unknown>) => void) {
+      return events.subscribe((frame) => {
+        if (frame.event !== 'den.collaboration.delivery_state_changed') return;
+        facade.assertCollaborationDeliveryEvent(frame);
+        listener(frame.payload as unknown as Record<string, unknown>);
+      });
+    },
     onOperatorStatus(listener: (status: OperatorStatus) => void) {
       return events.subscribe((frame) => {
         if (frame.event !== 'den://operator-status') return;

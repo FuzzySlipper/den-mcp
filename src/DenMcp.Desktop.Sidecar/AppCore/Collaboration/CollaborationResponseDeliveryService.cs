@@ -236,6 +236,21 @@ public sealed class CollaborationResponseDeliveryService
                 },
                 projectId, requestedBy, cancellationToken).ConfigureAwait(false);
         }
+        catch (DeliveryTooLargeException ex)
+        {
+            // Response exceeds safe threshold: Den save already succeeded, return draft-only fallback.
+            return await RecordDeliveryResultAsync(
+                request.SessionId, compiledText, denPost,
+                new CollaborationDeliveryRecord
+                {
+                    Status = CollaborationDeliveryStatus.DraftOnlyFallback,
+                    TargetSessionId = targetSessionId,
+                    TargetSessionStatus = session.Status,
+                    CanDeliver = false,
+                    Reason = ex.Message,
+                },
+                projectId, requestedBy, cancellationToken).ConfigureAwait(false);
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return await RecordDeliveryResultAsync(
@@ -256,13 +271,122 @@ public sealed class CollaborationResponseDeliveryService
     /// <summary>
     /// Deliver compiled text to a session's input. This is backend-agnostic:
     /// it uses the OperatorSession model and checks can_send_input before
-    /// delegating to the terminal protocol. The actual send mechanism
-    /// depends on the session's backend (tmux send-keys, PTY write, etc.)
-    /// and is handled by the TerminalOperatorSessionService.
+    /// delegating to the terminal protocol.
+    ///
+    /// Size strategy:
+    /// - If the framed payload fits within InputChunkMaxBytes, send as a single chunk.
+    /// - If it exceeds InputChunkMaxBytes but is below DraftOnlyThresholdBytes,
+    ///   split into multiple chunks each within InputChunkMaxBytes, each with
+    ///   part-numbered delimiters.
+    /// - If it exceeds DraftOnlyThresholdBytes, throw with a clear message so
+    ///   the caller can return a draft-only-fallback result.
     /// </summary>
     private async Task DeliverToSessionInputAsync(
         OperatorSession session,
         string compiledText,
+        CancellationToken cancellationToken)
+    {
+        var limits = new TerminalStreamLimits();
+        var maxChunkBytes = limits.InputChunkMaxBytes;
+
+        // Build the single-chunk framed payload.
+        var singlePayload = $"{CollaborationDelimiterProtocol.OpenTag}\n{compiledText}\n{CollaborationDelimiterProtocol.CloseTag}\n";
+        var singleBytes = Encoding.UTF8.GetBytes(singlePayload);
+
+        if (singleBytes.Length <= maxChunkBytes)
+        {
+            // Single-chunk delivery: fits within terminal input limit.
+            await PublishDeliveryAttemptEvent(session, compiledText.Length, "single_chunk", cancellationToken).ConfigureAwait(false);
+            await SendInputAsync(session, singlePayload, singleBytes, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        // Check if the response exceeds the draft-only safety threshold.
+        if (singleBytes.Length > CollaborationDelimiterProtocol.DraftOnlyThresholdBytes)
+        {
+            throw new DeliveryTooLargeException(
+                $"Compiled response ({singleBytes.Length} bytes) exceeds the {CollaborationDelimiterProtocol.DraftOnlyThresholdBytes / 1024} KiB safe delivery threshold. " +
+                $"The response has been saved to Den as a draft. Please send it manually or through a different channel.");
+        }
+
+        // Chunked delivery: split the compiled text into chunks that fit within the input limit.
+        var chunks = BuildDeliveryChunks(compiledText, maxChunkBytes);
+        await PublishDeliveryAttemptEvent(session, compiledText.Length, $"chunked:{chunks.Count}_parts", cancellationToken).ConfigureAwait(false);
+
+        for (var i = 0; i < chunks.Count; i++)
+        {
+            await SendInputAsync(session, chunks[i].Payload, chunks[i].Bytes, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Split compiled text into framed chunks, each within maxChunkBytes.
+    /// Each chunk is wrapped in part-numbered delimiters.
+    /// </summary>
+    private static List<(string Payload, byte[] Bytes)> BuildDeliveryChunks(string compiledText, int maxChunkBytes)
+    {
+        var textBytes = Encoding.UTF8.GetBytes(compiledText);
+        var chunks = new List<(string Payload, byte[] Bytes)>();
+
+        // Estimate the number of parts by dividing text into safe sub-chunk sizes.
+        // Each part has overhead from delimiters: ~80 bytes for tags + part attribute.
+        var delimiterOverhead = 120; // Conservative overhead per chunk for delimiters + part attribute
+        var safeTextBytesPerChunk = maxChunkBytes - delimiterOverhead;
+        if (safeTextBytesPerChunk <= 0)
+        {
+            throw new InvalidOperationException($"Input chunk limit ({maxChunkBytes} bytes) is too small for delivery framing.");
+        }
+
+        var totalParts = (textBytes.Length + safeTextBytesPerChunk - 1) / safeTextBytesPerChunk;
+
+        var offset = 0;
+        var partIndex = 1;
+        while (offset < textBytes.Length)
+        {
+            var remaining = textBytes.Length - offset;
+            var chunkSize = Math.Min(remaining, safeTextBytesPerChunk);
+
+            // Use byte-based slicing for accurate UTF-8 splitting
+            var chunkBytes = new byte[chunkSize];
+            Array.Copy(textBytes, offset, chunkBytes, 0, chunkSize);
+            var chunkTextDecoded = Encoding.UTF8.GetString(chunkBytes);
+
+            var openTag = string.Format(
+                System.Globalization.CultureInfo.InvariantCulture,
+                CollaborationDelimiterProtocol.ChunkOpenTagFormat,
+                partIndex, totalParts);
+            var payload = $"{openTag}\n{chunkTextDecoded}\n{CollaborationDelimiterProtocol.CloseTag}\n";
+            var payloadBytes = Encoding.UTF8.GetBytes(payload);
+
+            chunks.Add((payload, payloadBytes));
+            offset += chunkSize;
+            partIndex++;
+        }
+
+        return chunks;
+    }
+
+    private async Task SendInputAsync(
+        OperatorSession session,
+        string payload,
+        byte[] payloadBytes,
+        CancellationToken cancellationToken)
+    {
+        await _terminals.SendInputAsync(new TerminalSendInputRequest
+        {
+            SessionId = session.SessionId,
+            InputId = $"collab_{Guid.NewGuid():N}",
+            Encoding = "utf8",
+            Data = payload,
+            ByteCount = payloadBytes.Length,
+            ExpectedLeaseGeneration = session.LeaseGeneration,
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task PublishDeliveryAttemptEvent(
+        OperatorSession session,
+        int compiledTextLength,
+        string strategy,
         CancellationToken cancellationToken)
     {
         // Publish a delivery-attempt event before sending.
@@ -272,33 +396,10 @@ public sealed class CollaborationResponseDeliveryService
             {
                 SessionId = session.SessionId,
                 Status = "attempting",
-                CompiledTextLength = compiledText.Length,
+                CompiledTextLength = compiledTextLength,
                 ObservedAt = FormatNow(),
             },
             cancellationToken).ConfigureAwait(false);
-
-        // Delegate through the backend-neutral terminal service instead of
-        // hardcoding tmux/direct-PTY details here.  The terminal service routes
-        // to the current OperatorSession backend and re-validates backend
-        // support before writing input.
-        var deliveryPayload = $"[compiled-collaboration-response]\n{compiledText}\n[/compiled-collaboration-response]\n";
-        var textBytes = Encoding.UTF8.GetBytes(deliveryPayload);
-        var limits = new TerminalStreamLimits();
-        if (textBytes.Length > limits.InputChunkMaxBytes)
-        {
-            throw new InvalidOperationException(
-                $"Compiled response ({textBytes.Length} bytes) exceeds the {limits.InputChunkMaxBytes} byte per-command input limit.");
-        }
-
-        await _terminals.SendInputAsync(new TerminalSendInputRequest
-        {
-            SessionId = session.SessionId,
-            InputId = $"collab_{Guid.NewGuid():N}",
-            Encoding = "utf8",
-            Data = deliveryPayload,
-            ByteCount = textBytes.Length,
-            ExpectedLeaseGeneration = session.LeaseGeneration,
-        }, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<CollaborationSessionData?> LoadSessionAsync(
@@ -458,6 +559,16 @@ public sealed record CollaborationSessionData
 
     public IReadOnlyList<CollaborationSegment> Segments { get; init; } = [];
     public IReadOnlyList<CollaborationAnnotation> Annotations { get; init; } = [];
+}
+
+/// <summary>
+/// Thrown when the delivery payload exceeds the safe delivery threshold.
+/// The caller should return a draft-only-fallback result instead of failing.
+/// </summary>
+public sealed class DeliveryTooLargeException : Exception
+{
+    public DeliveryTooLargeException(string message) : base(message) { }
+    public DeliveryTooLargeException(string message, Exception inner) : base(message, inner) { }
 }
 
 /// <summary>

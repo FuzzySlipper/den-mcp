@@ -15,6 +15,7 @@ public class CollaborationDeliveryTests
         Assert.Equal("capability_denied", CollaborationDeliveryStatus.CapabilityDenied);
         Assert.Equal("skipped", CollaborationDeliveryStatus.Skipped);
         Assert.Equal("failed", CollaborationDeliveryStatus.Failed);
+        Assert.Equal("draft_only_fallback", CollaborationDeliveryStatus.DraftOnlyFallback);
     }
 
     [Fact]
@@ -131,18 +132,21 @@ public class CollaborationDeliveryTests
     }
 
     [Fact]
-    public async Task DeliveryService_LiveControllableSession_SendsViaTerminalService()
+    public async Task DeliveryService_LiveControllableAgentSession_SendsViaTerminalService()
     {
         using var provider = DesktopSidecarBridge.CreateServiceProvider(DesktopSidecarFixtures.CreateFixtureOptions());
         var registry = new OperatorSessionRegistry();
         var runner = new FakeTmuxCommandRunner();
         var service = CreateDeliveryService(provider, registry, runner);
         var identity = TmuxSessionNaming.FromSessionName("den-collab-agent");
+        // Agent session: has agent_identity set, so CanDeliverCompiledResponse is explicitly granted.
         registry.Register(new OperatorSession
         {
             SessionId = identity.SessionId,
             ProjectId = "test",
             Kind = OperatorSessionKind.Agent,
+            AgentIdentity = "pi",
+            Role = "coder",
             Backend = OperatorSessionBackend.Tmux,
             BackendRef = identity.BackendRef,
             Status = OperatorSessionStatus.Running,
@@ -232,6 +236,89 @@ public class CollaborationDeliveryTests
         Assert.Equal(CollaborationDeliveryStatus.CapabilityDenied, response.Delivery.Status);
         Assert.Equal("observe-only-session", response.Delivery.TargetSessionId);
         Assert.False(response.Delivery.CanDeliver);
+    }
+
+    [Fact]
+    public async Task DeliveryService_TooLargeResponse_ReturnsDraftOnlyFallback()
+    {
+        using var provider = DesktopSidecarBridge.CreateServiceProvider(DesktopSidecarFixtures.CreateFixtureOptions());
+        var registry = new OperatorSessionRegistry();
+        var runner = new FakeTmuxCommandRunner();
+        var service = CreateDeliveryService(provider, registry, runner);
+        var identity = TmuxSessionNaming.FromSessionName("den-large-agent");
+        registry.Register(new OperatorSession
+        {
+            SessionId = identity.SessionId,
+            ProjectId = "test",
+            Kind = OperatorSessionKind.Agent,
+            AgentIdentity = "pi",
+            Backend = OperatorSessionBackend.Tmux,
+            BackendRef = identity.BackendRef,
+            Status = OperatorSessionStatus.Running,
+            Capabilities = OperatorSessionCapabilities.FullControl() with { CanDeliverCompiledResponse = true },
+            CreatedAt = DateTime.UtcNow,
+            SourceInstanceId = "test",
+        });
+
+        // Generate text larger than DraftOnlyThresholdBytes (128 KiB)
+        var largeText = new string('A', 200 * 1024);
+        var response = await service.DeliverAsync(new CollaborationSendCompiledResponseRequest
+        {
+            SessionId = 1,
+            CompiledText = largeText,
+            TargetSessionId = identity.SessionId,
+            PostToDen = false,
+        }, CancellationToken.None);
+
+        Assert.Equal(CollaborationDeliveryStatus.DraftOnlyFallback, response.Delivery.Status);
+        Assert.False(response.Delivery.CanDeliver);
+        Assert.Contains("safe delivery threshold", response.Delivery.Reason);
+        Assert.DoesNotContain(runner.Calls, c => c.Args.Count > 0 && c.Args[0] == "send-keys");
+    }
+
+    [Fact]
+    public async Task DeliveryService_PlainTerminalSession_ReturnsCapabilityDenied()
+    {
+        using var provider = DesktopSidecarBridge.CreateServiceProvider(DesktopSidecarFixtures.CreateFixtureOptions());
+        var registry = new OperatorSessionRegistry();
+        var runner = new FakeTmuxCommandRunner();
+        var service = CreateDeliveryService(provider, registry, runner);
+        var identity = TmuxSessionNaming.FromSessionName("den-plain-shell");
+        // Plain terminal session: no agent identity, no task association.
+        // CanDeliverCompiledResponse should be false by default.
+        registry.Register(new OperatorSession
+        {
+            SessionId = identity.SessionId,
+            ProjectId = "test",
+            Kind = OperatorSessionKind.Terminal,
+            Backend = OperatorSessionBackend.Tmux,
+            BackendRef = identity.BackendRef,
+            Status = OperatorSessionStatus.Running,
+            Capabilities = OperatorSessionCapabilities.FullControl(), // CanDeliverCompiledResponse defaults false
+            CreatedAt = DateTime.UtcNow,
+            SourceInstanceId = "test",
+        });
+
+        var response = await service.DeliverAsync(new CollaborationSendCompiledResponseRequest
+        {
+            SessionId = 1,
+            CompiledText = "Test compiled response text",
+            TargetSessionId = identity.SessionId,
+            PostToDen = false,
+        }, CancellationToken.None);
+
+        Assert.Equal(CollaborationDeliveryStatus.CapabilityDenied, response.Delivery.Status);
+        Assert.Contains("can_deliver_compiled_response", response.Delivery.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(runner.Calls);
+    }
+
+    [Fact]
+    public void DelimiterProtocol_Constants_AreStable()
+    {
+        Assert.Equal("[compiled-collaboration-response]", CollaborationDelimiterProtocol.OpenTag);
+        Assert.Equal("[/compiled-collaboration-response]", CollaborationDelimiterProtocol.CloseTag);
+        Assert.Equal("[compiled-collaboration-response part=\"{0}/{1}\"]", CollaborationDelimiterProtocol.ChunkOpenTagFormat);
+        Assert.Equal(128 * 1024, CollaborationDelimiterProtocol.DraftOnlyThresholdBytes);
     }
 
     private static CollaborationResponseDeliveryService CreateDeliveryService(

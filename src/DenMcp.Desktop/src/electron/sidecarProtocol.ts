@@ -339,10 +339,11 @@ export interface AppAgentCancelRequest extends Record<string, JsonValue | undefi
   reason?: string | null;
 }
 
-// Collaboration send-compiled-response and delivery event types removed (task #1087).
-// The renderer compiles responses locally via denCollaborationApi.ts (Den REST)
-// and does not need a sidecar bridge path. If sidecar-based delivery is needed
-// in the future, re-add these types alongside preload + allow-list wiring.
+// Collaboration response live-delivery bridge command and event.
+// Re-introduced (task #1074) as a typed, allow-listed path for delivering
+// compiled collaboration responses through the sidecar to live agent sessions.
+// The renderer saves to Den first (Den-post-first), then optionally delivers
+// through this bridge when running under Electron with a live session target.
 
 export type TerminalResponse = Record<string, JsonValue>;
 export type TerminalEventPayload = Record<string, JsonValue>;
@@ -433,7 +434,11 @@ export const sidecarCommands: Record<string, BridgeCommandSpec<JsonValue, JsonVa
     requestSchema: 'den_desktop.app_agent.cancel_request.request',
     responseSchema: 'den_desktop.app_agent.cancel_request.response',
   },
-  // collaborationSendCompiledResponse removed — see type-level comment above.
+  collaborationSendCompiledResponse: {
+    command: 'den_desktop.collaboration.send_compiled_response',
+    requestSchema: 'den_desktop.collaboration.send_compiled_response.request',
+    responseSchema: 'den_desktop.collaboration.send_compiled_response.response',
+  },
   tasksGetDashboardSnapshot: {
     command: 'den_desktop.tasks.get_dashboard_snapshot',
     requestSchema: 'den_desktop.tasks.get_dashboard_snapshot.request',
@@ -556,7 +561,11 @@ export const sidecarEvents: Record<string, BridgeEventSpec<JsonValue>> = {
     event: 'den.app_agent.tool_call_state_changed',
     payloadSchema: 'den.app_agent.tool_call_state_changed.payload',
   },
-  // collaborationDelivery event removed — renderer does not subscribe to this.
+  collaborationDelivery: {
+    event: 'den.collaboration.delivery_state_changed',
+    payloadSchema: 'den.collaboration.delivery_state_changed.payload',
+  },
+  // Collaboration delivery lifecycle event for UI observability.
 };
 
 export type SidecarBridgeClient = CheckedBridgeClient<typeof sidecarCommands, typeof sidecarEvents>;
@@ -592,7 +601,9 @@ export function createSidecarBridgeFacade(client: SidecarBridgeClient) {
       facade.appAgentInvokeTool(request as unknown as JsonValue) as Promise<TResponse>,
     appAgentCancelRequest: async <TResponse = AppAgentResponse>(request: AppAgentCancelRequest): Promise<TResponse> =>
       facade.appAgentCancelRequest(request as JsonValue) as Promise<TResponse>,
-    // collaborationSendCompiledResponse removed (task #1087).
+    // collaborationSendCompiledResponse: typed live-delivery bridge path (task #1074).
+    collaborationSendCompiledResponse: async <TResponse = Record<string, JsonValue>>(request: Record<string, JsonValue>): Promise<TResponse> =>
+      facade.collaborationSendCompiledResponse(request as JsonValue) as Promise<TResponse>,
     tasksGetDashboardSnapshot: async <TResponse = TasksDashboardSnapshot>(request: TasksDashboardSnapshotRequest): Promise<TResponse> =>
       facade.tasksGetDashboardSnapshot(request as JsonValue) as Promise<TResponse>,
     messagesGetSnapshot: async <TResponse = MessagesSnapshot>(request: MessagesSnapshotRequest): Promise<TResponse> =>
@@ -656,7 +667,9 @@ export function createSidecarBridgeFacade(client: SidecarBridgeClient) {
     assertAppAgentToolCallStateEvent(frame: BridgeEventFrame): void {
       client.assertEvent('appAgentToolCallState', frame);
     },
-    // assertCollaborationDeliveryEvent removed (task #1087).
+    assertCollaborationDeliveryEvent(frame: BridgeEventFrame): void {
+      client.assertEvent('collaborationDelivery', frame);
+    },
   };
 }
 

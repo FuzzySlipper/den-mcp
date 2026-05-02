@@ -8,6 +8,10 @@ import {
   type DenCollaborationApi,
 } from './denCollaborationApi.ts';
 import { compileResponse } from './collaborationCompileResponse.ts';
+import {
+  collaborationSendCompiledResponse as bridgeCollaborationSendCompiledResponse,
+  type CollaborationSendCompiledResponseResponse,
+} from './sidecarBridgeApi.ts';
 
 export interface CollaborationState {
   /** List of sessions for the current project. */
@@ -225,10 +229,49 @@ export function useCollaborationState(
     setDelivering(true);
     setDeliveryResult(null);
     try {
-      // The delivery bridge command is called through the sidecar API.
-      // For now we construct the result from a direct fetch to the Den draft API
-      // since the bridge command path requires the Electron preload bridge.
-      // The compiled response is always saved to Den first (Den-post-first pattern).
+      // Den-post-first: always save to Den before attempting live delivery.
+      // If the typed sidecar bridge is available (Electron), route through it
+      // for full Den-post + live-delivery in a single typed call.
+      // If unavailable (non-Electron), fall back to direct Den REST save.
+      const bridgeAvailable = typeof window !== 'undefined'
+        && window.denDesktopSidecar?.collaborationSendCompiledResponse != null;
+
+      if (bridgeAvailable) {
+        // Typed bridge path: the sidecar service handles Den save + live delivery.
+        const bridgeResult = await bridgeCollaborationSendCompiledResponse({
+          session_id: selectedSessionId,
+          compiled_text: compiledResponse,
+          target_session_id: targetSessionId ?? null,
+          post_to_den: true,
+          requested_by: 'desktop-operator',
+        });
+
+        const result: CollaborationDeliveryResult = {
+          compiled_text: bridgeResult.compiled_text,
+          den_post: {
+            posted: bridgeResult.den_post.posted,
+            draft_id: bridgeResult.den_post.draft_id ?? null,
+            error: bridgeResult.den_post.error ?? null,
+          },
+          delivery: {
+            status: bridgeResult.delivery.status,
+            target_session_id: bridgeResult.delivery.target_session_id ?? null,
+            can_deliver: bridgeResult.delivery.can_deliver,
+            reason: bridgeResult.delivery.reason ?? null,
+            error: bridgeResult.delivery.error ?? null,
+          },
+          session_id: bridgeResult.session_id,
+          target_session_id: bridgeResult.target_session_id ?? null,
+        };
+
+        if (mountedRef.current) {
+          setDeliveryResult(result);
+          setError(null);
+        }
+        return result;
+      }
+
+      // Den-save-only fallback: no typed bridge available.
       if (apiRef.current) {
         await apiRef.current.createDraft(selectedSessionId, {
           turn_id: selectedTurn?.id ?? null,
@@ -241,12 +284,10 @@ export function useCollaborationState(
         compiled_text: compiledResponse,
         den_post: { posted: true },
         delivery: {
-          status: targetSessionId ? 'pending_bridge' : 'no_live_session',
+          status: targetSessionId ? 'no_live_session' : 'no_live_session',
           target_session_id: targetSessionId,
-          can_deliver: !!targetSessionId,
-          reason: targetSessionId
-            ? 'Bridge delivery path requires Electron preload integration.'
-            : 'No target session specified. Response saved to Den as draft.',
+          can_deliver: false,
+          reason: 'Sidecar bridge not available. Response saved to Den as draft only.',
         },
         session_id: selectedSessionId,
         target_session_id: targetSessionId,

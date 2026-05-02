@@ -79,6 +79,9 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
         process.Exited += (_, args) => _ = HandleExitAsync(sessionId, args, CancellationToken.None);
 
         var now = _now().UtcDateTime;
+        var caps = IsAgentSession(null, NullIfBlank(request.ProjectId), request.TaskId)
+            ? DirectPtyAgentCapabilities()
+            : DirectPtyCapabilities();
         var session = new OperatorSession
         {
             SessionId = sessionId,
@@ -94,7 +97,7 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
             BackendRef = process.ProcessId is null ? sessionId : $"pid:{process.ProcessId}",
             Status = OperatorSessionStatus.Running,
             CurrentCommand = "direct PTY shell",
-            Capabilities = DirectPtyCapabilities(),
+            Capabilities = caps,
             CreatedAt = now,
             StartedAt = now,
             LastObservedAt = now,
@@ -888,10 +891,24 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
         return OperatorSessionCapabilities.FullControl() with
         {
             CanOpenExternalAttach = false,
-            CanDeliverCompiledResponse = true,
+            // CanDeliverCompiledResponse defaults false from FullControl().
+            // Only set true for agent-kind sessions via DirectPtyAgentCapabilities().
             RequiresConfirmation = true,
             LeaseRequired = true,
             Constraints = "{\"backend_kind\":\"direct_pty\",\"persistence_kind\":\"process_owned\",\"ownership_kind\":\"sidecar_owned\",\"raw_stream_scope\":\"local_bridge_only\",\"backpressure_contract\":\"per_stream_unacked_bytes_throttled_until_ack\"}",
+        };
+    }
+
+    /// <summary>
+    /// Capabilities for direct-PTY sessions that are identified as agent-kind.
+    /// These sessions are approved for compiled response delivery because they
+    /// run agent software that can parse the delimiter protocol.
+    /// </summary>
+    private static OperatorSessionCapabilities DirectPtyAgentCapabilities()
+    {
+        return DirectPtyCapabilities() with
+        {
+            CanDeliverCompiledResponse = true,
         };
     }
 
@@ -991,6 +1008,20 @@ public sealed class DirectPtyOperatorSessionService : IAsyncDisposable, IDisposa
     }
 
     private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    /// <summary>
+    /// Determine whether a session qualifies as agent-kind for capability purposes.
+    /// A session is considered agent-kind if it has a task association and project,
+    /// which indicates it was created to run an agent (not a plain shell).
+    /// This is a conservative heuristic; agent_identity/role are set later by
+    /// the session observer and are not available at creation time.
+    /// </summary>
+    private static bool IsAgentSession(string? agentIdentity, string? projectId, long? taskId)
+    {
+        if (!string.IsNullOrWhiteSpace(agentIdentity)) return true;
+        if (!string.IsNullOrWhiteSpace(projectId) && taskId.HasValue) return true;
+        return false;
+    }
     private static string Format(DateTime? dt) => dt is null ? string.Empty : new DateTimeOffset(DateTime.SpecifyKind(dt.Value, DateTimeKind.Utc)).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'");
     private static string Format(DateTimeOffset dt) => dt.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'");
     private static BridgeHandlerException NotFound(string sessionId) => new("terminal.session.not_found", $"Session '{sessionId}' not found in local registry.", BridgeErrorCategories.NotFound);

@@ -508,6 +508,9 @@ public sealed class TmuxOperatorSessionService
         DateTime? lastActivityAt = null)
     {
         var now = _now().UtcDateTime;
+        var caps = IsAgentSession(null, projectId, taskId)
+            ? TmuxAgentCapabilities()
+            : TmuxCapabilities();
         return new OperatorSession
         {
             SessionId = identity.SessionId,
@@ -523,7 +526,7 @@ public sealed class TmuxOperatorSessionService
             BackendRef = identity.BackendRef,
             Status = OperatorSessionStatus.Running,
             CurrentCommand = "tmux session",
-            Capabilities = TmuxCapabilities(),
+            Capabilities = caps,
             CreatedAt = createdAt ?? now,
             StartedAt = createdAt ?? now,
             LastObservedAt = now,
@@ -539,10 +542,25 @@ public sealed class TmuxOperatorSessionService
     {
         return OperatorSessionCapabilities.FullControl() with
         {
-            CanDeliverCompiledResponse = true,
+            // CanDeliverCompiledResponse defaults false from FullControl().
+            // Only set true for agent-kind sessions via TmuxAgentCapabilities().
             RequiresConfirmation = true,
             LeaseRequired = false,
             Constraints = "{\"backend_kind\":\"persistent_terminal\",\"persistence_kind\":\"tmux\",\"ownership_kind\":\"backend_persistent\",\"raw_stream_scope\":\"local_bridge_only\",\"tmux_capture_replay\":\"viewport_rows_limit_and_resize_window\",\"external_attach_command\":\"display_copy_only\",\"backpressure_contract\":\"snapshot_capture_ack_validated_live_stream_enforcement_deferred_to_909_911\"}",
+        };
+    }
+
+    /// <summary>
+    /// Capabilities for tmux sessions that are identified as agent-kind
+    /// (have an agent_identity or role set). These sessions are approved
+    /// for compiled response delivery because they run agent software that
+    /// can parse the delimiter protocol.
+    /// </summary>
+    private static OperatorSessionCapabilities TmuxAgentCapabilities()
+    {
+        return TmuxCapabilities() with
+        {
+            CanDeliverCompiledResponse = true,
         };
     }
 
@@ -707,6 +725,23 @@ public sealed class TmuxOperatorSessionService
     private static string[] AppendWarning(IReadOnlyList<string> warnings, string warning)
     {
         return warnings.Concat([warning]).Distinct(StringComparer.Ordinal).Take(10).ToArray();
+    }
+
+    /// <summary>
+    /// Determine whether a session qualifies as agent-kind for capability purposes.
+    /// A session is considered agent-kind if it has a task association and project,
+    /// which indicates it was created to run an agent (not a plain shell).
+    /// This is a conservative heuristic; agent_identity/role are set later by
+    /// the session observer and are not available at creation time.
+    /// </summary>
+    private static bool IsAgentSession(string? agentIdentity, string? projectId, long? taskId)
+    {
+        // If agent_identity is already set, it's definitively agent-kind.
+        if (!string.IsNullOrWhiteSpace(agentIdentity)) return true;
+        // Sessions with both project and task association are likely agent sessions.
+        // Plain shell sessions typically don't have both set.
+        if (!string.IsNullOrWhiteSpace(projectId) && taskId.HasValue) return true;
+        return false;
     }
 
     private static DateTime? FromUnixSeconds(string? value)

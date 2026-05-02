@@ -169,6 +169,7 @@ test('preload exposes only allow-listed sidecar API surface via contextBridge', 
     'appAgentCancelRequest',
     'appAgentInvokeTool',
     'appAgentListTools',
+    'collaborationSendCompiledResponse',
     'consoleListCommands',
     'consoleRunCommand',
     'consoleRunCommandWithProgress',
@@ -182,6 +183,7 @@ test('preload exposes only allow-listed sidecar API surface via contextBridge', 
     'listLocalSnapshots',
     'onAppAgentRunState',
     'onAppAgentToolCallState',
+    'onCollaborationDelivery',
     'onGitSnapshots',
     'onOperatorStatus',
     'onSessionSnapshots',
@@ -209,11 +211,11 @@ test('preload exposes only allow-listed sidecar API surface via contextBridge', 
 
   assert.deepEqual(Object.keys(api).sort(), expectedMethods);
 
-  // Verify collaboration methods are not exposed (task #1087)
-  assert.equal(api.collaborationSendCompiledResponse, undefined,
-    'collaborationSendCompiledResponse must not be exposed on the sidecar API');
-  assert.equal(api.onCollaborationDelivery, undefined,
-    'onCollaborationDelivery must not be exposed on the sidecar API');
+  // Verify collaboration methods are exposed as typed, allow-listed bridge (task #1074)
+  assert.equal(typeof api.collaborationSendCompiledResponse, 'function',
+    'collaborationSendCompiledResponse must be a typed function on the sidecar API');
+  assert.equal(typeof api.onCollaborationDelivery, 'function',
+    'onCollaborationDelivery must be a typed function on the sidecar API');
 
   // Verify no escape hatches
   assert.equal(api.dispatch, undefined, 'No generic dispatch exposed');
@@ -294,19 +296,13 @@ test('main process sidecar IPC allow-list accepts known methods and rejects unkn
   assert.equal(assertAllowedSidecarSubscriptionEvent('terminalOutput'), 'terminalOutput');
   assert.throws(() => assertAllowedSidecarSubscriptionEvent('dispatch'), /Unknown sidecar event subscription 'dispatch'/);
 
-  // Verify collaboration methods are not allow-listed (task #1087)
-  assert.ok(!allowedSidecarCallMethods.includes('collaborationSendCompiledResponse'),
-    'collaborationSendCompiledResponse must not be in the IPC call allow-list');
-  assert.ok(!allowedSidecarSubscriptionEvents.includes('collaborationDelivery'),
-    'collaborationDelivery must not be in the IPC subscription allow-list');
-  assert.throws(
-    () => assertAllowedSidecarCallMethod('collaborationSendCompiledResponse'),
-    /Unknown sidecar method 'collaborationSendCompiledResponse'/,
-  );
-  assert.throws(
-    () => assertAllowedSidecarSubscriptionEvent('collaborationDelivery'),
-    /Unknown sidecar event subscription 'collaborationDelivery'/,
-  );
+  // Verify collaboration methods are allow-listed (task #1074 re-introduces typed path)
+  assert.ok(allowedSidecarCallMethods.includes('collaborationSendCompiledResponse'),
+    'collaborationSendCompiledResponse must be in the IPC call allow-list');
+  assert.ok(allowedSidecarSubscriptionEvents.includes('collaborationDelivery'),
+    'collaborationDelivery must be in the IPC subscription allow-list');
+  assert.equal(assertAllowedSidecarCallMethod('collaborationSendCompiledResponse'), 'collaborationSendCompiledResponse');
+  assert.equal(assertAllowedSidecarSubscriptionEvent('collaborationDelivery'), 'collaborationDelivery');
 });
 
 test('main process IPC bridge channel names are deterministic and scoped', () => {
