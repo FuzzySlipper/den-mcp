@@ -20,6 +20,21 @@ public sealed class TmuxOperatorSessionService
     private readonly Dictionary<string, string> _streams = new(StringComparer.Ordinal);
     private readonly object _lock = new();
 
+    /// <summary>
+    /// Diagnostic count of actively tracked tmux streams. Internal so test assemblies
+    /// can assert lifecycle behavior without reflecting over private fields.
+    /// </summary>
+    internal int TrackedStreamCount
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _streams.Count;
+            }
+        }
+    }
+
     public TmuxOperatorSessionService(
         ITmuxCommandRunner tmux,
         OperatorSessionRegistry registry,

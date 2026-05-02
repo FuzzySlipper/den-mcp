@@ -1892,10 +1892,7 @@ public class TerminalBridgeHandlerTests
 
     private static int GetTrackedTmuxStreamCount(TmuxOperatorSessionService service)
     {
-        var field = typeof(TmuxOperatorSessionService).GetField("_streams", BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.NotNull(field);
-        var streams = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(field!.GetValue(service));
-        return streams.Count;
+        return service.TrackedStreamCount;
     }
 
     private static async Task WaitForActivityCountAsync(OperatorSessionRegistry registry, string sessionId, int expectedCount, int timeoutMs = 1000)
