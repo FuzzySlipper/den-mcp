@@ -1652,6 +1652,190 @@ public class TerminalBridgeHandlerTests
         Assert.False(stale.Capabilities.CanSendInput);
     }
 
+    /// <summary>
+    /// R1034-2 negative-path coverage: EnsurePublishableOutputChunks rejects oversized chunks.
+    /// The guard is a defense-in-depth check in DirectPtyOperatorSessionService that throws
+    /// InvalidOperationException when a chunk exceeds the configured OutputChunkMaxBytes limit.
+    /// Normal operation splits chunks in OperatorSessionActivityBuffer before publication,
+    /// so this test exercises the guard path directly via reflection to cover the rejection case.
+    /// </summary>
+    [Fact]
+    public void DirectPtyService_EnsurePublishableOutputChunks_RejectsOversizedChunk()
+    {
+        var backend = new FakeDirectPtyBackend();
+        var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
+        var events = new OperatorRuntimeBridgeEventSink(new DesktopSidecarRuntimeState(DesktopSidecarFixtures.CreateFixtureOptions()));
+        using var service = CreateDirectPtyService(
+            backend,
+            registry,
+            events,
+            new TerminalStreamLimits { OutputChunkMaxBytes = 32 });
+
+        var guardMethod = typeof(DirectPtyOperatorSessionService).GetMethod(
+            "EnsurePublishableOutputChunks",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(guardMethod);
+
+        // A chunk that fits within the limit should pass the guard.
+        var validChunks = new List<TerminalOutputChunk>
+        {
+            new()
+            {
+                Sequence = 1,
+                Data = new byte[16],
+                ByteCount = 16,
+            },
+        };
+        var exception = Record.Exception(() => guardMethod!.Invoke(service, [validChunks]));
+        Assert.Null(exception);
+
+        // A chunk exceeding the 32-byte limit must be rejected.
+        var oversizedChunks = new List<TerminalOutputChunk>
+        {
+            new()
+            {
+                Sequence = 2,
+                Data = new byte[64],
+                ByteCount = 64,
+            },
+        };
+        var invocationException = Assert.Throws<TargetInvocationException>(() =>
+            guardMethod!.Invoke(service, [oversizedChunks]));
+        var actual = Assert.IsType<InvalidOperationException>(invocationException.InnerException);
+        Assert.Contains("exceeds the configured", actual.Message, StringComparison.Ordinal);
+        Assert.Contains("OutputChunkMaxBytes", actual.Message, StringComparison.Ordinal);
+        Assert.Contains("chunk_000000000002", actual.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// R1034-2 negative-path coverage: the guard rejects a chunk whose Data array is oversized
+    /// even when ByteCount happens to be at or below the limit (Data.Length check path).
+    /// </summary>
+    [Fact]
+    public void DirectPtyService_EnsurePublishableOutputChunks_RejectsOversizedDataArray()
+    {
+        var backend = new FakeDirectPtyBackend();
+        var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
+        var events = new OperatorRuntimeBridgeEventSink(new DesktopSidecarRuntimeState(DesktopSidecarFixtures.CreateFixtureOptions()));
+        using var service = CreateDirectPtyService(
+            backend,
+            registry,
+            events,
+            new TerminalStreamLimits { OutputChunkMaxBytes = 32 });
+
+        var guardMethod = typeof(DirectPtyOperatorSessionService).GetMethod(
+            "EnsurePublishableOutputChunks",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(guardMethod);
+
+        // ByteCount is within the limit but Data.Length exceeds it.
+        var deceptiveChunks = new List<TerminalOutputChunk>
+        {
+            new()
+            {
+                Sequence = 1,
+                Data = new byte[64],
+                ByteCount = 16, // ByteCount <= limit but Data.Length > limit
+            },
+        };
+        var invocationException = Assert.Throws<TargetInvocationException>(() =>
+            guardMethod!.Invoke(service, [deceptiveChunks]));
+        var actual = Assert.IsType<InvalidOperationException>(invocationException.InnerException);
+        Assert.Contains("exceeds the configured", actual.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// R1034-2 negative-path coverage: the guard passes when all chunks fit within the limit,
+    /// and rejects as soon as the first oversized chunk is encountered.
+    /// </summary>
+    [Fact]
+    public void DirectPtyService_EnsurePublishableOutputChunks_RejectsFirstOversizedInList()
+    {
+        var backend = new FakeDirectPtyBackend();
+        var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
+        var events = new OperatorRuntimeBridgeEventSink(new DesktopSidecarRuntimeState(DesktopSidecarFixtures.CreateFixtureOptions()));
+        using var service = CreateDirectPtyService(
+            backend,
+            registry,
+            events,
+            new TerminalStreamLimits { OutputChunkMaxBytes = 32 });
+
+        var guardMethod = typeof(DirectPtyOperatorSessionService).GetMethod(
+            "EnsurePublishableOutputChunks",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(guardMethod);
+
+        // Mixed list: first chunk valid, second oversized, third valid.
+        var mixedChunks = new List<TerminalOutputChunk>
+        {
+            new()
+            {
+                Sequence = 1,
+                Data = new byte[16],
+                ByteCount = 16,
+            },
+            new()
+            {
+                Sequence = 2,
+                Data = new byte[64],
+                ByteCount = 64,
+            },
+            new()
+            {
+                Sequence = 3,
+                Data = new byte[8],
+                ByteCount = 8,
+            },
+        };
+        var invocationException = Assert.Throws<TargetInvocationException>(() =>
+            guardMethod!.Invoke(service, [mixedChunks]));
+        var actual = Assert.IsType<InvalidOperationException>(invocationException.InnerException);
+        // The guard should identify the first oversized chunk (sequence 2).
+        Assert.Contains("chunk_000000000002", actual.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// R1034-2 positive-path confirmation: when the buffer splits oversized input correctly,
+    /// the guard allows all resulting chunks through to publication without error.
+    /// This complements the negative-path tests above by verifying the guard does not
+    /// reject properly split output from the normal OperatorSessionActivityBuffer path.
+    /// </summary>
+    [Fact]
+    public void DirectPtyService_EnsurePublishableOutputChunks_AllowsBufferSplitChunks()
+    {
+        var chunkLimit = 32;
+        var backend = new FakeDirectPtyBackend();
+        var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
+        var events = new OperatorRuntimeBridgeEventSink(new DesktopSidecarRuntimeState(DesktopSidecarFixtures.CreateFixtureOptions()));
+        using var service = CreateDirectPtyService(
+            backend,
+            registry,
+            events,
+            new TerminalStreamLimits { OutputChunkMaxBytes = chunkLimit });
+
+        var guardMethod = typeof(DirectPtyOperatorSessionService).GetMethod(
+            "EnsurePublishableOutputChunks",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(guardMethod);
+
+        // Simulate what the buffer actually produces: a 100-byte payload split into
+        // chunks of at most 32 bytes each → 32 + 32 + 32 + 4 = 100 bytes in 4 chunks.
+        var buffer = new OperatorSessionActivityBuffer(
+            maxBytes: 100_000,
+            outputChunkMaxBytes: chunkLimit);
+        var data = new byte[100];
+        for (var i = 0; i < data.Length; i++) data[i] = (byte)(i % 256);
+        var splitChunks = buffer.Append(data);
+
+        // All chunks must fit the limit.
+        Assert.Equal(4, splitChunks.Count);
+        Assert.All(splitChunks, c => Assert.True(c.ByteCount <= chunkLimit));
+
+        // The guard must accept all of them.
+        var exception = Record.Exception(() => guardMethod!.Invoke(service, [splitChunks]));
+        Assert.Null(exception);
+    }
+
     private static DirectPtyOperatorSessionService CreateDirectPtyService(
         FakeDirectPtyBackend backend,
         OperatorSessionRegistry registry,
