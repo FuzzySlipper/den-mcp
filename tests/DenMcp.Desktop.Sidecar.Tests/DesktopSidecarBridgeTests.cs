@@ -164,6 +164,51 @@ public class DesktopSidecarBridgeTests
     }
 
     [Fact]
+    public async Task CommandRouter_CorruptAppearanceSettingsEmitsDiagnosticAndReturnsDefaults()
+    {
+        var configPath = Path.Combine(
+            Path.GetTempPath(),
+            "den-mcp-sidecar-bridge-tests",
+            Guid.NewGuid().ToString("N"));
+        var options = DesktopSidecarFixtures.CreateFixtureOptions() with { ConfigPath = configPath };
+
+        try
+        {
+            using var provider = DesktopSidecarBridge.CreateServiceProvider(options);
+            var router = provider.GetRequiredService<IBridgeCommandRouter>();
+            var settingsService = provider.GetRequiredService<OperatorSettingsService>();
+            var runtime = provider.GetRequiredService<OperatorRuntimeService>();
+
+            // Write a corrupt appearance settings file
+            var appearancePath = settingsService.AppearanceSettingsPath;
+            Directory.CreateDirectory(Path.GetDirectoryName(appearancePath)!);
+            File.WriteAllText(appearancePath, "{not valid json");
+
+            var response = await router.DispatchAsync(Request("req_corrupt_appearance", DesktopSidecarProtocol.GetAppearanceSettingsCommand));
+
+            Assert.Null(response.Error);
+            Assert.Equal(OperatorAppearanceSettings.DefaultTheme, response.Result!.Value.GetProperty("theme").GetString());
+
+            // Verify a warn diagnostic was emitted for the corrupt settings recovery
+            var status = await runtime.GetStatusAsync();
+            Assert.Contains(status.Diagnostics, d =>
+                d.Level == "warn" &&
+                d.Source == "appearance-settings" &&
+                d.Message.Contains("recovered", StringComparison.OrdinalIgnoreCase));
+
+            // Verify the corrupt file is preserved
+            Assert.Equal("{not valid json", File.ReadAllText(appearancePath));
+        }
+        finally
+        {
+            if (Directory.Exists(configPath))
+            {
+                Directory.Delete(configPath, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void ReadySentinel_SerializesSingleBootstrapLineWithCompatibilityMetadata()
     {
         var options = DesktopSidecarFixtures.CreateFixtureOptions() with { Port = 0, EndpointPath = "/bridge" };

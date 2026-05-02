@@ -628,13 +628,28 @@ public sealed class GetLatestDiffSnapshotHandler : IBridgeCommandHandler<LatestD
 public sealed class GetAppearanceSettingsHandler : IBridgeCommandHandler<DesktopSidecarEmptyRequest, OperatorAppearanceSettings>
 {
     private readonly OperatorSettingsService _settingsService;
+    private readonly OperatorRuntimeService _runtime;
 
-    public GetAppearanceSettingsHandler(OperatorSettingsService settingsService) => _settingsService = settingsService;
+    public GetAppearanceSettingsHandler(OperatorSettingsService settingsService, OperatorRuntimeService runtime)
+    {
+        _settingsService = settingsService;
+        _runtime = runtime;
+    }
 
-    public ValueTask<OperatorAppearanceSettings?> HandleAsync(DesktopSidecarEmptyRequest request, BridgeRequestContext context, CancellationToken cancellationToken)
+    public async ValueTask<OperatorAppearanceSettings?> HandleAsync(DesktopSidecarEmptyRequest request, BridgeRequestContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult<OperatorAppearanceSettings?>(_settingsService.LoadAppearance());
+        var result = _settingsService.LoadAppearanceFull();
+        if (result.RecoveredFromMalformed)
+        {
+            await _runtime.AddDiagnosticAsync(
+                "warn",
+                "appearance-settings",
+                "Corrupt appearance-settings.json recovered to defaults; the original file is preserved for inspection.",
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        return result.Settings;
     }
 }
 

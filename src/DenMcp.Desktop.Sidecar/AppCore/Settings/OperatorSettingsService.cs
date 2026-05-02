@@ -190,25 +190,44 @@ public sealed class OperatorSettingsService
 
     public OperatorAppearanceSettings LoadAppearance()
     {
+        return LoadAppearanceFull().Settings;
+    }
+
+    /// <summary>
+    /// Loads appearance settings with recovery metadata.
+    /// When the stored file is malformed or unreadable, returns defaults with
+    /// <see cref="LoadAppearanceResult.RecoveredFromMalformed"/> set to <c>true</c>.
+    /// The corrupt file is preserved on disk for inspection.
+    /// </summary>
+    public LoadAppearanceResult LoadAppearanceFull()
+    {
         var path = AppearanceSettingsPath;
         if (!File.Exists(path))
         {
             var defaults = OperatorAppearanceSettings.CreateDefault();
             TrySaveDefaultAppearance(defaults);
-            return defaults;
+            return new LoadAppearanceResult { Settings = defaults, RecoveredFromMalformed = false };
         }
 
         try
         {
             var json = File.ReadAllText(path);
             var settings = JsonSerializer.Deserialize<OperatorAppearanceSettings>(json, JsonOptions);
-            return (settings ?? OperatorAppearanceSettings.CreateDefault()).Normalized();
+            return new LoadAppearanceResult
+            {
+                Settings = (settings ?? OperatorAppearanceSettings.CreateDefault()).Normalized(),
+                RecoveredFromMalformed = false,
+            };
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
             // Match Load(): malformed/unreadable settings recover silently to defaults so a bad
             // local settings file cannot prevent Den Desktop from starting.
-            return OperatorAppearanceSettings.CreateDefault();
+            return new LoadAppearanceResult
+            {
+                Settings = OperatorAppearanceSettings.CreateDefault(),
+                RecoveredFromMalformed = true,
+            };
         }
     }
 
@@ -293,4 +312,13 @@ public sealed class OperatorSettingsService
         {
         }
     }
+}
+
+/// <summary>/// Result of loading appearance settings, including whether the defaults were
+/// returned because the stored file was malformed or unreadable.
+/// </summary>
+public sealed record LoadAppearanceResult
+{
+    public required OperatorAppearanceSettings Settings { get; init; }
+    public required bool RecoveredFromMalformed { get; init; }
 }

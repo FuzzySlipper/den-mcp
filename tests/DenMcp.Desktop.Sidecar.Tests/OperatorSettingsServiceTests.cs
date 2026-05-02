@@ -252,6 +252,48 @@ public class OperatorSettingsServiceTests
     }
 
     [Fact]
+    public void LoadAppearanceFull_MissingFileReturnsDefaultsWithoutRecoveryFlag()
+    {
+        var path = TempSettingsPath();
+        var service = Service(path);
+
+        var result = service.LoadAppearanceFull();
+
+        Assert.False(result.RecoveredFromMalformed);
+        Assert.Equal(OperatorAppearanceSettings.DefaultTheme, result.Settings.Theme);
+    }
+
+    [Fact]
+    public void LoadAppearanceFull_ValidFileReturnsLoadedSettingsWithoutRecoveryFlag()
+    {
+        var path = TempSettingsPath();
+        var service = Service(path);
+        service.SaveAppearance(new OperatorAppearanceSettings { Theme = "graphite-dark", Accent = "cyan" });
+
+        var result = service.LoadAppearanceFull();
+
+        Assert.False(result.RecoveredFromMalformed);
+        Assert.Equal("graphite-dark", result.Settings.Theme);
+        Assert.Equal("cyan", result.Settings.Accent);
+    }
+
+    [Fact]
+    public void LoadAppearanceFull_MalformedFileReturnsDefaultsWithRecoveryFlagAndPreservesFile()
+    {
+        var path = TempSettingsPath();
+        var service = Service(path);
+        var appearancePath = service.AppearanceSettingsPath;
+        Directory.CreateDirectory(Path.GetDirectoryName(appearancePath)!);
+        File.WriteAllText(appearancePath, "{not valid json");
+
+        var result = service.LoadAppearanceFull();
+
+        Assert.True(result.RecoveredFromMalformed);
+        Assert.Equal(OperatorAppearanceSettings.DefaultTheme, result.Settings.Theme);
+        Assert.Equal("{not valid json", File.ReadAllText(appearancePath));
+    }
+
+    [Fact]
     public void SaveAppearanceSettingsRequest_MergesPartialUpdate()
     {
         var path = TempSettingsPath();
