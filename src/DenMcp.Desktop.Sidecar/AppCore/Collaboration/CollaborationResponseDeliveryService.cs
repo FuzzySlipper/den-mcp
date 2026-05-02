@@ -322,33 +322,56 @@ public sealed class CollaborationResponseDeliveryService
     /// <summary>
     /// Split compiled text into framed chunks, each within maxChunkBytes.
     /// Each chunk is wrapped in part-numbered delimiters.
+    ///
+    /// UTF-8 boundary safety: when the raw byte split point lands inside
+    /// a multi-byte character (continuation byte 0x80..0xBF), the boundary
+    /// is backed up to the last leading byte so each chunk decodes cleanly
+    /// without U+FFFD replacement characters.
     /// </summary>
     private static List<(string Payload, byte[] Bytes)> BuildDeliveryChunks(string compiledText, int maxChunkBytes)
     {
         var textBytes = Encoding.UTF8.GetBytes(compiledText);
         var chunks = new List<(string Payload, byte[] Bytes)>();
 
-        // Estimate the number of parts by dividing text into safe sub-chunk sizes.
-        // Each part has overhead from delimiters: ~80 bytes for tags + part attribute.
-        var delimiterOverhead = 120; // Conservative overhead per chunk for delimiters + part attribute
+        // Conservative overhead per chunk for delimiters + part attribute.
+        var delimiterOverhead = 120;
         var safeTextBytesPerChunk = maxChunkBytes - delimiterOverhead;
         if (safeTextBytesPerChunk <= 0)
         {
             throw new InvalidOperationException($"Input chunk limit ({maxChunkBytes} bytes) is too small for delivery framing.");
         }
 
-        var totalParts = (textBytes.Length + safeTextBytesPerChunk - 1) / safeTextBytesPerChunk;
-
-        var offset = 0;
-        var partIndex = 1;
-        while (offset < textBytes.Length)
+        // Pre-pass: compute chunk boundaries on valid UTF-8 character edges
+        // so each chunk decodes without replacement characters.
+        var offsets = new List<int>();
+        var currentOffset = 0;
+        while (currentOffset < textBytes.Length)
         {
-            var remaining = textBytes.Length - offset;
-            var chunkSize = Math.Min(remaining, safeTextBytesPerChunk);
+            var candidateEnd = Math.Min(currentOffset + safeTextBytesPerChunk, textBytes.Length);
+            if (candidateEnd < textBytes.Length)
+            {
+                // Back up if the candidate end lands on a UTF-8 continuation byte
+                // (0x80..0xBF). Continuation bytes cannot start a valid character.
+                while (candidateEnd > currentOffset && IsUtf8ContinuationByte(textBytes[candidateEnd]))
+                {
+                    candidateEnd--;
+                }
+            }
+            offsets.Add(candidateEnd);
+            currentOffset = candidateEnd;
+        }
 
-            // Use byte-based slicing for accurate UTF-8 splitting
+        var totalParts = offsets.Count;
+
+        var partIndex = 1;
+        var previousOffset = 0;
+        for (var i = 0; i < offsets.Count; i++)
+        {
+            var endOffset = offsets[i];
+            var chunkSize = endOffset - previousOffset;
+
             var chunkBytes = new byte[chunkSize];
-            Array.Copy(textBytes, offset, chunkBytes, 0, chunkSize);
+            Array.Copy(textBytes, previousOffset, chunkBytes, 0, chunkSize);
             var chunkTextDecoded = Encoding.UTF8.GetString(chunkBytes);
 
             var openTag = string.Format(
@@ -359,12 +382,18 @@ public sealed class CollaborationResponseDeliveryService
             var payloadBytes = Encoding.UTF8.GetBytes(payload);
 
             chunks.Add((payload, payloadBytes));
-            offset += chunkSize;
+            previousOffset = endOffset;
             partIndex++;
         }
 
         return chunks;
     }
+
+    /// <summary>
+    /// Returns true if the byte is a UTF-8 continuation byte (0x80..0xBF).
+    /// Continuation bytes have the pattern 10xxxxxx.
+    /// </summary>
+    private static bool IsUtf8ContinuationByte(byte b) => (b & 0xC0) == 0x80;
 
     private async Task SendInputAsync(
         OperatorSession session,

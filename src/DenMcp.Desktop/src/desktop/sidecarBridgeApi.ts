@@ -822,13 +822,6 @@ export async function messagesGetSnapshot(request: MessagesGetSnapshotRequest): 
 
 // ── Collaboration live-delivery bridge (task #1074) ─────────────────────────
 
-/** Delimiter protocol constants for compiled response terminal framing. */
-export const COLLABORATION_RESPONSE_DELIMITER_OPEN = '[compiled-collaboration-response]';
-export const COLLABORATION_RESPONSE_DELIMITER_CLOSE = '[/compiled-collaboration-response]';
-
-/** Maximum compiled response size before chunking is required (bytes). */
-export const COLLABORATION_RESPONSE_MAX_SINGLE_CHUNK_BYTES = 14_000;
-
 export interface CollaborationSendCompiledResponseRequest {
   session_id: number;
   compiled_text?: string | null;
