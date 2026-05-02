@@ -310,6 +310,8 @@ button:disabled { cursor: default; opacity: 0.55; }
 .desktop-shell[data-rail="hidden"] .left-rail { display: none; }
 .desktop-shell[data-rail="collapsed"] .rail-project-body,
 .desktop-shell[data-rail="collapsed"] .rail-delta,
+.desktop-shell[data-rail="collapsed"] .rail-expand-indicator,
+.desktop-shell[data-rail="collapsed"] .rail-workspace-list,
 .desktop-shell[data-rail="collapsed"] .rail-header span,
 .desktop-shell[data-rail="collapsed"] .rail-section-title,
 .desktop-shell[data-rail="collapsed"] .rail-mode-controls,
@@ -358,6 +360,17 @@ button:disabled { cursor: default; opacity: 0.55; }
 .rail-project-body strong { font-family: var(--font-mono); font-size: var(--fs-xs); }
 .rail-project-body span { color: var(--fg-muted); font-size: var(--fs-2xs); }
 .rail-delta { color: var(--accent); font-family: var(--font-mono); font-size: var(--fs-3xs); }
+.rail-project-group { display: grid; gap: 0; }
+.rail-project.multi-workspace .rail-delta { display: none; }
+.rail-expand-indicator { color: var(--fg-muted); font-size: var(--fs-2xs); transition: transform 0.15s ease; }
+.rail-expand-indicator.expanded { transform: rotate(90deg); }
+.rail-workspace-list { display: grid; gap: 1px; padding-left: var(--sp-3); border-left: 2px solid color-mix(in oklab, var(--accent) 20%, transparent); margin-left: var(--sp-2); }
+.rail-workspace { display: grid; grid-template-columns: auto 1fr; gap: var(--sp-1); align-items: center; padding: var(--sp-1) var(--sp-2); border: none; border-radius: var(--r-sm); background: transparent; color: var(--fg-secondary); cursor: pointer; text-align: left; font-size: var(--fs-2xs); width: 100%; }
+.rail-workspace:hover { background: var(--bg-hover); color: var(--fg-primary); }
+.rail-workspace.active { background: var(--accent-bg); color: var(--fg-primary); border-left: 2px solid var(--accent); }
+.rail-workspace-body { display: grid; gap: 1px; min-width: 0; }
+.rail-workspace-body strong { font-family: var(--font-mono); font-size: var(--fs-3xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-workspace-body span { color: var(--fg-muted); font-size: var(--fs-3xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rail-mode-controls { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
 .rail-mode-controls button.active, .console-controls button.active { color: var(--accent); background: var(--accent-bg); border-color: color-mix(in oklab, var(--accent) 35%, transparent); }
 .rail-action { border: var(--bw) dashed var(--bd-default); border-radius: var(--r-md); background: transparent; color: var(--fg-secondary); padding: var(--sp-2); }
@@ -434,7 +447,7 @@ kbd { border: var(--bw) solid var(--bd-default); border-bottom-color: var(--bd-s
 .tab-intro p { max-width: 760px; }
 .connection-actions { margin-top: var(--sp-4); }
 
-button:not(.tab-button):not(.icon-button):not(.rail-toggle):not(.rail-project):not(.workspace-card):not(.file-button):not(.console-controls button):not(.rail-mode-controls button) { border: var(--bw) solid color-mix(in oklab, var(--accent) 35%, transparent); border-radius: var(--r-lg); padding: 0.65rem 0.9rem; background: var(--accent); color: var(--accent-fg); font-weight: 800; }
+button:not(.tab-button):not(.icon-button):not(.rail-toggle):not(.rail-project):not(.rail-workspace):not(.workspace-card):not(.file-button):not(.console-controls button):not(.rail-mode-controls button) { border: var(--bw) solid color-mix(in oklab, var(--accent) 35%, transparent); border-radius: var(--r-lg); padding: 0.65rem 0.9rem; background: var(--accent); color: var(--accent-fg); font-weight: 800; }
 button.secondary { background: var(--bg-panel-2) !important; color: var(--fg-primary) !important; border-color: var(--bd-default) !important; }
 input, select { width: 100%; border: var(--bw) solid var(--bd-default); border-radius: var(--r-lg); background: var(--bg-input); color: var(--fg-primary); padding: 0.65rem 0.75rem; }
 input:focus, select:focus, button:focus-visible { outline: 2px solid color-mix(in oklab, var(--accent) 55%, transparent); outline-offset: 2px; }

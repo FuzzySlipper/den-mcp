@@ -138,6 +138,10 @@ export function App() {
     }
   };
 
+  const handleSelectSnapshot = (snapshot: LocalGitSnapshot) => {
+    selectSnapshot(snapshot);
+  };
+
   const operatorTab = (
     <div className="operator-tab tab-stack">
       <section className="operator-hero panel surface-panel">
@@ -278,7 +282,9 @@ export function App() {
       diagnostics={runtime.status?.diagnostics ?? []}
       ipcHealth={runtime.ipcHealth}
       activeProjectId={activeSnapshot?.scope.projectId ?? null}
+      activeSnapshotKey={activeSnapshot ? snapshotKey(activeSnapshot) : null}
       onSelectProject={selectProject}
+      onSelectSnapshot={handleSelectSnapshot}
       onRunConsoleCommand={runConsoleCommand}
       consoleCommands={runtime.consoleCommands}
       consoleCommandHistory={runtime.consoleCommandHistory}

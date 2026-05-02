@@ -24,6 +24,7 @@ import { buildConsoleLines, ConsoleCommandHistoryEntry, ConsoleCommandOutputLine
 import { type TaskStatusFilter } from '../tasksDashboardView';
 import { ConsoleDock } from './ConsoleDock';
 import { CommandPalette, type CommandPaletteCallbacks } from './CommandPalette';
+import { isMultiWorkspaceProject, projectRows, workspaceRowLabel, workspaceRowsForProject } from '../railView';
 
 interface AppShellProps {
   state: ShellState;
@@ -35,7 +36,10 @@ interface AppShellProps {
   ipcHealth: IpcHealth | null;
   children: Record<ShellTabId, ReactNode>;
   activeProjectId?: string | null;
+  /** Active snapshot key used to highlight the selected workspace in multi-workspace projects. */
+  activeSnapshotKey?: string | null;
   onSelectProject?: (projectId: string) => void;
+  onSelectSnapshot?: (snapshot: LocalGitSnapshot) => void;
   onRunConsoleCommand?: (command: string) => Promise<void>;
   consoleCommands?: { name: string; displayName: string; description: string; needsTarget: boolean }[];
   consoleCommandHistory?: ConsoleCommandHistoryEntry[];
@@ -45,7 +49,7 @@ interface AppShellProps {
   onTaskStatusFilterOverride?: (filter: TaskStatusFilter | null) => void;
 }
 
-export function AppShell({ state, onStateChange, status, snapshots, sessionSnapshots, diagnostics, ipcHealth, children, activeProjectId, onSelectProject, onRunConsoleCommand, consoleCommands, consoleCommandHistory, activeProgressLines, taskStatusFilterOverride, onTaskStatusFilterOverride }: AppShellProps) {
+export function AppShell({ state, onStateChange, status, snapshots, sessionSnapshots, diagnostics, ipcHealth, children, activeProjectId, activeSnapshotKey, onSelectProject, onSelectSnapshot, onRunConsoleCommand, consoleCommands, consoleCommandHistory, activeProgressLines, taskStatusFilterOverride, onTaskStatusFilterOverride }: AppShellProps) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const setState = (patch: Partial<ShellState>) => onStateChange({ ...state, ...patch });
   const activeTab = shellTabs.some((tab) => tab.id === state.activeTab) ? state.activeTab : 'operator';
@@ -104,7 +108,7 @@ export function AppShell({ state, onStateChange, status, snapshots, sessionSnaps
       <CommandPalette open={paletteOpen} callbacks={paletteCallbacks} />
       <TabBar activeTab={activeTab} onSelect={(tab) => setState({ activeTab: tab })} />
       <div className="shell-main">
-        <LeftRail snapshots={snapshots} activeProjectId={activeProjectId} mode={state.railMode} onModeChange={(railMode) => setState({ railMode })} onSelectProject={onSelectProject} />
+        <LeftRail snapshots={snapshots} activeProjectId={activeProjectId} activeSnapshotKey={activeSnapshotKey} mode={state.railMode} onModeChange={(railMode) => setState({ railMode })} onSelectProject={onSelectProject} onSelectSnapshot={onSelectSnapshot} />
         <section className="tab-canvas" aria-label={`${activeTabTitle} tab content`}>
           {activeTab === 'settings' ? (
             <div className="settings-tab tab-stack">
@@ -199,18 +203,40 @@ function TabBar({ activeTab, onSelect }: { activeTab: ShellTabId; onSelect: (tab
 function LeftRail({
   snapshots,
   activeProjectId,
+  activeSnapshotKey,
   mode,
   onModeChange,
   onSelectProject,
+  onSelectSnapshot,
 }: {
   snapshots: LocalGitSnapshot[];
   activeProjectId?: string | null;
+  activeSnapshotKey?: string | null;
   mode: ShellRailMode;
   onModeChange: (mode: ShellRailMode) => void;
   onSelectProject?: (projectId: string) => void;
+  onSelectSnapshot?: (snapshot: LocalGitSnapshot) => void;
 }) {
   const rows = projectRows(snapshots, activeProjectId ?? null);
   const collapsed = mode === 'collapsed';
+  // Track which multi-workspace project is expanded in the rail.
+  // This is transient UI state, not domain state.
+  const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
+
+  const handleProjectClick = (projectId: string) => {
+    if (isMultiWorkspaceProject(snapshots, projectId)) {
+      // Toggle expand/collapse for multi-workspace projects
+      setExpandedProjectId((prev) => prev === projectId ? null : projectId);
+    } else {
+      // Single-workspace: select directly
+      onSelectProject?.(projectId);
+    }
+  };
+
+  const handleWorkspaceClick = (snapshot: LocalGitSnapshot) => {
+    onSelectSnapshot?.(snapshot);
+    setExpandedProjectId(null);
+  };
 
   return (
     <aside className="left-rail" aria-label="Project rail">
@@ -227,23 +253,54 @@ function LeftRail({
         </button>
       </div>
       <div className="rail-list">
-        {rows.map((row) => (
-          <button
-            key={row.id}
-            type="button"
-            className={`rail-project ${row.active ? 'active' : ''}`}
-            title={collapsed ? `${row.name} · ${row.subtitle}` : undefined}
-            aria-pressed={row.active}
-            onClick={() => onSelectProject?.(row.id)}
-          >
-            <span className={`rail-dot ${row.state}`} aria-hidden="true" />
-            <span className="rail-project-body">
-              <strong>{row.name}</strong>
-              <span>{row.subtitle}</span>
-            </span>
-            <span className="rail-delta">{row.delta}</span>
-          </button>
-        ))}
+        {rows.map((row) => {
+          const multi = row.workspaceCount > 1;
+          const expanded = expandedProjectId === row.id;
+          const workspaces = multi && expanded ? workspaceRowsForProject(snapshots, row.id) : [];
+          return (
+            <div key={row.id} className="rail-project-group">
+              <button
+                type="button"
+                className={`rail-project ${row.active ? 'active' : ''} ${multi ? 'multi-workspace' : ''} ${expanded ? 'expanded' : ''}`}
+                title={collapsed ? `${row.name} · ${row.subtitle}` : undefined}
+                aria-pressed={row.active}
+                aria-expanded={multi ? expanded : undefined}
+                onClick={() => handleProjectClick(row.id)}
+              >
+                <span className={`rail-dot ${row.state}`} aria-hidden="true" />
+                <span className="rail-project-body">
+                  <strong>{row.name}</strong>
+                  <span>{row.subtitle}</span>
+                </span>
+                {multi && !collapsed && <span className={`rail-expand-indicator ${expanded ? 'expanded' : ''}`} aria-hidden="true">{expanded ? '▾' : '▸'}</span>}
+                {!multi && <span className="rail-delta">{row.delta}</span>}
+              </button>
+              {expanded && workspaces.length > 0 && (
+                <div className="rail-workspace-list" role="listbox" aria-label={`${row.name} workspaces`}>
+                  {workspaces.map((ws) => (
+                    <button
+                      key={ws.snapshotKey}
+                      type="button"
+                      role="option"
+                      className={`rail-workspace ${ws.snapshotKey === activeSnapshotKey ? 'active' : ''}`}
+                      aria-selected={ws.snapshotKey === activeSnapshotKey}
+                      onClick={() => handleWorkspaceClick(snapshots.find((s) => {
+                        const key = [s.scope.projectId, s.scope.workspaceId ?? 'project', s.scope.taskId ?? 'none', s.request.root_path].join('::');
+                        return key === ws.snapshotKey;
+                      })!)}
+                    >
+                      <span className={`rail-dot ${ws.state}`} aria-hidden="true" />
+                      <span className="rail-workspace-body">
+                        <strong>{workspaceRowLabel(ws)}</strong>
+                        <span>{ws.branch ?? 'no branch'} · {ws.dirty > 0 ? `±${ws.dirty}` : 'clean'}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
       <div className="rail-section-title">Shell</div>
       <div className="rail-mode-controls" aria-label="Rail mode">
@@ -323,32 +380,7 @@ function Select<T extends string>({ label, value, options, onChange }: { label: 
   );
 }
 
-export function projectRows(snapshots: LocalGitSnapshot[], activeProjectId: string | null = null) {
-  if (snapshots.length === 0) {
-    return [{ id: 'den-mcp', name: 'den-mcp', subtitle: 'awaiting bridge snapshot', delta: '—', state: 'idle', active: true }];
-  }
-
-  const byProject = new Map<string, { dirty: number; workspaces: number; warning: boolean }>();
-  for (const snapshot of snapshots) {
-    const id = snapshot.scope.projectId;
-    const current = byProject.get(id) ?? { dirty: 0, workspaces: 0, warning: false };
-    current.dirty += snapshot.request.dirty_counts.total;
-    current.workspaces += 1;
-    current.warning ||= snapshot.request.warnings.length > 0 || snapshot.request.state !== 'ok';
-    byProject.set(id, current);
-  }
-
-  const sorted = [...byProject.entries()].sort(([a], [b]) => a.localeCompare(b));
-  const activeId = activeProjectId && byProject.has(activeProjectId) ? activeProjectId : sorted[0]?.[0] ?? null;
-  return sorted.map(([id, item]) => ({
-    id,
-    name: id,
-    subtitle: `${item.workspaces} workspace${item.workspaces === 1 ? '' : 's'}`,
-    delta: item.dirty > 0 ? `±${item.dirty}` : 'clean',
-    state: item.warning ? 'warn' : item.dirty > 0 ? 'running' : 'ok',
-    active: id === activeId,
-  }));
-}
+// projectRows moved to railView.ts
 
 function compactTimestamp(value: string): string {
   const date = new Date(value);

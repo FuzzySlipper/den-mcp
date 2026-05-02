@@ -358,7 +358,7 @@ test('Electron shell exposes safe context menu and avoids dead topbar controls',
   assert.match(shellSource, /onClick=\{onOpenSearch\}/);
   assert.match(shellSource, /Notifications are not wired yet" disabled/);
   assert.match(shellSource, /Expand project sidebar/);
-  assert.match(shellSource, /onSelectProject\?\.\(row\.id\)/);
+  assert.match(shellSource, /handleProjectClick\(row\.id\)/);
 });
 
 test('built Electron dev launch uses sandbox-compatible preload and relative Vite asset URLs', async () => {
