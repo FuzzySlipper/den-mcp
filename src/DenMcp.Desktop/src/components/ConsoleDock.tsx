@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { ShellConsoleMode, shellConsoleModes } from '../shellState';
-import { ConsoleCommandHistoryEntry, ConsoleCommandOutputLine, ConsoleLine } from '../consoleLines';
+import { ConsoleCommandHistoryEntry, ConsoleCommandLine, ConsoleLine } from '../consoleLines';
 
 interface ConsoleDockProps {
   mode: ShellConsoleMode;
@@ -10,7 +10,9 @@ interface ConsoleDockProps {
   consoleCommands?: { name: string; displayName: string; description: string; needsTarget: boolean }[];
   consoleCommandHistory?: ConsoleCommandHistoryEntry[];
   /** In-flight progress lines from the currently running command. */
-  activeProgressLines?: ConsoleCommandOutputLine[];
+  activeProgressLines?: ConsoleCommandLine[];
+  /** Name of the currently running command for the in-flight progress header. */
+  activeProgressCommand?: string;
 }
 
 type InputMode = 'filter' | 'palette' | 'agent';
@@ -38,6 +40,7 @@ export function ConsoleDock({
   consoleCommands,
   consoleCommandHistory,
   activeProgressLines,
+  activeProgressCommand,
 }: ConsoleDockProps) {
   const [inputValue, setInputValue] = useState('');
   const [runningCommand, setRunningCommand] = useState(false);
@@ -51,11 +54,13 @@ export function ConsoleDock({
     const result: { kind: 'diag' | 'cmd-start' | 'cmd-line' | 'cmd-end' | 'progress-line'; data: unknown; key: string }[] = [];
 
     // When showing command history, prepend history entries
-    // In-flight progress lines: rendered before history when a command is running
+    // In-flight progress lines: rendered before history when a command is running.
+    // Shows the actual command name in the header and a closing delimiter.
     if (activeProgressLines && activeProgressLines.length > 0) {
+      const progressCommand = activeProgressCommand || '…';
       result.push({
         kind: 'cmd-start',
-        data: { command: '…', executedAt: new Date().toISOString(), lines: [], status: 'success' } as ConsoleCommandHistoryEntry,
+        data: { command: progressCommand, executedAt: new Date().toISOString(), lines: [], status: 'running' as const },
         key: 'progress:running',
       });
       for (let i = 0; i < activeProgressLines.length; i++) {
@@ -65,6 +70,12 @@ export function ConsoleDock({
           key: `progress:${i}`,
         });
       }
+      // Close the in-flight progress block with a delimiter
+      result.push({
+        kind: 'cmd-end',
+        data: null,
+        key: 'progress:running:end',
+      });
     }
 
     if (showHistory && consoleCommandHistory && consoleCommandHistory.length > 0) {
@@ -139,7 +150,7 @@ export function ConsoleDock({
     }
 
     return result;
-  }, [lines, inputValue, inputMode, showHistory, consoleCommandHistory, activeProgressLines]);
+  }, [lines, inputValue, inputMode, showHistory, consoleCommandHistory, activeProgressLines, activeProgressCommand]);
 
   const modeIndicator = inputMode !== 'filter'
     ? (inputMode === 'palette' ? '[command]' : '[agent prompt]')
@@ -252,13 +263,14 @@ export function ConsoleDock({
             displayLines.map((item) => {
               if (item.kind === 'cmd-start') {
                 const entry = item.data as ConsoleCommandHistoryEntry;
+                const isRunning = entry.status === 'running';
+                const statusLabel = isRunning ? 'run' : entry.status === 'success' ? 'ok' : 'err';
+                const statusClass = isRunning ? 'run' : entry.status === 'success' ? 'ok' : 'err';
                 return (
-                  <div className="console-line console-cmd-header" key={item.key}>
+                  <div className={`console-line console-cmd-header ${isRunning ? 'console-cmd-inflight' : ''}`} key={item.key}>
                     <span className="ts">{formatTimestampShort(entry.executedAt)}</span>
-                    <span className={`lvl ${entry.status === 'success' ? 'ok' : 'err'}`}>
-                      {entry.status === 'success' ? 'ok' : 'err'}
-                    </span>
-                    <span className="console-cmd-name">▶ {entry.command}</span>
+                    <span className={`lvl ${statusClass}`}>{statusLabel}</span>
+                    <span className="console-cmd-name">{isRunning ? '⟳' : '▶'} {entry.command}</span>
                     {entry.errorMessage ? (
                       <span className="console-cmd-error">{entry.errorMessage}</span>
                     ) : null}

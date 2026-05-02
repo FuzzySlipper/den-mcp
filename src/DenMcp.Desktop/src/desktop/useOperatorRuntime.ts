@@ -45,6 +45,8 @@ export interface RuntimeState {
   consoleCommands: ConsoleCommandDefinition[];
   consoleCommandHistory: ConsoleCommandHistoryEntry[];
   activeProgressLines: ConsoleCommandLine[];
+  /** Name of the currently running command (null when idle). */
+  activeProgressCommand: string | null;
   runConsoleCommand: (command: string, options?: { projectId?: string | null; taskId?: number | null; workspaceId?: string | null; sessionId?: string | null }) => Promise<ConsoleCommandRunResponse>;
 }
 
@@ -64,6 +66,7 @@ export function useOperatorRuntime(): RuntimeState {
   const [consoleCommands, setConsoleCommands] = useState<ConsoleCommandDefinition[]>([]);
   const [consoleCommandHistory, setConsoleCommandHistory] = useState<ConsoleCommandHistoryEntry[]>([]);
   const [activeProgressLines, setActiveProgressLines] = useState<ConsoleCommandLine[]>([]);
+  const [activeProgressCommand, setActiveProgressCommand] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -313,6 +316,7 @@ export function useOperatorRuntime(): RuntimeState {
 
       // Clear any previous in-flight progress lines
       setActiveProgressLines([]);
+      setActiveProgressCommand(command);
 
       let response: ConsoleCommandRunResponse;
       try {
@@ -327,6 +331,7 @@ export function useOperatorRuntime(): RuntimeState {
         // Clear in-flight progress lines once the command settles, whether the
         // final response succeeds or the bridge call fails.
         setActiveProgressLines([]);
+        setActiveProgressCommand(null);
       }
 
       const executedAt = new Date().toISOString();
@@ -405,8 +410,9 @@ export function useOperatorRuntime(): RuntimeState {
       consoleCommands,
       consoleCommandHistory,
       activeProgressLines,
+      activeProgressCommand,
       runConsoleCommand,
     }),
-    [status, settings, appearanceSettings, snapshots, sessionSnapshots, ipcHealth, loading, error, refresh, saveSettings, saveAppearanceCallback, consoleCommands, consoleCommandHistory, activeProgressLines, runConsoleCommand],
+    [status, settings, appearanceSettings, snapshots, sessionSnapshots, ipcHealth, loading, error, refresh, saveSettings, saveAppearanceCallback, consoleCommands, consoleCommandHistory, activeProgressLines, activeProgressCommand, runConsoleCommand],
   );
 }

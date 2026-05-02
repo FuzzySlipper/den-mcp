@@ -20,7 +20,7 @@ import {
 } from '../shellState';
 import { DiagnosticEntry, LocalGitSnapshot, LocalSessionSnapshot, OperatorStatus } from '../desktop/sidecarBridgeApi';
 import { IpcHealth } from '../desktop/ipcHealth';
-import { buildConsoleLines, ConsoleCommandHistoryEntry, ConsoleCommandOutputLine } from '../consoleLines';
+import { buildConsoleLines, ConsoleCommandHistoryEntry, ConsoleCommandLine } from '../consoleLines';
 import { type TaskStatusFilter } from '../tasksDashboardView';
 import { ConsoleDock } from './ConsoleDock';
 import { CommandPalette, type CommandPaletteCallbacks } from './CommandPalette';
@@ -43,13 +43,15 @@ interface AppShellProps {
   onRunConsoleCommand?: (command: string) => Promise<void>;
   consoleCommands?: { name: string; displayName: string; description: string; needsTarget: boolean }[];
   consoleCommandHistory?: ConsoleCommandHistoryEntry[];
-  activeProgressLines?: ConsoleCommandOutputLine[];
+  activeProgressLines?: ConsoleCommandLine[];
+  /** Name of the currently running command for the in-flight progress header. */
+  activeProgressCommand?: string;
   /** External task-filter override driven by command palette; null = no override. */
   taskStatusFilterOverride?: TaskStatusFilter | null;
   onTaskStatusFilterOverride?: (filter: TaskStatusFilter | null) => void;
 }
 
-export function AppShell({ state, onStateChange, status, snapshots, sessionSnapshots, diagnostics, ipcHealth, children, activeProjectId, activeSnapshotKey, onSelectProject, onSelectSnapshot, onRunConsoleCommand, consoleCommands, consoleCommandHistory, activeProgressLines, taskStatusFilterOverride, onTaskStatusFilterOverride }: AppShellProps) {
+export function AppShell({ state, onStateChange, status, snapshots, sessionSnapshots, diagnostics, ipcHealth, children, activeProjectId, activeSnapshotKey, onSelectProject, onSelectSnapshot, onRunConsoleCommand, consoleCommands, consoleCommandHistory, activeProgressLines, activeProgressCommand, taskStatusFilterOverride, onTaskStatusFilterOverride }: AppShellProps) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const setState = (patch: Partial<ShellState>) => onStateChange({ ...state, ...patch });
   const activeTab = shellTabs.some((tab) => tab.id === state.activeTab) ? state.activeTab : 'operator';
@@ -126,6 +128,7 @@ export function AppShell({ state, onStateChange, status, snapshots, sessionSnaps
         consoleCommands={consoleCommands}
         consoleCommandHistory={consoleCommandHistory}
         activeProgressLines={activeProgressLines}
+        activeProgressCommand={activeProgressCommand}
       />
       <StatusBar status={status} snapshots={snapshots} sessionSnapshots={sessionSnapshots} state={state} />
     </div>

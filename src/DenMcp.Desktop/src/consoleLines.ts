@@ -1,4 +1,12 @@
 import { ipcHealthState, ipcHealthSummary, formatDuration, STALE_IPC_AFTER_MS } from './desktop/ipcHealth.ts';
+// Re-export the canonical bridge type so consumers can import from either path.
+// consoleLines is the UI-side model module; sidecarBridgeApi is the protocol-level
+// definition. The canonical shape lives in sidecarBridgeApi (mirroring sidecarProtocol)
+// and is re-exported here for convenience.
+export type { ConsoleCommandLine } from './desktop/sidecarBridgeApi.ts';
+
+/** @deprecated Use ConsoleCommandLine (canonical bridge name) instead. */
+export type ConsoleCommandOutputLine = import('./desktop/sidecarBridgeApi.ts').ConsoleCommandLine;
 
 export interface ConsoleLine {
   ts: string;
@@ -7,24 +15,14 @@ export interface ConsoleLine {
 }
 
 /**
- * Structured command output line as returned by the sidecar console command runner.
- * Mirrors ConsoleCommandLine from the .NET sidecar DTOs.
- */
-export interface ConsoleCommandOutputLine {
-  level: string;
-  timestamp: string;
-  source: string;
-  message: string;
-}
-
-/**
  * An entry in the console command history: what was run and what the structured output was.
+ * status may be 'running' for in-flight progress entries rendered by ConsoleDock.
  */
 export interface ConsoleCommandHistoryEntry {
   command: string;
   executedAt: string;
-  lines: ConsoleCommandOutputLine[];
-  status: 'success' | 'error';
+  lines: import('./desktop/sidecarBridgeApi.ts').ConsoleCommandLine[];
+  status: 'success' | 'error' | 'running';
   errorMessage?: string | null;
 }
 

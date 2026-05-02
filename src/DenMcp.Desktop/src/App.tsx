@@ -289,6 +289,7 @@ export function App() {
       consoleCommands={runtime.consoleCommands}
       consoleCommandHistory={runtime.consoleCommandHistory}
       activeProgressLines={runtime.activeProgressLines}
+      activeProgressCommand={runtime.activeProgressCommand ?? undefined}
       taskStatusFilterOverride={taskStatusFilterOverride}
       onTaskStatusFilterOverride={setTaskStatusFilterOverride}
     >
