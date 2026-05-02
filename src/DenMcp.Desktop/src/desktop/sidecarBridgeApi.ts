@@ -759,12 +759,8 @@ export function onAppAgentToolCallState(callback: (event: AppAgentToolCallStateE
 
 // ── Tasks dashboard snapshot (#1028/#1029) ──
 
-export interface TasksDashboardGetSnapshotRequest {
-  project_id: string;
-  parent_task_id?: number | null;
-  focused_task_id?: number | null;
-  include_done?: boolean;
-}
+/** Re-export the canonical protocol request type to avoid duplication drift. */
+export type TasksDashboardGetSnapshotRequest = TasksDashboardSnapshotRequest;
 
 export type TasksDashboardGetSnapshotResponse = TasksDashboardSnapshot;
 
@@ -815,7 +811,7 @@ export interface MessagesGetSnapshotResponse {
 }
 
 export async function tasksGetDashboardSnapshot(request: TasksDashboardGetSnapshotRequest): Promise<TasksDashboardGetSnapshotResponse> {
-  return callSidecar('tasksGetDashboardSnapshot', () => sidecarApi().tasksGetDashboardSnapshot(request as TasksDashboardSnapshotRequest));
+  return callSidecar('tasksGetDashboardSnapshot', () => sidecarApi().tasksGetDashboardSnapshot(request));
 }
 
 export async function messagesGetSnapshot(request: MessagesGetSnapshotRequest): Promise<MessagesGetSnapshotResponse> {

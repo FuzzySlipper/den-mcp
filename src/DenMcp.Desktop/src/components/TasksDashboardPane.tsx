@@ -16,6 +16,8 @@ import {
   priorityLabel,
   priorityTone,
   progressStageLabel,
+  PROGRESS_STAGES,
+  PROGRESS_STAGE_SHORT_LABELS,
   relativeTimeLabel,
   sortTasks,
   taskStatusLabel,
@@ -417,20 +419,20 @@ function TaskDetailSection({ task }: { task: TaskRowView }) {
 }
 
 function ProgressStrip({ stage, index }: { stage: string; index: number }) {
-  const stages = ['planned', 'context', 'coder', 'impl', 'validate', 'drift', 'review', 'approved', 'merged'];
-  const stageNames = ['Planned', 'Context', 'Coder', 'Impl', 'Validate', 'Drift', 'Review', 'Approved', 'Merged'];
+  const stages = PROGRESS_STAGES;
   const currentIndex = Math.min(index, stages.length - 1);
+  const isDone = stage === 'done';
 
   return (
     <div className="tasks-progress-strip" aria-label={`Progress: ${progressStageLabel(stage as any)}`}>
       {stages.map((s, i) => (
         <div
           key={s}
-          className={`tasks-progress-step ${i < currentIndex ? 'completed' : ''} ${i === currentIndex ? 'active' : ''}`}
-          title={stageNames[i]}
+          className={`tasks-progress-step ${i < currentIndex || isDone ? 'completed' : ''} ${i === currentIndex && !isDone ? 'active' : ''}`}
+          title={PROGRESS_STAGE_SHORT_LABELS[s]}
         >
           <span className="tasks-progress-dot" />
-          {i === currentIndex && <span className="tasks-progress-current">{progressStageLabel(stage as any)}</span>}
+          {i === currentIndex && !isDone && <span className="tasks-progress-current">{progressStageLabel(stage as any)}</span>}
         </div>
       ))}
     </div>

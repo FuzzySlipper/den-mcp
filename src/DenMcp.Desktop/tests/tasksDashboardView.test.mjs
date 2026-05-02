@@ -19,6 +19,8 @@ import {
   taskStatusLabel,
   truncateText,
   waveDisplayTone,
+  PROGRESS_STAGES,
+  PROGRESS_STAGE_SHORT_LABELS,
 } from '../src/tasksDashboardView.ts';
 
 function makeSnapshot(overrides = {}) {
@@ -351,11 +353,10 @@ test('progressStageIndex returns correct index', () => {
   assert.equal(progressStageIndex('validation_passed'), 4);
   assert.equal(progressStageIndex('drift_check_complete'), 5);
   assert.equal(progressStageIndex('review_requested'), 6);
-  assert.equal(progressStageIndex('approved'), 7);
-  assert.equal(progressStageIndex('merged'), 8);
-  assert.equal(progressStageIndex('done'), 9);
-  // changes_requested is not in the stages list, so it returns 0 (fallback)
-  assert.equal(progressStageIndex('changes_requested'), 0);
+  assert.equal(progressStageIndex('changes_requested'), 7);
+  assert.equal(progressStageIndex('approved'), 8);
+  assert.equal(progressStageIndex('merged'), 9);
+  assert.equal(progressStageIndex('done'), 10);
 });
 
 test('progressStageLabel returns human-readable labels', () => {
@@ -630,4 +631,53 @@ test('task row view handles missing parity fields gracefully', () => {
   assert.equal(task.subtaskCount, 0);
   assert.deepEqual(task.subtaskIds, []);
   assert.equal(task.createdAt, null);
+});
+
+test('changes_requested stage is ordered after review_requested and before approved', () => {
+  const reviewRequestedIdx = progressStageIndex('review_requested');
+  const changesRequestedIdx = progressStageIndex('changes_requested');
+  const approvedIdx = progressStageIndex('approved');
+
+  assert.ok(changesRequestedIdx > reviewRequestedIdx, 'changes_requested should come after review_requested');
+  assert.ok(changesRequestedIdx < approvedIdx, 'changes_requested should come before approved');
+});
+
+test('review_findings_packet maps to changes_requested stage', () => {
+  const packets = [
+    { type: 'review_findings_packet', created_at: '2026-04-30T00:04:00.000Z' },
+  ];
+  const result = extractPacketSummaries(packets);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].stage, 'changes_requested');
+});
+
+test('deriveProgressStage resolves changes_requested from packets', () => {
+  const packets = [
+    { type: 'review_findings_packet', label: 'Review findings', stage: 'changes_requested', timestamp: null, details: null },
+    { type: 'review_request_packet', label: 'Review requested', stage: 'review_requested', timestamp: null, details: null },
+  ];
+
+  assert.equal(deriveProgressStage(packets, 'in_progress'), 'changes_requested');
+});
+
+test('PROGRESS_STAGES includes all ProgressStage union members', () => {
+  const stageSet = new Set(PROGRESS_STAGES);
+  const expectedStages = [
+    'planned', 'context_prepared', 'coder_running', 'implementation_posted',
+    'validation_passed', 'drift_check_complete', 'review_requested',
+    'changes_requested', 'approved', 'merged', 'done',
+  ];
+  for (const stage of expectedStages) {
+    assert.ok(stageSet.has(stage), `PROGRESS_STAGES should include ${stage}`);
+  }
+  assert.equal(PROGRESS_STAGES.length, expectedStages.length, `PROGRESS_STAGES should have exactly ${expectedStages.length} entries`);
+});
+
+test('PROGRESS_STAGE_SHORT_LABELS covers all stages', () => {
+  const stages = ['planned', 'context_prepared', 'coder_running', 'implementation_posted',
+    'validation_passed', 'drift_check_complete', 'review_requested',
+    'changes_requested', 'approved', 'merged', 'done'];
+  for (const stage of stages) {
+    assert.ok(typeof PROGRESS_STAGE_SHORT_LABELS[stage] === 'string', `short label for ${stage} should exist`);
+  }
 });

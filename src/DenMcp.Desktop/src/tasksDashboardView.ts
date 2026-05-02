@@ -189,6 +189,7 @@ export const PROGRESS_STAGES: readonly ProgressStage[] = [
   'validation_passed',
   'drift_check_complete',
   'review_requested',
+  'changes_requested',
   'approved',
   'merged',
   'done',
@@ -202,8 +203,23 @@ const PROGRESS_STAGE_LABELS: Record<ProgressStage, string> = {
   validation_passed: 'Validation passed',
   drift_check_complete: 'Drift check complete',
   review_requested: 'Review requested',
-  approved: 'Approved',
   changes_requested: 'Changes requested',
+  approved: 'Approved',
+  merged: 'Merged',
+  done: 'Done',
+};
+
+/** Short labels for progress strip dot rendering (one word per stage). */
+export const PROGRESS_STAGE_SHORT_LABELS: Record<ProgressStage, string> = {
+  planned: 'Planned',
+  context_prepared: 'Context',
+  coder_running: 'Coder',
+  implementation_posted: 'Impl',
+  validation_passed: 'Validate',
+  drift_check_complete: 'Drift',
+  review_requested: 'Review',
+  changes_requested: 'Changes',
+  approved: 'Approved',
   merged: 'Merged',
   done: 'Done',
 };
