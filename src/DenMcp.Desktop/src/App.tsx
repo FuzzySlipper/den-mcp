@@ -15,6 +15,7 @@ import { getLatestDiffSnapshot } from './desktop/sidecarBridgeApi';
 import type { DesktopDiffSnapshotLatestResult, GitFileStatus, LocalGitSnapshot, ShellAppearanceSettings } from './desktop/sidecarBridgeApi';
 import { useOperatorRuntime } from './desktop/useOperatorRuntime';
 import { applyShellDataAttributes, defaultShellState, loadShellState, nextConsoleMode, parseShellState, saveShellState, ShellState, ShellTabId } from './shellState';
+import { type TaskStatusFilter } from './tasksDashboardView';
 import { buildLatestDiffSnapshotRequest, snapshotKey } from './snapshotView';
 import './styles/index.css';
 
@@ -51,6 +52,7 @@ export function App() {
   }, [runtime.appearanceSettings]);
   const [activeSnapshotKey, setActiveSnapshotKey] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<GitFileStatus | null>(null);
+  const [taskStatusFilterOverride, setTaskStatusFilterOverride] = useState<TaskStatusFilter | null>(null);
   const [diff, setDiff] = useState<DesktopDiffSnapshotLatestResult | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffError, setDiffError] = useState<string | null>(null);
@@ -249,7 +251,7 @@ export function App() {
   const tabContent: Record<ShellTabId, ReactNode> = {
     operator: operatorTab,
     agent: <AgentPane selection={agentSelection} />,
-    tasks: <TasksDashboardPane projectId={activeSnapshot?.scope.projectId ?? null} parentTaskId={activeSnapshot?.scope.taskId ?? null} />,
+    tasks: <TasksDashboardPane projectId={activeSnapshot?.scope.projectId ?? null} parentTaskId={activeSnapshot?.scope.taskId ?? null} statusFilterOverride={taskStatusFilterOverride} />,
     messages: <MessagesPane projectId={activeSnapshot?.scope.projectId ?? null} taskId={activeSnapshot?.scope.taskId ?? null} />,
     git: gitTab,
     compare: <StubSurface eyebrow="Compare" title="Multi-worktree compare" description="Routed surface reserved for pinned worktree panes and side-by-side terminal/output comparison without making renderer state authoritative." />,
@@ -281,6 +283,8 @@ export function App() {
       consoleCommands={runtime.consoleCommands}
       consoleCommandHistory={runtime.consoleCommandHistory}
       activeProgressLines={runtime.activeProgressLines}
+      taskStatusFilterOverride={taskStatusFilterOverride}
+      onTaskStatusFilterOverride={setTaskStatusFilterOverride}
     >
       {tabContent}
     </AppShell>

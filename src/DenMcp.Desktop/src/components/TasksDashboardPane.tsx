@@ -36,13 +36,15 @@ import {
 interface Props {
   projectId: string | null;
   parentTaskId?: number | null;
+  /** External filter override from command palette; takes precedence when set. */
+  statusFilterOverride?: TaskStatusFilter | null;
 }
 
 const REFRESH_INTERVAL_MS = 30_000;
 const STATUS_FILTERS: TaskStatusFilter[] = ['all', 'in_progress', 'review', 'blocked', 'planned', 'done', 'cancelled'];
 const SORT_MODES: TaskSortMode[] = ['priority', 'status', 'id', 'title', 'updated'];
 
-export function TasksDashboardPane({ projectId, parentTaskId }: Props) {
+export function TasksDashboardPane({ projectId, parentTaskId, statusFilterOverride }: Props) {
   const [snapshot, setSnapshot] = useState<TasksDashboardSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -87,10 +89,13 @@ export function TasksDashboardPane({ projectId, parentTaskId }: Props) {
 
   const view = useMemo(() => buildDashboardView(snapshot, focusedTaskId), [snapshot, focusedTaskId]);
 
+  // When command palette overrides the filter, apply it once then clear the override
+  const effectiveStatusFilter: TaskStatusFilter = statusFilterOverride ?? statusFilter;
+
   const displayedTasks = useMemo(() => {
-    const filtered = filterTasksByStatus(view.tasks, statusFilter);
+    const filtered = filterTasksByStatus(view.tasks, effectiveStatusFilter);
     return sortTasks(filtered, sortMode);
-  }, [view.tasks, statusFilter, sortMode]);
+  }, [view.tasks, effectiveStatusFilter, sortMode]);
 
   // No project selected
   if (!projectId) {
@@ -120,7 +125,7 @@ export function TasksDashboardPane({ projectId, parentTaskId }: Props) {
       {snapshot ? (
         <>
           <TasksFilterBar
-            statusFilter={statusFilter}
+            statusFilter={effectiveStatusFilter}
             sortMode={sortMode}
             onStatusFilterChange={setStatusFilter}
             onSortModeChange={setSortMode}

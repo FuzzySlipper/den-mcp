@@ -1,4 +1,4 @@
-import { ReactNode, useMemo } from 'react';
+import { ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ShellAccent,
   ShellBodyFont,
@@ -7,6 +7,7 @@ import {
   ShellState,
   ShellTabId,
   ShellTheme,
+  nextConsoleMode,
   nextTheme,
   shellAccents,
   shellBodyFonts,
@@ -20,7 +21,9 @@ import {
 import { DiagnosticEntry, LocalGitSnapshot, LocalSessionSnapshot, OperatorStatus } from '../desktop/sidecarBridgeApi';
 import { IpcHealth } from '../desktop/ipcHealth';
 import { buildConsoleLines, ConsoleCommandHistoryEntry, ConsoleCommandOutputLine } from '../consoleLines';
+import { type TaskStatusFilter } from '../tasksDashboardView';
 import { ConsoleDock } from './ConsoleDock';
+import { CommandPalette, type CommandPaletteCallbacks } from './CommandPalette';
 
 interface AppShellProps {
   state: ShellState;
@@ -37,9 +40,13 @@ interface AppShellProps {
   consoleCommands?: { name: string; displayName: string; description: string; needsTarget: boolean }[];
   consoleCommandHistory?: ConsoleCommandHistoryEntry[];
   activeProgressLines?: ConsoleCommandOutputLine[];
+  /** External task-filter override driven by command palette; null = no override. */
+  taskStatusFilterOverride?: TaskStatusFilter | null;
+  onTaskStatusFilterOverride?: (filter: TaskStatusFilter | null) => void;
 }
 
-export function AppShell({ state, onStateChange, status, snapshots, sessionSnapshots, diagnostics, ipcHealth, children, activeProjectId, onSelectProject, onRunConsoleCommand, consoleCommands, consoleCommandHistory, activeProgressLines }: AppShellProps) {
+export function AppShell({ state, onStateChange, status, snapshots, sessionSnapshots, diagnostics, ipcHealth, children, activeProjectId, onSelectProject, onRunConsoleCommand, consoleCommands, consoleCommandHistory, activeProgressLines, taskStatusFilterOverride, onTaskStatusFilterOverride }: AppShellProps) {
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const setState = (patch: Partial<ShellState>) => onStateChange({ ...state, ...patch });
   const activeTab = shellTabs.some((tab) => tab.id === state.activeTab) ? state.activeTab : 'operator';
   const activeTabTitle = shellTabs.find((tab) => tab.id === activeTab)?.label ?? 'operator';
@@ -55,6 +62,34 @@ export function AppShell({ state, onStateChange, status, snapshots, sessionSnaps
     [diagnostics, ipcHealth, status?.denConnection, status?.observerStatuses, status?.lastSyncAt],
   );
 
+  const paletteCallbacks: CommandPaletteCallbacks = useMemo(
+    () => ({
+      onNavigate: (tab) => setState({ activeTab: tab }),
+      onFilterTasks: (filter) => {
+        setState({ activeTab: 'tasks' });
+        onTaskStatusFilterOverride?.(filter);
+      },
+      onCycleTheme: () => setState({ theme: nextTheme(state.theme) }),
+      onToggleConsole: () => setState({ consoleMode: nextConsoleMode(state.consoleMode) }),
+      onClose: () => setPaletteOpen(false),
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.theme, state.consoleMode, onTaskStatusFilterOverride],
+  );
+
+  // Global Ctrl+K shortcut to open palette
+  const handleGlobalKeyDown = useCallback((e: KeyboardEvent) => {
+    if (!paletteOpen && (e.ctrlKey || e.metaKey) && e.key === 'k') {
+      e.preventDefault();
+      setPaletteOpen(true);
+    }
+  }, [paletteOpen]);
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [handleGlobalKeyDown]);
+
   return (
     <div className="desktop-shell" {...dataAttributes}>
       <Titlebar
@@ -64,8 +99,9 @@ export function AppShell({ state, onStateChange, status, snapshots, sessionSnaps
         accent={state.accent}
         onCycleTheme={() => setState({ theme: nextTheme(state.theme) })}
         onOpenSettings={() => setState({ activeTab: 'settings' })}
-        onOpenSearch={() => setState({ activeTab: 'tasks' })}
+        onOpenSearch={() => setPaletteOpen(true)}
       />
+      <CommandPalette open={paletteOpen} callbacks={paletteCallbacks} />
       <TabBar activeTab={activeTab} onSelect={(tab) => setState({ activeTab: tab })} />
       <div className="shell-main">
         <LeftRail snapshots={snapshots} activeProjectId={activeProjectId} mode={state.railMode} onModeChange={(railMode) => setState({ railMode })} onSelectProject={onSelectProject} />
@@ -130,7 +166,7 @@ function Titlebar({
         <span className="titlebar-run"><span>sync</span>{syncId}</span>
       </div>
       <div className="titlebar-actions">
-        <button type="button" className="icon-button" title="Open Tasks search context" onClick={onOpenSearch}>⌕</button>
+        <button type="button" className="icon-button" title="Command palette (Ctrl+K)" onClick={onOpenSearch}>⌕</button>
         <button type="button" className="icon-button" title="Notifications are not wired yet" disabled>▽</button>
         <button type="button" className="icon-button" title={`Cycle theme (${theme})`} onClick={onCycleTheme}>◐</button>
         <button type="button" className="icon-button" title={`Settings · ${accent}`} onClick={onOpenSettings}>⚙</button>
