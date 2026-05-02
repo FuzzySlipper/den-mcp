@@ -176,8 +176,8 @@ test('replay_complete urgency decision documented: attach flow already refreshes
   // Decision record for #1064: den.terminal.replay_complete remains coalesced.
   //
   // Rationale:
-  // 1. The attach flow in SessionPane.attachToSession calls refreshSessionsNow() after
-  //    receiving the attach response — capabilities and session state are already current.
+  // 1. The attach flow triggers an immediate session-list refresh after receiving the
+  //    attach response — capabilities and session state are already current.
   // 2. replay_complete fires once after the sidecar finishes replaying buffered output;
   //    it signals a streaming milestone, not a state/capability boundary.
   // 3. Making it immediate would add a redundant session-list refresh with no UX benefit.
