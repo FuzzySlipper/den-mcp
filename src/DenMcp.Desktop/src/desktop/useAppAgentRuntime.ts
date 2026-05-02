@@ -22,7 +22,7 @@ import {
   appAgentListTools,
   onAppAgentRunState,
   onAppAgentToolCallState,
-} from './tauriApi';
+} from './sidecarBridgeApi';
 import type { AppAgentBuildContextRequest, AppAgentInvokeToolRequest } from '../electron/sidecarProtocol.ts';
 import type { JsonValue } from '../bridge/contract.ts';
 import { normalizeAppAgentSelection } from './appAgentSelection.ts';

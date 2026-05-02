@@ -17,7 +17,7 @@ import {
   shellTabs,
   shellThemes,
 } from '../shellState';
-import { DiagnosticEntry, LocalGitSnapshot, LocalSessionSnapshot, OperatorStatus } from '../desktop/tauriApi';
+import { DiagnosticEntry, LocalGitSnapshot, LocalSessionSnapshot, OperatorStatus } from '../desktop/sidecarBridgeApi';
 import { IpcHealth } from '../desktop/ipcHealth';
 import { buildConsoleLines, ConsoleCommandHistoryEntry, ConsoleCommandOutputLine } from '../consoleLines';
 import { ConsoleDock } from './ConsoleDock';

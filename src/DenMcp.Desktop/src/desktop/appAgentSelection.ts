@@ -1,4 +1,4 @@
-import type { AppAgentSelection } from './tauriApi.ts';
+import type { AppAgentSelection } from './sidecarBridgeApi.ts';
 
 export function normalizeAppAgentSelection(selection: AppAgentSelection): AppAgentSelection {
   return {

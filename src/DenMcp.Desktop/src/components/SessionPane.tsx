@@ -25,7 +25,7 @@ import {
   TerminalOutputEvent,
   TerminalSessionSummary,
   TerminalStatusEvent,
-} from '../desktop/tauriApi';
+} from '../desktop/sidecarBridgeApi';
 import {
   buildTerminalSessionOverview,
   canAttachInline,

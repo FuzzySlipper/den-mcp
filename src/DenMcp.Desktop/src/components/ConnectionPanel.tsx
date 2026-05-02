@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { OperatorSettings, OperatorStatus, SaveOperatorSettingsRequest } from '../desktop/tauriApi';
+import { OperatorSettings, OperatorStatus, SaveOperatorSettingsRequest } from '../desktop/sidecarBridgeApi';
 
 interface Props {
   status: OperatorStatus | null;

@@ -230,7 +230,7 @@ Suitability: strong product and architecture reference.
 
 Helpful patterns:
 
-- Native desktop app with Tauri, React, Rust, TypeScript, CodeMirror, and xterm.js.
+- Native desktop app (originally Tauri, now Electron + .NET sidecar) with React, TypeScript, CodeMirror, and xterm.js.
 - Multi-project and worktree management.
 - Multiple sessions per worktree.
 - Execution modes such as Plan, Build, and Yolo, including plan approval flows.

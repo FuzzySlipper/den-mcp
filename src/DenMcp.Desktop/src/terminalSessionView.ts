@@ -1,4 +1,4 @@
-import type { LocalSessionSnapshot, TerminalSessionSummary } from './desktop/tauriApi.ts';
+import type { LocalSessionSnapshot, TerminalSessionSummary } from './desktop/sidecarBridgeApi.ts';
 import { recentActivityItems, type RecentActivityItem } from './sessionView.ts';
 
 export type TerminalOverviewAuthority = 'local' | 'observed';

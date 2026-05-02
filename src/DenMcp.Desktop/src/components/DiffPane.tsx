@@ -1,4 +1,4 @@
-import { DesktopDiffSnapshotLatestResult, GitFileStatus, LocalGitSnapshot } from '../desktop/tauriApi';
+import { DesktopDiffSnapshotLatestResult, GitFileStatus, LocalGitSnapshot } from '../desktop/sidecarBridgeApi';
 import { diffStatusMessage } from '../snapshotView';
 
 interface Props {

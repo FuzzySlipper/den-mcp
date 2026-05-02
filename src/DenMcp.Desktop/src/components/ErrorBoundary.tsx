@@ -36,7 +36,7 @@ export class ErrorBoundary extends Component<Props, State> {
           <p className="eyebrow">Desktop UI degraded</p>
           <h1>Something in the operator surface crashed.</h1>
           <p className="muted">
-            The local Tauri shell is still running. You can try to reset the React shell or reload the window without treating this as a Den outage.
+            The local Electron shell is still running. You can try to reset the React shell or reload the window without treating this as a Den outage.
           </p>
           <p className="error-note">{this.state.error.message}</p>
           {this.state.errorInfo?.componentStack && <pre>{this.state.errorInfo.componentStack}</pre>}

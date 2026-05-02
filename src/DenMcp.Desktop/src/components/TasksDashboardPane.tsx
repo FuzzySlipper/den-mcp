@@ -6,7 +6,7 @@ import type {
 import {
   tasksGetDashboardSnapshot,
   type TasksDashboardGetSnapshotRequest,
-} from '../desktop/tauriApi.ts';
+} from '../desktop/sidecarBridgeApi.ts';
 import {
   buildDashboardView,
   copyToClipboard,

@@ -25,7 +25,7 @@ import {
   saveOperatorSettings,
   SaveOperatorSettingsRequest,
   ShellAppearanceSettings,
-} from './tauriApi';
+} from './sidecarBridgeApi';
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const WATCHDOG_INTERVAL_MS = 5_000;

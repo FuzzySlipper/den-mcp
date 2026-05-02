@@ -28,7 +28,7 @@ export interface ConsoleCommandHistoryEntry {
   errorMessage?: string | null;
 }
 
-// Local type shapes — ipcHealth.IpcHealth and tauriApi types are all interface/type-only exports
+// Local type shapes — ipcHealth.IpcHealth and sidecarBridgeApi types are all interface/type-only exports
 // that get erased at runtime. Inlining here avoids runtime import resolution failures from Node ESM.
 
 interface IpcHealthState {

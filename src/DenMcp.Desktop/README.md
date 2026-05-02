@@ -1,6 +1,6 @@
 # DenMcp.Desktop
 
-Local desktop operator app for Den, with an Electron dev shell and legacy Tauri configuration.
+Local desktop operator app for Den, built with an Electron shell and a reusable .NET sidecar behind a typed bridge.
 
 This app is intentionally a sibling to `src/DenMcp.Server/ClientApp`: it bundles and runs its own local UI instead of serving or iframing Den web from the Den server.
 
@@ -45,27 +45,12 @@ npm run electron:dev:hot
 
 The renderer communicates with the sidecar exclusively through `window.denDesktopSidecar`, exposed by the preload via `contextBridge`. No raw token, endpoint URL, Node APIs, or shell access are available to the renderer.
 
-### Legacy Tauri configuration
-
-The `src-tauri/` directory retains the original Tauri configuration. Tauri dev commands are still present but the Electron shell is the primary development path:
-
-```bash
-npm run tauri:dev
-```
-
-Rust-only validation:
-
-```bash
-cd src/DenMcp.Desktop/src-tauri
-cargo check
-```
-
 ## First-slice behavior
 
-- Loads local settings from the Tauri app config directory.
+- Loads local settings from the platform app config directory.
 - Maintains a stable `sourceInstanceId` for this desktop app instance.
 - Checks Den health and syncs projects plus agent workspaces from a configured Den server URL.
-- Scans locally visible project roots/worktrees with safe Rust-side `git` process calls.
+- Scans locally visible project roots/worktrees with safe `git` process calls.
 - Publishes desktop git snapshots to `/api/projects/{projectId}/desktop/git-snapshots`.
 - Keeps local in-memory snapshots and shows queued/stale/offline-style status when Den is disconnected.
 - Renders a local React UI for connection health, observer status, diagnostics, task/workspace snapshot cards, changed-file grouping, bounded diff lookup status, and prototype Pi session snapshots.

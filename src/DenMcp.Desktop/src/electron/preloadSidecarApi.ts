@@ -9,7 +9,7 @@ import type {
   OperatorSettings,
   OperatorStatus,
   SaveOperatorSettingsRequest,
-} from '../desktop/tauriApi.ts';
+} from '../desktop/sidecarBridgeApi.ts';
 import type { SidecarBridgeClient } from './sidecarProtocol.ts';
 import { createSidecarBridgeFacade, type SidecarHealthResponse, type SidecarCapabilitiesResponse, type ConsoleCommandDefinition, type ConsoleCommandRunRequest, type ConsoleCommandRunResponse, type ConsoleCommandListResponse, type TerminalAckOutputRequest, type TerminalAttachRequest, type TerminalCreateSessionRequest, type TerminalDetachRequest, type TerminalListSessionsRequest, type TerminalReadActivityRequest, type TerminalReconnectRequest, type TerminalResizeRequest, type TerminalResponse, type TerminalEventPayload, type TerminalSendInputRequest, type TerminalTerminateRequest, type AppAgentBuildContextRequest, type AppAgentCancelRequest, type AppAgentInvokeToolRequest, type AppAgentListToolsRequest, type AppAgentResponse, type TasksDashboardSnapshotRequest, type TasksDashboardSnapshot, type CollaborationSendCompiledResponseRequest, type CollaborationSendCompiledResponseResponse, type CollaborationDeliveryEventPayload, type MessagesSnapshotRequest, type MessagesSnapshot } from './sidecarProtocol.ts';
 

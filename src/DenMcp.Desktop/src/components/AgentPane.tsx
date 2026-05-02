@@ -12,7 +12,7 @@ import {
   type AppAgentSelection,
   type AppAgentToolCallStateEvent,
   type AppAgentToolDefinition,
-} from '../desktop/tauriApi';
+} from '../desktop/sidecarBridgeApi';
 import type { JsonValue } from '../bridge/contract.ts';
 import {
   type AgentActionEntry,

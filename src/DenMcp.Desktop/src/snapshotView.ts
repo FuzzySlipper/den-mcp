@@ -1,4 +1,4 @@
-import type { DesktopDiffSnapshotLatestResult, GitFileStatus, LatestDiffSnapshotRequest, LocalGitSnapshot } from './desktop/tauriApi';
+import type { DesktopDiffSnapshotLatestResult, GitFileStatus, LatestDiffSnapshotRequest, LocalGitSnapshot } from './desktop/sidecarBridgeApi';
 
 export interface FileGroup {
   category: string;

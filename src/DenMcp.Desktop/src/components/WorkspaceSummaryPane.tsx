@@ -1,4 +1,4 @@
-import { LocalGitSnapshot } from '../desktop/tauriApi';
+import { LocalGitSnapshot } from '../desktop/sidecarBridgeApi';
 import { calmStateLabel, freshnessLabel, snapshotKey, snapshotTitle } from '../snapshotView';
 
 interface Props {

@@ -5,7 +5,7 @@ import type {
 import {
   messagesGetSnapshot,
   type MessagesGetSnapshotRequest,
-} from '../desktop/tauriApi.ts';
+} from '../desktop/sidecarBridgeApi.ts';
 import {
   buildMessagesView,
   type MessagesView,

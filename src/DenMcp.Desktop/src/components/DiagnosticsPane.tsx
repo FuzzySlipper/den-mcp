@@ -1,5 +1,5 @@
 import { IpcHealth, ipcHealthState, ipcHealthSummary } from '../desktop/ipcHealth';
-import { DiagnosticEntry, ObserverStatus } from '../desktop/tauriApi';
+import { DiagnosticEntry, ObserverStatus } from '../desktop/sidecarBridgeApi';
 
 interface Props {
   diagnostics: DiagnosticEntry[];

@@ -1,4 +1,4 @@
-import type { LocalSessionSnapshot } from './desktop/tauriApi';
+import type { LocalSessionSnapshot } from './desktop/sidecarBridgeApi';
 
 export interface RecentActivityItem {
   kind?: string;
