@@ -39,7 +39,7 @@ npm run ui:dev
 npm run electron:dev:hot
 ```
 
-`electron:dev:hot` sets `DEN_DESKTOP_ELECTRON_LOAD_MODE=hot`; `VITE_DEV_SERVER_URL` can override the default `http://127.0.0.1:1421`.
+`electron:dev:hot` runs a cross-platform Node launcher that sets the `DEN_DESKTOP_ELECTRON_LOAD_MODE=hot` env var internally; `VITE_DEV_SERVER_URL` can override the default `http://127.0.0.1:1421`.
 
 **Manual step:** the sidecar `.NET` project must be buildable (`dotnet build src/DenMcp.Desktop.Sidecar`). If `dotnet` is not on PATH, the sidecar will fail to launch.
 
