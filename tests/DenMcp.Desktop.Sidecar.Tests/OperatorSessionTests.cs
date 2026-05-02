@@ -1224,11 +1224,19 @@ public class TerminalBridgeHandlerTests
         var backend = new FakeDirectPtyBackend();
         var registry = new OperatorSessionRegistry(() => new DateTime(2026, 4, 29, 12, 0, 0, DateTimeKind.Utc));
         var events = new OperatorRuntimeBridgeEventSink(new DesktopSidecarRuntimeState(DesktopSidecarFixtures.CreateFixtureOptions()));
-        await using var service = CreateDirectPtyService(backend, registry, events);
+        var recordingHandler = new RecordingDelegatingHandler();
+        var settings = new OperatorSettingsService(OperatorSettingsStorage.ForPath(Path.Combine(Path.GetTempPath(), "den-tests", Guid.NewGuid().ToString("N"), "settings.json")));
+        await using var service = new DirectPtyOperatorSessionService(
+            backend,
+            registry,
+            events,
+            settings,
+            new DenHttpClient(new HttpClient(recordingHandler)),
+            () => new DateTimeOffset(2026, 4, 29, 12, 0, 0, TimeSpan.Zero));
 
         var session = await service.CreateAsync(new TerminalCreateSessionRequest
         {
-            ProjectId = string.Empty,
+            ProjectId = "test-project",
             Title = "Activity-only replay suppression",
             Backend = OperatorSessionBackend.DirectPty,
         }, CancellationToken.None);
@@ -1260,6 +1268,7 @@ public class TerminalBridgeHandlerTests
 
         // Record frame index before activity_only attach so we can scope assertions.
         var frameStart = events.PublishedFrames.Count;
+        recordingHandler.Clear();
 
         // Attach with activity_only mode — replay chunks must be suppressed.
         var activityAttach = await service.AttachAsync(new TerminalAttachRequest
@@ -1278,9 +1287,8 @@ public class TerminalBridgeHandlerTests
         Assert.False(activityAttach.ReplayGap);
 
         // No TerminalOutputEvent should be published for the activity_only stream.
-        // The buffer has retained output, but AttachAsync skips publishing replay chunks
-        // when mode != "terminal_stream".
-        await Task.Delay(50);
+        // AttachAsync is awaited so all synchronous publish paths are complete;
+        // no timing delay is needed.
         var activityOutputFrames = events.PublishedFrames.Skip(frameStart)
             .Where(frame => frame.Event == DesktopSidecarProtocol.TerminalOutputEvent
                 && string.Equals(frame.Payload.GetProperty("stream_id").GetString(), activityAttach.StreamId, StringComparison.Ordinal))
@@ -1300,9 +1308,20 @@ public class TerminalBridgeHandlerTests
         Assert.Equal("cur_000000000002", replayComplete.ToCursor);
         Assert.False(replayComplete.ReplayGap);
 
-        // session.attached metadata is published with raw_stream = false.
-        // Since ProjectId is empty, Den session events are not forwarded, but the
-        // attach flow still executed the session.attached publish path.
+        // session.attached metadata is published with raw_stream = false via Den HTTP.
+        var attachedRequests = recordingHandler.SentRequests
+            .Where(r => r.RelativeUri.Contains("/desktop/session-events", StringComparison.Ordinal)
+                && r.Body.TryGetProperty("event_type", out var et)
+                && et.GetString() == "session.attached")
+            .ToList();
+        Assert.NotEmpty(attachedRequests);
+        var attachedRequest = attachedRequests[0];
+        Assert.True(attachedRequest.Body.TryGetProperty("payload", out var payloadProp));
+        var payload = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(payloadProp.GetString()!);
+        Assert.NotNull(payload);
+        Assert.Equal(activityAttach.StreamId, payload!["stream_id"].GetString());
+        Assert.Equal("activity_only", payload["mode"].GetString());
+        Assert.False(payload["raw_stream"].GetBoolean());
 
         // Activity-only stream can still be detached cleanly.
         var detachResult = await service.DetachAsync(new TerminalDetachRequest
@@ -2133,4 +2152,56 @@ public sealed class FakeDirectPtyProcess : IDirectPtyProcess
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     public void EmitOutput(byte[] bytes) => OutputReceived?.Invoke(this, bytes);
+}
+
+/// <summary>
+/// A <see cref="DelegatingHandler"/> that records outgoing HTTP requests and returns 200 OK.
+/// Used to capture Den session event publish calls in tests.
+/// </summary>
+internal sealed class RecordingDelegatingHandler : DelegatingHandler
+{
+    private readonly List<(string RelativeUri, JsonElement Body)> _sentRequests = [];
+
+    public IReadOnlyList<(string RelativeUri, JsonElement Body)> SentRequests
+    {
+        get
+        {
+            lock (_sentRequests)
+            {
+                return _sentRequests.ToArray();
+            }
+        }
+    }
+
+    public void Clear()
+    {
+        lock (_sentRequests)
+        {
+            _sentRequests.Clear();
+        }
+    }
+
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var uri = request.RequestUri?.PathAndQuery ?? string.Empty;
+        JsonElement body = default;
+        if (request.Content is { } content)
+        {
+            var bodyStr = content.ReadAsStringAsync(cancellationToken).GetAwaiter().GetResult();
+            if (!string.IsNullOrWhiteSpace(bodyStr))
+            {
+                body = JsonSerializer.Deserialize<JsonElement>(bodyStr);
+            }
+        }
+
+        lock (_sentRequests)
+        {
+            _sentRequests.Add((uri, body));
+        }
+
+        return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        {
+            Content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json"),
+        });
+    }
 }
