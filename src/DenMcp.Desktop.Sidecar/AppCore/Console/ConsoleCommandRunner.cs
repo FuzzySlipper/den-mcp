@@ -129,6 +129,10 @@ public sealed class ConsoleCommandRunner : IConsoleCommandRunner
             await EmitAsync(onProgress, Line("ok", "console", $"Refresh complete. {status.ProjectCount} projects, {status.WorkspaceCount} workspaces, {status.LocalSnapshotCount} snapshots.", ts), lines, cancellationToken).ConfigureAwait(false);
             return Ok("refresh", lines);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw; // Cancellation propagates; do not turn it into an error response.
+        }
         catch (Exception ex)
         {
             await EmitAsync(onProgress, Line("err", "console", $"Refresh failed: {ex.Message}", ts), lines, cancellationToken).ConfigureAwait(false);
@@ -149,6 +153,10 @@ public sealed class ConsoleCommandRunner : IConsoleCommandRunner
             var status = await _runtime.GetStatusAsync(cancellationToken).ConfigureAwait(false);
             await EmitAsync(onProgress, Line("ok", "console", $"Publish snapshot complete. {status.LocalSnapshotCount} git snapshots, {status.LocalSessionSnapshotCount} session snapshots.", ts), lines, cancellationToken).ConfigureAwait(false);
             return Ok("publish-snapshot", lines);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw; // Cancellation propagates; do not turn it into an error response.
         }
         catch (Exception ex)
         {
