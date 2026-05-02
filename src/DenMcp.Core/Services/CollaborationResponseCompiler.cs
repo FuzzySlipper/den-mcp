@@ -115,40 +115,11 @@ public static class CollaborationResponseCompiler
         return $"[code block: {truncated}]";
     }
 
-    private static string ExtractFencedCodeContent(string rawMarkdown)
-    {
-        var normalized = rawMarkdown.Replace("\r\n", "\n").Replace('\r', '\n');
-        var lines = normalized.Split('\n');
-        if (lines.Length == 0 || !TryGetFence(lines[0], out var fence))
-            return rawMarkdown.Trim();
+    private static string ExtractFencedCodeContent(string rawMarkdown) =>
+        MarkdownFenceHelper.ExtractFencedContent(rawMarkdown);
 
-        var end = lines.Length;
-        if (end > 1 && lines[^1].TrimStart().StartsWith(fence, StringComparison.Ordinal))
-            end--;
-
-        return string.Join('\n', lines[1..end]).Trim('\n');
-    }
-
-    private static bool StartsWithFence(string text) => TryGetFence(text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n')[0], out _);
-
-    private static bool TryGetFence(string line, out string fence)
-    {
-        var trimmedStart = line.TrimStart();
-        if (trimmedStart.StartsWith("```", StringComparison.Ordinal))
-        {
-            fence = "```";
-            return true;
-        }
-
-        if (trimmedStart.StartsWith("~~~", StringComparison.Ordinal))
-        {
-            fence = "~~~";
-            return true;
-        }
-
-        fence = string.Empty;
-        return false;
-    }
+    private static bool StartsWithFence(string text) =>
+        MarkdownFenceHelper.TryFence(text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n')[0], out _, out _);
 
     private static string BuildSegmentReference(CollaborationSegment segment)
     {

@@ -58,7 +58,7 @@ public static class MarkdownBlockSegmenter
             int? headingLevel = null;
             string? codeLanguage = null;
 
-            if (TryFence(trimmedStart, out var fence, out codeLanguage))
+            if (MarkdownFenceHelper.TryFence(trimmedStart, out var fence, out codeLanguage))
             {
                 type = CollaborationSegmentType.CodeBlock;
                 i++;
@@ -141,24 +141,7 @@ public static class MarkdownBlockSegmenter
     }
 
     private static bool StartsBlock(string line) =>
-        TryFence(line, out _, out _) || TryHeading(line, out _) || IsBlockQuote(line) || IsListItem(line);
-
-    private static bool TryFence(string line, out string fence, out string? language)
-    {
-        fence = string.Empty;
-        language = null;
-        if (line.StartsWith("```", StringComparison.Ordinal))
-            fence = "```";
-        else if (line.StartsWith("~~~", StringComparison.Ordinal))
-            fence = "~~~";
-        else
-            return false;
-
-        language = line[fence.Length..].Trim();
-        if (language.Length == 0)
-            language = null;
-        return true;
-    }
+        MarkdownFenceHelper.TryFence(line, out _, out _) || TryHeading(line, out _) || IsBlockQuote(line) || IsListItem(line);
 
     private static bool TryHeading(string line, out int level)
     {
@@ -189,17 +172,5 @@ public static class MarkdownBlockSegmenter
         return raw.Trim();
     }
 
-    private static string ExtractCodeBlockText(string raw)
-    {
-        var normalized = raw.Replace("\r\n", "\n").Replace('\r', '\n');
-        var lines = normalized.Split('\n');
-        if (lines.Length == 0 || !TryFence(lines[0].TrimStart(), out var fence, out _))
-            return raw.Trim();
-
-        var end = lines.Length;
-        if (end > 1 && lines[^1].TrimStart().StartsWith(fence, StringComparison.Ordinal))
-            end--;
-
-        return string.Join('\n', lines[1..end]).Trim('\n');
-    }
+    private static string ExtractCodeBlockText(string raw) => MarkdownFenceHelper.ExtractFencedContent(raw);
 }
