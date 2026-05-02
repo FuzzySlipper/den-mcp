@@ -5,14 +5,19 @@ import {
   buildSessionChipView,
   deriveProgressStage,
   extractPacketSummaries,
+  filterTasksByStatus,
   formatCost,
   formatTokenCount,
+  priorityLabel,
+  priorityTone,
   progressStageIndex,
   progressStageLabel,
   relativeTimeLabel,
+  sortTasks,
   taskDisplayState,
   taskDisplayTone,
   taskStatusLabel,
+  truncateText,
   waveDisplayTone,
 } from '../src/tasksDashboardView.ts';
 
@@ -44,6 +49,19 @@ function makeSnapshot(overrides = {}) {
         title: 'Implement projection',
         status: 'done',
         computed_state: 'done',
+        priority: 2,
+        assigned_to: 'pi',
+        tags: ['desktop', 'core'],
+        description: 'Build the projection layer for the tasks dashboard.',
+        message_count: 5,
+        recent_messages: [
+          { id: 1, sender: 'pi', intent: 'handoff', metadata_type: 'implementation_packet', content_summary: 'Projection implemented', created_at: '2026-04-30T00:01:00.000Z' },
+          { id: 2, sender: 'pi', intent: 'handoff', metadata_type: 'merge_summary', content_summary: 'Merged', created_at: '2026-04-30T00:03:00.000Z' },
+        ],
+        dependency_count: 0,
+        subtask_count: 0,
+        subtask_ids: [],
+        created_at: '2026-04-29T12:00:00.000Z',
         dependencies: [],
         packets: [
           { type: 'implementation_packet', created_at: '2026-04-30T00:01:00.000Z', summary: 'Projection implemented' },
@@ -61,6 +79,18 @@ function makeSnapshot(overrides = {}) {
         title: 'Tasks dashboard UI',
         status: 'in_progress',
         computed_state: 'coder_running',
+        priority: 1,
+        assigned_to: 'pi',
+        tags: ['desktop', 'ui'],
+        description: 'Build the tasks dashboard UI with parity features.',
+        message_count: 3,
+        recent_messages: [
+          { id: 3, sender: 'pi', intent: 'handoff', metadata_type: 'coder_context_packet', content_summary: 'Context packet sent', created_at: '2026-04-30T00:00:30.000Z' },
+        ],
+        dependency_count: 1,
+        subtask_count: 2,
+        subtask_ids: [1030, 1031],
+        created_at: '2026-04-29T14:00:00.000Z',
         dependencies: [{ task_id: 909 }],
         packets: [
           { type: 'coder_context_packet', created_at: '2026-04-30T00:00:30.000Z' },
@@ -77,6 +107,16 @@ function makeSnapshot(overrides = {}) {
         title: 'Terminal attach',
         status: 'review',
         computed_state: 'review',
+        priority: 3,
+        assigned_to: null,
+        tags: [],
+        description: '',
+        message_count: 2,
+        recent_messages: [],
+        dependency_count: 0,
+        subtask_count: 0,
+        subtask_ids: [],
+        created_at: '2026-04-29T15:00:00.000Z',
         dependencies: [],
         packets: [
           { type: 'implementation_packet', created_at: '2026-04-30T00:02:00.000Z' },
@@ -119,9 +159,31 @@ test('buildDashboardView transforms snapshot into display-ready view', () => {
   assert.equal(view.tasks[0].progressStage, 'done');
   assert.equal(view.tasks[0].branch, 'task/909-projection');
 
+  // New parity fields
+  assert.equal(view.tasks[0].priority, 2);
+  assert.equal(view.tasks[0].assignedTo, 'pi');
+  assert.deepEqual(view.tasks[0].tags, ['desktop', 'core']);
+  assert.equal(view.tasks[0].description, 'Build the projection layer for the tasks dashboard.');
+  assert.equal(view.tasks[0].messageCount, 5);
+  assert.equal(view.tasks[0].recentMessages.length, 2);
+  assert.equal(view.tasks[0].recentMessages[0].sender, 'pi');
+  assert.equal(view.tasks[0].recentMessages[0].contentSummary, 'Projection implemented');
+  assert.equal(view.tasks[0].dependencyCount, 0);
+  assert.equal(view.tasks[0].subtaskCount, 0);
+  assert.deepEqual(view.tasks[0].subtaskIds, []);
+  assert.equal(view.tasks[0].createdAt, '2026-04-29T12:00:00.000Z');
+
   assert.equal(view.tasks[1].id, 1029);
   assert.equal(view.tasks[1].displayState, 'in_progress');
   assert.equal(view.tasks[1].displayTone, 'running');
+  assert.equal(view.tasks[1].priority, 1);
+  assert.equal(view.tasks[1].assignedTo, 'pi');
+  assert.deepEqual(view.tasks[1].tags, ['desktop', 'ui']);
+  assert.equal(view.tasks[1].description, 'Build the tasks dashboard UI with parity features.');
+  assert.equal(view.tasks[1].messageCount, 3);
+  assert.equal(view.tasks[1].dependencyCount, 1);
+  assert.equal(view.tasks[1].subtaskCount, 2);
+  assert.deepEqual(view.tasks[1].subtaskIds, [1030, 1031]);
   assert.equal(view.tasks[1].sessionChips.length, 1);
   assert.equal(view.tasks[1].sessionChips[0].label, 'Pi coder #1029');
   assert.equal(view.tasks[1].sessionChips[0].canAttach, true);
@@ -132,6 +194,9 @@ test('buildDashboardView transforms snapshot into display-ready view', () => {
   assert.equal(view.tasks[2].displayTone, 'accent');
   assert.equal(view.tasks[2].reviewState, 'changes_requested');
   assert.equal(view.tasks[2].reviewFindingsOpen, 2);
+  assert.equal(view.tasks[2].assignedTo, null);
+  assert.deepEqual(view.tasks[2].tags, []);
+  assert.equal(view.tasks[2].description, '');
 
   assert.equal(view.waves.length, 2);
   assert.equal(view.waves[0].tone, 'ok');
@@ -376,4 +441,193 @@ test('status panel includes focused task packet entries', () => {
 test('empty snapshot yields empty status panel', () => {
   const view = buildDashboardView(null);
   assert.equal(view.statusPanel.length, 0);
+});
+
+// ── Parity feature tests ────────────────────────────────────
+
+test('filterTasksByStatus returns all tasks when filter is all', () => {
+  const snapshot = makeSnapshot();
+  const view = buildDashboardView(snapshot, null, Date.parse('2026-04-30T00:05:30.000Z'));
+  const filtered = filterTasksByStatus(view.tasks, 'all');
+  assert.equal(filtered.length, 3);
+});
+
+test('filterTasksByStatus filters by status', () => {
+  const snapshot = makeSnapshot();
+  const view = buildDashboardView(snapshot, null, Date.parse('2026-04-30T00:05:30.000Z'));
+
+  const done = filterTasksByStatus(view.tasks, 'done');
+  assert.equal(done.length, 1);
+  assert.equal(done[0].id, 909);
+
+  const inProgress = filterTasksByStatus(view.tasks, 'in_progress');
+  assert.equal(inProgress.length, 1);
+  assert.equal(inProgress[0].id, 1029);
+
+  const review = filterTasksByStatus(view.tasks, 'review');
+  assert.equal(review.length, 1);
+  assert.equal(review[0].id, 1038);
+
+  const planned = filterTasksByStatus(view.tasks, 'planned');
+  assert.equal(planned.length, 0);
+});
+
+test('sortTasks sorts by priority', () => {
+  const snapshot = makeSnapshot();
+  const view = buildDashboardView(snapshot, null, Date.parse('2026-04-30T00:05:30.000Z'));
+  const sorted = sortTasks(view.tasks, 'priority');
+
+  assert.equal(sorted[0].id, 1029); // P1
+  assert.equal(sorted[1].id, 909);  // P2
+  assert.equal(sorted[2].id, 1038); // P3
+});
+
+test('sortTasks sorts by status', () => {
+  const snapshot = makeSnapshot();
+  const view = buildDashboardView(snapshot, null, Date.parse('2026-04-30T00:05:30.000Z'));
+  const sorted = sortTasks(view.tasks, 'status');
+
+  // in_progress (0), review (1), done (4)
+  assert.equal(sorted[0].status, 'in_progress');
+  assert.equal(sorted[1].status, 'review');
+  assert.equal(sorted[2].status, 'done');
+});
+
+test('sortTasks sorts by id', () => {
+  const snapshot = makeSnapshot();
+  const view = buildDashboardView(snapshot, null, Date.parse('2026-04-30T00:05:30.000Z'));
+  const sorted = sortTasks(view.tasks, 'id');
+
+  assert.equal(sorted[0].id, 909);
+  assert.equal(sorted[1].id, 1029);
+  assert.equal(sorted[2].id, 1038);
+});
+
+test('sortTasks sorts by title', () => {
+  const snapshot = makeSnapshot();
+  const view = buildDashboardView(snapshot, null, Date.parse('2026-04-30T00:05:30.000Z'));
+  const sorted = sortTasks(view.tasks, 'title');
+
+  assert.equal(sorted[0].title, 'Implement projection');
+  assert.equal(sorted[1].title, 'Tasks dashboard UI');
+  assert.equal(sorted[2].title, 'Terminal attach');
+});
+
+test('sortTasks sorts by updated (latest packet timestamp)', () => {
+  const snapshot = makeSnapshot();
+  const view = buildDashboardView(snapshot, null, Date.parse('2026-04-30T00:05:30.000Z'));
+  const sorted = sortTasks(view.tasks, 'updated');
+
+  // 1038 latest packet = 00:03, 909 latest = 00:03, 1029 latest = 00:00:30
+  // 1038 and 909 tie, fall back to id
+  assert.equal(sorted[sorted.length - 1].id, 1029); // oldest packet
+});
+
+test('priorityLabel returns human-readable priority', () => {
+  assert.equal(priorityLabel(1), 'P1 !!');
+  assert.equal(priorityLabel(2), 'P2 !');
+  assert.equal(priorityLabel(3), 'P3');
+  assert.equal(priorityLabel(4), 'P4');
+  assert.equal(priorityLabel(5), 'P5');
+});
+
+test('priorityTone maps priority to display tone', () => {
+  assert.equal(priorityTone(1), 'err');
+  assert.equal(priorityTone(2), 'warn');
+  assert.equal(priorityTone(3), 'info');
+  assert.equal(priorityTone(4), 'idle');
+  assert.equal(priorityTone(5), 'idle');
+});
+
+test('truncateText truncates long text and adds ellipsis', () => {
+  assert.equal(truncateText('short', 10), 'short');
+  assert.equal(truncateText('a very long text that should be truncated', 15), 'a very long tex…');
+});
+
+test('truncateText preserves text within limit', () => {
+  assert.equal(truncateText('hello', 5), 'hello');
+  assert.equal(truncateText('hello', 10), 'hello');
+});
+
+test('recentMessages are populated from snapshot', () => {
+  const snapshot = makeSnapshot();
+  const view = buildDashboardView(snapshot, null, Date.parse('2026-04-30T00:05:30.000Z'));
+
+  const task909 = view.tasks.find((t) => t.id === 909);
+  assert.ok(task909);
+  assert.equal(task909.recentMessages.length, 2);
+  assert.equal(task909.recentMessages[0].id, 1);
+  assert.equal(task909.recentMessages[0].sender, 'pi');
+  assert.equal(task909.recentMessages[0].intent, 'handoff');
+  assert.equal(task909.recentMessages[0].metadataType, 'implementation_packet');
+  assert.equal(task909.recentMessages[0].contentSummary, 'Projection implemented');
+  assert.ok(task909.recentMessages[0].createdAt);
+});
+
+test('task row view includes description field', () => {
+  const snapshot = makeSnapshot();
+  const view = buildDashboardView(snapshot, null, Date.parse('2026-04-30T00:05:30.000Z'));
+
+  const taskWithDesc = view.tasks.find((t) => t.id === 909);
+  assert.ok(taskWithDesc);
+  assert.equal(taskWithDesc.description, 'Build the projection layer for the tasks dashboard.');
+
+  const taskNoDesc = view.tasks.find((t) => t.id === 1038);
+  assert.ok(taskNoDesc);
+  assert.equal(taskNoDesc.description, '');
+});
+
+test('task row view includes hierarchy counts', () => {
+  const snapshot = makeSnapshot();
+  const view = buildDashboardView(snapshot, null, Date.parse('2026-04-30T00:05:30.000Z'));
+
+  const task1029 = view.tasks.find((t) => t.id === 1029);
+  assert.ok(task1029);
+  assert.equal(task1029.dependencyCount, 1);
+  assert.equal(task1029.subtaskCount, 2);
+  assert.deepEqual(task1029.subtaskIds, [1030, 1031]);
+});
+
+test('task row view handles missing parity fields gracefully', () => {
+  const snapshot = {
+    snapshot_id: 'snap-min',
+    project_id: 'den-mcp',
+    parent_task_id: null,
+    focused_task_id: null,
+    generated_at: '2026-04-30T00:05:00.000Z',
+    header: { state: 'idle', task_count: 1, completion_percent: 0 },
+    tasks: [
+      {
+        id: 1,
+        project_id: 'den-mcp',
+        title: 'Minimal task',
+        status: 'planned',
+        computed_state: 'queued',
+        // No priority, assigned_to, tags, description, etc.
+        dependencies: [],
+        packets: [],
+        review: {},
+        run_summary: {},
+        agent_lifecycle: {},
+        session_chips: [],
+      },
+    ],
+    waves: [],
+    lanes: [],
+    freshness: { source: 'test', is_partial: false, warnings: [], errors: [] },
+  };
+
+  const view = buildDashboardView(snapshot, null, Date.parse('2026-04-30T00:05:30.000Z'));
+  assert.equal(view.tasks.length, 1);
+  const task = view.tasks[0];
+  assert.equal(task.priority, 3); // default
+  assert.equal(task.assignedTo, null);
+  assert.deepEqual(task.tags, []);
+  assert.equal(task.description, '');
+  assert.equal(task.messageCount, 0);
+  assert.equal(task.recentMessages.length, 0);
+  assert.equal(task.dependencyCount, 0);
+  assert.equal(task.subtaskCount, 0);
+  assert.deepEqual(task.subtaskIds, []);
+  assert.equal(task.createdAt, null);
 });

@@ -558,6 +558,9 @@ public sealed record DenTaskRecord
     [JsonPropertyName("title")]
     public string Title { get; init; } = string.Empty;
 
+    [JsonPropertyName("description")]
+    public string? Description { get; init; }
+
     [JsonPropertyName("status")]
     public string Status { get; init; } = string.Empty;
 

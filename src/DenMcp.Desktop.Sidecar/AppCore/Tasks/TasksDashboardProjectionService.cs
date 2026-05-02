@@ -198,6 +198,21 @@ public sealed class TasksDashboardProjectionService
             })
             .ToList();
 
+        var recentMessages = messages
+            .OrderByDescending(m => ParseDate(m.CreatedAt))
+            .ThenByDescending(m => m.Id)
+            .Take(5)
+            .Select(m => new TasksDashboardRecentMessage
+            {
+                Id = m.Id,
+                Sender = m.Sender,
+                Intent = m.Intent,
+                MetadataType = TryGetMetadataType(m.Metadata),
+                ContentSummary = BoundSummary(m.Content, 200),
+                CreatedAt = m.CreatedAt,
+            })
+            .ToList();
+
         return new TasksDashboardTaskRow
         {
             Id = taskId,
@@ -217,6 +232,12 @@ public sealed class TasksDashboardProjectionService
             Review = review,
             RunSummary = runAggregate,
             AgentLifecycle = lifecycle,
+            Description = task.Description ?? string.Empty,
+            MessageCount = messages.Count,
+            RecentMessages = recentMessages,
+            DependencyCount = task.DependencyCount,
+            SubtaskCount = task.SubtaskCount,
+            CreatedAt = task.CreatedAt,
             SessionChips = sessionChips,
             UpdatedAt = task.UpdatedAt,
         };

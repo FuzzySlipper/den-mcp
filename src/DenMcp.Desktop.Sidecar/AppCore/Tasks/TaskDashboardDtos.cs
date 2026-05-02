@@ -139,6 +139,24 @@ public sealed record TasksDashboardTaskRow
     [JsonPropertyName("agent_lifecycle")]
     public TasksDashboardLifecycleSummary AgentLifecycle { get; init; } = new();
 
+    [JsonPropertyName("description")]
+    public string Description { get; init; } = string.Empty;
+
+    [JsonPropertyName("message_count")]
+    public int MessageCount { get; init; }
+
+    [JsonPropertyName("recent_messages")]
+    public IReadOnlyList<TasksDashboardRecentMessage> RecentMessages { get; init; } = [];
+
+    [JsonPropertyName("dependency_count")]
+    public int DependencyCount { get; init; }
+
+    [JsonPropertyName("subtask_count")]
+    public int SubtaskCount { get; init; }
+
+    [JsonPropertyName("created_at")]
+    public string? CreatedAt { get; init; }
+
     [JsonPropertyName("session_chips")]
     public IReadOnlyList<TasksDashboardSessionChip> SessionChips { get; init; } = [];
 
@@ -438,6 +456,27 @@ public sealed record TasksDashboardSessionCapabilities
 
     [JsonPropertyName("reason")]
     public string? Reason { get; init; }
+}
+
+public sealed record TasksDashboardRecentMessage
+{
+    [JsonPropertyName("id")]
+    public long Id { get; init; }
+
+    [JsonPropertyName("sender")]
+    public string Sender { get; init; } = string.Empty;
+
+    [JsonPropertyName("intent")]
+    public string? Intent { get; init; }
+
+    [JsonPropertyName("metadata_type")]
+    public string? MetadataType { get; init; }
+
+    [JsonPropertyName("content_summary")]
+    public string ContentSummary { get; init; } = string.Empty;
+
+    [JsonPropertyName("created_at")]
+    public string? CreatedAt { get; init; }
 }
 
 public sealed record TasksDashboardFreshness

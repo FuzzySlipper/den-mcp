@@ -10,18 +10,26 @@ import {
 import {
   buildDashboardView,
   copyToClipboard,
+  filterTasksByStatus,
   formatCost,
   formatTokenCount,
+  priorityLabel,
+  priorityTone,
   progressStageLabel,
   relativeTimeLabel,
+  sortTasks,
   taskStatusLabel,
+  truncateText,
   type DashboardView,
   type HeaderView,
   type LaneView,
   type PacketSummary,
+  type RecentMessageView,
   type SessionChipView,
   type StatusPanelSection,
   type TaskRowView,
+  type TaskSortMode,
+  type TaskStatusFilter,
   type WaveView,
 } from '../tasksDashboardView.ts';
 
@@ -31,6 +39,8 @@ interface Props {
 }
 
 const REFRESH_INTERVAL_MS = 30_000;
+const STATUS_FILTERS: TaskStatusFilter[] = ['all', 'in_progress', 'review', 'blocked', 'planned', 'done', 'cancelled'];
+const SORT_MODES: TaskSortMode[] = ['priority', 'status', 'id', 'title', 'updated'];
 
 export function TasksDashboardPane({ projectId, parentTaskId }: Props) {
   const [snapshot, setSnapshot] = useState<TasksDashboardSnapshot | null>(null);
@@ -38,6 +48,8 @@ export function TasksDashboardPane({ projectId, parentTaskId }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [focusedTaskId, setFocusedTaskId] = useState<number | null>(null);
   const [lastRefreshAt, setLastRefreshAt] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<TaskStatusFilter>('all');
+  const [sortMode, setSortMode] = useState<TaskSortMode>('priority');
   const mountedRef = useRef(true);
 
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
@@ -75,6 +87,11 @@ export function TasksDashboardPane({ projectId, parentTaskId }: Props) {
 
   const view = useMemo(() => buildDashboardView(snapshot, focusedTaskId), [snapshot, focusedTaskId]);
 
+  const displayedTasks = useMemo(() => {
+    const filtered = filterTasksByStatus(view.tasks, statusFilter);
+    return sortTasks(filtered, sortMode);
+  }, [view.tasks, statusFilter, sortMode]);
+
   // No project selected
   if (!projectId) {
     return (
@@ -102,15 +119,23 @@ export function TasksDashboardPane({ projectId, parentTaskId }: Props) {
       />
       {snapshot ? (
         <>
+          <TasksFilterBar
+            statusFilter={statusFilter}
+            sortMode={sortMode}
+            onStatusFilterChange={setStatusFilter}
+            onSortModeChange={setSortMode}
+            filteredCount={displayedTasks.length}
+            totalCount={view.tasks.length}
+          />
           <WaveStrip waves={view.waves} tasks={view.tasks} />
           <div className="tasks-workbench-grid">
             <div className="tasks-lane-list">
-              {view.tasks.length === 0 ? (
+              {displayedTasks.length === 0 ? (
                 <div className="empty-state">
                   <strong>No tasks found.</strong>
                   <p>Tasks will appear here once they are created in Den for this project.</p>
                 </div>
-              ) : view.tasks.map((task) => (
+              ) : displayedTasks.map((task) => (
                 <TaskRowCard
                   key={task.id}
                   task={task}
@@ -139,6 +164,54 @@ export function TasksDashboardPane({ projectId, parentTaskId }: Props) {
 }
 
 // ── Sub-components ──────────────────────────────────────────────
+
+function TasksFilterBar({
+  statusFilter,
+  sortMode,
+  onStatusFilterChange,
+  onSortModeChange,
+  filteredCount,
+  totalCount,
+}: {
+  statusFilter: TaskStatusFilter;
+  sortMode: TaskSortMode;
+  onStatusFilterChange: (f: TaskStatusFilter) => void;
+  onSortModeChange: (m: TaskSortMode) => void;
+  filteredCount: number;
+  totalCount: number;
+}) {
+  return (
+    <div className="tasks-filter-bar">
+      <div className="tasks-filter-status">
+        {STATUS_FILTERS.map((f) => (
+          <button
+            key={f}
+            type="button"
+            className={`tasks-filter-btn ${f === statusFilter ? 'active' : ''}`}
+            onClick={() => onStatusFilterChange(f)}
+          >
+            {f === 'all' ? 'All' : taskStatusLabel(f)}
+          </button>
+        ))}
+      </div>
+      <div className="tasks-filter-sort">
+        <label className="tasks-sort-label">Sort:</label>
+        <select
+          className="tasks-sort-select"
+          value={sortMode}
+          onChange={(e) => onSortModeChange(e.target.value as TaskSortMode)}
+        >
+          {SORT_MODES.map((m) => (
+            <option key={m} value={m}>{m === 'priority' ? 'Priority' : m === 'status' ? 'Status' : m === 'id' ? 'ID' : m === 'title' ? 'Title' : 'Last updated'}</option>
+          ))}
+        </select>
+      </div>
+      <span className="tasks-filter-count">
+        {filteredCount === totalCount ? `${totalCount} tasks` : `${filteredCount} of ${totalCount}`}
+      </span>
+    </div>
+  );
+}
 
 function TasksDashboardHeader({
   projectId,
@@ -223,9 +296,24 @@ function TaskRowCard({ task, focused, onSelect }: { task: TaskRowView; focused: 
         </div>
         <div className="tasks-row-pills">
           <span className={`status-pill status-${task.displayTone}`}>{taskStatusLabel(task.status)}</span>
+          <span className={`tasks-priority-chip tasks-priority-${task.priority}`}>{priorityLabel(task.priority)}</span>
           {task.reviewState && <span className="chip">{task.reviewState.replaceAll('_', ' ')}</span>}
           {task.isFocused && <span className="chip accent">focused</span>}
         </div>
+      </div>
+
+      {/* Assignee + tags + hierarchy row */}
+      <div className="tasks-row-attrs">
+        {task.assignedTo && <span className="tasks-row-assignee">👤 {task.assignedTo}</span>}
+        {task.tags.length > 0 && (
+          <span className="tasks-row-tags">
+            {task.tags.map((tag) => <span key={tag} className="tasks-tag-chip">{tag}</span>)}
+          </span>
+        )}
+        {task.dependencyCount > 0 && <span className="tasks-row-dep-count">↗ {task.dependencyCount} dep{task.dependencyCount !== 1 ? 's' : ''}</span>}
+        {task.subtaskCount > 0 && <span className="tasks-row-sub-count">▾ {task.subtaskCount} sub{task.subtaskCount !== 1 ? 's' : ''}</span>}
+        {task.messageCount > 0 && <span className="tasks-row-msg-count">💬 {task.messageCount}</span>}
+        {task.createdAt && <span className="tasks-row-created">created {relativeTimeLabel(task.createdAt)}</span>}
       </div>
 
       <ProgressStrip stage={task.progressStage} index={task.progressIndex} />
@@ -254,8 +342,72 @@ function TaskRowCard({ task, focused, onSelect }: { task: TaskRowView; focused: 
         </div>
       )}
 
-      {task.worktreePath && <p className="tasks-row-worktree">{task.worktreePath}</p>}
+      {/* Expanded detail section when focused */}
+      {focused && <TaskDetailSection task={task} />}
     </article>
+  );
+}
+
+function TaskDetailSection({ task }: { task: TaskRowView }) {
+  return (
+    <div className="tasks-detail-section" onClick={(e) => e.stopPropagation()}>
+      {/* Description */}
+      {task.description && (
+        <div className="tasks-detail-block">
+          <p className="tasks-detail-heading">Description</p>
+          <p className="tasks-detail-description">{truncateText(task.description, 400)}</p>
+        </div>
+      )}
+
+      {/* Dependencies */}
+      {task.dependencyCount > 0 && (
+        <div className="tasks-detail-block">
+          <p className="tasks-detail-heading">Dependencies</p>
+          <p className="tasks-detail-text">{task.dependencyCount} task{task.dependencyCount !== 1 ? 's' : ''} — see Den web for full dependency navigation.</p>
+        </div>
+      )}
+
+      {/* Subtasks */}
+      {task.subtaskCount > 0 && (
+        <div className="tasks-detail-block">
+          <p className="tasks-detail-heading">Subtasks</p>
+          <div className="tasks-detail-subtasks">
+            {task.subtaskIds.map((subId) => (
+              <span key={subId} className="tasks-detail-subtask-ref">#{subId}</span>
+            ))}
+            <span className="tasks-detail-text">({task.subtaskCount} subtask{task.subtaskCount !== 1 ? 's' : ''})</span>
+          </div>
+        </div>
+      )}
+
+      {/* Recent messages */}
+      {task.recentMessages.length > 0 && (
+        <div className="tasks-detail-block">
+          <p className="tasks-detail-heading">Recent messages ({task.messageCount})</p>
+          <div className="tasks-detail-messages">
+            {task.recentMessages.map((msg) => (
+              <div key={msg.id} className="tasks-detail-message-row">
+                <span className="tasks-detail-msg-sender">{msg.sender}</span>
+                {msg.metadataType && <span className="tasks-detail-msg-type">{msg.metadataType.replaceAll('_', ' ')}</span>}
+                <span className="tasks-detail-msg-summary">{truncateText(msg.contentSummary, 120)}</span>
+                {msg.createdAt && <span className="tasks-detail-msg-time">{relativeTimeLabel(msg.createdAt)}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Review context */}
+      {(task.reviewState || task.reviewFindingsOpen > 0) && (
+        <div className="tasks-detail-block">
+          <p className="tasks-detail-heading">Review</p>
+          <div className="tasks-detail-text">
+            {task.reviewState && <span>State: <strong>{task.reviewState.replaceAll('_', ' ')}</strong></span>}
+            {task.reviewFindingsOpen > 0 && <span> · {task.reviewFindingsOpen} open finding{task.reviewFindingsOpen !== 1 ? 's' : ''}</span>}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -257,12 +257,31 @@ export interface TasksDashboardTaskRow {
   title: string;
   status: string;
   computed_state: string;
+  priority: number;
+  assigned_to?: string | null;
+  tags: string[];
+  description: string;
+  message_count: number;
+  recent_messages: TasksDashboardRecentMessageRow[];
+  dependency_count: number;
+  subtask_count: number;
+  subtask_ids: number[];
+  created_at?: string | null;
   dependencies: Array<Record<string, JsonValue>>;
   packets: Array<Record<string, JsonValue>>;
   review: Record<string, JsonValue>;
   run_summary: Record<string, JsonValue>;
   agent_lifecycle: Record<string, JsonValue>;
   session_chips: Array<Record<string, JsonValue>>;
+}
+
+export interface TasksDashboardRecentMessageRow {
+  id: number;
+  sender: string;
+  intent?: string | null;
+  metadata_type?: string | null;
+  content_summary: string;
+  created_at?: string | null;
 }
 
 export interface TasksDashboardWave {

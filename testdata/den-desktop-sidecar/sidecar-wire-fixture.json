@@ -2521,6 +2521,11 @@
                 "title",
                 "status",
                 "computed_state",
+                "description",
+                "message_count",
+                "recent_messages",
+                "dependency_count",
+                "subtask_count",
                 "dependencies",
                 "packets",
                 "review",
@@ -2543,6 +2548,86 @@
                 },
                 "computed_state": {
                   "type": "string"
+                },
+                "priority": {
+                  "type": "integer"
+                },
+                "assigned_to": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "description": {
+                  "type": "string"
+                },
+                "message_count": {
+                  "type": "integer"
+                },
+                "recent_messages": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "required": [
+                      "id",
+                      "sender",
+                      "content_summary"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "integer"
+                      },
+                      "sender": {
+                        "type": "string"
+                      },
+                      "intent": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "metadata_type": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "content_summary": {
+                        "type": "string"
+                      },
+                      "created_at": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "dependency_count": {
+                  "type": "integer"
+                },
+                "subtask_count": {
+                  "type": "integer"
+                },
+                "subtask_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  }
+                },
+                "created_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "dependencies": {
                   "type": "array",

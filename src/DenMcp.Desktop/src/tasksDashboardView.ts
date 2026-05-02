@@ -71,6 +71,25 @@ export interface TaskRowView {
   sessionChips: SessionChipView[];
   dependencies: number[];
   isFocused: boolean;
+  priority: number;
+  assignedTo: string | null;
+  tags: string[];
+  description: string;
+  messageCount: number;
+  recentMessages: RecentMessageView[];
+  dependencyCount: number;
+  subtaskCount: number;
+  subtaskIds: number[];
+  createdAt: string | null;
+}
+
+export interface RecentMessageView {
+  id: number;
+  sender: string;
+  intent: string | null;
+  metadataType: string | null;
+  contentSummary: string;
+  createdAt: string | null;
 }
 
 export interface SessionChipView {
@@ -147,6 +166,18 @@ export interface StatusPanelEntry {
   value: string;
   tone: TaskDisplayTone;
 }
+
+export type TaskStatusFilter = 'all' | 'planned' | 'in_progress' | 'review' | 'blocked' | 'done' | 'cancelled';
+export type TaskSortMode = 'priority' | 'status' | 'id' | 'title' | 'updated';
+
+const STATUS_ORDER: Record<string, number> = {
+  in_progress: 0,
+  review: 1,
+  blocked: 2,
+  planned: 3,
+  done: 4,
+  cancelled: 5,
+};
 
 // ── Constants ──────────────────────────────────────────────────
 
@@ -343,6 +374,59 @@ export function copyToClipboard(text: string): void {
   }
 }
 
+export function filterTasksByStatus(tasks: TaskRowView[], filter: TaskStatusFilter): TaskRowView[] {
+  if (filter === 'all') return tasks;
+  return tasks.filter((task) => task.status === filter);
+}
+
+export function sortTasks(tasks: TaskRowView[], mode: TaskSortMode): TaskRowView[] {
+  const sorted = [...tasks];
+  switch (mode) {
+    case 'priority':
+      sorted.sort((a, b) => a.priority - b.priority || a.id - b.id);
+      break;
+    case 'status':
+      sorted.sort((a, b) => (STATUS_ORDER[a.status] ?? 99) - (STATUS_ORDER[b.status] ?? 99) || a.priority - b.priority || a.id - b.id);
+      break;
+    case 'id':
+      sorted.sort((a, b) => a.id - b.id);
+      break;
+    case 'title':
+      sorted.sort((a, b) => a.title.localeCompare(b.title));
+      break;
+    case 'updated':
+      sorted.sort((a, b) => {
+        const ta = a.latestPacket?.timestamp ?? '';
+        const tb = b.latestPacket?.timestamp ?? '';
+        return tb.localeCompare(ta) || a.id - b.id;
+      });
+      break;
+    default:
+      sorted.sort((a, b) => a.priority - b.priority || a.id - b.id);
+  }
+  return sorted;
+}
+
+export function priorityLabel(priority: number): string {
+  if (priority === 1) return 'P1 !!';
+  if (priority === 2) return 'P2 !';
+  if (priority === 3) return 'P3';
+  if (priority === 4) return 'P4';
+  return `P${priority}`;
+}
+
+export function priorityTone(priority: number): TaskDisplayTone {
+  if (priority <= 1) return 'err';
+  if (priority === 2) return 'warn';
+  if (priority === 3) return 'info';
+  return 'idle';
+}
+
+export function truncateText(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return text.slice(0, maxChars) + '…';
+}
+
 // ── Internal helpers ───────────────────────────────────────────
 
 function emptyDashboardView(): DashboardView {
@@ -421,6 +505,17 @@ function buildTaskRowView(
   const sessionChips = (row.session_chips ?? []).map(buildSessionChipView);
   const dependencies = extractDependencyIds(row.dependencies);
 
+  const priority = typeof row.priority === 'number' ? row.priority : 3;
+  const assignedTo = typeof row.assigned_to === 'string' ? row.assigned_to : null;
+  const tags = Array.isArray(row.tags) ? row.tags.filter((t): t is string => typeof t === 'string') : [];
+  const description = typeof row.description === 'string' ? row.description : '';
+  const messageCount = typeof row.message_count === 'number' ? row.message_count : 0;
+  const recentMessages = Array.isArray(row.recent_messages) ? row.recent_messages.map(buildRecentMessageView) : [];
+  const dependencyCount = typeof row.dependency_count === 'number' ? row.dependency_count : dependencies.length;
+  const subtaskCount = typeof row.subtask_count === 'number' ? row.subtask_count : 0;
+  const subtaskIds = Array.isArray(row.subtask_ids) ? row.subtask_ids.filter((n): n is number => typeof n === 'number') : [];
+  const createdAt = typeof row.created_at === 'string' ? row.created_at : null;
+
   return {
     id: row.id,
     title: row.title,
@@ -443,6 +538,16 @@ function buildTaskRowView(
     sessionChips,
     dependencies,
     isFocused: focusedSet.has(row.id),
+    priority,
+    assignedTo,
+    tags,
+    description,
+    messageCount,
+    recentMessages,
+    dependencyCount,
+    subtaskCount,
+    subtaskIds,
+    createdAt,
   };
 }
 
@@ -569,6 +674,17 @@ function extractDependencyIds(deps: Array<Record<string, unknown>>): number[] {
   return deps
     .map((d) => typeof d.task_id === 'number' ? d.task_id : typeof d.depends_on === 'number' ? d.depends_on : null)
     .filter((id): id is number => id != null);
+}
+
+function buildRecentMessageView(record: { id?: number; sender?: string; intent?: string | null; metadata_type?: string | null; content_summary?: string; created_at?: string | null }): RecentMessageView {
+  return {
+    id: typeof record.id === 'number' ? record.id : 0,
+    sender: typeof record.sender === 'string' ? record.sender : '',
+    intent: typeof record.intent === 'string' ? record.intent : null,
+    metadataType: typeof record.metadata_type === 'string' ? record.metadata_type : null,
+    contentSummary: typeof record.content_summary === 'string' ? record.content_summary : '',
+    createdAt: typeof record.created_at === 'string' ? record.created_at : null,
+  };
 }
 
 function headerStateTone(state: string): TaskDisplayTone {

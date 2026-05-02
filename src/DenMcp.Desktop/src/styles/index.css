@@ -1370,6 +1370,164 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid color-mix(i
 .tasks-lane-branch { color: var(--accent); font-family: var(--font-mono); font-size: var(--fs-2xs); }
 .tasks-lane-worktree { color: var(--fg-muted); font-family: var(--font-mono); font-size: var(--fs-2xs); overflow-wrap: anywhere; }
 
+/* ── Task filter/sort bar ── */
+.tasks-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: var(--bw) solid var(--bd-subtle);
+  background: color-mix(in oklab, var(--bg-input) 50%, transparent);
+  flex-wrap: wrap;
+}
+.tasks-filter-status {
+  display: flex;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+}
+.tasks-filter-btn {
+  background: none;
+  border: var(--bw) solid var(--bd-subtle);
+  color: var(--fg-secondary);
+  border-radius: var(--r-md);
+  padding: var(--sp-0_5) var(--sp-2);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+.tasks-filter-btn:hover { background: var(--bg-hover); color: var(--fg-primary); }
+.tasks-filter-btn.active { background: color-mix(in oklab, var(--accent) 18%, transparent); color: var(--accent); border-color: color-mix(in oklab, var(--accent) 40%, transparent); font-weight: 600; }
+.tasks-filter-sort {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-left: auto;
+}
+.tasks-sort-label { color: var(--fg-muted); font-size: var(--fs-xs); }
+.tasks-sort-select {
+  background: var(--bg-input);
+  color: var(--fg-primary);
+  border: var(--bw) solid var(--bd-subtle);
+  border-radius: var(--r-md);
+  font-size: var(--fs-xs);
+  padding: var(--sp-0_5) var(--sp-2);
+}
+.tasks-filter-count { color: var(--fg-muted); font-size: var(--fs-xs); white-space: nowrap; }
+
+/* ── Task row attrs (priority/assignee/tags) ── */
+.tasks-row-attrs {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  font-size: var(--fs-xs);
+}
+.tasks-priority-chip {
+  font-family: var(--font-mono);
+  font-size: var(--fs-3xs);
+  font-weight: 600;
+  padding: 1px var(--sp-1);
+  border-radius: var(--r-xs);
+}
+.tasks-priority-1 { color: var(--st-err); background: color-mix(in oklab, var(--st-err) 14%, transparent); }
+.tasks-priority-2 { color: var(--st-warn); background: color-mix(in oklab, var(--st-warn) 14%, transparent); }
+.tasks-priority-3 { color: var(--fg-secondary); background: color-mix(in oklab, var(--fg-secondary) 8%, transparent); }
+.tasks-priority-4 { color: var(--fg-muted); background: transparent; }
+.tasks-priority-5 { color: var(--fg-muted); background: transparent; }
+.tasks-row-assignee { color: var(--fg-secondary); }
+.tasks-row-tags { display: flex; gap: var(--sp-1); flex-wrap: wrap; }
+.tasks-tag-chip {
+  font-size: var(--fs-3xs);
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
+  padding: 1px var(--sp-1);
+  border-radius: var(--r-xs);
+}
+.tasks-row-dep-count { color: var(--fg-muted); }
+.tasks-row-sub-count { color: var(--fg-muted); }
+.tasks-row-msg-count { color: var(--fg-muted); }
+.tasks-row-created { color: var(--fg-tertiary); margin-left: auto; }
+
+/* ── Task detail section (expanded when focused) ── */
+.tasks-detail-section {
+  display: grid;
+  gap: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: var(--bw) solid var(--bd-subtle);
+  margin-top: var(--sp-1);
+}
+.tasks-detail-block { display: grid; gap: var(--sp-1); }
+.tasks-detail-heading {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--fg-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0;
+}
+.tasks-detail-description {
+  font-size: var(--fs-xs);
+  color: var(--fg-secondary);
+  margin: 0;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+.tasks-detail-text {
+  font-size: var(--fs-xs);
+  color: var(--fg-muted);
+  margin: 0;
+}
+.tasks-detail-subtasks {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+}
+.tasks-detail-subtask-ref {
+  font-family: var(--font-mono);
+  font-size: var(--fs-3xs);
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
+  padding: 1px var(--sp-1);
+  border-radius: var(--r-xs);
+}
+.tasks-detail-messages {
+  display: grid;
+  gap: var(--sp-1);
+}
+.tasks-detail-message-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-size: var(--fs-3xs);
+  min-width: 0;
+}
+.tasks-detail-msg-sender {
+  color: var(--fg-secondary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.tasks-detail-msg-type {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--fs-3xs);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.tasks-detail-msg-summary {
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+.tasks-detail-msg-time {
+  color: var(--fg-tertiary);
+  white-space: nowrap;
+  margin-left: auto;
+}
+
 @media (max-width: 1100px) {
   .tasks-header { grid-template-columns: 1fr; }
   .tasks-workbench-grid { grid-template-columns: 1fr; }
