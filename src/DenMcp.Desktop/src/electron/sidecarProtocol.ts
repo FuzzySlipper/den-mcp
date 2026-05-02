@@ -339,45 +339,10 @@ export interface AppAgentCancelRequest extends Record<string, JsonValue | undefi
   reason?: string | null;
 }
 
-export interface CollaborationSendCompiledResponseRequest extends Record<string, JsonValue | undefined> {
-  session_id: number;
-  compiled_text?: string | null;
-  target_session_id?: string | null;
-  post_to_den?: boolean;
-  requested_by?: string | null;
-}
-
-export interface CollaborationDenPostRecord {
-  posted: boolean;
-  draft_id?: number | null;
-  project_id?: string | null;
-  error?: string | null;
-}
-
-export interface CollaborationDeliveryRecord {
-  status: 'delivered' | 'no_live_session' | 'session_stale' | 'session_offline' | 'capability_denied' | 'skipped' | 'failed';
-  target_session_id?: string | null;
-  target_session_status?: string | null;
-  can_deliver: boolean;
-  reason?: string | null;
-  error?: string | null;
-}
-
-export interface CollaborationSendCompiledResponseResponse {
-  compiled_text: string;
-  den_post: CollaborationDenPostRecord;
-  delivery: CollaborationDeliveryRecord;
-  session_id: number;
-  target_session_id?: string | null;
-}
-
-export interface CollaborationDeliveryEventPayload {
-  session_id: string;
-  status: string;
-  compiled_text_length: number;
-  reason?: string | null;
-  observed_at: string;
-}
+// Collaboration send-compiled-response and delivery event types removed (task #1087).
+// The renderer compiles responses locally via denCollaborationApi.ts (Den REST)
+// and does not need a sidecar bridge path. If sidecar-based delivery is needed
+// in the future, re-add these types alongside preload + allow-list wiring.
 
 export type TerminalResponse = Record<string, JsonValue>;
 export type TerminalEventPayload = Record<string, JsonValue>;
@@ -468,11 +433,7 @@ export const sidecarCommands: Record<string, BridgeCommandSpec<JsonValue, JsonVa
     requestSchema: 'den_desktop.app_agent.cancel_request.request',
     responseSchema: 'den_desktop.app_agent.cancel_request.response',
   },
-  collaborationSendCompiledResponse: {
-    command: 'den_desktop.collaboration.send_compiled_response',
-    requestSchema: 'den_desktop.collaboration.send_compiled_response.request',
-    responseSchema: 'den_desktop.collaboration.send_compiled_response.response',
-  },
+  // collaborationSendCompiledResponse removed — see type-level comment above.
   tasksGetDashboardSnapshot: {
     command: 'den_desktop.tasks.get_dashboard_snapshot',
     requestSchema: 'den_desktop.tasks.get_dashboard_snapshot.request',
@@ -595,10 +556,7 @@ export const sidecarEvents: Record<string, BridgeEventSpec<JsonValue>> = {
     event: 'den.app_agent.tool_call_state_changed',
     payloadSchema: 'den.app_agent.tool_call_state_changed.payload',
   },
-  collaborationDelivery: {
-    event: 'den.collaboration.delivery_state_changed',
-    payloadSchema: 'den.collaboration.delivery_state_changed.payload',
-  },
+  // collaborationDelivery event removed — renderer does not subscribe to this.
 };
 
 export type SidecarBridgeClient = CheckedBridgeClient<typeof sidecarCommands, typeof sidecarEvents>;
@@ -634,8 +592,7 @@ export function createSidecarBridgeFacade(client: SidecarBridgeClient) {
       facade.appAgentInvokeTool(request as unknown as JsonValue) as Promise<TResponse>,
     appAgentCancelRequest: async <TResponse = AppAgentResponse>(request: AppAgentCancelRequest): Promise<TResponse> =>
       facade.appAgentCancelRequest(request as JsonValue) as Promise<TResponse>,
-    collaborationSendCompiledResponse: async <TResponse = CollaborationSendCompiledResponseResponse>(request: CollaborationSendCompiledResponseRequest): Promise<TResponse> =>
-      facade.collaborationSendCompiledResponse(request as unknown as JsonValue) as Promise<TResponse>,
+    // collaborationSendCompiledResponse removed (task #1087).
     tasksGetDashboardSnapshot: async <TResponse = TasksDashboardSnapshot>(request: TasksDashboardSnapshotRequest): Promise<TResponse> =>
       facade.tasksGetDashboardSnapshot(request as JsonValue) as Promise<TResponse>,
     messagesGetSnapshot: async <TResponse = MessagesSnapshot>(request: MessagesSnapshotRequest): Promise<TResponse> =>
@@ -699,9 +656,7 @@ export function createSidecarBridgeFacade(client: SidecarBridgeClient) {
     assertAppAgentToolCallStateEvent(frame: BridgeEventFrame): void {
       client.assertEvent('appAgentToolCallState', frame);
     },
-    assertCollaborationDeliveryEvent(frame: BridgeEventFrame): void {
-      client.assertEvent('collaborationDelivery', frame);
-    },
+    // assertCollaborationDeliveryEvent removed (task #1087).
   };
 }
 

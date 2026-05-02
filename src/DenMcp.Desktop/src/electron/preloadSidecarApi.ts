@@ -10,8 +10,12 @@ import type {
   OperatorStatus,
   SaveOperatorSettingsRequest,
 } from '../desktop/sidecarBridgeApi.ts';
+// Note: collaborationSendCompiledResponse types were removed from
+// sidecarProtocol.ts in task #1087. The renderer compiles collaboration
+// responses locally via denCollaborationApi.ts (Den REST), not through
+// the sidecar bridge.
 import type { SidecarBridgeClient } from './sidecarProtocol.ts';
-import { createSidecarBridgeFacade, type SidecarHealthResponse, type SidecarCapabilitiesResponse, type ConsoleCommandDefinition, type ConsoleCommandRunRequest, type ConsoleCommandRunResponse, type ConsoleCommandListResponse, type TerminalAckOutputRequest, type TerminalAttachRequest, type TerminalCreateSessionRequest, type TerminalDetachRequest, type TerminalListSessionsRequest, type TerminalReadActivityRequest, type TerminalReconnectRequest, type TerminalResizeRequest, type TerminalResponse, type TerminalEventPayload, type TerminalSendInputRequest, type TerminalTerminateRequest, type AppAgentBuildContextRequest, type AppAgentCancelRequest, type AppAgentInvokeToolRequest, type AppAgentListToolsRequest, type AppAgentResponse, type TasksDashboardSnapshotRequest, type TasksDashboardSnapshot, type CollaborationSendCompiledResponseRequest, type CollaborationSendCompiledResponseResponse, type CollaborationDeliveryEventPayload, type MessagesSnapshotRequest, type MessagesSnapshot } from './sidecarProtocol.ts';
+import { createSidecarBridgeFacade, type SidecarHealthResponse, type SidecarCapabilitiesResponse, type ConsoleCommandDefinition, type ConsoleCommandRunRequest, type ConsoleCommandRunResponse, type ConsoleCommandListResponse, type TerminalAckOutputRequest, type TerminalAttachRequest, type TerminalCreateSessionRequest, type TerminalDetachRequest, type TerminalListSessionsRequest, type TerminalReadActivityRequest, type TerminalReconnectRequest, type TerminalResizeRequest, type TerminalResponse, type TerminalEventPayload, type TerminalSendInputRequest, type TerminalTerminateRequest, type AppAgentBuildContextRequest, type AppAgentCancelRequest, type AppAgentInvokeToolRequest, type AppAgentListToolsRequest, type AppAgentResponse, type TasksDashboardSnapshotRequest, type TasksDashboardSnapshot, type MessagesSnapshotRequest, type MessagesSnapshot } from './sidecarProtocol.ts';
 
 export interface ShellAppearanceSettings {
   theme: string;
@@ -48,7 +52,7 @@ export interface DenDesktopSidecarApi {
   appAgentListTools(request?: AppAgentListToolsRequest): Promise<AppAgentResponse>;
   appAgentInvokeTool(request: AppAgentInvokeToolRequest): Promise<AppAgentResponse>;
   appAgentCancelRequest(request: AppAgentCancelRequest): Promise<AppAgentResponse>;
-  collaborationSendCompiledResponse(request: CollaborationSendCompiledResponseRequest): Promise<CollaborationSendCompiledResponseResponse>;
+  // collaborationSendCompiledResponse removed (task #1087) — renderer uses Den REST directly.
   tasksGetDashboardSnapshot(request: TasksDashboardSnapshotRequest): Promise<TasksDashboardSnapshot>;
   messagesGetSnapshot(request: MessagesSnapshotRequest): Promise<MessagesSnapshot>;
   terminalCreateSession(request: TerminalCreateSessionRequest): Promise<TerminalResponse>;
@@ -68,7 +72,7 @@ export interface DenDesktopSidecarApi {
   onTerminalSessionList(listener: (event: TerminalResponse) => void): () => void;
   onAppAgentRunState(listener: (event: AppAgentResponse) => void): () => void;
   onAppAgentToolCallState(listener: (event: AppAgentResponse) => void): () => void;
-  onCollaborationDelivery(listener: (event: CollaborationDeliveryEventPayload) => void): () => void;
+  // onCollaborationDelivery removed (task #1087) — renderer does not subscribe to this event.
   onOperatorStatus(listener: (status: OperatorStatus) => void): () => void;
   onGitSnapshots(listener: (snapshots: LocalGitSnapshot[]) => void): () => void;
   onSessionSnapshots(listener: (snapshots: LocalSessionSnapshot[]) => void): () => void;
@@ -107,7 +111,7 @@ export function createDenDesktopSidecarApi(
     appAgentListTools: (request?: AppAgentListToolsRequest) => facade.appAgentListTools(request ?? {}),
     appAgentInvokeTool: (request: AppAgentInvokeToolRequest) => facade.appAgentInvokeTool(request),
     appAgentCancelRequest: (request: AppAgentCancelRequest) => facade.appAgentCancelRequest(request),
-    collaborationSendCompiledResponse: (request: CollaborationSendCompiledResponseRequest) => facade.collaborationSendCompiledResponse(request),
+    // collaborationSendCompiledResponse removed (task #1087).
     tasksGetDashboardSnapshot: (request: TasksDashboardSnapshotRequest) => facade.tasksGetDashboardSnapshot(request),
     messagesGetSnapshot: (request: MessagesSnapshotRequest) => facade.messagesGetSnapshot(request),
     terminalCreateSession: (request: TerminalCreateSessionRequest) => facade.terminalCreateSession(request),
@@ -179,13 +183,7 @@ export function createDenDesktopSidecarApi(
         listener(frame.payload as unknown as AppAgentResponse);
       });
     },
-    onCollaborationDelivery(listener: (event: CollaborationDeliveryEventPayload) => void) {
-      return events.subscribe((frame) => {
-        if (frame.event !== 'den.collaboration.delivery_state_changed') return;
-        facade.assertCollaborationDeliveryEvent(frame);
-        listener(frame.payload as unknown as CollaborationDeliveryEventPayload);
-      });
-    },
+    // onCollaborationDelivery removed (task #1087).
     onOperatorStatus(listener: (status: OperatorStatus) => void) {
       return events.subscribe((frame) => {
         if (frame.event !== 'den://operator-status') return;
