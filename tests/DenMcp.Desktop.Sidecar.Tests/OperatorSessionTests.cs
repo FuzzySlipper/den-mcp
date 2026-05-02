@@ -1357,11 +1357,23 @@ public class TerminalBridgeHandlerTests
 
         var frameStart = events.PublishedFrames.Count;
         backend.Processes[0].EmitOutput(Encoding.UTF8.GetBytes("g"));
+
+        // Wait for stream B's backpressure (7 unacked bytes >= AckAfterBytes=5).
         await WaitForPublishedFrameAsync(events, DesktopSidecarProtocol.TerminalBackpressureEvent,
             frame => string.Equals(frame.Payload.GetProperty("stream_id").GetString(), streamB.StreamId, StringComparison.Ordinal)
                 && frame.Payload.GetProperty("queue_bytes").GetInt32() >= 7,
             startIndex: frameStart);
-        await Task.Delay(50);
+
+        // Positive proof that HandleOutputAsync processed stream A for the "g" emission.
+        // Stream A was acked, so unackedBytes is only 1 byte after this output — well below
+        // the AckAfterBytes threshold. Waiting for this output event (and the stream B
+        // backpressure above) guarantees all synchronous processing is complete, making the
+        // negative assertion below deterministic without a timing window.
+        await WaitForPublishedFrameAsync(events, DesktopSidecarProtocol.TerminalOutputEvent,
+            frame => string.Equals(frame.Payload.GetProperty("stream_id").GetString(), streamA.StreamId, StringComparison.Ordinal)
+                && frame.Payload.TryGetProperty("data", out var data)
+                && Encoding.UTF8.GetString(Convert.FromBase64String(data.GetString()!)) == "g",
+            startIndex: frameStart);
 
         Assert.DoesNotContain(events.PublishedFrames.Skip(frameStart), frame =>
             frame.Event == DesktopSidecarProtocol.TerminalBackpressureEvent
