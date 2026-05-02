@@ -56,6 +56,10 @@ const STALE_AFTER_MS = 120_000;
 // Single click selects/previews metadata; explicit Attach, Enter, or double-click attaches.
 export const TERMINAL_ATTACH_INTERACTION_DECISION: TerminalAttachInteractionDecision = 'select_first_explicit_attach';
 
+// replay_complete is intentionally NOT immediate: the attach flow already triggers
+// refreshSessionsNow() when the attach response arrives, so replay_complete does not
+// represent a new state boundary. Making it immediate would cause a redundant refresh
+// with no UX benefit. See task #1064 for the analysis.
 const IMMEDIATE_REFRESH_LIFECYCLE_EVENTS = new Set(['den.terminal.exit', 'den.terminal.error']);
 const IMMEDIATE_REFRESH_STATUSES = new Set(['exited', 'failed', 'crashed', 'detached', 'terminated']);
 

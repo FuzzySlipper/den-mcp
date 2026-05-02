@@ -163,9 +163,27 @@ test('terminal attach labels encode select-first explicit attach UX', () => {
 test('terminal event refresh urgency favors boundary changes over noisy activity', () => {
   assert.equal(terminalSessionRefreshUrgency({ kind: 'status', status: 'running' }), 'coalesced');
   assert.equal(terminalSessionRefreshUrgency({ kind: 'lifecycle', event: 'den.terminal.heartbeat' }), 'coalesced');
+  // replay_complete is coalesced because the attach flow already calls refreshSessionsNow()
+  // at attach time; replay_complete is a streaming milestone, not a state boundary (#1064).
   assert.equal(terminalSessionRefreshUrgency({ kind: 'lifecycle', event: 'den.terminal.replay_complete' }), 'coalesced');
 
   assert.equal(terminalSessionRefreshUrgency({ kind: 'status', status: 'detached' }), 'immediate');
   assert.equal(terminalSessionRefreshUrgency({ kind: 'status', status: 'exited' }), 'immediate');
   assert.equal(terminalSessionRefreshUrgency({ kind: 'lifecycle', event: 'den.terminal.exit' }), 'immediate');
+});
+
+test('replay_complete urgency decision documented: attach flow already refreshes immediately', () => {
+  // Decision record for #1064: den.terminal.replay_complete remains coalesced.
+  //
+  // Rationale:
+  // 1. The attach flow in SessionPane.attachToSession calls refreshSessionsNow() after
+  //    receiving the attach response — capabilities and session state are already current.
+  // 2. replay_complete fires once after the sidecar finishes replaying buffered output;
+  //    it signals a streaming milestone, not a state/capability boundary.
+  // 3. Making it immediate would add a redundant session-list refresh with no UX benefit.
+  // 4. Noisy event coalescing from #1037 (heartbeat, active-stream status) is preserved.
+  assert.equal(terminalSessionRefreshUrgency({ kind: 'lifecycle', event: 'den.terminal.replay_complete' }), 'coalesced');
+  // Verify state-boundary events remain immediate for contrast.
+  assert.equal(terminalSessionRefreshUrgency({ kind: 'lifecycle', event: 'den.terminal.exit' }), 'immediate');
+  assert.equal(terminalSessionRefreshUrgency({ kind: 'lifecycle', event: 'den.terminal.error' }), 'immediate');
 });
