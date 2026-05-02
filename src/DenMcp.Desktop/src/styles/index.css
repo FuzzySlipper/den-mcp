@@ -974,6 +974,30 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid color-mix(i
 .terminal-session-card:hover { border-color: var(--bd-default); background: color-mix(in oklab, var(--bg-input) 84%, var(--bg-hover)); }
 .terminal-session-card.active { border-color: color-mix(in oklab, var(--accent) 72%, transparent); box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 20%, transparent), var(--shadow-md); }
 .terminal-session-card.calm { opacity: 0.9; }
+.terminal-session-card.double-click-feedback { animation: card-shake 0.3s ease; }
+@keyframes card-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-3px); }
+  40% { transform: translateX(3px); }
+  60% { transform: translateX(-2px); }
+  80% { transform: translateX(2px); }
+}
+.terminal-double-click-hint {
+  display: inline-block;
+  font-size: var(--fs-xs);
+  color: var(--fg-tertiary);
+  background: var(--bg-input);
+  border: var(--bw) solid var(--bd-default);
+  border-radius: var(--r-md);
+  padding: var(--sp-1) var(--sp-2);
+  animation: hint-fade 1.4s ease forwards;
+}
+@keyframes hint-fade {
+  0% { opacity: 0; }
+  10% { opacity: 1; }
+  75% { opacity: 1; }
+  100% { opacity: 0; }
+}
 .terminal-card-topline { display: flex; justify-content: space-between; gap: var(--sp-3); align-items: flex-start; }
 .terminal-card-topline h3 { margin: 0; }
 .terminal-card-meta { margin: var(--sp-1) 0; }

@@ -6,6 +6,7 @@ import {
   canAttachInline,
   relativeActivityLabel,
   terminalInlineAttachButtonLabel,
+  terminalNonAttachableDoubleClickHint,
   terminalSessionCardActionHint,
   terminalSessionRefreshUrgency,
   terminalStatusLabel,
@@ -214,4 +215,92 @@ test('starting status urgency decision documented: no event path emits starting,
   assert.equal(terminalSessionRefreshUrgency({ kind: 'status', status: 'exited' }), 'immediate');
   assert.equal(terminalSessionRefreshUrgency({ kind: 'status', status: 'detached' }), 'immediate');
   assert.equal(terminalSessionRefreshUrgency({ kind: 'status', status: 'failed' }), 'immediate');
+});
+
+test('terminalNonAttachableDoubleClickHint returns null for attachable cards, contextual hint otherwise', () => {
+  // Decision record for #1068: non-attachable card double-clicks show brief feedback.
+  //
+  // Rationale:
+  // 1. Attachable cards respond to double-click with an attach action, giving visible feedback.
+  // 2. Non-attachable cards silently did nothing on double-click, creating inconsistent UX.
+  // 3. terminalNonAttachableDoubleClickHint provides a brief contextual message without
+  //    triggering attach or external attach commands.
+  // 4. Single-click select/preview behavior is preserved unchanged.
+  // 5. Explicit Attach button in the action row remains the primary attach affordance.
+
+  // Attachable inline session — no hint (double-click is a valid attach)
+  const [attachable] = buildTerminalSessionOverview([
+    {
+      session_id: 'pty-1',
+      display_name: 'PTY 1',
+      kind: 'terminal',
+      backend: 'direct_pty',
+      status: 'running',
+      project_id: 'den-mcp',
+      task_id: 1068,
+      workspace_id: 'ws-main',
+      cwd: '/work/den-mcp',
+      can_attach: true,
+      can_stream_terminal: true,
+      can_send_input: true,
+      can_resize: true,
+      can_detach: true,
+      can_reconnect: true,
+      can_terminate: true,
+      last_activity_at: '2026-04-30T00:01:00.000Z',
+      last_observed_at: '2026-04-30T00:01:00.000Z',
+      warnings: [],
+    },
+  ], [], Date.parse('2026-04-30T00:02:20.000Z'));
+  assert.equal(terminalNonAttachableDoubleClickHint(attachable), null);
+
+  // Read-only Pi artifact session
+  const [readOnly] = buildTerminalSessionOverview([], [snapshot()], Date.parse('2026-04-30T00:03:00.000Z'));
+  assert.equal(readOnly.readOnly, true);
+  assert.equal(terminalNonAttachableDoubleClickHint(readOnly), 'Read-only session — attach unavailable');
+
+  // External-attach-only session (not read-only, no inline attach)
+  const [externalOnly] = buildTerminalSessionOverview([
+    {
+      session_id: 'tmux-1',
+      display_name: 'tmux detached',
+      kind: 'terminal',
+      backend: 'tmux',
+      status: 'running',
+      project_id: 'den-mcp',
+      task_id: 1068,
+      workspace_id: 'ws-main',
+      cwd: '/work/den-mcp',
+      can_attach: false,
+      can_stream_terminal: false,
+      can_open_external_attach: true,
+      last_activity_at: '2026-04-30T00:01:00.000Z',
+      last_observed_at: '2026-04-30T00:01:00.000Z',
+      warnings: [],
+    },
+  ], [], Date.parse('2026-04-30T00:02:20.000Z'));
+  assert.equal(externalOnly.readOnly, false);
+  assert.equal(terminalNonAttachableDoubleClickHint(externalOnly), 'Attach not available for this session');
+
+  // Session with canAttach but not canStreamTerminal (partial capabilities)
+  const [partial] = buildTerminalSessionOverview([
+    {
+      session_id: 'partial-1',
+      display_name: 'partial session',
+      kind: 'terminal',
+      backend: 'tmux',
+      status: 'running',
+      project_id: 'den-mcp',
+      task_id: 1068,
+      workspace_id: 'ws-main',
+      cwd: '/work/den-mcp',
+      can_attach: true,
+      can_stream_terminal: false,
+      last_activity_at: '2026-04-30T00:01:00.000Z',
+      last_observed_at: '2026-04-30T00:01:00.000Z',
+      warnings: [],
+    },
+  ], [], Date.parse('2026-04-30T00:02:20.000Z'));
+  assert.equal(canAttachInline(partial), false);
+  assert.equal(terminalNonAttachableDoubleClickHint(partial), 'Inline attach unavailable');
 });

@@ -123,6 +123,15 @@ export function terminalSessionCardActionHint(session: TerminalOverviewSession):
   return 'Single click selects and previews metadata';
 }
 
+/** Brief feedback shown when a non-attachable card is double-clicked.
+ *  Returns null for attachable cards (double-click is a valid attach trigger). */
+export function terminalNonAttachableDoubleClickHint(session: TerminalOverviewSession): string | null {
+  if (canAttachInline(session)) return null;
+  if (session.readOnly) return 'Read-only session — attach unavailable';
+  if (!session.capabilities.canAttach) return 'Attach not available for this session';
+  return 'Inline attach unavailable';
+}
+
 export function terminalStatusLabel(status: string | null | undefined): string {
   return (status || 'observed').replaceAll('_', ' ');
 }

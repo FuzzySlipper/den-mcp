@@ -31,6 +31,7 @@ import {
   canAttachInline,
   relativeActivityLabel,
   terminalInlineAttachButtonLabel,
+  terminalNonAttachableDoubleClickHint,
   terminalSessionCardActionHint,
   terminalSessionRefreshUrgency,
   terminalStatusLabel,
@@ -449,6 +450,8 @@ function TerminalOverviewWorkbench({ snapshots, workspaces = [] }: Props) {
   );
 }
 
+const NON_ATTACHABLE_FEEDBACK_MS = 1400;
+
 function TerminalSessionCard({
   session,
   active,
@@ -472,6 +475,28 @@ function TerminalSessionCard({
 }) {
   const inlineAttach = canAttachInline(session);
   const inlineAttachLabel = terminalInlineAttachButtonLabel(session, attached);
+  const [nonAttachHint, setNonAttachHint] = useState<string | null>(null);
+  const hintTimerRef = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (hintTimerRef.current !== null) window.clearTimeout(hintTimerRef.current);
+  }, []);
+
+  const handleDoubleClick = useCallback(() => {
+    if (inlineAttach) {
+      onAttach();
+      return;
+    }
+    const hint = terminalNonAttachableDoubleClickHint(session);
+    if (!hint) return;
+    setNonAttachHint(hint);
+    if (hintTimerRef.current !== null) window.clearTimeout(hintTimerRef.current);
+    hintTimerRef.current = window.setTimeout(() => {
+      hintTimerRef.current = null;
+      setNonAttachHint(null);
+    }, NON_ATTACHABLE_FEEDBACK_MS);
+  }, [inlineAttach, onAttach, session]);
+
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === 'Enter') {
       event.preventDefault();
@@ -486,15 +511,16 @@ function TerminalSessionCard({
 
   return (
     <article
-      className={`terminal-session-card ${active ? 'active' : ''} ${session.stale ? 'calm' : ''}`}
+      className={`terminal-session-card ${active ? 'active' : ''} ${session.stale ? 'calm' : ''} ${nonAttachHint ? 'double-click-feedback' : ''}`}
       role="button"
       tabIndex={0}
       onClick={onSelect}
-      onDoubleClick={() => { if (inlineAttach) onAttach(); }}
+      onDoubleClick={handleDoubleClick}
       onKeyDown={handleKeyDown}
       aria-pressed={active}
       aria-label={`${session.displayName}, ${terminalStatusLabel(session.status)}, ${terminalSessionCardActionHint(session)}`}
     >
+      {nonAttachHint ? <span className="terminal-double-click-hint" role="status">{nonAttachHint}</span> : null}
       <div className="terminal-card-topline">
         <div>
           <h3>{session.displayName}</h3>
