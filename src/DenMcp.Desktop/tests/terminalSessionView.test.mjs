@@ -187,3 +187,31 @@ test('replay_complete urgency decision documented: attach flow already refreshes
   assert.equal(terminalSessionRefreshUrgency({ kind: 'lifecycle', event: 'den.terminal.exit' }), 'immediate');
   assert.equal(terminalSessionRefreshUrgency({ kind: 'lifecycle', event: 'den.terminal.error' }), 'immediate');
 });
+
+test('starting status urgency decision documented: no event path emits starting, remains coalesced', () => {
+  // Decision record for #1065: `starting` status remains coalesced.
+  //
+  // Evidence from sidecar event-flow analysis:
+  // 1. OperatorSession defaults Status to "starting", but every creation path overrides
+  //    to Running/Exited/Failed/Stale before publishing session or status events:
+  //    - DirectPtyOperatorSessionService: Status = OperatorSessionStatus.Running at creation
+  //    - TmuxOperatorSessionService: Status = Running or Stale
+  //    - OperatorSessionRegistry.RegisterFromPiSnapshot: FromLegacyPhase -> Running/Exited/Failed
+  //    - AppAgentServices: Status = Running or Exited
+  // 2. No current code path emits a status event with value "starting".
+  // 3. New-session discovery is covered by session-list events and the initial
+  //    terminalListSessions call, not by status events.
+  // 4. If starting were ever emitted in the future, a 750ms coalesced delay is acceptable
+  //    for a transient startup phase that immediately transitions to running.
+  //
+  // Making starting immediate would be dead code with no event-flow justification.
+  // Noisy active-stream coalescing from #1037 is preserved.
+  assert.equal(terminalSessionRefreshUrgency({ kind: 'status', status: 'starting' }), 'coalesced');
+  // Verify the active-stream statuses that drove #1037 coalescing remain coalesced.
+  assert.equal(terminalSessionRefreshUrgency({ kind: 'status', status: 'running' }), 'coalesced');
+  assert.equal(terminalSessionRefreshUrgency({ kind: 'status', status: 'idle' }), 'coalesced');
+  // Verify state-boundary terminal statuses remain immediate.
+  assert.equal(terminalSessionRefreshUrgency({ kind: 'status', status: 'exited' }), 'immediate');
+  assert.equal(terminalSessionRefreshUrgency({ kind: 'status', status: 'detached' }), 'immediate');
+  assert.equal(terminalSessionRefreshUrgency({ kind: 'status', status: 'failed' }), 'immediate');
+});

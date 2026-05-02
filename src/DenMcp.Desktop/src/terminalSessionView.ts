@@ -60,6 +60,18 @@ export const TERMINAL_ATTACH_INTERACTION_DECISION: TerminalAttachInteractionDeci
 // an immediate session-list refresh when the attach response arrives, so replay_complete
 // does not represent a new state boundary. Making it immediate would cause a redundant refresh
 // with no UX benefit. See task #1064 for the analysis.
+//
+// `starting` is intentionally NOT immediate (#1065 analysis):
+// - OperatorSession defaults Status to "starting", but every creation path (DirectPty,
+//   Tmux, PiArtifact, AppAgent) sets status to Running/Exited/Failed/Stale *before*
+//   publishing any session or status event.
+// - No current code path emits a status event with `starting` through the terminal
+//   event pipeline.
+// - Session-list events and the initial list-sessions call already cover new-session
+//   discovery; a status event for `starting` cannot appear without a preceding
+//   session-list or creation event that already populated the session.
+// - Keeping `starting` coalesced is defensive-safe: if it ever did fire, a 750ms delay
+//   is acceptable for a transient startup phase that immediately transitions to running.
 const IMMEDIATE_REFRESH_LIFECYCLE_EVENTS = new Set(['den.terminal.exit', 'den.terminal.error']);
 const IMMEDIATE_REFRESH_STATUSES = new Set(['exited', 'failed', 'crashed', 'detached', 'terminated']);
 
