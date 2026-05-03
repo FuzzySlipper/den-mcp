@@ -3699,6 +3699,154 @@
             }
           }
         }
+      },
+      "den_desktop.documents.list.request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "project_id"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string"
+          }
+        }
+      },
+      "den_desktop.documents.list.response": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "documents"
+        ],
+        "properties": {
+          "documents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "slug",
+                "title",
+                "doc_type",
+                "tags"
+              ],
+              "properties": {
+                "slug": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "doc_type": {
+                  "type": "string"
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "den_desktop.documents.get.request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "project_id",
+          "slug"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        }
+      },
+      "den_desktop.documents.get.response": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slug",
+          "title",
+          "content",
+          "doc_type",
+          "tags"
+        ],
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "doc_type": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "den_desktop.documents.store.request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "project_id",
+          "slug",
+          "title",
+          "content"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "doc_type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "den_desktop.documents.store.response": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slug",
+          "title",
+          "created"
+        ],
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "created": {
+            "type": "boolean"
+          }
+        }
       }
     },
     "commands": [
@@ -3938,6 +4086,30 @@
         "command": "den_desktop.terminal.terminate",
         "request_schema": "den_desktop.terminal.terminate.request",
         "response_schema": "den_desktop.terminal.terminate.response",
+        "supports_cancellation": false,
+        "supports_progress": false,
+        "required_capabilities": []
+      },
+      {
+        "command": "den_desktop.documents.list",
+        "request_schema": "den_desktop.documents.list.request",
+        "response_schema": "den_desktop.documents.list.response",
+        "supports_cancellation": false,
+        "supports_progress": false,
+        "required_capabilities": []
+      },
+      {
+        "command": "den_desktop.documents.get",
+        "request_schema": "den_desktop.documents.get.request",
+        "response_schema": "den_desktop.documents.get.response",
+        "supports_cancellation": false,
+        "supports_progress": false,
+        "required_capabilities": []
+      },
+      {
+        "command": "den_desktop.documents.store",
+        "request_schema": "den_desktop.documents.store.request",
+        "response_schema": "den_desktop.documents.store.response",
         "supports_cancellation": false,
         "supports_progress": false,
         "required_capabilities": []

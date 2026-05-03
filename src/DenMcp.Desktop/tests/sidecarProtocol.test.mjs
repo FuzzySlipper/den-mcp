@@ -65,6 +65,9 @@ test('sidecar schema bundle and representative frames are compatible with the ch
     'den_desktop.terminal.resize',
     'den_desktop.terminal.send_input',
     'den_desktop.terminal.terminate',
+    'den_desktop.documents.list',
+    'den_desktop.documents.get',
+    'den_desktop.documents.store',
   ]);
   assert.deepEqual(bundle.events.map((event) => event.event), [
     'den.app_agent.run_state_changed',
@@ -222,6 +225,9 @@ test('sidecar checked facade allow-lists health/capabilities/runtime commands an
     'terminalResize',
     'terminalSendInput',
     'terminalTerminate',
+    'documentsList',
+    'documentGet',
+    'documentStore',
   ].sort());
 });
 
@@ -508,6 +514,9 @@ test('preload sidecar API exposes no generic dispatch, token, endpoint, or node 
     'terminalResize',
     'terminalSendInput',
     'terminalTerminate',
+    'documentsList',
+    'documentGet',
+    'documentStore',
   ].sort());
   assert.equal(api.dispatch, undefined);
   assert.equal(api.ipcRenderer, undefined);

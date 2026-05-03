@@ -40,7 +40,7 @@ test('each command has a unique id', () => {
 });
 
 test('navigate actions reference valid tab ids', () => {
-  const validTabs = ['operator', 'agent', 'tasks', 'messages', 'git', 'compare', 'terminals', 'collaboration', 'settings'];
+  const validTabs = ['operator', 'agent', 'tasks', 'messages', 'git', 'compare', 'terminals', 'collaboration', 'settings', 'docs'];
   const commands = buildPaletteCommands();
   const navCommands = commands.filter((c) => c.action.type === 'navigate');
   for (const cmd of navCommands) {
