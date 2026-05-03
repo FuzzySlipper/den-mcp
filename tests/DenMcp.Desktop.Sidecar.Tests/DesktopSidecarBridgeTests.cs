@@ -32,6 +32,9 @@ public class DesktopSidecarBridgeTests
             DesktopSidecarProtocol.GetOperatorStatusCommand,
             DesktopSidecarProtocol.ListLocalGitSnapshotsCommand,
             DesktopSidecarProtocol.ListLocalSessionSnapshotsCommand,
+            DesktopSidecarProtocol.DocumentGetCommand,
+            DesktopSidecarProtocol.DocumentStoreCommand,
+            DesktopSidecarProtocol.DocumentsListCommand,
             DesktopSidecarProtocol.MessagesGetSnapshotCommand,
             DesktopSidecarProtocol.RefreshNowCommand,
             DesktopSidecarProtocol.SaveAppearanceSettingsCommand,
@@ -81,6 +84,12 @@ public class DesktopSidecarBridgeTests
         Assert.Equal(sortedEvents, bundle.Events.Select(@event => @event.Event).ToArray());
         Assert.Contains(DesktopSidecarProtocol.GetOperatorStatusCommand + ".response", bundle.Definitions.Keys);
         Assert.Contains(DesktopSidecarProtocol.OperatorStatusEvent + ".payload", bundle.Definitions.Keys);
+        Assert.Contains(DesktopSidecarProtocol.DocumentsListCommand + ".request", bundle.Definitions.Keys);
+        Assert.Contains(DesktopSidecarProtocol.DocumentsListCommand + ".response", bundle.Definitions.Keys);
+        Assert.Contains(DesktopSidecarProtocol.DocumentGetCommand + ".request", bundle.Definitions.Keys);
+        Assert.Contains(DesktopSidecarProtocol.DocumentGetCommand + ".response", bundle.Definitions.Keys);
+        Assert.Contains(DesktopSidecarProtocol.DocumentStoreCommand + ".request", bundle.Definitions.Keys);
+        Assert.Contains(DesktopSidecarProtocol.DocumentStoreCommand + ".response", bundle.Definitions.Keys);
     }
 
     [Fact]

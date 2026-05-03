@@ -41,6 +41,9 @@ public static class DesktopSidecarBridge
         services.AddSingleton<CollaborationResponseDeliveryService>();
         services.AddSingleton<TasksDashboardProjectionService>();
         services.AddSingleton<MessagesProjectionService>();
+        services.AddSingleton<DocumentsListHandler>();
+        services.AddSingleton<DocumentGetHandler>();
+        services.AddSingleton<DocumentStoreHandler>();
         services.AddBridgeHost(
             ConfigureRegistry,
             host =>
@@ -50,7 +53,7 @@ public static class DesktopSidecarBridge
                 host.SchemaVersion = DesktopSidecarProtocol.SchemaVersion;
                 host.SchemaBundleId = DesktopSidecarProtocol.SchemaBundleId;
                 host.SupportedTransports = new[] { WebSocketBridgeTransportNames.LoopbackWebSocket };
-                host.FeatureFlags = new[] { "operator_runtime", "typed_runtime_bridge", "tmux_operator_sessions", "direct_pty_operator_sessions", "app_agent_bridge_foundation", "tasks_dashboard_projection", "messages_tab_projection" };
+                host.FeatureFlags = new[] { "operator_runtime", "typed_runtime_bridge", "tmux_operator_sessions", "direct_pty_operator_sessions", "app_agent_bridge_foundation", "tasks_dashboard_projection", "messages_tab_projection", "documents_tab" };
             });
 
         return services.BuildServiceProvider(validateScopes: true);
@@ -128,6 +131,13 @@ public static class DesktopSidecarBridge
             .RegisterCommand<MessagesSnapshotRequest, MessagesSnapshot, MessagesSnapshotHandler>(
                 DesktopSidecarProtocol.MessagesGetSnapshotCommand,
                 config => { config.SupportsCancellation = true; })
+            // Documents tab (task #1147)
+            .RegisterCommand<DocumentsListRequest, DocumentsListResponse, DocumentsListHandler>(
+                DesktopSidecarProtocol.DocumentsListCommand)
+            .RegisterCommand<DocumentGetRequest, DocumentGetResponse, DocumentGetHandler>(
+                DesktopSidecarProtocol.DocumentGetCommand)
+            .RegisterCommand<DocumentStoreRequest, DocumentStoreResponse, DocumentStoreHandler>(
+                DesktopSidecarProtocol.DocumentStoreCommand)
             // Collaboration response delivery (task #920)
             .RegisterCommand<CollaborationSendCompiledResponseRequest, CollaborationSendCompiledResponseResponse, CollaborationSendCompiledResponseHandler>(
                 DesktopSidecarProtocol.CollaborationSendCompiledResponseCommand)
@@ -270,6 +280,13 @@ public static class DesktopSidecarBridge
             Schema(DesktopSidecarProtocol.TasksGetDashboardSnapshotCommand + ".response", TasksDashboardSnapshotResponseSchema),
             Schema(DesktopSidecarProtocol.MessagesGetSnapshotCommand + ".request", MessagesSnapshotRequestSchema),
             Schema(DesktopSidecarProtocol.MessagesGetSnapshotCommand + ".response", MessagesSnapshotResponseSchema),
+            // Documents tab (task #1147)
+            Schema(DesktopSidecarProtocol.DocumentsListCommand + ".request", DocumentsListRequestSchema),
+            Schema(DesktopSidecarProtocol.DocumentsListCommand + ".response", DocumentsListResponseSchema),
+            Schema(DesktopSidecarProtocol.DocumentGetCommand + ".request", DocumentGetRequestSchema),
+            Schema(DesktopSidecarProtocol.DocumentGetCommand + ".response", DocumentGetResponseSchema),
+            Schema(DesktopSidecarProtocol.DocumentStoreCommand + ".request", DocumentStoreRequestSchema),
+            Schema(DesktopSidecarProtocol.DocumentStoreCommand + ".response", DocumentStoreResponseSchema),
             Schema(DesktopSidecarProtocol.AppAgentRunStateEvent + ".payload", AppAgentRunStateEventSchema),
             Schema(DesktopSidecarProtocol.AppAgentToolCallStateEvent + ".payload", AppAgentToolCallStateEventSchema),
             // Collaboration response delivery schemas (task #920)
@@ -460,6 +477,32 @@ public static class DesktopSidecarBridge
 
     private const string MessagesSnapshotResponseSchema = """
         {"type":"object","additionalProperties":true,"required":["snapshot_id","project_id","generated_at","messages","unread_count","total_count","freshness"],"properties":{"snapshot_id":{"type":"string"},"project_id":{"type":"string"},"task_id":{"type":["integer","null"]},"thread_id":{"type":["integer","null"]},"generated_at":{"type":"string"},"messages":{"type":"array","items":{"type":"object","additionalProperties":true,"required":["id","sender","content","content_summary"],"properties":{"id":{"type":"integer"},"sender":{"type":"string"},"content":{"type":"string"},"intent":{"type":["string","null"]},"metadata_type":{"type":["string","null"]},"task_id":{"type":["integer","null"]},"thread_id":{"type":["integer","null"]},"created_at":{"type":["string","null"]},"is_unread":{"type":"boolean"},"content_summary":{"type":"string"}}}},"thread_root":{"type":["object","null"]},"unread_count":{"type":"integer"},"total_count":{"type":"integer"},"freshness":{"type":"object","additionalProperties":false,"required":["source","is_partial","warnings","errors"],"properties":{"source":{"type":"string"},"generated_at":{"type":["string","null"]},"is_partial":{"type":"boolean"},"warnings":{"type":"array","items":{"type":"string"}},"errors":{"type":"array","items":{"type":"string"}}}}}}
+        """;
+
+    // ── Documents tab schemas (task #1147) ────────────────────────────────────
+
+    private const string DocumentsListRequestSchema = """
+        {"type":"object","additionalProperties":false,"required":["project_id"],"properties":{"project_id":{"type":"string"}}}
+        """;
+
+    private const string DocumentsListResponseSchema = """
+        {"type":"object","additionalProperties":false,"required":["documents"],"properties":{"documents":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["slug","title","doc_type","tags"],"properties":{"slug":{"type":"string"},"title":{"type":"string"},"doc_type":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}}}}}}}
+        """;
+
+    private const string DocumentGetRequestSchema = """
+        {"type":"object","additionalProperties":false,"required":["project_id","slug"],"properties":{"project_id":{"type":"string"},"slug":{"type":"string"}}}
+        """;
+
+    private const string DocumentGetResponseSchema = """
+        {"type":"object","additionalProperties":false,"required":["slug","title","content","doc_type","tags"],"properties":{"slug":{"type":"string"},"title":{"type":"string"},"content":{"type":"string"},"doc_type":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}}}}
+        """;
+
+    private const string DocumentStoreRequestSchema = """
+        {"type":"object","additionalProperties":false,"required":["project_id","slug","title","content"],"properties":{"project_id":{"type":"string"},"slug":{"type":"string"},"title":{"type":"string"},"content":{"type":"string"},"doc_type":{"type":["string","null"]}}}
+        """;
+
+    private const string DocumentStoreResponseSchema = """
+        {"type":"object","additionalProperties":false,"required":["slug","title","created"],"properties":{"slug":{"type":"string"},"title":{"type":"string"},"created":{"type":"boolean"}}}
         """;
 
     private const string AppAgentRunStateEventSchema = """

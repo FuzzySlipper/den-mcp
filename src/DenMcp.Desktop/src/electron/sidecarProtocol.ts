@@ -305,6 +305,50 @@ export interface TasksDashboardLane {
   session_chips: Array<Record<string, JsonValue>>;
 }
 
+// ── Documents tab (task #1147) ────────────────────────────────────────────
+
+export interface DocumentsListRequest {
+  project_id: string;
+}
+
+export interface DocumentsListResponse {
+  documents: DocumentListItem[];
+}
+
+export interface DocumentListItem {
+  slug: string;
+  title: string;
+  doc_type: string;
+  tags: string[];
+}
+
+export interface DocumentGetRequest {
+  project_id: string;
+  slug: string;
+}
+
+export interface DocumentGetResponse {
+  slug: string;
+  title: string;
+  content: string;
+  doc_type: string;
+  tags: string[];
+}
+
+export interface DocumentStoreRequest {
+  project_id: string;
+  slug: string;
+  title: string;
+  content: string;
+  doc_type?: string | null;
+}
+
+export interface DocumentStoreResponse {
+  slug: string;
+  title: string;
+  created: boolean;
+}
+
 export interface TasksDashboardFreshness {
   source: string;
   generated_at?: string | null;
@@ -450,6 +494,21 @@ export const sidecarCommands: Record<string, BridgeCommandSpec<JsonValue, JsonVa
     requestSchema: 'den_desktop.messages.get_snapshot.request',
     responseSchema: 'den_desktop.messages.get_snapshot.response',
     supportsCancellation: true,
+  },
+  documentsList: {
+    command: 'den_desktop.documents.list',
+    requestSchema: 'den_desktop.documents.list.request',
+    responseSchema: 'den_desktop.documents.list.response',
+  },
+  documentGet: {
+    command: 'den_desktop.documents.get',
+    requestSchema: 'den_desktop.documents.get.request',
+    responseSchema: 'den_desktop.documents.get.response',
+  },
+  documentStore: {
+    command: 'den_desktop.documents.store',
+    requestSchema: 'den_desktop.documents.store.request',
+    responseSchema: 'den_desktop.documents.store.response',
   },
   getHealth: {
     command: 'bridge.get_health',
@@ -608,6 +667,12 @@ export function createSidecarBridgeFacade(client: SidecarBridgeClient) {
       facade.tasksGetDashboardSnapshot(request as JsonValue) as Promise<TResponse>,
     messagesGetSnapshot: async <TResponse = MessagesSnapshot>(request: MessagesSnapshotRequest): Promise<TResponse> =>
       facade.messagesGetSnapshot(request as JsonValue) as Promise<TResponse>,
+    documentsList: async <TResponse = DocumentsListResponse>(request: DocumentsListRequest): Promise<TResponse> =>
+      facade.documentsList(request as unknown as JsonValue) as Promise<TResponse>,
+    documentGet: async <TResponse = DocumentGetResponse>(request: DocumentGetRequest): Promise<TResponse> =>
+      facade.documentGet(request as unknown as JsonValue) as Promise<TResponse>,
+    documentStore: async <TResponse = DocumentStoreResponse>(request: DocumentStoreRequest): Promise<TResponse> =>
+      facade.documentStore(request as unknown as JsonValue) as Promise<TResponse>,
     terminalCreateSession: async <TResponse = TerminalResponse>(request: TerminalCreateSessionRequest): Promise<TResponse> =>
       facade.terminalCreateSession(request as JsonValue) as Promise<TResponse>,
     terminalListSessions: async <TResponse = TerminalResponse>(request: TerminalListSessionsRequest = {}): Promise<TResponse> =>

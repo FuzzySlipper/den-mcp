@@ -519,6 +519,71 @@ public sealed record DesktopDiffSnapshot
     public int FreshnessSeconds { get; init; }
 }
 
+// ── Document API DTOs (task #1147) ────────────────────────────────────────
+
+public sealed record DenDocumentSummary
+{
+    [JsonPropertyName("slug")]
+    public string Slug { get; init; } = string.Empty;
+
+    [JsonPropertyName("title")]
+    public string Title { get; init; } = string.Empty;
+
+    [JsonPropertyName("doc_type")]
+    public string? DocType { get; init; }
+
+    [JsonPropertyName("tags")]
+    public List<string>? Tags { get; init; }
+
+    [JsonPropertyName("created_at")]
+    public string? CreatedAt { get; init; }
+
+    [JsonPropertyName("updated_at")]
+    public string? UpdatedAt { get; init; }
+}
+
+public sealed record DenDocumentDetail
+{
+    [JsonPropertyName("slug")]
+    public string Slug { get; init; } = string.Empty;
+
+    [JsonPropertyName("title")]
+    public string Title { get; init; } = string.Empty;
+
+    [JsonPropertyName("content")]
+    public string Content { get; init; } = string.Empty;
+
+    [JsonPropertyName("doc_type")]
+    public string? DocType { get; init; }
+
+    [JsonPropertyName("tags")]
+    public List<string>? Tags { get; init; }
+
+    [JsonPropertyName("created_at")]
+    public string? CreatedAt { get; init; }
+
+    [JsonPropertyName("updated_at")]
+    public string? UpdatedAt { get; init; }
+}
+
+public sealed record StoreDocumentApiRequest
+{
+    [JsonPropertyName("slug")]
+    public string Slug { get; init; } = string.Empty;
+
+    [JsonPropertyName("title")]
+    public string Title { get; init; } = string.Empty;
+
+    [JsonPropertyName("content")]
+    public string Content { get; init; } = string.Empty;
+
+    [JsonPropertyName("doc_type")]
+    public string? DocType { get; init; }
+
+    [JsonPropertyName("tags")]
+    public List<string>? Tags { get; init; }
+}
+
 // ── Collaboration API DTOs ────────────────────────────────────────────────
 
 public sealed record CreateCollaborationDraftApiRequest

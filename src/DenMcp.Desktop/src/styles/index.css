@@ -521,6 +521,84 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid color-mix(i
 
 .git-panel, .session-panel { margin-top: 0; }
 .git-workbench-grid .diff-panel { position: sticky; top: 0; align-self: start; }
+/* ── Docs tab (task #1147) ──────────────────────────────────────────────── */
+
+.docs-pane { display: flex; flex-direction: column; gap: var(--sp-3); }
+
+.docs-header { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-3); }
+.docs-header-title .eyebrow { margin: 0 0 var(--sp-1); }
+.docs-header-title h2 { margin: 0; }
+.docs-header-metrics { display: flex; gap: var(--sp-4); align-items: center; }
+.docs-count { font-size: var(--fs-sm); color: var(--fg-muted); }
+.docs-count strong { color: var(--fg-default); }
+
+.docs-search-bar { display: flex; gap: var(--sp-2); align-items: center; }
+.docs-search-bar input { flex: 1; max-width: 480px; }
+
+.docs-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--sp-3); }
+
+.docs-card {
+  border: var(--bw) solid var(--bd-subtle);
+  border-radius: var(--r-lg);
+  padding: var(--sp-3);
+  background: var(--bg-input);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  transition: border-color 0.12s, background 0.12s;
+}
+.docs-card:hover { border-color: var(--bd-default); background: color-mix(in oklab, var(--bg-input) 84%, var(--bg-hover)); }
+.docs-card:focus-visible { outline: 2px solid color-mix(in oklab, var(--accent) 55%, transparent); outline-offset: 2px; }
+.docs-card-topline { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); }
+.docs-card-title { font-weight: 700; font-size: var(--fs-sm); color: var(--fg-primary); }
+.docs-card-slug { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--fg-muted); overflow-wrap: anywhere; }
+.docs-card-tags { display: flex; gap: var(--sp-1); flex-wrap: wrap; margin-top: var(--sp-1); }
+
+.docs-viewer-header { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-3); }
+.docs-viewer-header-title .eyebrow { margin: 0 0 var(--sp-1); }
+.docs-viewer-header-title h2 { margin: 0; }
+.docs-meta-pills { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin-top: var(--sp-2); }
+
+.docs-viewer {
+  border: var(--bw) solid var(--bd-subtle);
+  border-radius: var(--r-lg);
+  background: var(--bg-panel-2);
+  max-height: 70vh;
+  overflow: auto;
+}
+.docs-viewer-content {
+  margin: 0;
+  padding: var(--sp-4);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--fg-primary);
+}
+
+.docs-editor-group { display: flex; flex-direction: column; gap: var(--sp-3); }
+.docs-editor-label { display: flex; flex-direction: column; gap: var(--sp-1); }
+.docs-editor-label span { color: var(--fg-tertiary); font-size: var(--fs-xs); }
+.docs-editor-title-input { max-width: 640px; }
+.docs-editor {
+  width: 100%;
+  min-height: 300px;
+  border: var(--bw) solid var(--bd-default);
+  border-radius: var(--r-lg);
+  background: var(--bg-input);
+  color: var(--fg-primary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  padding: var(--sp-3);
+  resize: vertical;
+}
+.docs-editor:focus { outline: 2px solid color-mix(in oklab, var(--accent) 55%, transparent); outline-offset: 2px; }
+
+.docs-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); }
+
 .settings-tab .connection-panel { max-width: 980px; }
 .stub-surface { max-width: 860px; }
 .settings-grid { display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: var(--sp-3); margin-top: var(--sp-4); }

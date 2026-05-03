@@ -429,6 +429,99 @@ public sealed class DenHttpClient
         }
     }
 
+    // ── Document API methods (task #1147) ────────────────────────────────────
+
+    public async Task<IReadOnlyList<DenDocumentSummary>> ListDocumentsAsync(
+        string baseUrl,
+        string? projectId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var path = projectId is not null
+            ? $"/api/projects/{EscapePathSegment(projectId)}/documents"
+            : "/api/documents";
+        var response = await SendAsync(
+            () => new HttpRequestMessage(HttpMethod.Get, JoinUrl(baseUrl, path)),
+            "Unable to fetch Den documents",
+            cancellationToken).ConfigureAwait(false);
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await ReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+                throw new DenHttpClientException($"Den documents list returned HTTP {(int)response.StatusCode}: {body}");
+            }
+
+            return await ReadJsonAsync<List<DenDocumentSummary>>(
+                response,
+                "Unable to parse Den documents",
+                cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    public async Task<DenDocumentDetail> GetDocumentAsync(
+        string baseUrl,
+        string projectId,
+        string slug,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(slug);
+
+        var path = $"/api/projects/{EscapePathSegment(projectId)}/documents/{Uri.EscapeDataString(slug)}";
+        var response = await SendAsync(
+            () => new HttpRequestMessage(HttpMethod.Get, JoinUrl(baseUrl, path)),
+            $"Unable to fetch Den document '{slug}'",
+            cancellationToken).ConfigureAwait(false);
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await ReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+                throw new DenHttpClientException($"Den document '{slug}' returned HTTP {(int)response.StatusCode}: {body}");
+            }
+
+            return await ReadJsonAsync<DenDocumentDetail>(
+                response,
+                $"Unable to parse Den document '{slug}'",
+                cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    public async Task<DenDocumentDetail> StoreDocumentAsync(
+        string baseUrl,
+        string projectId,
+        StoreDocumentApiRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+
+        var path = $"/api/projects/{EscapePathSegment(projectId)}/documents";
+        var response = await SendAsync(
+            () => new HttpRequestMessage(HttpMethod.Post, JoinUrl(baseUrl, path))
+            {
+                Content = JsonContent(request),
+            },
+            $"Unable to store Den document '{request.Slug}'",
+            cancellationToken).ConfigureAwait(false);
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await ReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+                throw new DenHttpClientException($"Den document store returned HTTP {(int)response.StatusCode}: {body}");
+            }
+
+            return await ReadJsonAsync<DenDocumentDetail>(
+                response,
+                $"Unable to parse stored Den document",
+                cancellationToken).ConfigureAwait(false);
+        }
+    }
+
     public async Task<CollaborationSessionData> GetCollaborationSessionAsync(
         string baseUrl,
         long sessionId,

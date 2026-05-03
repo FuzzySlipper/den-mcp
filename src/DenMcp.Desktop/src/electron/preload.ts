@@ -133,6 +133,11 @@ contextBridge.exposeInMainWorld('denDesktopSidecar', {
   // Messages tab
   messagesGetSnapshot: (request: unknown) => callSidecar('messagesGetSnapshot', request),
 
+  // Documents tab (task #1147)
+  documentsList: (request: unknown) => callSidecar('documentsList', request),
+  documentGet: (request: unknown) => callSidecar('documentGet', request),
+  documentStore: (request: unknown) => callSidecar('documentStore', request),
+
   // Terminal commands
   terminalCreateSession: (request: unknown) => callSidecar('terminalCreateSession', request),
   terminalListSessions: (request?: unknown) => callSidecar('terminalListSessions', request ?? {}),

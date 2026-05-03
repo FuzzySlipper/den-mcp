@@ -3,6 +3,7 @@ import { AgentPane } from './components/AgentPane';
 import { CollaborationPane } from './components/CollaborationPane';
 import { TasksDashboardPane } from './components/TasksDashboardPane';
 import { MessagesPane } from './components/MessagesPane';
+import { DocsPane } from './components/DocsPane';
 import { useCollaborationState } from './desktop/useCollaborationState';
 import { AppShell } from './components/AppShell';
 import { ConnectionPanel } from './components/ConnectionPanel';
@@ -288,6 +289,7 @@ export function App() {
     agent: <AgentPane selection={agentSelection} />,
     tasks: <TasksDashboardPane projectId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (effectiveProjectFilter ?? null)} parentTaskId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (activeSnapshot?.scope.taskId ?? null)} statusFilterOverride={taskStatusFilterOverride} />,
     messages: <MessagesPane projectId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (effectiveProjectFilter ?? null)} taskId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (activeSnapshot?.scope.taskId ?? null)} />,
+    docs: <DocsPane projectId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (effectiveProjectFilter ?? null)} />,
     git: gitTab,
     compare: <StubSurface eyebrow="Compare" title="Multi-worktree compare" description="Routed surface reserved for pinned worktree panes and side-by-side terminal/output comparison without making renderer state authoritative." />,
     terminals: terminalsTab,

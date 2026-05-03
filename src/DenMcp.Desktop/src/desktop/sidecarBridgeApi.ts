@@ -66,6 +66,9 @@ interface DenDesktopSidecarRuntimeApi {
   terminalAckOutput(request: TerminalAckOutputRequest): Promise<TerminalAckOutputResponse>;
   tasksGetDashboardSnapshot(request: TasksDashboardSnapshotRequest): Promise<TasksDashboardSnapshot>;
   messagesGetSnapshot(request: MessagesGetSnapshotRequest): Promise<MessagesGetSnapshotResponse>;
+  documentsList(request: Record<string, unknown>): Promise<DocumentsListBridgeResponse>;
+  documentGet(request: Record<string, unknown>): Promise<DocumentGetBridgeResponse>;
+  documentStore(request: Record<string, unknown>): Promise<DocumentStoreBridgeResponse>;
   appAgentBuildContext(request?: AppAgentBuildContextRequest): Promise<AppAgentResponse>;
   appAgentListTools(request?: AppAgentListToolsRequest): Promise<AppAgentResponse>;
   appAgentInvokeTool(request: AppAgentInvokeToolRequest): Promise<AppAgentResponse>;
@@ -810,6 +813,59 @@ export interface MessagesGetSnapshotResponse {
   unread_count: number;
   total_count: number;
   freshness: MessagesFreshness;
+}
+
+// ── Documents tab bridge API (task #1147) ──────────────────────────────────
+
+export interface DocumentsListItem {
+  slug: string;
+  title: string;
+  doc_type: string;
+  tags: string[];
+}
+
+export interface DocumentsListBridgeResponse {
+  documents: DocumentsListItem[];
+}
+
+export interface DocumentGetBridgeResponse {
+  slug: string;
+  title: string;
+  content: string;
+  doc_type: string;
+  tags: string[];
+}
+
+export interface DocumentStoreBridgeRequest {
+  project_id: string;
+  slug: string;
+  title: string;
+  content: string;
+  doc_type?: string | null;
+}
+
+export interface DocumentStoreBridgeResponse {
+  slug: string;
+  title: string;
+  created: boolean;
+}
+
+export async function documentsList(request: { project_id: string }): Promise<DocumentsListBridgeResponse> {
+  return callSidecar('documentsList', () =>
+    sidecarApi().documentsList(request as unknown as Record<string, unknown>),
+  );
+}
+
+export async function documentGet(request: { project_id: string; slug: string }): Promise<DocumentGetBridgeResponse> {
+  return callSidecar('documentGet', () =>
+    sidecarApi().documentGet(request as unknown as Record<string, unknown>),
+  );
+}
+
+export async function documentStore(request: DocumentStoreBridgeRequest): Promise<DocumentStoreBridgeResponse> {
+  return callSidecar('documentStore', () =>
+    sidecarApi().documentStore(request as unknown as Record<string, unknown>),
+  );
 }
 
 export async function tasksGetDashboardSnapshot(request: TasksDashboardGetSnapshotRequest): Promise<TasksDashboardGetSnapshotResponse> {
