@@ -1567,8 +1567,6 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid color-mix(i
 
 @media (max-width: 1100px) {
   .tasks-header { grid-template-columns: 1fr; }
-  .tasks-workbench-grid { grid-template-columns: 1fr; }
-  .tasks-status-panel { position: static; }
   .tasks-lanes-grid { grid-template-columns: 1fr; }
 }
 
