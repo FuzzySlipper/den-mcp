@@ -54,7 +54,22 @@ export function TasksDashboardPane({ projectId, parentTaskId, statusFilterOverri
   const [lastRefreshAt, setLastRefreshAt] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<TaskStatusFilter>('all');
   const [sortMode, setSortMode] = useState<TaskSortMode>('priority');
+  const [navigatedParentTaskId, setNavigatedParentTaskId] = useState<number | null>(null);
   const mountedRef = useRef(true);
+
+  // Reset internal drill-down when external parentTaskId changes
+  useEffect(() => {
+    setNavigatedParentTaskId(null);
+  }, [parentTaskId]);
+
+  // Navigation callback for subtask drill-down
+  const handleNavigateToParent = useCallback((parentId: number) => {
+    setFocusedTaskId(null);
+    setNavigatedParentTaskId(parentId);
+  }, []);
+
+  // Effective parent task: internal drill-down takes precedence over external prop
+  const effectiveParentTaskId = navigatedParentTaskId ?? parentTaskId ?? null;
 
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
 
@@ -65,7 +80,7 @@ export function TasksDashboardPane({ projectId, parentTaskId, statusFilterOverri
     try {
       const request: TasksDashboardGetSnapshotRequest = {
         project_id: projectId,
-        parent_task_id: parentTaskId ?? null,
+        parent_task_id: navigatedParentTaskId ?? parentTaskId ?? null,
         focused_task_id: focusedTaskId,
       };
       const result = await tasksGetDashboardSnapshot(request);
@@ -80,7 +95,7 @@ export function TasksDashboardPane({ projectId, parentTaskId, statusFilterOverri
     } finally {
       if (mountedRef.current) setLoading(false);
     }
-  }, [projectId, parentTaskId, focusedTaskId]);
+  }, [projectId, parentTaskId, navigatedParentTaskId, focusedTaskId]);
 
   // Initial load and periodic refresh
   useEffect(() => {
@@ -90,6 +105,12 @@ export function TasksDashboardPane({ projectId, parentTaskId, statusFilterOverri
   }, [fetchSnapshot]);
 
   const view = useMemo(() => buildDashboardView(snapshot, focusedTaskId), [snapshot, focusedTaskId]);
+
+  // Parent task record for breadcrumb display (found in the full task list)
+  const parentViewTask = useMemo(() => {
+    if (effectiveParentTaskId == null || !snapshot) return null;
+    return snapshot.tasks.find(t => t.id === effectiveParentTaskId) ?? null;
+  }, [effectiveParentTaskId, snapshot]);
 
   // When command palette overrides the filter, apply it once then clear the override
   const effectiveStatusFilter: TaskStatusFilter = statusFilterOverride ?? statusFilter;
@@ -117,7 +138,7 @@ export function TasksDashboardPane({ projectId, parentTaskId, statusFilterOverri
     <section className="panel tasks-dashboard">
       <TasksDashboardHeader
         projectId={projectId}
-        parentTaskId={parentTaskId}
+        parentTaskId={effectiveParentTaskId}
         view={view}
         loading={loading}
         error={error}
@@ -126,6 +147,14 @@ export function TasksDashboardPane({ projectId, parentTaskId, statusFilterOverri
       />
       {snapshot ? (
         <>
+          {effectiveParentTaskId != null && (
+            <BreadcrumbBar
+              projectId={projectId}
+              parentTaskId={effectiveParentTaskId}
+              parentTitle={parentViewTask?.title ?? null}
+              onNavigateToRoot={() => setNavigatedParentTaskId(null)}
+            />
+          )}
           <TasksFilterBar
             statusFilter={effectiveStatusFilter}
             sortMode={sortMode}
@@ -148,6 +177,7 @@ export function TasksDashboardPane({ projectId, parentTaskId, statusFilterOverri
                   task={task}
                   focused={task.isFocused}
                   onSelect={() => setFocusedTaskId(task.isFocused ? null : task.id)}
+                  onNavigateToParent={task.subtaskCount > 0 ? () => handleNavigateToParent(task.id) : undefined}
                 />
               ))}
             </div>
@@ -285,7 +315,7 @@ function WaveStrip({ waves, tasks }: { waves: WaveView[]; tasks: TaskRowView[] }
   );
 }
 
-function TaskRowCard({ task, focused, onSelect }: { task: TaskRowView; focused: boolean; onSelect: () => void }) {
+function TaskRowCard({ task, focused, onSelect, onNavigateToParent }: { task: TaskRowView; focused: boolean; onSelect: () => void; onNavigateToParent?: () => void }) {
   return (
     <article
       className={`tasks-row-card ${focused ? 'focused' : ''} tasks-row-${task.displayTone}`}
@@ -318,7 +348,20 @@ function TaskRowCard({ task, focused, onSelect }: { task: TaskRowView; focused: 
           </span>
         )}
         {task.dependencyCount > 0 && <span className="tasks-row-dep-count">↗ {task.dependencyCount} dep{task.dependencyCount !== 1 ? 's' : ''}</span>}
-        {task.subtaskCount > 0 && <span className="tasks-row-sub-count">▾ {task.subtaskCount} sub{task.subtaskCount !== 1 ? 's' : ''}</span>}
+        {task.subtaskCount > 0 && (
+          onNavigateToParent ? (
+            <button
+              type="button"
+              className="tasks-row-sub-count tasks-subnav-btn"
+              onClick={(e) => { e.stopPropagation(); onNavigateToParent(); }}
+              title={`View ${task.subtaskCount} subtask${task.subtaskCount !== 1 ? 's' : ''} of task #${task.id}`}
+            >
+              ▾ {task.subtaskCount} sub{task.subtaskCount !== 1 ? 's' : ''}
+            </button>
+          ) : (
+            <span className="tasks-row-sub-count">▾ {task.subtaskCount} sub{task.subtaskCount !== 1 ? 's' : ''}</span>
+          )
+        )}
         {task.messageCount > 0 && <span className="tasks-row-msg-count">💬 {task.messageCount}</span>}
         {task.createdAt && <span className="tasks-row-created">created {relativeTimeLabel(task.createdAt)}</span>}
       </div>
@@ -542,5 +585,34 @@ function LaneOverview({ lanes }: { lanes: LaneView[] }) {
         ))}
       </div>
     </div>
+  );
+}
+
+function BreadcrumbBar({
+  projectId,
+  parentTaskId,
+  parentTitle,
+  onNavigateToRoot,
+}: {
+  projectId: string;
+  parentTaskId: number;
+  parentTitle: string | null;
+  onNavigateToRoot: () => void;
+}) {
+  return (
+    <nav className="tasks-breadcrumb-bar" aria-label="Task navigation">
+      <button
+        type="button"
+        className="tasks-breadcrumb-back"
+        onClick={onNavigateToRoot}
+        title="Back to all tasks"
+      >
+        ← All tasks
+      </button>
+      <span className="tasks-breadcrumb-separator" aria-hidden="true">/</span>
+      <span className="tasks-breadcrumb-current">
+        #{parentTaskId}{parentTitle ? ` ${parentTitle}` : ''}
+      </span>
+    </nav>
   );
 }

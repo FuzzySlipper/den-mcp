@@ -60,8 +60,12 @@ public sealed class TasksDashboardProjectionService
         var settings = await _settingsProvider(cancellationToken).ConfigureAwait(false);
         var baseUrl = settings.DenBaseUrl;
 
+        // Use tree: true when parentTaskId is null (root view) to include all tasks,
+        // not just root-level. When drilling into a specific parent, use tree: false
+        // to return only that parent's subtasks.
+        var useTree = request.ParentTaskId is null;
         var visibleSummaries = await TryAsync(
-            () => _den.ListTasksAsync(baseUrl, request.ProjectId, request.ParentTaskId, tree: false, cancellationToken),
+            () => _den.ListTasksAsync(baseUrl, request.ProjectId, request.ParentTaskId, tree: useTree, cancellationToken),
             errors,
             "Unable to load task list",
             Array.Empty<DenTaskRecord>()).ConfigureAwait(false);
