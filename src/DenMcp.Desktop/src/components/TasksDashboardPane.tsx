@@ -55,6 +55,7 @@ export function TasksDashboardPane({ projectId, parentTaskId, statusFilterOverri
   const [statusFilter, setStatusFilter] = useState<TaskStatusFilter>('all');
   const [sortMode, setSortMode] = useState<TaskSortMode>('priority');
   const [navigatedParentTaskId, setNavigatedParentTaskId] = useState<number | null>(null);
+  const [detailOverlayTaskId, setDetailOverlayTaskId] = useState<number | null>(null);
   const mountedRef = useRef(true);
 
   // Reset internal drill-down when external parentTaskId changes
@@ -65,6 +66,22 @@ export function TasksDashboardPane({ projectId, parentTaskId, statusFilterOverri
   // Navigation callback for subtask drill-down
   const handleNavigateToParent = useCallback((parentId: number) => {
     setFocusedTaskId(null);
+    setNavigatedParentTaskId(parentId);
+  }, []);
+
+  // Detail overlay handlers
+  const handleOpenDetail = useCallback((taskId: number) => {
+    setDetailOverlayTaskId(taskId);
+    setFocusedTaskId(taskId);
+  }, []);
+
+  const handleCloseDetail = useCallback(() => {
+    setDetailOverlayTaskId(null);
+  }, []);
+
+  // Navigate to subtask view from overlay: close overlay and drill into parent
+  const handleOverlayNavigateSubtask = useCallback((parentId: number) => {
+    setDetailOverlayTaskId(null);
     setNavigatedParentTaskId(parentId);
   }, []);
 
@@ -105,6 +122,24 @@ export function TasksDashboardPane({ projectId, parentTaskId, statusFilterOverri
   }, [fetchSnapshot]);
 
   const view = useMemo(() => buildDashboardView(snapshot, focusedTaskId), [snapshot, focusedTaskId]);
+
+  // Escape key closes the detail overlay
+  useEffect(() => {
+    if (!detailOverlayTaskId) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setDetailOverlayTaskId(null);
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [detailOverlayTaskId]);
+
+  // Look up the overlay task from view data
+  const overlayTask = useMemo(() => {
+    if (detailOverlayTaskId == null) return null;
+    return view.tasks.find(t => t.id === detailOverlayTaskId) ?? null;
+  }, [detailOverlayTaskId, view.tasks]);
 
   // Parent task record for breadcrumb display (found in the full task list)
   const parentViewTask = useMemo(() => {
@@ -176,7 +211,7 @@ export function TasksDashboardPane({ projectId, parentTaskId, statusFilterOverri
                   key={task.id}
                   task={task}
                   focused={task.isFocused}
-                  onSelect={() => setFocusedTaskId(task.isFocused ? null : task.id)}
+                  onSelect={() => handleOpenDetail(task.id)}
                   onNavigateToParent={task.subtaskCount > 0 ? () => handleNavigateToParent(task.id) : undefined}
                 />
               ))}
@@ -195,6 +230,14 @@ export function TasksDashboardPane({ projectId, parentTaskId, statusFilterOverri
           <strong>{loading ? 'Loading tasks dashboard…' : 'No snapshot available.'}</strong>
           <p>{loading ? 'Fetching the latest task data from the Den Desktop bridge.' : 'The sidecar has not returned a tasks dashboard snapshot yet. Check the bridge connection or try refreshing.'}</p>
         </div>
+      )}
+
+      {detailOverlayTaskId != null && overlayTask && (
+        <TaskDetailOverlay
+          task={overlayTask}
+          onClose={handleCloseDetail}
+          onNavigateToSubtask={handleOverlayNavigateSubtask}
+        />
       )}
     </section>
   );
@@ -457,6 +500,235 @@ function TaskDetailSection({ task }: { task: TaskRowView }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Full-screen detail overlay for a task, shown when a row is clicked.
+ * Provides close affordances (X button, backdrop click, Escape key)
+ * and displays all available task information.
+ */
+function TaskDetailOverlay({
+  task,
+  onClose,
+  onNavigateToSubtask,
+}: {
+  task: TaskRowView;
+  onClose: () => void;
+  onNavigateToSubtask: (parentId: number) => void;
+}) {
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
+
+  // Focus close button on mount; trap focus within overlay
+  useEffect(() => {
+    closeBtnRef.current?.focus();
+  }, []);
+
+  // Backdrop click handler: only close if clicking the backdrop itself
+  const handleBackdropClick = useCallback((e: React.MouseEvent) => {
+    if (e.target === e.currentTarget) {
+      onClose();
+    }
+  }, [onClose]);
+
+  return (
+    <div
+      className="task-detail-overlay"
+      onClick={handleBackdropClick}
+      ref={overlayRef}
+    >
+      <div
+        className="task-detail-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Task #${task.id} details`}
+      >
+        {/* ── Header ── */}
+        <div className="task-detail-header">
+          <div className="task-detail-header-info">
+            <div className="task-detail-header-topline">
+              <span className="task-detail-header-id">#{task.id}</span>
+              <span className={`status-pill status-${task.displayTone}`}>{taskStatusLabel(task.status)}</span>
+              <span className={`tasks-priority-chip tasks-priority-${task.priority}`}>{priorityLabel(task.priority)}</span>
+              {task.reviewState && <span className="chip">{task.reviewState.replaceAll('_', ' ')}</span>}
+            </div>
+            <h3 className="task-detail-header-title">{task.title}</h3>
+          </div>
+          <button
+            ref={closeBtnRef}
+            type="button"
+            className="task-detail-close-btn"
+            onClick={onClose}
+            aria-label="Close task details"
+            title="Close (Esc)"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* ── Body ── */}
+        <div className="task-detail-body">
+          {/* Description */}
+          {task.description && (
+            <div className="task-detail-section">
+              <h4 className="task-detail-section-heading">Description</h4>
+              <p className="task-detail-description">{task.description}</p>
+            </div>
+          )}
+
+          {/* Metadata */}
+          <div className="task-detail-section">
+            <h4 className="task-detail-section-heading">Metadata</h4>
+            <div className="task-detail-meta-grid">
+              {task.assignedTo && (
+                <div className="task-detail-meta-item">
+                  <span className="task-detail-meta-label">Assignee</span>
+                  <span className="task-detail-meta-value">{task.assignedTo}</span>
+                </div>
+              )}
+              {task.tags.length > 0 && (
+                <div className="task-detail-meta-item">
+                  <span className="task-detail-meta-label">Tags</span>
+                  <span className="task-detail-meta-value">
+                    {task.tags.map((tag) => <span key={tag} className="tasks-tag-chip">{tag}</span>)}
+                  </span>
+                </div>
+              )}
+              {task.priority != null && (
+                <div className="task-detail-meta-item">
+                  <span className="task-detail-meta-label">Priority</span>
+                  <span className="task-detail-meta-value">{priorityLabel(task.priority)}</span>
+                </div>
+              )}
+              {task.createdAt && (
+                <div className="task-detail-meta-item">
+                  <span className="task-detail-meta-label">Created</span>
+                  <span className="task-detail-meta-value">{relativeTimeLabel(task.createdAt)}</span>
+                </div>
+              )}
+              {task.branch && (
+                <div className="task-detail-meta-item">
+                  <span className="task-detail-meta-label">Branch</span>
+                  <span className="task-detail-meta-value task-detail-branch">{task.branch}</span>
+                </div>
+              )}
+              {task.worktreePath && (
+                <div className="task-detail-meta-item">
+                  <span className="task-detail-meta-label">Worktree</span>
+                  <span className="task-detail-meta-value">{task.worktreePath}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Progress */}
+          <div className="task-detail-section">
+            <h4 className="task-detail-section-heading">Progress</h4>
+            <ProgressStrip stage={task.progressStage} index={task.progressIndex} />
+          </div>
+
+          {/* Run summary */}
+          {(task.runElapsed || task.runTokens != null || task.runCost != null) && (
+            <div className="task-detail-section">
+              <h4 className="task-detail-section-heading">Run Summary</h4>
+              <div className="task-detail-run-grid">
+                {task.runElapsed && (
+                  <span className="task-detail-run-item">Elapsed <strong>{task.runElapsed}</strong></span>
+                )}
+                {task.runTokens != null && (
+                  <span className="task-detail-run-item">Tokens <strong>{formatTokenCount(task.runTokens)}</strong></span>
+                )}
+                {task.runCost != null && (
+                  <span className="task-detail-run-item">Cost <strong>{formatCost(task.runCost, task.runCurrency)}</strong></span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Dependencies */}
+          {task.dependencyCount > 0 && (
+            <div className="task-detail-section">
+              <h4 className="task-detail-section-heading">Dependencies</h4>
+              <p className="task-detail-text">{task.dependencyCount} task{task.dependencyCount !== 1 ? 's' : ''} — see Den web for full dependency navigation.</p>
+            </div>
+          )}
+
+          {/* Subtasks */}
+          {task.subtaskCount > 0 && (
+            <div className="task-detail-section">
+              <h4 className="task-detail-section-heading">Subtasks</h4>
+              <div className="task-detail-subtasks-list">
+                {task.subtaskIds.map((subId) => (
+                  <button
+                    key={subId}
+                    type="button"
+                    className="task-detail-subtask-btn"
+                    onClick={() => onNavigateToSubtask(subId)}
+                    title={`Navigate to subtask #${subId}`}
+                  >
+                    #{subId}
+                  </button>
+                ))}
+              </div>
+              <p className="task-detail-text">{task.subtaskCount} subtask{task.subtaskCount !== 1 ? 's' : ''} total</p>
+            </div>
+          )}
+
+          {/* Review */}
+          {(task.reviewState || task.reviewFindingsOpen > 0) && (
+            <div className="task-detail-section">
+              <h4 className="task-detail-section-heading">Review</h4>
+              <p className="task-detail-text">
+                {task.reviewState && <span>State: <strong>{task.reviewState.replaceAll('_', ' ')}</strong></span>}
+                {task.reviewFindingsOpen > 0 && <span> · {task.reviewFindingsOpen} open finding{task.reviewFindingsOpen !== 1 ? 's' : ''}</span>}
+              </p>
+            </div>
+          )}
+
+          {/* Recent messages */}
+          {task.recentMessages.length > 0 && (
+            <div className="task-detail-section">
+              <h4 className="task-detail-section-heading">Messages ({task.messageCount})</h4>
+              <div className="task-detail-messages-list">
+                {task.recentMessages.map((msg) => (
+                  <div key={msg.id} className="task-detail-message-row">
+                    <span className="task-detail-msg-sender">{msg.sender}</span>
+                    {msg.metadataType && <span className="task-detail-msg-type">{msg.metadataType.replaceAll('_', ' ')}</span>}
+                    <span className="task-detail-msg-summary">{truncateText(msg.contentSummary, 150)}</span>
+                    {msg.createdAt && <span className="task-detail-msg-time">{relativeTimeLabel(msg.createdAt)}</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Session chips */}
+          {task.sessionChips.length > 0 && (
+            <div className="task-detail-section">
+              <h4 className="task-detail-section-heading">Sessions</h4>
+              <div className="task-detail-sessions">
+                {task.sessionChips.map((chip) => (
+                  <SessionAttachChip key={chip.key} chip={chip} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Latest packet */}
+          {task.latestPacket && (
+            <div className="task-detail-section">
+              <h4 className="task-detail-section-heading">Latest Packet</h4>
+              <p className="task-detail-text">
+                <strong>{task.latestPacket.label}</strong>
+                {task.latestPacket.details && <span> — {task.latestPacket.details}</span>}
+                {task.latestPacket.timestamp && <span> ({relativeTimeLabel(task.latestPacket.timestamp)})</span>}
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

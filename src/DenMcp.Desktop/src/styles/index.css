@@ -1570,6 +1570,288 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid color-mix(i
   .tasks-lanes-grid { grid-template-columns: 1fr; }
 }
 
+/* ── Task detail overlay (#1145) ── */
+
+.task-detail-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 5vh var(--sp-4);
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  overflow-y: auto;
+}
+
+.task-detail-panel {
+  position: relative;
+  width: min(900px, 95vw);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border: var(--bw) solid var(--bd-strong);
+  border-radius: var(--r-xl);
+  box-shadow: 0 16px 48px oklch(0 0 0 / 0.5);
+  overflow: hidden;
+  animation: task-detail-fadein 0.15s ease-out;
+}
+
+@keyframes task-detail-fadein {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.task-detail-header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: var(--bw) solid var(--bd-subtle);
+  flex-shrink: 0;
+}
+
+.task-detail-header-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.task-detail-header-topline {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.task-detail-header-id {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 800;
+  color: var(--accent);
+}
+
+.task-detail-header-title {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  color: var(--fg-primary);
+  margin: 0;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+.task-detail-header-pills {
+  display: flex;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.task-detail-close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: var(--bw) solid var(--bd-subtle);
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: var(--fs-md);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+.task-detail-close-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg-primary);
+  border-color: var(--bd-default);
+}
+
+.task-detail-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-4) var(--sp-5);
+  display: grid;
+  gap: var(--sp-4);
+}
+
+.task-detail-section {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.task-detail-section-heading {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--fg-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0;
+  padding-bottom: var(--sp-1);
+  border-bottom: var(--bw) solid var(--bd-subtle);
+}
+
+.task-detail-description {
+  font-size: var(--fs-sm);
+  color: var(--fg-secondary);
+  line-height: 1.6;
+  white-space: pre-line;
+  margin: 0;
+}
+
+.task-detail-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--sp-2);
+}
+
+.task-detail-meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.task-detail-meta-label {
+  font-size: var(--fs-2xs);
+  color: var(--fg-muted);
+  font-weight: 500;
+}
+
+.task-detail-meta-value {
+  font-size: var(--fs-xs);
+  color: var(--fg-secondary);
+  font-family: var(--font-mono);
+}
+
+.task-detail-meta-value .tasks-tag-chip {
+  font-family: var(--font-body);
+}
+
+.task-detail-text {
+  font-size: var(--fs-xs);
+  color: var(--fg-muted);
+  margin: 0;
+}
+
+.task-detail-subtasks-list {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+}
+
+.task-detail-subtask-btn {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
+  padding: 2px var(--sp-1_5);
+  border-radius: var(--r-sm);
+  border: var(--bw) solid transparent;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+}
+.task-detail-subtask-btn:hover {
+  background: color-mix(in oklab, var(--accent) 18%, transparent);
+  border-color: color-mix(in oklab, var(--accent) 30%, transparent);
+}
+
+.task-detail-messages-list {
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.task-detail-message-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  min-width: 0;
+  padding: var(--sp-1) var(--sp-1_5);
+  border-radius: var(--r-sm);
+  background: var(--bg-input);
+}
+
+.task-detail-msg-sender {
+  color: var(--fg-secondary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.task-detail-msg-type {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.task-detail-msg-summary {
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.task-detail-msg-time {
+  color: var(--fg-tertiary);
+  white-space: nowrap;
+  margin-left: auto;
+}
+
+.task-detail-sessions {
+  display: flex;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+}
+
+.task-detail-run-grid {
+  display: flex;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+}
+
+.task-detail-run-item {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--fg-tertiary);
+}
+.task-detail-run-item strong {
+  color: var(--fg-primary);
+}
+
+.task-detail-parent-link {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
+  padding: 2px var(--sp-1_5);
+  border-radius: var(--r-sm);
+  border: var(--bw) solid transparent;
+  cursor: pointer;
+  transition: background 0.1s;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.task-detail-parent-link:hover {
+  background: color-mix(in oklab, var(--accent) 18%, transparent);
+}
+
+.task-detail-branch {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+
 /* ── Agent tab ── */
 
 .agent-tab .tab-intro { display: flex; justify-content: space-between; gap: var(--sp-3); align-items: flex-start; flex-wrap: wrap; }
