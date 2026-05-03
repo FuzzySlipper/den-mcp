@@ -33,6 +33,8 @@ export interface ShellState {
   railMode: ShellRailMode;
   consoleMode: ShellConsoleMode;
   activeTab: ShellTabId;
+  /** Selected project filter shared across tabs. '_global' shows all projects, null means 'no selection'. */
+  selectedProjectId: string | null;
 }
 
 export type ShellStatePatch = Partial<ShellState>;
@@ -45,6 +47,7 @@ export const defaultShellState: ShellState = {
   railMode: 'expanded',
   consoleMode: 'preview',
   activeTab: 'operator',
+  selectedProjectId: null,
 };
 
 export const shellStateStorageKey = 'den-desktop:shell-state:v1';
@@ -67,6 +70,9 @@ export function parseShellState(value: unknown, fallback: ShellState = defaultSh
     railMode: coerceChoice(input.railMode, shellRailModes, fallback.railMode),
     consoleMode: coerceChoice(input.consoleMode, shellConsoleModes, fallback.consoleMode),
     activeTab: coerceChoice(input.activeTab, shellTabs.map((tab) => tab.id), fallback.activeTab),
+    selectedProjectId: typeof input.selectedProjectId === 'string'
+      ? (input.selectedProjectId === '_global' || input.selectedProjectId.length > 0 ? input.selectedProjectId : null)
+      : (fallback.selectedProjectId ?? null),
   };
 }
 
@@ -88,6 +94,7 @@ export function serializeShellState(state: ShellState): string {
     railMode: normalized.railMode,
     consoleMode: normalized.consoleMode,
     activeTab: normalized.activeTab,
+    selectedProjectId: normalized.selectedProjectId,
   });
 }
 

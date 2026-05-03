@@ -15,6 +15,7 @@ import { getLatestDiffSnapshot } from './desktop/sidecarBridgeApi';
 import type { DesktopDiffSnapshotLatestResult, GitFileStatus, LocalGitSnapshot, ShellAppearanceSettings } from './desktop/sidecarBridgeApi';
 import { useOperatorRuntime } from './desktop/useOperatorRuntime';
 import { applyShellDataAttributes, defaultShellState, loadShellState, nextConsoleMode, parseShellState, saveShellState, ShellState, ShellTabId } from './shellState';
+import { GLOBAL_PROJECT_ID } from './railView';
 import { type TaskStatusFilter } from './tasksDashboardView';
 import { buildLatestDiffSnapshotRequest, snapshotKey } from './snapshotView';
 import './styles/index.css';
@@ -50,6 +51,9 @@ export function App() {
       });
     }
   }, [runtime.appearanceSettings]);
+  // selectedProjectId is managed in shellState but we also track it locally
+  // so it can drive tab filtering independently of the active snapshot.
+  const selectedProjectId = shellState.selectedProjectId;
   const [activeSnapshotKey, setActiveSnapshotKey] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<GitFileStatus | null>(null);
   const [taskStatusFilterOverride, setTaskStatusFilterOverride] = useState<TaskStatusFilter | null>(null);
@@ -132,6 +136,13 @@ export function App() {
   };
 
   const selectProject = (projectId: string) => {
+    if (projectId === GLOBAL_PROJECT_ID) {
+      // Global: set the project filter to '_global', keep current snapshot for Git diff
+      setShellState((current) => ({ ...current, selectedProjectId: GLOBAL_PROJECT_ID }));
+      return;
+    }
+    // Specific project: update the shell state and also find matching snapshot for Git diffs
+    setShellState((current) => ({ ...current, selectedProjectId: projectId }));
     const nextSnapshot = runtime.snapshots.find((snapshot) => snapshot.scope.projectId === projectId) ?? null;
     if (nextSnapshot) {
       selectSnapshot(nextSnapshot);
@@ -141,6 +152,26 @@ export function App() {
   const handleSelectSnapshot = (snapshot: LocalGitSnapshot) => {
     selectSnapshot(snapshot);
   };
+
+  // Effective project filter: '_global' or a specific project ID, or null for 'no selection'
+  const effectiveProjectFilter = selectedProjectId;
+
+  // Filter snapshots by selected project for tabs that need filtering.
+  // When '_global' is selected (or no snapshots yet), show all snapshots.
+  const filteredSnapshots = useMemo(() => {
+    if (!effectiveProjectFilter || effectiveProjectFilter === GLOBAL_PROJECT_ID) {
+      return runtime.snapshots;
+    }
+    return runtime.snapshots.filter((s) => s.scope.projectId === effectiveProjectFilter);
+  }, [runtime.snapshots, effectiveProjectFilter]);
+
+  // Filter session snapshots by selected project.
+  const filteredSessionSnapshots = useMemo(() => {
+    if (!effectiveProjectFilter || effectiveProjectFilter === GLOBAL_PROJECT_ID) {
+      return runtime.sessionSnapshots;
+    }
+    return runtime.sessionSnapshots.filter((s) => s.projectId === effectiveProjectFilter);
+  }, [runtime.sessionSnapshots, effectiveProjectFilter]);
 
   const operatorTab = (
     <div className="operator-tab tab-stack">
@@ -177,7 +208,7 @@ export function App() {
         />
       </div>
 
-      <WorkspaceSummaryPane snapshots={runtime.snapshots} activeKey={activeSnapshot ? snapshotKey(activeSnapshot) : null} onSelect={selectSnapshot} />
+      <WorkspaceSummaryPane snapshots={filteredSnapshots} activeKey={activeSnapshot ? snapshotKey(activeSnapshot) : null} onSelect={selectSnapshot} />
     </div>
   );
 
@@ -192,7 +223,7 @@ export function App() {
       </section>
       <div className="git-workbench-grid">
         <GitSnapshotPane
-          snapshots={runtime.snapshots}
+          snapshots={filteredSnapshots}
           activeSnapshotKey={activeSnapshot ? snapshotKey(activeSnapshot) : null}
           selectedFilePath={selectedFile?.path ?? null}
           onSelectSnapshot={selectSnapshot}
@@ -212,12 +243,12 @@ export function App() {
           Browse direct PTY, tmux-backed, and observed-only sessions; attach inline only when raw-stream capabilities are reported by the sidecar.
         </p>
       </section>
-      <SessionPane snapshots={runtime.sessionSnapshots} workspaces={runtime.snapshots} />
+      <SessionPane snapshots={filteredSessionSnapshots} workspaces={filteredSnapshots} />
     </div>
   );
 
-  // Collaboration tab state — derive project/task context from active workspace snapshot
-  const collabProjectId = activeSnapshot?.scope.projectId ?? null;
+  // Collaboration tab state — derive project/task context from the effective project filter
+  const collabProjectId = effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (effectiveProjectFilter ?? null);
   const collabTaskId = activeSnapshot?.scope.taskId ?? null;
   const collaborationState = useCollaborationState(
     runtime.status?.denBaseUrl ?? null,
@@ -255,8 +286,8 @@ export function App() {
   const tabContent: Record<ShellTabId, ReactNode> = {
     operator: operatorTab,
     agent: <AgentPane selection={agentSelection} />,
-    tasks: <TasksDashboardPane projectId={activeSnapshot?.scope.projectId ?? null} parentTaskId={activeSnapshot?.scope.taskId ?? null} statusFilterOverride={taskStatusFilterOverride} />,
-    messages: <MessagesPane projectId={activeSnapshot?.scope.projectId ?? null} taskId={activeSnapshot?.scope.taskId ?? null} />,
+    tasks: <TasksDashboardPane projectId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (effectiveProjectFilter ?? null)} parentTaskId={activeSnapshot?.scope.taskId ?? null} statusFilterOverride={taskStatusFilterOverride} />,
+    messages: <MessagesPane projectId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (effectiveProjectFilter ?? null)} taskId={activeSnapshot?.scope.taskId ?? null} />,
     git: gitTab,
     compare: <StubSurface eyebrow="Compare" title="Multi-worktree compare" description="Routed surface reserved for pinned worktree panes and side-by-side terminal/output comparison without making renderer state authoritative." />,
     terminals: terminalsTab,
@@ -281,7 +312,7 @@ export function App() {
       sessionSnapshots={runtime.sessionSnapshots}
       diagnostics={runtime.status?.diagnostics ?? []}
       ipcHealth={runtime.ipcHealth}
-      activeProjectId={activeSnapshot?.scope.projectId ?? null}
+      activeProjectId={selectedProjectId}
       activeSnapshotKey={activeSnapshot ? snapshotKey(activeSnapshot) : null}
       onSelectProject={selectProject}
       onSelectSnapshot={handleSelectSnapshot}

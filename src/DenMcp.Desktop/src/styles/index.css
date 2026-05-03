@@ -311,6 +311,7 @@ button:disabled { cursor: default; opacity: 0.55; }
 .desktop-shell[data-rail="collapsed"] .rail-project-body,
 .desktop-shell[data-rail="collapsed"] .rail-delta,
 .desktop-shell[data-rail="collapsed"] .rail-expand-indicator,
+.desktop-shell[data-rail="collapsed"] .rail-global-badge,
 .desktop-shell[data-rail="collapsed"] .rail-workspace-list,
 .desktop-shell[data-rail="collapsed"] .rail-header span,
 .desktop-shell[data-rail="collapsed"] .rail-section-title,
@@ -348,6 +349,14 @@ button:disabled { cursor: default; opacity: 0.55; }
 .rail-project:hover { background: var(--bg-hover); color: var(--fg-primary); border-color: var(--bd-subtle); }
 .rail-project.active { background: var(--accent-bg); border-color: color-mix(in oklab, var(--accent) 35%, transparent); }
 .rail-project.active::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; border-radius: 2px; background: var(--accent); }
+.rail-project.global { border-color: var(--bd-subtle); background: transparent; }
+.rail-project.global:hover { background: var(--bg-hover); border-color: var(--bd-default); }
+.rail-project.global.active { border-color: color-mix(in oklab, var(--accent) 40%, transparent); background: var(--accent-bg); }
+.rail-project.global.active::before { background: var(--accent); }
+.rail-project.global .rail-project-body strong { color: var(--accent); }
+.rail-project.global.active .rail-project-body strong { color: var(--fg-primary); }
+.rail-global-badge { color: var(--accent); font-size: var(--fs-sm); opacity: 0.8; }
+.rail-dot.global { width: 8px; height: 8px; background: transparent; border: 2px solid var(--accent-dim); box-shadow: 0 0 4px color-mix(in oklab, var(--accent) 30%, transparent); }
 .desktop-shell[data-rail="collapsed"] .rail-project { grid-template-columns: 1fr; justify-items: center; padding: var(--sp-2) 0; }
 .desktop-shell[data-rail="collapsed"] .rail-header { justify-content: center; padding: 0; }
 .rail-dot, .status-light, .pill-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; background: var(--st-idle); }

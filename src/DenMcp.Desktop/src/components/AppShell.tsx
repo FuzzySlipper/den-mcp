@@ -24,7 +24,7 @@ import { buildConsoleLines, ConsoleCommandHistoryEntry, ConsoleCommandLine } fro
 import { type TaskStatusFilter } from '../tasksDashboardView';
 import { ConsoleDock } from './ConsoleDock';
 import { CommandPalette, type CommandPaletteCallbacks } from './CommandPalette';
-import { isMultiWorkspaceProject, projectRows, workspaceRowLabel, workspaceRowsForProject } from '../railView';
+import { GLOBAL_PROJECT_ID, globalRailRow, isMultiWorkspaceProject, projectRows, workspaceRowLabel, workspaceRowsForProject } from '../railView';
 
 interface AppShellProps {
   state: ShellState;
@@ -220,7 +220,9 @@ function LeftRail({
   onSelectProject?: (projectId: string) => void;
   onSelectSnapshot?: (snapshot: LocalGitSnapshot) => void;
 }) {
+  const isGlobalActive = activeProjectId === GLOBAL_PROJECT_ID;
   const rows = projectRows(snapshots, activeProjectId ?? null);
+  const allRows = [globalRailRow(isGlobalActive), ...rows];
   const collapsed = mode === 'collapsed';
   // Track which multi-workspace project is expanded in the rail.
   // This is transient UI state, not domain state.
@@ -256,7 +258,7 @@ function LeftRail({
         </button>
       </div>
       <div className="rail-list">
-        {rows.map((row) => {
+        {allRows.map((row) => {
           const multi = row.workspaceCount > 1;
           const expanded = expandedProjectId === row.id;
           const workspaces = multi && expanded ? workspaceRowsForProject(snapshots, row.id) : [];
@@ -264,19 +266,24 @@ function LeftRail({
             <div key={row.id} className="rail-project-group">
               <button
                 type="button"
-                className={`rail-project ${row.active ? 'active' : ''} ${multi ? 'multi-workspace' : ''} ${expanded ? 'expanded' : ''}`}
+                className={`rail-project ${row.active ? 'active' : ''} ${row.id === GLOBAL_PROJECT_ID ? 'global' : ''} ${multi ? 'multi-workspace' : ''} ${expanded ? 'expanded' : ''}`}
                 title={collapsed ? `${row.name} · ${row.subtitle}` : undefined}
                 aria-pressed={row.active}
                 aria-expanded={multi ? expanded : undefined}
                 onClick={() => handleProjectClick(row.id)}
               >
-                <span className={`rail-dot ${row.state}`} aria-hidden="true" />
+                <span className={`rail-dot ${row.id === GLOBAL_PROJECT_ID ? 'global' : row.state}`} aria-hidden="true" />
                 <span className="rail-project-body">
                   <strong>{row.name}</strong>
                   <span>{row.subtitle}</span>
                 </span>
-                {multi && !collapsed && <span className={`rail-expand-indicator ${expanded ? 'expanded' : ''}`} aria-hidden="true">{expanded ? '▾' : '▸'}</span>}
-                {!multi && <span className="rail-delta">{row.delta}</span>}
+                {row.id === GLOBAL_PROJECT_ID ? (
+                  <span className="rail-global-badge" aria-hidden="true">◈</span>
+                ) : multi && !collapsed ? (
+                  <span className={`rail-expand-indicator ${expanded ? 'expanded' : ''}`} aria-hidden="true">{expanded ? '▾' : '▸'}</span>
+                ) : (
+                  <span className="rail-delta">{row.delta}</span>
+                )}
               </button>
               {expanded && workspaces.length > 0 && (
                 <div className="rail-workspace-list" role="listbox" aria-label={`${row.name} workspaces`}>

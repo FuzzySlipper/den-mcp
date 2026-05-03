@@ -46,6 +46,7 @@ test('shell state parser accepts valid values and repairs invalid values', () =>
     railMode: 'collapsed',
     consoleMode: 'full',
     activeTab: 'collaboration',
+    selectedProjectId: null,
   });
 
   assert.deepEqual(parseShellState('{"theme":"neon","activeTab":"mock"}'), defaultShellState);
@@ -55,7 +56,7 @@ test('shell state parser accepts valid values and repairs invalid values', () =>
 test('shell state serialization is stable and storage-backed', () => {
   const state = parseShellState({ theme: 'graphite-dark', accent: 'cyan', consoleMode: 'half', activeTab: 'git' });
   const serialized = serializeShellState(state);
-  assert.equal(serialized, '{"theme":"graphite-dark","accent":"cyan","density":"comfortable","bodyFont":"sans","railMode":"expanded","consoleMode":"half","activeTab":"git"}');
+  assert.equal(serialized, '{"theme":"graphite-dark","accent":"cyan","density":"comfortable","bodyFont":"sans","railMode":"expanded","consoleMode":"half","activeTab":"git","selectedProjectId":null}');
 
   const storage = memoryStorage();
   saveShellState(storage, state);

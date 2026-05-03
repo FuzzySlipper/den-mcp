@@ -1,5 +1,8 @@
 import type { LocalGitSnapshot } from './desktop/sidecarBridgeApi';
 
+/** Sentinel value for the Global project filter option in the LeftRail. */
+export const GLOBAL_PROJECT_ID = '_global' as const;
+
 export interface ProjectRailRow {
   id: string;
   name: string;
@@ -26,6 +29,7 @@ export interface WorkspaceRailRow {
  * Each project becomes one row; workspace count is rolled up.
  * The active project is determined by `activeProjectId`, falling back
  * to the first project alphabetically.
+ * When `activeProjectId` is GLOBAL_PROJECT_ID ('_global'), the Global row is marked active.
  */
 export function projectRows(snapshots: LocalGitSnapshot[], activeProjectId: string | null = null): ProjectRailRow[] {
   if (snapshots.length === 0) {
@@ -43,7 +47,10 @@ export function projectRows(snapshots: LocalGitSnapshot[], activeProjectId: stri
   }
 
   const sorted = [...byProject.entries()].sort(([a], [b]) => a.localeCompare(b));
-  const activeId = activeProjectId && byProject.has(activeProjectId) ? activeProjectId : sorted[0]?.[0] ?? null;
+  // Determine active ID: Global doesn't map to a project, so fall through to first project
+  const activeId = (activeProjectId && activeProjectId !== GLOBAL_PROJECT_ID && byProject.has(activeProjectId))
+    ? activeProjectId
+    : sorted[0]?.[0] ?? null;
   return sorted.map(([id, item]) => ({
     id,
     name: id,
@@ -53,6 +60,21 @@ export function projectRows(snapshots: LocalGitSnapshot[], activeProjectId: stri
     active: id === activeId,
     workspaceCount: item.workspaces,
   }));
+}
+
+/**
+ * Build the Global rail row, shown as the first item in the LeftRail.
+ */
+export function globalRailRow(active: boolean): ProjectRailRow {
+  return {
+    id: GLOBAL_PROJECT_ID,
+    name: 'Global',
+    subtitle: 'All projects',
+    delta: '',
+    state: 'global',
+    active,
+    workspaceCount: 0,
+  };
 }
 
 /**
