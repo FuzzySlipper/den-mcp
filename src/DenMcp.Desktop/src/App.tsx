@@ -286,8 +286,8 @@ export function App() {
   const tabContent: Record<ShellTabId, ReactNode> = {
     operator: operatorTab,
     agent: <AgentPane selection={agentSelection} />,
-    tasks: <TasksDashboardPane projectId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (effectiveProjectFilter ?? null)} parentTaskId={activeSnapshot?.scope.taskId ?? null} statusFilterOverride={taskStatusFilterOverride} />,
-    messages: <MessagesPane projectId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (effectiveProjectFilter ?? null)} taskId={activeSnapshot?.scope.taskId ?? null} />,
+    tasks: <TasksDashboardPane projectId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (effectiveProjectFilter ?? null)} parentTaskId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (activeSnapshot?.scope.taskId ?? null)} statusFilterOverride={taskStatusFilterOverride} />,
+    messages: <MessagesPane projectId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (effectiveProjectFilter ?? null)} taskId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (activeSnapshot?.scope.taskId ?? null)} />,
     git: gitTab,
     compare: <StubSurface eyebrow="Compare" title="Multi-worktree compare" description="Routed surface reserved for pinned worktree panes and side-by-side terminal/output comparison without making renderer state authoritative." />,
     terminals: terminalsTab,
