@@ -96,7 +96,7 @@ export function MessagesPane({ projectId, taskId }: Props) {
         lastRefreshAt={lastRefreshAt}
         onRefresh={() => void fetchSnapshot()}
       />
-      {snapshot && view.messages.length > 0 ? (
+      {snapshot ? (
         <MessagesFilterBar
           currentFilter={messageFilter}
           onChange={setMessageFilter}
