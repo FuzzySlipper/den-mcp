@@ -8,6 +8,8 @@ import {
 } from '../desktop/sidecarBridgeApi.ts';
 import {
   buildMessagesView,
+  filterMessagesByType,
+  type MessageFilterType,
   type MessagesView,
   type MessageRowView,
 } from '../messagesView.ts';
@@ -24,6 +26,7 @@ export function MessagesPane({ projectId, taskId }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedMessageId, setExpandedMessageId] = useState<number | null>(null);
+  const [messageFilter, setMessageFilter] = useState<MessageFilterType>('all');
   const [lastRefreshAt, setLastRefreshAt] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
@@ -59,7 +62,15 @@ export function MessagesPane({ projectId, taskId }: Props) {
     return () => window.clearInterval(interval);
   }, [fetchSnapshot]);
 
-  const view = useMemo(() => buildMessagesView(snapshot), [snapshot]);
+  const view = useMemo(() => {
+    const raw = buildMessagesView(snapshot);
+    const filtered = filterMessagesByType(raw.messages, messageFilter);
+    return {
+      ...raw,
+      messages: filtered,
+      isEmpty: filtered.length === 0,
+    };
+  }, [snapshot, messageFilter]);
 
   // No project selected
   if (!projectId) {
@@ -85,6 +96,12 @@ export function MessagesPane({ projectId, taskId }: Props) {
         lastRefreshAt={lastRefreshAt}
         onRefresh={() => void fetchSnapshot()}
       />
+      {snapshot && view.messages.length > 0 ? (
+        <MessagesFilterBar
+          currentFilter={messageFilter}
+          onChange={setMessageFilter}
+        />
+      ) : null}
       {snapshot && !view.isEmpty ? (
         <div className="messages-list">
           {view.messages.map((msg) => (
@@ -98,8 +115,8 @@ export function MessagesPane({ projectId, taskId }: Props) {
         </div>
       ) : (
         <div className="empty-state">
-          <strong>{loading ? 'Loading messages…' : 'No messages found.'}</strong>
-          <p>{loading ? 'Fetching the latest messages from the Den Desktop bridge.' : 'Messages will appear here once they are sent in Den for this project.'}</p>
+          <strong>{loading ? 'Loading messages…' : emptyStateLabel(messageFilter)}</strong>
+          <p>{loading ? 'Fetching the latest messages from the Den Desktop bridge.' : emptyStateDescription(messageFilter)}</p>
         </div>
       )}
       <MessagesFreshnessBanner view={view.freshness} />
@@ -108,6 +125,49 @@ export function MessagesPane({ projectId, taskId }: Props) {
 }
 
 // ── Sub-components ──────────────────────────────────────────────
+
+function MessagesFilterBar({
+  currentFilter,
+  onChange,
+}: {
+  currentFilter: MessageFilterType;
+  onChange: (filter: MessageFilterType) => void;
+}) {
+  const filters: MessageFilterType[] = ['all', 'messages', 'stream', 'thoughts', 'user'];
+  return (
+    <div className="messages-filter-bar">
+      {filters.map((f) => (
+        <button
+          key={f}
+          type="button"
+          className={`messages-filter-btn${currentFilter === f ? ' active' : ''}`}
+          onClick={() => onChange(f)}
+        >
+          {f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function emptyStateLabel(filter: MessageFilterType): string {
+  switch (filter) {
+    case 'messages': return 'No regular messages found.';
+    case 'stream': return 'No workflow stream entries found.';
+    case 'thoughts': return 'No thought entries found.';
+    case 'user': return 'No user messages found.';
+    default: return 'No messages found.';
+  }
+}
+
+function emptyStateDescription(filter: MessageFilterType): string {
+  switch (filter) {
+    case 'stream': return 'Agent stream data requires backend support. Only task-thread and project messages are currently loaded.';
+    case 'thoughts': return 'Agent thought data requires backend support. The current filter provides a best-effort placeholder classification.';
+    case 'user': return 'No messages sent by the user identity were found in the current view.';
+    default: return 'Messages will appear here once they are sent in Den for this project.';
+  }
+}
 
 function MessagesHeader({
   projectId,

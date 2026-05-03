@@ -15,6 +15,8 @@ import type {
 
 export type MessageSenderTone = 'ok' | 'warn' | 'err' | 'accent' | 'idle' | 'info' | 'running';
 
+export type MessageFilterType = 'all' | 'messages' | 'stream' | 'thoughts' | 'user';
+
 export interface MessageRowView {
   id: number;
   sender: string;
@@ -60,6 +62,20 @@ export interface MessagesView {
 
 // ── Constants ──────────────────────────────────────────────────
 
+const PACKET_TYPES = new Set([
+  'coder_context_packet',
+  'implementation_packet',
+  'validation_packet',
+  'drift_check_packet',
+  'review_request_packet',
+  'rereview_packet',
+  'review_findings_packet',
+  'merge_summary',
+  'planning_summary',
+  'review_feedback',
+  'review_request',
+]);
+
 const METADATA_TYPE_LABELS: Record<string, string> = {
   coder_context_packet: 'Context prepared',
   implementation_packet: 'Implementation posted',
@@ -91,6 +107,51 @@ const PACKET_SENDER_TONES: Record<string, MessageSenderTone> = {
 };
 
 // ── Public functions ───────────────────────────────────────────
+
+/**
+ * Filter messages by type.
+ * - 'all' — no filtering
+ * - 'messages' — regular messages (no packet metadata_type)
+ * - 'stream' — workflow/packet messages (metadata_type in PACKET_TYPES)
+ * - 'thoughts' — best-effort thought/observation classification
+ * - 'user' — messages where sender === 'user' (case-insensitive)
+ *
+ * Note: 'stream', 'thoughts' filters need backend support to include
+ * agent stream entries and thought data. For now they filter from
+ * the available task-thread/project messages only.
+ */
+export function filterMessagesByType(
+  messages: MessageRowView[],
+  filter: MessageFilterType,
+): MessageRowView[] {
+  if (filter === 'all') return messages;
+
+  return messages.filter((msg) => {
+    switch (filter) {
+      case 'messages':
+        // Regular messages have no metadata_type, or metadata_type not in the known packet list
+        return !msg.metadataType || !PACKET_TYPES.has(msg.metadataType);
+      case 'stream':
+        return !!msg.metadataType && PACKET_TYPES.has(msg.metadataType);
+      case 'thoughts':
+        return isThoughtEntry(msg);
+      case 'user':
+        return msg.sender.toLowerCase() === 'user';
+      default:
+        return true;
+    }
+  });
+}
+
+function isThoughtEntry(msg: MessageRowView): boolean {
+  const sender = msg.sender.toLowerCase();
+  const isCoderOrReviewer = sender.includes('coder') || sender.includes('reviewer');
+  const hasThoughtIndicators =
+    msg.contentFull.toLowerCase().includes('thinking') ||
+    msg.contentFull.toLowerCase().includes('observation') ||
+    msg.contentFull.toLowerCase().includes('analysis');
+  return isCoderOrReviewer && hasThoughtIndicators;
+}
 
 export function buildMessagesView(
   snapshot: MessagesSnapshot | null,

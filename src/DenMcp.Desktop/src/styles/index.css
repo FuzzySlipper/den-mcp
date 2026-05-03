@@ -2155,6 +2155,40 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid color-mix(i
 .messages-freshness-stale strong { color: var(--st-warn); }
 .messages-freshness-stale p { color: var(--fg-muted); margin: var(--sp-1) 0 0; }
 
+/* Messages filter bar */
+.messages-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.messages-filter-btn {
+  background: none;
+  border: var(--bw) solid var(--bd-subtle);
+  color: var(--fg-secondary);
+  border-radius: var(--r-md);
+  padding: var(--sp-0_5) var(--sp-2);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+.messages-filter-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg-primary);
+}
+.messages-filter-btn.active {
+  background: color-mix(in oklab, var(--accent) 18%, transparent);
+  color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent) 40%, transparent);
+  font-weight: 600;
+}
+.messages-filter-count {
+  color: var(--fg-muted);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  margin-left: auto;
+}
+
 /* ── Command palette ───────────────────────────────────────── */
 
 .palette-backdrop {
