@@ -105,7 +105,12 @@ export function buildTerminalSessionOverview(
     }
   }
 
-  return [...byId.values()].sort((a, b) => timestampMs(b.lastActivityAt ?? b.lastObservedAt) - timestampMs(a.lastActivityAt ?? a.lastObservedAt));
+  // Active sessions first (stale === false), then stale sessions, each group sorted newest-first by last activity.
+  // This ensures users see active sessions at the top even if a stale session had more recent activity.
+  return [...byId.values()].sort((a, b) => {
+    if (a.stale !== b.stale) return a.stale ? 1 : -1;
+    return timestampMs(b.lastActivityAt ?? b.lastObservedAt) - timestampMs(a.lastActivityAt ?? a.lastObservedAt);
+  });
 }
 
 export function canAttachInline(session: TerminalOverviewSession): boolean {

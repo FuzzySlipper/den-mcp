@@ -38,6 +38,10 @@ import {
   type TerminalOverviewSession,
 } from '../terminalSessionView';
 
+// The terminals tab includes both local sidecar sessions and externally-observed
+// Pi sessions. This is by design: Den Desktop is an operator control plane that
+// should show all known sessions, not just those it created.
+
 interface Props {
   snapshots: LocalSessionSnapshot[];
   workspaces?: LocalGitSnapshot[];
@@ -511,7 +515,7 @@ function TerminalSessionCard({
 
   return (
     <article
-      className={`terminal-session-card ${active ? 'active' : ''} ${session.stale ? 'calm' : ''} ${nonAttachHint ? 'double-click-feedback' : ''}`}
+      className={`terminal-session-card ${active ? 'active' : ''} ${session.stale ? 'stale' : ''} ${nonAttachHint ? 'double-click-feedback' : ''}`}
       role="button"
       tabIndex={0}
       onClick={onSelect}
@@ -528,6 +532,7 @@ function TerminalSessionCard({
         </div>
         <div className="pill-stack">
           {attached ? <span className="chip accent">attached</span> : null}
+          {session.stale ? <span className="chip stale-chip">stale</span> : null}
           {session.readOnly ? <span className="chip">read-only</span> : null}
           <span className={`status-pill status-${session.statusTone}`}>{terminalStatusLabel(session.status)}</span>
         </div>

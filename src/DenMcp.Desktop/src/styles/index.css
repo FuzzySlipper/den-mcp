@@ -973,7 +973,24 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid color-mix(i
 }
 .terminal-session-card:hover { border-color: var(--bd-default); background: color-mix(in oklab, var(--bg-input) 84%, var(--bg-hover)); }
 .terminal-session-card.active { border-color: color-mix(in oklab, var(--accent) 72%, transparent); box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 20%, transparent), var(--shadow-md); }
-.terminal-session-card.calm { opacity: 0.9; }
+.terminal-session-card.stale {
+  opacity: 0.75;
+  border-color: var(--bd-subtle);
+  background: color-mix(in oklab, var(--bg-input) 70%, transparent 30%);
+}
+.terminal-session-card.stale:hover {
+  border-color: var(--bd-default);
+  background: color-mix(in oklab, var(--bg-input) 64%, transparent 36%);
+}
+.terminal-session-card.stale .status-pill {
+  opacity: 0.6;
+}
+.terminal-session-card.stale .chip.stale-chip {
+  color: var(--fg-muted);
+  border-color: var(--bd-subtle);
+  background: var(--bg-panel-2);
+  opacity: 0.8;
+}
 .terminal-session-card.double-click-feedback { animation: card-shake 0.3s ease; }
 @keyframes card-shake {
   0%, 100% { transform: translateX(0); }
