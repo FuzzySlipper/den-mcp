@@ -937,8 +937,8 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid color-mix(i
   .desktop-shell { min-width: 0; min-height: 100vh; height: auto; }
   .shell-main { grid-template-columns: 1fr; }
   .left-rail { display: none; }
-  .content-grid, .git-workbench-grid, .terminal-workbench-grid, .terminal-create-strip, .settings-form, .settings-grid { grid-template-columns: 1fr; }
-  .git-workbench-grid .diff-panel, .terminal-attach-panel { position: static; }
+  .content-grid, .git-workbench-grid, .terminal-workbench-grid, .tasks-workbench-grid, .terminal-create-strip, .settings-form, .settings-grid { grid-template-columns: 1fr; }
+  .git-workbench-grid .diff-panel, .terminal-attach-panel, .tasks-status-panel { position: static; }
   .titlebar { grid-template-columns: 1fr auto; }
   .titlebar-center { display: none; }
   .tabbar { overflow-x: auto; }
