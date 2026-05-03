@@ -3670,7 +3670,33 @@
               "is_partial",
               "warnings",
               "errors"
-            ]
+            ],
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "generated_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "is_partial": {
+                "type": "boolean"
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "errors": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       }
