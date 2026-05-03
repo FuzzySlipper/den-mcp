@@ -620,6 +620,19 @@ function TaskDetailOverlay({
                   <span className="task-detail-meta-value">{task.worktreePath}</span>
                 </div>
               )}
+              {task.parentId != null && (
+                <div className="task-detail-meta-item">
+                  <span className="task-detail-meta-label">Parent</span>
+                  <button
+                    type="button"
+                    className="tasks-subnav-btn"
+                    onClick={() => onNavigateToSubtask(task.parentId!)}
+                    title={`View parent task #${task.parentId}`}
+                  >
+                    #{task.parentId}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 

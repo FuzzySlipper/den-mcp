@@ -80,6 +80,7 @@ export interface TaskRowView {
   dependencyCount: number;
   subtaskCount: number;
   subtaskIds: number[];
+  parentId: number | null;
   createdAt: string | null;
 }
 
@@ -530,6 +531,7 @@ function buildTaskRowView(
   const dependencyCount = typeof row.dependency_count === 'number' ? row.dependency_count : dependencies.length;
   const subtaskCount = typeof row.subtask_count === 'number' ? row.subtask_count : 0;
   const subtaskIds = Array.isArray(row.subtask_ids) ? row.subtask_ids.filter((n): n is number => typeof n === 'number') : [];
+  const parentId = typeof row.parent_id === 'number' ? row.parent_id : null;
   const createdAt = typeof row.created_at === 'string' ? row.created_at : null;
 
   return {
@@ -563,6 +565,7 @@ function buildTaskRowView(
     dependencyCount,
     subtaskCount,
     subtaskIds,
+    parentId,
     createdAt,
   };
 }
