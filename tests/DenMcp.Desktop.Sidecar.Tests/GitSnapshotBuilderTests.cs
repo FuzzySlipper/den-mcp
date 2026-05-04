@@ -226,6 +226,17 @@ public class GitSnapshotBuilderTests
         Assert.True(GitSnapshotBuilder.LooksLikeBinaryDiff("GIT binary patch\nliteral 0"));
     }
 
+    [Fact]
+    public async Task FakeGitRunner_ReturnsGitErrorWhenQueueIsEmpty()
+    {
+        var runner = new FakeGitRunner();
+
+        var result = await runner.RunGitAsync("/repo", ["status"], CancellationToken.None);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("No fake git result queued", result.Stderr, StringComparison.Ordinal);
+    }
+
     private static OperatorSettings Settings()
     {
         return new OperatorSettings
@@ -321,7 +332,11 @@ public class GitSnapshotBuilderTests
             Calls.Add(new GitCall(rootPath, args.ToArray()));
             if (_results.Count == 0)
             {
-                throw new InvalidOperationException("No fake git result queued.");
+                return Task.FromResult(new GitCommandResult
+                {
+                    ExitCode = 1,
+                    Stderr = "No fake git result queued.",
+                });
             }
 
             return Task.FromResult(_results.Dequeue());

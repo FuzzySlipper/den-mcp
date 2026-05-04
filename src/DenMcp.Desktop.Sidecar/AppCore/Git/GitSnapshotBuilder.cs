@@ -318,7 +318,7 @@ public sealed class GitSnapshotBuilder
 
         return parsed with
         {
-            Truncated = status.Truncated || parsed.Truncated || parsed.ChangedFiles.Count >= Math.Max(0, maxChangedFiles),
+            Truncated = status.Truncated || parsed.Truncated,
             Warnings = warnings,
         };
     }
@@ -492,6 +492,19 @@ public sealed class GitSnapshotBuilder
         };
     }
 
+    /// <summary>
+    /// Validates that <paramref name="path"/> is a safe relative path for git operations.
+    /// </summary>
+    /// <remarks>
+    /// This check is intentionally more defensive than the Rust reference implementation.
+    /// Extra guards beyond the original:
+    /// <list type="bullet">
+    ///   <item><description>Null-byte rejection — prevents injection through C-string boundaries.</description></item>
+    ///   <item><description>Whitespace-only rejection — avoids empty or meaningless paths.</description></item>
+    ///   <item><description>Windows drive-letter rejection (e.g., <c>C:\secret</c>) — cross-platform path safety.</description></item>
+    ///   <item><description>Explicit backslash segment handling — treats <c>\</c> as a path separator on all platforms.</description></item>
+    /// </list>
+    /// </remarks>
     public static bool IsSafeRelativeGitPath(string path)
     {
         if (string.IsNullOrWhiteSpace(path) || path.Contains('\0', StringComparison.Ordinal))
@@ -525,6 +538,15 @@ public sealed class GitSnapshotBuilder
         return staged ? ["diff", "--cached", "--", path] : ["diff", "HEAD", "--", path];
     }
 
+    /// <summary>
+    /// Truncates <paramref name="value"/> to fit within <paramref name="maxBytes"/> UTF-8 bytes,
+    /// ensuring the result ends on a valid UTF-8 character boundary.
+    /// </summary>
+    /// <remarks>
+    /// Uses <see cref="Encoding.GetByteCount(string)"/> for a zero-allocation fast path when the
+    /// input already fits. The <see cref="Encoding.GetBytes(string)"/> allocation is bounded and
+    /// acceptable here because diff content is already capped at <see cref="MaxDiffBytes"/> (64 KiB).
+    /// </remarks>
     public static (string Text, bool Truncated) BoundText(string value, int maxBytes)
     {
         ArgumentNullException.ThrowIfNull(value);
@@ -533,12 +555,13 @@ public sealed class GitSnapshotBuilder
             throw new ArgumentOutOfRangeException(nameof(maxBytes), "Maximum byte count must be non-negative.");
         }
 
-        var bytes = Encoding.UTF8.GetBytes(value);
-        if (bytes.Length <= maxBytes)
+        // Fast path: avoid allocating the byte array when the text already fits.
+        if (Encoding.UTF8.GetByteCount(value) <= maxBytes)
         {
             return (value, false);
         }
 
+        var bytes = Encoding.UTF8.GetBytes(value);
         var end = maxBytes;
         while (end > 0 && (bytes[end] & 0b1100_0000) == 0b1000_0000)
         {
