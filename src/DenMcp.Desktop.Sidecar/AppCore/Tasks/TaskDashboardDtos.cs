@@ -496,3 +496,56 @@ public sealed record TasksDashboardFreshness
     [JsonPropertyName("errors")]
     public IReadOnlyList<string> Errors { get; init; } = [];
 }
+
+// ── Task update bridge command (task #1152) ──────────────────────────────────
+
+public sealed record TaskUpdateRequest
+{
+    [JsonPropertyName("project_id")]
+    public required string ProjectId { get; init; }
+
+    [JsonPropertyName("task_id")]
+    public required long TaskId { get; init; }
+
+    [JsonPropertyName("agent")]
+    public string Agent { get; init; } = "desktop";
+
+    [JsonPropertyName("title")]
+    public string? Title { get; init; }
+
+    [JsonPropertyName("description")]
+    public string? Description { get; init; }
+
+    [JsonPropertyName("status")]
+    public string? Status { get; init; }
+
+    [JsonPropertyName("priority")]
+    public int? Priority { get; init; }
+
+    [JsonPropertyName("assigned_to")]
+    public string? AssignedTo { get; init; }
+
+    [JsonPropertyName("tags")]
+    public List<string>? Tags { get; init; }
+}
+
+public sealed record TaskUpdateResponse
+{
+    [JsonPropertyName("task_id")]
+    public long TaskId { get; init; }
+
+    [JsonPropertyName("project_id")]
+    public string ProjectId { get; init; } = string.Empty;
+
+    [JsonPropertyName("title")]
+    public string Title { get; init; } = string.Empty;
+
+    [JsonPropertyName("status")]
+    public string Status { get; init; } = string.Empty;
+
+    [JsonPropertyName("priority")]
+    public int Priority { get; init; }
+
+    [JsonPropertyName("assigned_to")]
+    public string? AssignedTo { get; init; }
+}

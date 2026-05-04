@@ -429,6 +429,42 @@ public sealed class DenHttpClient
         }
     }
 
+    // ── Task update API method (task #1152) ────────────────────────────────────
+
+    public async Task<DenTaskRecord> UpdateTaskAsync(
+        string baseUrl,
+        string projectId,
+        long taskId,
+        DenTaskUpdateRequest update,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentNullException.ThrowIfNull(update);
+
+        var path = $"/api/projects/{EscapePathSegment(projectId)}/tasks/{taskId}";
+        var response = await SendAsync(
+            () => new HttpRequestMessage(HttpMethod.Put, JoinUrl(baseUrl, path))
+            {
+                Content = JsonContent(update),
+            },
+            $"Unable to update Den task {taskId}",
+            cancellationToken).ConfigureAwait(false);
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await ReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+                throw new DenHttpClientException($"Den task {taskId} update returned HTTP {(int)response.StatusCode}: {body}");
+            }
+
+            return await ReadJsonAsync<DenTaskRecord>(
+                response,
+                $"Unable to parse updated Den task {taskId}",
+                cancellationToken).ConfigureAwait(false);
+        }
+    }
+
     // ── Document API methods (task #1147) ────────────────────────────────────
 
     public async Task<IReadOnlyList<DenDocumentSummary>> ListDocumentsAsync(

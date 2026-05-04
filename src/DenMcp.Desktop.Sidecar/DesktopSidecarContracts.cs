@@ -61,6 +61,9 @@ public static class DesktopSidecarProtocol
     // Messages tab projection (task #1092)
     public const string MessagesGetSnapshotCommand = "den_desktop.messages.get_snapshot";
 
+    // Task update bridge command (task #1152)
+    public const string TaskUpdateCommand = "den_desktop.tasks.update";
+
     // Documents tab (task #1147)
     public const string DocumentsListCommand = "den_desktop.documents.list";
     public const string DocumentGetCommand = "den_desktop.documents.get";

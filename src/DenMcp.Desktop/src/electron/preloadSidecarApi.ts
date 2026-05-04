@@ -15,7 +15,7 @@ import type {
 // (Den-post-first), then optionally delivers through this bridge command when
 // running under Electron with a live session target.
 import type { SidecarBridgeClient } from './sidecarProtocol.ts';
-import { createSidecarBridgeFacade, type SidecarHealthResponse, type SidecarCapabilitiesResponse, type ConsoleCommandDefinition, type ConsoleCommandRunRequest, type ConsoleCommandRunResponse, type ConsoleCommandListResponse, type TerminalAckOutputRequest, type TerminalAttachRequest, type TerminalCreateSessionRequest, type TerminalDetachRequest, type TerminalListSessionsRequest, type TerminalReadActivityRequest, type TerminalReconnectRequest, type TerminalResizeRequest, type TerminalResponse, type TerminalEventPayload, type TerminalSendInputRequest, type TerminalTerminateRequest, type AppAgentBuildContextRequest, type AppAgentCancelRequest, type AppAgentInvokeToolRequest, type AppAgentListToolsRequest, type AppAgentResponse, type TasksDashboardSnapshotRequest, type TasksDashboardSnapshot, type MessagesSnapshotRequest, type MessagesSnapshot, type DocumentsListRequest, type DocumentsListResponse, type DocumentGetRequest, type DocumentGetResponse, type DocumentStoreRequest, type DocumentStoreResponse } from './sidecarProtocol.ts';
+import { createSidecarBridgeFacade, type SidecarHealthResponse, type SidecarCapabilitiesResponse, type ConsoleCommandDefinition, type ConsoleCommandRunRequest, type ConsoleCommandRunResponse, type ConsoleCommandListResponse, type TerminalAckOutputRequest, type TerminalAttachRequest, type TerminalCreateSessionRequest, type TerminalDetachRequest, type TerminalListSessionsRequest, type TerminalReadActivityRequest, type TerminalReconnectRequest, type TerminalResizeRequest, type TerminalResponse, type TerminalEventPayload, type TerminalSendInputRequest, type TerminalTerminateRequest, type AppAgentBuildContextRequest, type AppAgentCancelRequest, type AppAgentInvokeToolRequest, type AppAgentListToolsRequest, type AppAgentResponse, type TasksDashboardSnapshotRequest, type TasksDashboardSnapshot, type TaskUpdateRequest, type TaskUpdateResponse, type MessagesSnapshotRequest, type MessagesSnapshot, type DocumentsListRequest, type DocumentsListResponse, type DocumentGetRequest, type DocumentGetResponse, type DocumentStoreRequest, type DocumentStoreResponse } from './sidecarProtocol.ts';
 
 export interface ShellAppearanceSettings {
   theme: string;
@@ -56,6 +56,7 @@ export interface DenDesktopSidecarApi {
   // responses through the sidecar when running under Electron (task #1074).
   collaborationSendCompiledResponse(request: Record<string, unknown>): Promise<Record<string, unknown>>;
   tasksGetDashboardSnapshot(request: TasksDashboardSnapshotRequest): Promise<TasksDashboardSnapshot>;
+  taskUpdate(request: TaskUpdateRequest): Promise<TaskUpdateResponse>;
   messagesGetSnapshot(request: MessagesSnapshotRequest): Promise<MessagesSnapshot>;
   documentsList(request: DocumentsListRequest): Promise<DocumentsListResponse>;
   documentGet(request: DocumentGetRequest): Promise<DocumentGetResponse>;
@@ -120,6 +121,7 @@ export function createDenDesktopSidecarApi(
       facade.collaborationSendCompiledResponse(request as Record<string, import('../bridge/contract.ts').JsonValue>) as Promise<Record<string, unknown>>,
     // collaborationSendCompiledResponse: typed live-delivery path (task #1074).
     tasksGetDashboardSnapshot: (request: TasksDashboardSnapshotRequest) => facade.tasksGetDashboardSnapshot(request),
+    taskUpdate: (request: TaskUpdateRequest) => facade.taskUpdate(request),
     messagesGetSnapshot: (request: MessagesSnapshotRequest) => facade.messagesGetSnapshot(request),
     documentsList: (request: DocumentsListRequest) => facade.documentsList(request),
     documentGet: (request: DocumentGetRequest) => facade.documentGet(request),

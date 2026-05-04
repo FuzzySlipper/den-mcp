@@ -621,3 +621,30 @@ public sealed record CollaborationDraftRecord
     [JsonPropertyName("created_at")]
     public string? CreatedAt { get; init; }
 }
+
+public sealed record DenTaskUpdateRequest
+{
+    [JsonPropertyName("agent")]
+    public string Agent { get; init; } = string.Empty;
+
+    [JsonPropertyName("title")]
+    public string? Title { get; init; }
+
+    [JsonPropertyName("description")]
+    public string? Description { get; init; }
+
+    [JsonPropertyName("status")]
+    public string? Status { get; init; }
+
+    [JsonPropertyName("priority")]
+    public int? Priority { get; init; }
+
+    [JsonPropertyName("assigned_to")]
+    public string? AssignedTo { get; init; }
+
+    [JsonPropertyName("tags")]
+    public List<string>? Tags { get; init; }
+
+    [JsonPropertyName("parent_id")]
+    public int? ParentId { get; init; }
+}

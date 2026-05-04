@@ -287,7 +287,7 @@ export function App() {
   const tabContent: Record<ShellTabId, ReactNode> = {
     operator: operatorTab,
     agent: <AgentPane selection={agentSelection} />,
-    tasks: <TasksDashboardPane projectId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (effectiveProjectFilter ?? null)} parentTaskId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (activeSnapshot?.scope.taskId ?? null)} statusFilterOverride={taskStatusFilterOverride} />,
+    tasks: <TasksDashboardPane projectId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (effectiveProjectFilter ?? null)} parentTaskId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (activeSnapshot?.scope.taskId ?? null)} statusFilterOverride={taskStatusFilterOverride} onNavigateToMessagesTab={(taskId) => setShellState((current) => ({ ...current, activeTab: 'messages' as ShellTabId }))} onNavigateToDocsTab={() => setShellState((current) => ({ ...current, activeTab: 'docs' as ShellTabId }))} />,
     messages: <MessagesPane projectId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (effectiveProjectFilter ?? null)} taskId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (activeSnapshot?.scope.taskId ?? null)} />,
     docs: <DocsPane projectId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (effectiveProjectFilter ?? null)} />,
     git: gitTab,

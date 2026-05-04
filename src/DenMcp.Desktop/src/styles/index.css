@@ -1933,6 +1933,213 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid color-mix(i
   color: var(--fg-primary);
 }
 
+/* ── Task detail overlay edit mode (task #1152) ───────────────────────────── */
+
+.task-detail-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1_5);
+  flex-shrink: 0;
+}
+
+.task-detail-edit-btn,
+.task-detail-save-btn,
+.task-detail-cancel-btn {
+  font-size: var(--fs-xs);
+  padding: var(--sp-0_5) var(--sp-2);
+  border-radius: var(--r-sm);
+  border: var(--bw) solid var(--bd-default);
+  background: transparent;
+  color: var(--fg-primary);
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s, color 0.1s;
+  white-space: nowrap;
+}
+.task-detail-edit-btn:hover,
+.task-detail-save-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.task-detail-cancel-btn:hover {
+  background: var(--bg-hover);
+  border-color: color-mix(in oklab, var(--err) 50%, transparent);
+  color: var(--err);
+}
+.task-detail-save-btn:disabled,
+.task-detail-cancel-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.task-detail-save-error {
+  padding: var(--sp-2) var(--sp-5);
+  font-size: var(--fs-xs);
+  color: var(--err);
+  background: color-mix(in oklab, var(--err) 8%, transparent);
+  border-bottom: var(--bw) solid color-mix(in oklab, var(--err) 20%, transparent);
+}
+
+.task-edit-input {
+  width: 100%;
+  padding: var(--sp-1) var(--sp-1_5);
+  border: var(--bw) solid var(--bd-default);
+  border-radius: var(--r-sm);
+  background: var(--bg-input);
+  color: var(--fg-primary);
+  font-family: var(--font-body);
+  font-size: var(--fs-sm);
+}
+.task-edit-title-input {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+}
+
+.task-edit-textarea {
+  width: 100%;
+  padding: var(--sp-1_5);
+  border: var(--bw) solid var(--bd-default);
+  border-radius: var(--r-sm);
+  background: var(--bg-input);
+  color: var(--fg-primary);
+  font-family: var(--font-body);
+  font-size: var(--fs-sm);
+  resize: vertical;
+  min-height: 80px;
+  line-height: 1.6;
+}
+
+.task-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--sp-2);
+}
+
+.task-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-0_5);
+}
+
+.task-edit-label {
+  font-size: var(--fs-2xs);
+  color: var(--fg-muted);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.task-edit-select {
+  padding: var(--sp-0_5) var(--sp-1_5);
+  border: var(--bw) solid var(--bd-default);
+  border-radius: var(--r-sm);
+  background: var(--bg-input);
+  color: var(--fg-primary);
+  font-family: var(--font-body);
+  font-size: var(--fs-xs);
+}
+
+.task-edit-tags-readonly {
+  display: flex;
+  gap: var(--sp-0_5);
+  flex-wrap: wrap;
+}
+
+/* ── Enhanced subtask rows ────────────────────────────────────────────────── */
+
+.task-detail-subtasks-enhanced {
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.task-detail-subtask-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1_5) var(--sp-2);
+  border: var(--bw) solid var(--bd-subtle);
+  border-radius: var(--r-md);
+  background: var(--bg-input);
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+  text-align: left;
+  width: 100%;
+  font-family: var(--font-body);
+}
+.task-detail-subtask-row:hover {
+  background: var(--bg-hover);
+  border-color: var(--bd-default);
+}
+
+.task-detail-subtask-id {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.task-detail-subtask-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-sm);
+  color: var(--fg-primary);
+}
+
+.tasks-subtask-status {
+  font-size: var(--fs-2xs);
+  padding: 0 var(--sp-1);
+}
+
+/* ── Navigation buttons ───────────────────────────────────────────────────── */
+
+.task-detail-nav-btn {
+  font-size: var(--fs-xs);
+  color: var(--accent);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: var(--sp-0_5) 0;
+  text-align: left;
+  transition: color 0.1s;
+}
+.task-detail-nav-btn:hover {
+  color: color-mix(in oklab, var(--accent) 80%, white);
+  text-decoration: underline;
+}
+
+/* ── Documents list in overlay ────────────────────────────────────────────── */
+
+.task-detail-docs-list {
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.task-detail-doc-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-1_5);
+  border-radius: var(--r-sm);
+  background: var(--bg-input);
+  font-size: var(--fs-xs);
+}
+
+.task-detail-doc-title {
+  color: var(--fg-primary);
+  font-weight: 600;
+}
+
+.task-detail-doc-slug {
+  color: var(--fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  margin-left: auto;
+}
+
 .task-detail-parent-link {
   font-family: var(--font-mono);
   font-size: var(--fs-xs);

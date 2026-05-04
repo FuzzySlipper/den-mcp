@@ -18,6 +18,7 @@ export const allowedSidecarCallMethods = Object.freeze([
   'saveAppearanceSettings',
   'saveOperatorSettings',
   'tasksGetDashboardSnapshot',
+  'taskUpdate',
   'messagesGetSnapshot',
   'documentsList',
   'documentGet',

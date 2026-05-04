@@ -305,6 +305,28 @@ export interface TasksDashboardLane {
   session_chips: Array<Record<string, JsonValue>>;
 }
 
+// ── Task update bridge (task #1152) ────────────────────────────────────────────
+
+export interface TaskUpdateRequest extends Record<string, JsonValue | undefined> {
+  project_id: string;
+  task_id: number;
+  agent: string;
+  title?: string | null;
+  description?: string | null;
+  status?: string | null;
+  priority?: number | null;
+  assigned_to?: string | null;
+}
+
+export interface TaskUpdateResponse {
+  task_id: number;
+  project_id: string;
+  title: string;
+  status: string;
+  priority: number;
+  assigned_to?: string | null;
+}
+
 // ── Documents tab (task #1147) ────────────────────────────────────────────
 
 export interface DocumentsListRequest {
@@ -510,6 +532,11 @@ export const sidecarCommands: Record<string, BridgeCommandSpec<JsonValue, JsonVa
     requestSchema: 'den_desktop.documents.store.request',
     responseSchema: 'den_desktop.documents.store.response',
   },
+  taskUpdate: {
+    command: 'den_desktop.tasks.update',
+    requestSchema: 'den_desktop.tasks.update.request',
+    responseSchema: 'den_desktop.tasks.update.response',
+  },
   getHealth: {
     command: 'bridge.get_health',
     requestSchema: 'bridge.get_health.request',
@@ -673,6 +700,8 @@ export function createSidecarBridgeFacade(client: SidecarBridgeClient) {
       facade.documentGet(request as unknown as JsonValue) as Promise<TResponse>,
     documentStore: async <TResponse = DocumentStoreResponse>(request: DocumentStoreRequest): Promise<TResponse> =>
       facade.documentStore(request as unknown as JsonValue) as Promise<TResponse>,
+    taskUpdate: async <TResponse = TaskUpdateResponse>(request: TaskUpdateRequest): Promise<TResponse> =>
+      facade.taskUpdate(request as JsonValue) as Promise<TResponse>,
     terminalCreateSession: async <TResponse = TerminalResponse>(request: TerminalCreateSessionRequest): Promise<TResponse> =>
       facade.terminalCreateSession(request as JsonValue) as Promise<TResponse>,
     terminalListSessions: async <TResponse = TerminalResponse>(request: TerminalListSessionsRequest = {}): Promise<TResponse> =>

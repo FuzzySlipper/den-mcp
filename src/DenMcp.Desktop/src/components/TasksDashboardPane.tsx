@@ -2,9 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   TasksDashboardSnapshot,
   TasksDashboardTaskRow,
+  TaskUpdateResponse,
 } from '../electron/sidecarProtocol.ts';
 import {
   tasksGetDashboardSnapshot,
+  taskUpdate,
+  messagesGetSnapshot,
+  documentsList,
   type TasksDashboardGetSnapshotRequest,
 } from '../desktop/sidecarBridgeApi.ts';
 import {
@@ -40,13 +44,17 @@ interface Props {
   parentTaskId?: number | null;
   /** External filter override from command palette; takes precedence when set. */
   statusFilterOverride?: TaskStatusFilter | null;
+  /** Callback to switch to the Messages tab with a task pre-filtered. */
+  onNavigateToMessagesTab?: (taskId: number) => void;
+  /** Callback to switch to the Docs tab. */
+  onNavigateToDocsTab?: () => void;
 }
 
 const REFRESH_INTERVAL_MS = 30_000;
 const STATUS_FILTERS: TaskStatusFilter[] = ['all', 'in_progress', 'review', 'blocked', 'planned', 'done', 'cancelled'];
 const SORT_MODES: TaskSortMode[] = ['priority', 'status', 'id', 'title', 'updated'];
 
-export function TasksDashboardPane({ projectId, parentTaskId, statusFilterOverride }: Props) {
+export function TasksDashboardPane({ projectId, parentTaskId, statusFilterOverride, onNavigateToMessagesTab, onNavigateToDocsTab }: Props) {
   const [snapshot, setSnapshot] = useState<TasksDashboardSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -235,8 +243,13 @@ export function TasksDashboardPane({ projectId, parentTaskId, statusFilterOverri
       {detailOverlayTaskId != null && overlayTask && (
         <TaskDetailOverlay
           task={overlayTask}
+          snapshot={snapshot}
+          projectId={projectId}
           onClose={handleCloseDetail}
           onNavigateToSubtask={handleOverlayNavigateSubtask}
+          onNavigateToMessagesTab={onNavigateToMessagesTab}
+          onNavigateToDocsTab={onNavigateToDocsTab}
+          onTaskUpdated={() => void fetchSnapshot()}
         />
       )}
     </section>
@@ -511,27 +524,139 @@ function TaskDetailSection({ task }: { task: TaskRowView }) {
  */
 function TaskDetailOverlay({
   task,
+  snapshot,
+  projectId,
   onClose,
   onNavigateToSubtask,
+  onNavigateToMessagesTab,
+  onNavigateToDocsTab,
+  onTaskUpdated,
 }: {
   task: TaskRowView;
+  snapshot: TasksDashboardSnapshot | null;
+  projectId: string | null;
   onClose: () => void;
   onNavigateToSubtask: (parentId: number) => void;
+  onNavigateToMessagesTab?: (taskId: number) => void;
+  onNavigateToDocsTab?: () => void;
+  onTaskUpdated: () => void;
 }) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
+  const [editMode, setEditMode] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Focus close button on mount; trap focus within overlay
+  // Edit form state — initialized from task on mount
+  const [editTitle, setEditTitle] = useState(task.title);
+  const [editDescription, setEditDescription] = useState(task.description ?? '');
+  const [editStatus, setEditStatus] = useState(task.status);
+  const [editPriority, setEditPriority] = useState(task.priority);
+  const [editAssignedTo, setEditAssignedTo] = useState(task.assignedTo ?? '');
+
+  // Reset form when task changes
+  useEffect(() => {
+    setEditTitle(task.title);
+    setEditDescription(task.description ?? '');
+    setEditStatus(task.status);
+    setEditPriority(task.priority);
+    setEditAssignedTo(task.assignedTo ?? '');
+    setEditMode(false);
+    setSaveError(null);
+  }, [task.id, task.title, task.description, task.status, task.priority, task.assignedTo]);
+
+  // Focus close button on mount and when task changes
   useEffect(() => {
     closeBtnRef.current?.focus();
-  }, []);
+  }, [task.id]);
 
   // Backdrop click handler: only close if clicking the backdrop itself
   const handleBackdropClick = useCallback((e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {
-      onClose();
+      if (editMode) {
+        setEditMode(false);
+        setSaveError(null);
+      } else {
+        onClose();
+      }
     }
-  }, [onClose]);
+  }, [onClose, editMode]);
+
+  const handleEditToggle = useCallback(() => {
+    setEditMode(true);
+    // Reset form fields to current task values
+    setEditTitle(task.title);
+    setEditDescription(task.description ?? '');
+    setEditStatus(task.status);
+    setEditPriority(task.priority);
+    setEditAssignedTo(task.assignedTo ?? '');
+    setSaveError(null);
+  }, [task]);
+
+  const handleCancelEdit = useCallback(() => {
+    setEditMode(false);
+    setSaveError(null);
+    // Reset to original values
+    setEditTitle(task.title);
+    setEditDescription(task.description ?? '');
+    setEditStatus(task.status);
+    setEditPriority(task.priority);
+    setEditAssignedTo(task.assignedTo ?? '');
+  }, [task]);
+
+  const handleSave = useCallback(async () => {
+    if (!projectId) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await taskUpdate({
+        project_id: projectId,
+        task_id: task.id,
+        agent: 'desktop',
+        title: editTitle !== task.title ? editTitle : null,
+        description: editDescription !== (task.description ?? '') ? editDescription : null,
+        status: editStatus !== task.status ? editStatus : null,
+        priority: editPriority !== task.priority ? editPriority : null,
+        assigned_to: editAssignedTo !== (task.assignedTo ?? '') ? editAssignedTo || null : null,
+      });
+      setEditMode(false);
+      onTaskUpdated();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }, [projectId, task, editTitle, editDescription, editStatus, editPriority, editAssignedTo, onTaskUpdated]);
+
+  // Build subtask rows from snapshot
+  const subtaskRows = useMemo(() => {
+    if (!snapshot || task.subtaskIds.length === 0) return [];
+    return snapshot.tasks.filter((t) => task.subtaskIds.includes(t.id));
+  }, [snapshot, task.subtaskIds]);
+
+  // Docs section: use project docs from a simple fetch
+  const [docs, setDocs] = useState<Array<{ slug: string; title: string }> | null>(null);
+  const [docsLoading, setDocsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    setDocsLoading(true);
+    documentsList({ project_id: projectId })
+      .then((result) => {
+        if (!cancelled) {
+          setDocs(result.documents.slice(0, 10));
+          setDocsLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDocs([]);
+          setDocsLoading(false);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [projectId]);
 
   return (
     <div
@@ -554,86 +679,191 @@ function TaskDetailOverlay({
               <span className={`tasks-priority-chip tasks-priority-${task.priority}`}>{priorityLabel(task.priority)}</span>
               {task.reviewState && <span className="chip">{task.reviewState.replaceAll('_', ' ')}</span>}
             </div>
-            <h3 className="task-detail-header-title">{task.title}</h3>
+            {editMode ? (
+              <input
+                type="text"
+                className="task-edit-input task-edit-title-input"
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                placeholder="Task title"
+                aria-label="Edit title"
+              />
+            ) : (
+              <h3 className="task-detail-header-title">{task.title}</h3>
+            )}
           </div>
-          <button
-            ref={closeBtnRef}
-            type="button"
-            className="task-detail-close-btn"
-            onClick={onClose}
-            aria-label="Close task details"
-            title="Close (Esc)"
-          >
-            ✕
-          </button>
+          <div className="task-detail-header-actions">
+            {!editMode ? (
+              <button
+                type="button"
+                className="task-detail-edit-btn"
+                onClick={handleEditToggle}
+                title="Edit task"
+                aria-label="Edit task"
+              >
+                ✏️ Edit
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="task-detail-save-btn"
+                  onClick={handleSave}
+                  disabled={saving}
+                  title="Save changes"
+                >
+                  {saving ? 'Saving…' : '💾 Save'}
+                </button>
+                <button
+                  type="button"
+                  className="task-detail-cancel-btn"
+                  onClick={handleCancelEdit}
+                  disabled={saving}
+                  title="Discard changes"
+                >
+                  ✕ Cancel
+                </button>
+              </>
+            )}
+            <button
+              ref={closeBtnRef}
+              type="button"
+              className="task-detail-close-btn"
+              onClick={onClose}
+              aria-label="Close task details"
+              title="Close (Esc)"
+            >
+              ✕
+            </button>
+          </div>
         </div>
+
+        {/* Save error */}
+        {saveError && (
+          <div className="task-detail-save-error">
+            <strong>Save failed:</strong> {saveError}
+          </div>
+        )}
 
         {/* ── Body ── */}
         <div className="task-detail-body">
           {/* Description */}
-          {task.description && (
-            <div className="task-detail-section">
-              <h4 className="task-detail-section-heading">Description</h4>
-              <p className="task-detail-description">{task.description}</p>
-            </div>
-          )}
+          <div className="task-detail-section">
+            <h4 className="task-detail-section-heading">Description</h4>
+            {editMode ? (
+              <textarea
+                className="task-edit-textarea"
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                placeholder="Task description"
+                rows={4}
+                aria-label="Edit description"
+              />
+            ) : (
+              task.description && <p className="task-detail-description">{task.description}</p>
+            )}
+          </div>
 
-          {/* Metadata */}
+          {/* Editable Metadata */}
           <div className="task-detail-section">
             <h4 className="task-detail-section-heading">Metadata</h4>
-            <div className="task-detail-meta-grid">
-              {task.assignedTo && (
-                <div className="task-detail-meta-item">
-                  <span className="task-detail-meta-label">Assignee</span>
-                  <span className="task-detail-meta-value">{task.assignedTo}</span>
-                </div>
-              )}
-              {task.tags.length > 0 && (
-                <div className="task-detail-meta-item">
-                  <span className="task-detail-meta-label">Tags</span>
-                  <span className="task-detail-meta-value">
-                    {task.tags.map((tag) => <span key={tag} className="tasks-tag-chip">{tag}</span>)}
-                  </span>
-                </div>
-              )}
-              {task.priority != null && (
-                <div className="task-detail-meta-item">
-                  <span className="task-detail-meta-label">Priority</span>
-                  <span className="task-detail-meta-value">{priorityLabel(task.priority)}</span>
-                </div>
-              )}
-              {task.createdAt && (
-                <div className="task-detail-meta-item">
-                  <span className="task-detail-meta-label">Created</span>
-                  <span className="task-detail-meta-value">{relativeTimeLabel(task.createdAt)}</span>
-                </div>
-              )}
-              {task.branch && (
-                <div className="task-detail-meta-item">
-                  <span className="task-detail-meta-label">Branch</span>
-                  <span className="task-detail-meta-value task-detail-branch">{task.branch}</span>
-                </div>
-              )}
-              {task.worktreePath && (
-                <div className="task-detail-meta-item">
-                  <span className="task-detail-meta-label">Worktree</span>
-                  <span className="task-detail-meta-value">{task.worktreePath}</span>
-                </div>
-              )}
-              {task.parentId != null && (
-                <div className="task-detail-meta-item">
-                  <span className="task-detail-meta-label">Parent</span>
-                  <button
-                    type="button"
-                    className="tasks-subnav-btn"
-                    onClick={() => onNavigateToSubtask(task.parentId!)}
-                    title={`View parent task #${task.parentId}`}
+            {editMode ? (
+              <div className="task-edit-grid">
+                <div className="task-edit-field">
+                  <label className="task-edit-label">Status</label>
+                  <select
+                    className="task-edit-select"
+                    value={editStatus}
+                    onChange={(e) => setEditStatus(e.target.value)}
+                    aria-label="Edit status"
                   >
-                    #{task.parentId}
-                  </button>
+                    {['planned', 'in_progress', 'review', 'blocked', 'done', 'cancelled'].map((s) => (
+                      <option key={s} value={s}>{taskStatusLabel(s)}</option>
+                    ))}
+                  </select>
                 </div>
-              )}
-            </div>
+                <div className="task-edit-field">
+                  <label className="task-edit-label">Priority</label>
+                  <select
+                    className="task-edit-select"
+                    value={editPriority}
+                    onChange={(e) => setEditPriority(Number(e.target.value))}
+                    aria-label="Edit priority"
+                  >
+                    {[1, 2, 3, 4, 5].map((p) => (
+                      <option key={p} value={p}>{priorityLabel(p)}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="task-edit-field">
+                  <label className="task-edit-label">Assignee</label>
+                  <input
+                    type="text"
+                    className="task-edit-input"
+                    value={editAssignedTo}
+                    onChange={(e) => setEditAssignedTo(e.target.value)}
+                    placeholder="e.g. pi"
+                    aria-label="Edit assignee"
+                  />
+                </div>
+                {task.tags.length > 0 && (
+                  <div className="task-edit-field">
+                    <label className="task-edit-label">Tags</label>
+                    <div className="task-edit-tags-readonly">
+                      {task.tags.map((tag) => <span key={tag} className="tasks-tag-chip">{tag}</span>)}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="task-detail-meta-grid">
+                {task.assignedTo && (
+                  <div className="task-detail-meta-item">
+                    <span className="task-detail-meta-label">Assignee</span>
+                    <span className="task-detail-meta-value">{task.assignedTo}</span>
+                  </div>
+                )}
+                {task.tags.length > 0 && (
+                  <div className="task-detail-meta-item">
+                    <span className="task-detail-meta-label">Tags</span>
+                    <span className="task-detail-meta-value">
+                      {task.tags.map((tag) => <span key={tag} className="tasks-tag-chip">{tag}</span>)}
+                    </span>
+                  </div>
+                )}
+                {task.createdAt && (
+                  <div className="task-detail-meta-item">
+                    <span className="task-detail-meta-label">Created</span>
+                    <span className="task-detail-meta-value">{relativeTimeLabel(task.createdAt)}</span>
+                  </div>
+                )}
+                {task.branch && (
+                  <div className="task-detail-meta-item">
+                    <span className="task-detail-meta-label">Branch</span>
+                    <span className="task-detail-meta-value task-detail-branch">{task.branch}</span>
+                  </div>
+                )}
+                {task.worktreePath && (
+                  <div className="task-detail-meta-item">
+                    <span className="task-detail-meta-label">Worktree</span>
+                    <span className="task-detail-meta-value">{task.worktreePath}</span>
+                  </div>
+                )}
+                {task.parentId != null && (
+                  <div className="task-detail-meta-item">
+                    <span className="task-detail-meta-label">Parent</span>
+                    <button
+                      type="button"
+                      className="tasks-subnav-btn"
+                      onClick={() => onNavigateToSubtask(task.parentId!)}
+                      title={`View parent task #${task.parentId}`}
+                    >
+                      #{task.parentId}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Progress */}
@@ -668,24 +898,25 @@ function TaskDetailOverlay({
             </div>
           )}
 
-          {/* Subtasks */}
+          {/* Subtasks — enhanced with titles */}
           {task.subtaskCount > 0 && (
             <div className="task-detail-section">
-              <h4 className="task-detail-section-heading">Subtasks</h4>
-              <div className="task-detail-subtasks-list">
-                {task.subtaskIds.map((subId) => (
+              <h4 className="task-detail-section-heading">Subtasks ({task.subtaskCount})</h4>
+              <div className="task-detail-subtasks-enhanced">
+                {subtaskRows.map((sub) => (
                   <button
-                    key={subId}
+                    key={sub.id}
                     type="button"
-                    className="task-detail-subtask-btn"
-                    onClick={() => onNavigateToSubtask(subId)}
-                    title={`Navigate to subtask #${subId}`}
+                    className="task-detail-subtask-row"
+                    onClick={() => onNavigateToSubtask(sub.id)}
+                    title={`Open subtask #${sub.id}: ${sub.title}`}
                   >
-                    #{subId}
+                    <span className="task-detail-subtask-id">#{sub.id}</span>
+                    <span className="task-detail-subtask-title">{sub.title}</span>
+                    <span className={`status-pill tasks-subtask-status status-${sub.computed_state || sub.status}`}>{taskStatusLabel(sub.status)}</span>
                   </button>
                 ))}
               </div>
-              <p className="task-detail-text">{task.subtaskCount} subtask{task.subtaskCount !== 1 ? 's' : ''} total</p>
             </div>
           )}
 
@@ -700,10 +931,10 @@ function TaskDetailOverlay({
             </div>
           )}
 
-          {/* Recent messages */}
-          {task.recentMessages.length > 0 && (
-            <div className="task-detail-section">
-              <h4 className="task-detail-section-heading">Messages ({task.messageCount})</h4>
+          {/* Messages — with click-through */}
+          <div className="task-detail-section">
+            <h4 className="task-detail-section-heading">Messages ({task.messageCount})</h4>
+            {task.recentMessages.length > 0 ? (
               <div className="task-detail-messages-list">
                 {task.recentMessages.map((msg) => (
                   <div key={msg.id} className="task-detail-message-row">
@@ -714,8 +945,47 @@ function TaskDetailOverlay({
                   </div>
                 ))}
               </div>
-            </div>
-          )}
+            ) : (
+              <p className="task-detail-text">No messages yet.</p>
+            )}
+            {onNavigateToMessagesTab && task.messageCount > 0 && (
+              <button
+                type="button"
+                className="task-detail-nav-btn"
+                onClick={() => onNavigateToMessagesTab(task.id)}
+              >
+                View all messages →
+              </button>
+            )}
+          </div>
+
+          {/* Documents section */}
+          <div className="task-detail-section">
+            <h4 className="task-detail-section-heading">Documents</h4>
+            {docsLoading ? (
+              <p className="task-detail-text">Loading documents…</p>
+            ) : docs && docs.length > 0 ? (
+              <div className="task-detail-docs-list">
+                {docs.map((doc) => (
+                  <div key={doc.slug} className="task-detail-doc-row">
+                    <span className="task-detail-doc-title">{doc.title}</span>
+                    <span className="task-detail-doc-slug">{doc.slug}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="task-detail-text">No project documents found.</p>
+            )}
+            {onNavigateToDocsTab && (
+              <button
+                type="button"
+                className="task-detail-nav-btn"
+                onClick={() => onNavigateToDocsTab()}
+              >
+                Browse documents →
+              </button>
+            )}
+          </div>
 
           {/* Session chips */}
           {task.sessionChips.length > 0 && (

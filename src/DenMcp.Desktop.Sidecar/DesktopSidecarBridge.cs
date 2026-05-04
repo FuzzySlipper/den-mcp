@@ -44,6 +44,7 @@ public static class DesktopSidecarBridge
         services.AddSingleton<DocumentsListHandler>();
         services.AddSingleton<DocumentGetHandler>();
         services.AddSingleton<DocumentStoreHandler>();
+        services.AddSingleton<TaskUpdateHandler>();
         services.AddBridgeHost(
             ConfigureRegistry,
             host =>
@@ -138,6 +139,9 @@ public static class DesktopSidecarBridge
                 DesktopSidecarProtocol.DocumentGetCommand)
             .RegisterCommand<DocumentStoreRequest, DocumentStoreResponse, DocumentStoreHandler>(
                 DesktopSidecarProtocol.DocumentStoreCommand)
+            // Task update (task #1152)
+            .RegisterCommand<TaskUpdateRequest, TaskUpdateResponse, TaskUpdateHandler>(
+                DesktopSidecarProtocol.TaskUpdateCommand)
             // Collaboration response delivery (task #920)
             .RegisterCommand<CollaborationSendCompiledResponseRequest, CollaborationSendCompiledResponseResponse, CollaborationSendCompiledResponseHandler>(
                 DesktopSidecarProtocol.CollaborationSendCompiledResponseCommand)
@@ -287,6 +291,9 @@ public static class DesktopSidecarBridge
             Schema(DesktopSidecarProtocol.DocumentGetCommand + ".response", DocumentGetResponseSchema),
             Schema(DesktopSidecarProtocol.DocumentStoreCommand + ".request", DocumentStoreRequestSchema),
             Schema(DesktopSidecarProtocol.DocumentStoreCommand + ".response", DocumentStoreResponseSchema),
+            // Task update schemas (task #1152)
+            Schema(DesktopSidecarProtocol.TaskUpdateCommand + ".request", TaskUpdateRequestSchema),
+            Schema(DesktopSidecarProtocol.TaskUpdateCommand + ".response", TaskUpdateResponseSchema),
             Schema(DesktopSidecarProtocol.AppAgentRunStateEvent + ".payload", AppAgentRunStateEventSchema),
             Schema(DesktopSidecarProtocol.AppAgentToolCallStateEvent + ".payload", AppAgentToolCallStateEventSchema),
             // Collaboration response delivery schemas (task #920)
@@ -503,6 +510,14 @@ public static class DesktopSidecarBridge
 
     private const string DocumentStoreResponseSchema = """
         {"type":"object","additionalProperties":false,"required":["slug","title","created"],"properties":{"slug":{"type":"string"},"title":{"type":"string"},"created":{"type":"boolean"}}}
+        """;
+
+    private const string TaskUpdateRequestSchema = """
+        {"type":"object","additionalProperties":false,"required":["project_id","task_id","agent"],"properties":{"project_id":{"type":"string"},"task_id":{"type":"integer"},"agent":{"type":"string"},"title":{"type":["string","null"]},"description":{"type":["string","null"]},"status":{"type":["string","null"]},"priority":{"type":["integer","null"]},"assigned_to":{"type":["string","null"]}}}
+        """;
+
+    private const string TaskUpdateResponseSchema = """
+        {"type":"object","additionalProperties":false,"required":["task_id","project_id","title","status","priority"],"properties":{"task_id":{"type":"integer"},"project_id":{"type":"string"},"title":{"type":"string"},"status":{"type":"string"},"priority":{"type":"integer"},"assigned_to":{"type":["string","null"]}}}
         """;
 
     private const string AppAgentRunStateEventSchema = """

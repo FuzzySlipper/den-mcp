@@ -1,4 +1,4 @@
-import type { AppAgentBuildContextRequest, AppAgentCancelRequest, AppAgentInvokeToolRequest, AppAgentListToolsRequest, AppAgentResponse, AppAgentSelection, TasksDashboardSnapshot, TasksDashboardSnapshotRequest } from '../electron/sidecarProtocol.ts';
+import type { AppAgentBuildContextRequest, AppAgentCancelRequest, AppAgentInvokeToolRequest, AppAgentListToolsRequest, AppAgentResponse, AppAgentSelection, TaskUpdateRequest, TaskUpdateResponse, TasksDashboardSnapshot, TasksDashboardSnapshotRequest } from '../electron/sidecarProtocol.ts';
 
 import { validateBuildContextResponse, validateCancelResponse, validateInvokeToolResponse, validateListToolsResponse } from './sidecarBridgeValidation.ts';
 
@@ -65,6 +65,7 @@ interface DenDesktopSidecarRuntimeApi {
   terminalReconnect(request: TerminalReconnectRequest): Promise<TerminalAttachResponse>;
   terminalAckOutput(request: TerminalAckOutputRequest): Promise<TerminalAckOutputResponse>;
   tasksGetDashboardSnapshot(request: TasksDashboardSnapshotRequest): Promise<TasksDashboardSnapshot>;
+  taskUpdate(request: TaskUpdateRequest): Promise<TaskUpdateResponse>;
   messagesGetSnapshot(request: MessagesGetSnapshotRequest): Promise<MessagesGetSnapshotResponse>;
   documentsList(request: Record<string, unknown>): Promise<DocumentsListBridgeResponse>;
   documentGet(request: Record<string, unknown>): Promise<DocumentGetBridgeResponse>;
@@ -870,6 +871,10 @@ export async function documentStore(request: DocumentStoreBridgeRequest): Promis
 
 export async function tasksGetDashboardSnapshot(request: TasksDashboardGetSnapshotRequest): Promise<TasksDashboardGetSnapshotResponse> {
   return callSidecar('tasksGetDashboardSnapshot', () => sidecarApi().tasksGetDashboardSnapshot(request));
+}
+
+export async function taskUpdate(request: TaskUpdateRequest): Promise<TaskUpdateResponse> {
+  return callSidecar('taskUpdate', () => sidecarApi().taskUpdate(request));
 }
 
 export async function messagesGetSnapshot(request: MessagesGetSnapshotRequest): Promise<MessagesGetSnapshotResponse> {

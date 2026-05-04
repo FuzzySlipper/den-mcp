@@ -2717,6 +2717,90 @@
           }
         }
       },
+      "den_desktop.tasks.update.request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "project_id",
+          "task_id",
+          "agent"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "task_id": {
+            "type": "integer"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "priority": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "assigned_to": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "den_desktop.tasks.update.response": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "task_id",
+          "project_id",
+          "title",
+          "status",
+          "priority"
+        ],
+        "properties": {
+          "task_id": {
+            "type": "integer"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "assigned_to": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "den_desktop.terminal.ack_output.request": {
         "type": "object",
         "additionalProperties": false,
@@ -4007,6 +4091,14 @@
         "request_schema": "den_desktop.tasks.get_dashboard_snapshot.request",
         "response_schema": "den_desktop.tasks.get_dashboard_snapshot.response",
         "supports_cancellation": true,
+        "supports_progress": false,
+        "required_capabilities": []
+      },
+      {
+        "command": "den_desktop.tasks.update",
+        "request_schema": "den_desktop.tasks.update.request",
+        "response_schema": "den_desktop.tasks.update.response",
+        "supports_cancellation": false,
         "supports_progress": false,
         "required_capabilities": []
       },

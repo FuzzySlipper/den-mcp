@@ -40,6 +40,7 @@ public class DesktopSidecarBridgeTests
             DesktopSidecarProtocol.SaveAppearanceSettingsCommand,
             DesktopSidecarProtocol.SaveSettingsCommand,
             DesktopSidecarProtocol.TasksGetDashboardSnapshotCommand,
+            DesktopSidecarProtocol.TaskUpdateCommand,
             DesktopSidecarProtocol.TerminalAckOutputCommand,
             DesktopSidecarProtocol.TerminalAttachCommand,
             DesktopSidecarProtocol.TerminalCreateSessionCommand,
