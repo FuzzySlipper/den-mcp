@@ -163,8 +163,8 @@ function addIfUnique(lines: ConsoleLine[], seen: Set<string>, line: ConsoleLine)
 /** Locale/options used for console timestamp formatting.
  *  Explicit locale and options ensure deterministic HH:MM:SS output across environments.
  *  Tests must use the same contract to detect future drift. */
-const TIMESTAMP_LOCALE = 'en-US';
-const TIMESTAMP_OPTIONS: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
+export const TIMESTAMP_LOCALE = 'en-US';
+export const TIMESTAMP_OPTIONS: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
 
 function formatTimestamp(isoString: string): string {
   const d = new Date(isoString);

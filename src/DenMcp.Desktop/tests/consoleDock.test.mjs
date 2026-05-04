@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildConsoleLines } from '../src/consoleLines.ts';
+import { buildConsoleLines, TIMESTAMP_LOCALE, TIMESTAMP_OPTIONS } from '../src/consoleLines.ts';
 import { initialIpcHealth } from '../src/desktop/ipcHealth.ts';
 
 function makeIpcHealth(overrides = {}) {
@@ -40,9 +40,7 @@ function makeObserver(overrides = {}) {
   };
 }
 
-// Must match the explicit locale/options contract in consoleLines.ts formatTimestamp.
-const TIMESTAMP_LOCALE = 'en-US';
-const TIMESTAMP_OPTIONS = { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
+// Timestamp constants are imported from consoleLines.ts to avoid drift.
 
 function expectedTimestamp(isoString) {
   return new Date(isoString).toLocaleTimeString(TIMESTAMP_LOCALE, TIMESTAMP_OPTIONS);

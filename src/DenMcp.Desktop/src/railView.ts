@@ -1,4 +1,5 @@
 import type { LocalGitSnapshot } from './desktop/sidecarBridgeApi';
+import { snapshotKey } from './snapshotView.ts';
 
 /** Sentinel value for the Global project filter option in the LeftRail. */
 export const GLOBAL_PROJECT_ID = '_global' as const;
@@ -93,7 +94,7 @@ export function workspaceRowsForProject(snapshots: LocalGitSnapshot[], projectId
   return snapshots
     .filter((s) => s.scope.projectId === projectId)
     .map((s) => ({
-      snapshotKey: buildSnapshotRowKey(s),
+      snapshotKey: snapshotKey(s),
       projectId: s.scope.projectId,
       workspaceId: s.scope.workspaceId ?? null,
       taskId: s.scope.taskId ?? null,
@@ -129,15 +130,4 @@ export function workspaceRowLabel(row: WorkspaceRailRow): string {
   return 'project root';
 }
 
-/**
- * Build a stable key for a workspace row from a snapshot.
- * Matches the snapshotKey format from snapshotView but is locally computed.
- */
-function buildSnapshotRowKey(snapshot: LocalGitSnapshot): string {
-  return [
-    snapshot.scope.projectId,
-    snapshot.scope.workspaceId ?? 'project',
-    snapshot.scope.taskId ?? 'none',
-    snapshot.request.root_path,
-  ].join('::');
-}
+

@@ -2421,13 +2421,13 @@ internal sealed class RecordingDelegatingHandler : DelegatingHandler
         }
     }
 
-    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var uri = request.RequestUri?.PathAndQuery ?? string.Empty;
         JsonElement body = default;
         if (request.Content is { } content)
         {
-            var bodyStr = content.ReadAsStringAsync(cancellationToken).GetAwaiter().GetResult();
+            var bodyStr = await content.ReadAsStringAsync(cancellationToken);
             if (!string.IsNullOrWhiteSpace(bodyStr))
             {
                 body = JsonSerializer.Deserialize<JsonElement>(bodyStr);
@@ -2439,9 +2439,9 @@ internal sealed class RecordingDelegatingHandler : DelegatingHandler
             _sentRequests.Add((uri, body));
         }
 
-        return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
         {
             Content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json"),
-        });
+        };
     }
 }
