@@ -77,7 +77,6 @@ public sealed class OperatorSettingsService
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.General)
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.Never,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         PropertyNameCaseInsensitive = false,
         WriteIndented = true,
     };
@@ -170,7 +169,7 @@ public sealed class OperatorSettingsService
                 bufferSize: 16 * 1024,
                 FileOptions.WriteThrough))
             {
-                JsonSerializer.Serialize(stream, settings.Normalized(_sourceInstanceIdFactory), JsonOptions);
+                JsonSerializer.Serialize(stream, settings, JsonOptions);
                 stream.WriteByte((byte)'\n');
                 stream.Flush(flushToDisk: true);
             }
@@ -280,7 +279,7 @@ public sealed class OperatorSettingsService
                 bufferSize: 16 * 1024,
                 FileOptions.WriteThrough))
             {
-                JsonSerializer.Serialize(stream, settings.Normalized(), JsonOptions);
+                JsonSerializer.Serialize(stream, settings, JsonOptions);
                 stream.WriteByte((byte)'\n');
                 stream.Flush(flushToDisk: true);
             }
