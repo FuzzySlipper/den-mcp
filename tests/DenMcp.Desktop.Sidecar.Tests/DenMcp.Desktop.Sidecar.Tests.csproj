@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Den.Bridge\Den.Bridge.csproj" />
+    <ProjectReference Include="..\..\external\den-bridge\src\Den.Bridge\Den.Bridge.csproj" />
     <ProjectReference Include="..\..\src\DenMcp.Desktop.Sidecar\DenMcp.Desktop.Sidecar.csproj" />
   </ItemGroup>
 

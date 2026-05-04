@@ -5,7 +5,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Den.Bridge\Den.Bridge.csproj" />
+    <ProjectReference Include="..\..\external\den-bridge\src\Den.Bridge\Den.Bridge.csproj" />
     <ProjectReference Include="..\DenMcp.Core\DenMcp.Core.csproj" />
   </ItemGroup>
 
