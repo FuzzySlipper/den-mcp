@@ -15,7 +15,7 @@ import type {
 
 export type MessageSenderTone = 'ok' | 'warn' | 'err' | 'accent' | 'idle' | 'info' | 'running';
 
-export type MessageFilterType = 'all' | 'messages' | 'stream' | 'thoughts' | 'user';
+export type MessageFilterType = 'all' | 'messages' | 'stream' | 'thoughts' | 'user' | 'notifications';
 
 export interface MessageRowView {
   id: number;
@@ -115,6 +115,7 @@ const PACKET_SENDER_TONES: Record<string, MessageSenderTone> = {
  * - 'stream' — workflow/packet messages (metadata_type in PACKET_TYPES)
  * - 'thoughts' — best-effort thought/observation classification
  * - 'user' — messages where sender === 'user' (case-insensitive)
+ * - 'notifications' — messages with intent === 'notification'
  *
  * Note: 'stream', 'thoughts' filters need backend support to include
  * agent stream entries and thought data. For now they filter from
@@ -137,6 +138,8 @@ export function filterMessagesByType(
         return isThoughtEntry(msg);
       case 'user':
         return msg.sender.toLowerCase() === 'user';
+      case 'notifications':
+        return msg.intent === 'notification';
       default:
         return true;
     }

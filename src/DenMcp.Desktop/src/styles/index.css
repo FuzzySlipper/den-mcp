@@ -2440,6 +2440,7 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid color-mix(i
 }
 .messages-card:hover { border-color: var(--bd-default); background: color-mix(in oklab, var(--bg-input) 84%, var(--bg-hover)); }
 .messages-card.unread { border-left-color: var(--accent); background: color-mix(in oklab, var(--accent-bg) 30%, var(--bg-input)); }
+.messages-card.notification { border-left-color: var(--st-warn); background: color-mix(in oklab, var(--st-warn-bg) 20%, var(--bg-input)); }
 .messages-card.expanded { border-color: var(--bd-default); }
 .messages-card-topline { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); }
 .messages-card-id-sender { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }

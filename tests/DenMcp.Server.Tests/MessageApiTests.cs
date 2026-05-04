@@ -295,6 +295,34 @@ public class MessageApiTests : IAsyncLifetime
         Assert.Null(nullMsg!.Metadata);
     }
 
+    [Fact]
+    public async Task McpMessageTools_SendUserNotification_CreatesNotificationMessage()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+        var detection = scope.ServiceProvider.GetRequiredService<IDispatchDetectionService>();
+        var logger = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<MessageTools>>();
+
+        var json = await MessageTools.SendUserNotification(
+            repo, detection, logger,
+            ProjectId, "pi", "Server redeployment required",
+            urgency: "high",
+            verbose: true);
+
+        var msg = JsonSerializer.Deserialize<Message>(json, JsonOpts);
+        Assert.NotNull(msg);
+        Assert.Equal(MessageIntent.Notification, msg!.Intent);
+        Assert.Equal("high", msg.Metadata?.GetProperty("urgency").GetString());
+        Assert.Equal("pi", msg.Metadata?.GetProperty("source_sender").GetString());
+        Assert.Equal("Server redeployment required", msg.Content);
+
+        // Verify it appears in notification-filtered messages
+        var filteredJson = await MessageTools.GetMessages(repo, ProjectId, intent: "notification");
+        var filtered = JsonSerializer.Deserialize<List<Message>>(filteredJson, JsonOpts);
+        var notification = Assert.Single(filtered!);
+        Assert.Equal(msg.Id, notification.Id);
+    }
+
     private sealed class MessageAppFactory : WebApplicationFactory<Program>
     {
         private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"den-mcp-message-api-{Guid.NewGuid()}.db");

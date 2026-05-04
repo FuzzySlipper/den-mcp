@@ -134,7 +134,8 @@ public sealed class DatabaseInitializer
                             'review_feedback',
                             'review_approval',
                             'task_ready',
-                            'task_blocked'
+                            'task_blocked',
+                            'notification'
                         )),
             metadata    TEXT,
             created_at  TEXT NOT NULL DEFAULT (datetime('now'))

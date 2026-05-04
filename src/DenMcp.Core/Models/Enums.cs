@@ -38,7 +38,8 @@ public enum MessageIntent
     ReviewFeedback,
     ReviewApproval,
     TaskReady,
-    TaskBlocked
+    TaskBlocked,
+    Notification
 }
 
 public enum AgentStreamKind

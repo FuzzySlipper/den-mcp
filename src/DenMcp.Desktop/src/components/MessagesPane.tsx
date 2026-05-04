@@ -133,7 +133,7 @@ function MessagesFilterBar({
   currentFilter: MessageFilterType;
   onChange: (filter: MessageFilterType) => void;
 }) {
-  const filters: MessageFilterType[] = ['all', 'messages', 'stream', 'thoughts', 'user'];
+  const filters: MessageFilterType[] = ['all', 'messages', 'stream', 'thoughts', 'user', 'notifications'];
   return (
     <div className="messages-filter-bar">
       {filters.map((f) => (
@@ -156,6 +156,7 @@ function emptyStateLabel(filter: MessageFilterType): string {
     case 'stream': return 'No workflow stream entries found.';
     case 'thoughts': return 'No thought entries found.';
     case 'user': return 'No user messages found.';
+    case 'notifications': return 'No notifications found.';
     default: return 'No messages found.';
   }
 }
@@ -165,6 +166,7 @@ function emptyStateDescription(filter: MessageFilterType): string {
     case 'stream': return 'Agent stream data requires backend support. Only task-thread and project messages are currently loaded.';
     case 'thoughts': return 'Agent thought data requires backend support. The current filter provides a best-effort placeholder classification.';
     case 'user': return 'No messages sent by the user identity were found in the current view.';
+    case 'notifications': return 'Notifications appear when agents send user-facing alerts. None are present in the current view.';
     default: return 'Messages will appear here once they are sent in Den for this project.';
   }
 }
@@ -208,7 +210,7 @@ function MessagesHeader({
 function MessageCard({ message, expanded, onToggle }: { message: MessageRowView; expanded: boolean; onToggle: () => void }) {
   return (
     <article
-      className={`messages-card ${expanded ? 'expanded' : ''} ${message.isUnread ? 'unread' : ''}`}
+      className={`messages-card ${expanded ? 'expanded' : ''} ${message.isUnread ? 'unread' : ''} ${message.intent === 'notification' ? 'notification' : ''}`}
       role="button"
       tabIndex={0}
       onClick={onToggle}
@@ -221,7 +223,8 @@ function MessageCard({ message, expanded, onToggle }: { message: MessageRowView;
           <span className="messages-card-id">#{message.id}</span>
           <span className={`messages-card-sender sender-tone-${message.senderTone}`}>{message.sender}</span>
           {message.metadataTypeLabel && <span className="chip">{message.metadataTypeLabel}</span>}
-          {message.intent && <span className="chip idle">{message.intent}</span>}
+          {message.intent === 'notification' && <span className="chip accent">🔔 notification</span>}
+          {message.intent && message.intent !== 'notification' && <span className="chip idle">{message.intent}</span>}
         </div>
         <span className="messages-card-time">{message.relativeTime}</span>
       </div>

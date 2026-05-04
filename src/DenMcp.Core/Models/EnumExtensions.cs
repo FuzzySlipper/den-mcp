@@ -73,6 +73,7 @@ public static class EnumExtensions
         MessageIntent.ReviewApproval => "review_approval",
         MessageIntent.TaskReady => "task_ready",
         MessageIntent.TaskBlocked => "task_blocked",
+        MessageIntent.Notification => "notification",
         _ => throw new ArgumentOutOfRangeException(nameof(intent), intent, null)
     };
 
@@ -89,6 +90,7 @@ public static class EnumExtensions
         "review_approval" => MessageIntent.ReviewApproval,
         "task_ready" => MessageIntent.TaskReady,
         "task_blocked" => MessageIntent.TaskBlocked,
+        "notification" => MessageIntent.Notification,
         _ => throw new ArgumentException($"Unknown message intent: {value}", nameof(value))
     };
 

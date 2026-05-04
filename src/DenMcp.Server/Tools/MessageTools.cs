@@ -51,6 +51,57 @@ public sealed class MessageTools
             : ConciseResponse.SentMessage(created);
     }
 
+    [McpServerTool(Name = "send_user_notification"), Description(
+        "Send a user-facing notification message in a project. " +
+        "Use this when you have noteworthy information for the user that should not require stopping the run or waiting for a final response. " +
+        "Examples: server needs redeployment, a long-running task completed, a blocking issue needs user decision. " +
+        "Notifications appear prominently in the Den Desktop Messages tab." +
+        "Prefer this over send_message when the message is specifically for the user rather than general task tracking.")]
+    public static async Task<string> SendUserNotification(
+        IMessageRepository repo,
+        IDispatchDetectionService detection,
+        ILogger<MessageTools> logger,
+        [Description("Project ID.")] string project_id,
+        [Description("Your agent identity, e.g. 'pi' or another manual agent identity.")] string sender,
+        [Description("Notification body (markdown). Keep it concise and actionable.")] string content,
+        [Description("Attach to a task by ID.")] int? task_id = null,
+        [Description("Optional JSON metadata object or JSON-encoded string.")] JsonElement? metadata = null,
+        [Description("Optional urgency hint: low, normal, or high. Defaults to normal.")] string? urgency = null,
+        [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
+    {
+        var normalizedUrgency = urgency?.ToLowerInvariant() switch
+        {
+            "low" => "low",
+            "high" => "high",
+            _ => "normal"
+        };
+
+        var mergedMetadata = MergeUrgencyIntoMetadata(NormalizeMetadata(metadata), normalizedUrgency, sender);
+
+        var msg = new Message
+        {
+            ProjectId = project_id,
+            Sender = sender,
+            Content = content,
+            TaskId = task_id,
+            Intent = MessageIntent.Notification,
+            Metadata = mergedMetadata
+        };
+
+        var created = await repo.CreateAsync(msg);
+        try
+        {
+            await detection.OnMessageCreatedAsync(created);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Dispatch detection failed for notification {MessageId}", created.Id);
+        }
+        return verbose
+            ? JsonSerializer.Serialize(created, JsonOpts.Default)
+            : ConciseResponse.SentMessage(created);
+    }
+
     [McpServerTool(Name = "get_messages"), Description("Get messages in a project, with optional filters. Returns newest first.")]
     public static async Task<string> GetMessages(
         IMessageRepository repo,
@@ -110,5 +161,23 @@ public sealed class MessageTools
         }
 
         return metadata;
+    }
+
+    private static JsonElement? MergeUrgencyIntoMetadata(JsonElement? metadata, string urgency, string sender)
+    {
+        var obj = new System.Text.Json.Nodes.JsonObject();
+
+        if (metadata.HasValue && metadata.Value.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in metadata.Value.EnumerateObject())
+            {
+                obj[property.Name] = System.Text.Json.Nodes.JsonNode.Parse(property.Value.GetRawText());
+            }
+        }
+
+        obj["urgency"] = urgency;
+        obj["source_sender"] = sender;
+
+        return JsonSerializer.Deserialize<JsonElement>(obj.ToJsonString());
     }
 }
