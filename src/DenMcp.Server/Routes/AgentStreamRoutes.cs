@@ -236,10 +236,6 @@ public static class AgentStreamRoutes
 
     private static AgentStreamMessageCreateRequest ToCreateRequest(SendAgentStreamEntryRequest req, string? projectId)
     {
-        JsonElement? metadata = null;
-        if (!string.IsNullOrWhiteSpace(req.Metadata))
-            metadata = JsonSerializer.Deserialize<JsonElement>(req.Metadata);
-
         return new AgentStreamMessageCreateRequest
         {
             ProjectId = projectId,
@@ -254,7 +250,7 @@ public static class AgentStreamRoutes
             RecipientInstanceId = req.RecipientInstanceId,
             DeliveryMode = req.DeliveryMode,
             Body = req.Body ?? string.Empty,
-            Metadata = metadata,
+            Metadata = NormalizeMetadata(req.Metadata),
             DedupKey = req.DedupKey
         };
     }
@@ -263,10 +259,6 @@ public static class AgentStreamRoutes
     {
         var eventType = NormalizeRequired(req.EventType, nameof(req.EventType));
         var sender = NormalizeRequired(req.Sender, nameof(req.Sender));
-
-        JsonElement? metadata = null;
-        if (!string.IsNullOrWhiteSpace(req.Metadata))
-            metadata = JsonSerializer.Deserialize<JsonElement>(req.Metadata);
 
         return new AgentStreamEntry
         {
@@ -283,7 +275,7 @@ public static class AgentStreamRoutes
             RecipientInstanceId = NormalizeOptional(req.RecipientInstanceId),
             DeliveryMode = req.DeliveryMode ?? AgentStreamDeliveryMode.RecordOnly,
             Body = NormalizeOptional(req.Body),
-            Metadata = metadata,
+            Metadata = NormalizeMetadata(req.Metadata),
             DedupKey = NormalizeOptional(req.DedupKey)
         };
     }
@@ -296,6 +288,22 @@ public static class AgentStreamRoutes
 
     private static string? NormalizeOptional(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static JsonElement? NormalizeMetadata(JsonElement? metadata)
+    {
+        if (metadata is null)
+            return null;
+
+        if (metadata.Value.ValueKind == JsonValueKind.String)
+        {
+            var str = metadata.Value.GetString();
+            if (string.IsNullOrWhiteSpace(str))
+                return null;
+            return JsonSerializer.Deserialize<JsonElement>(str);
+        }
+
+        return metadata;
+    }
 }
 
 public sealed record SendAgentStreamEntryRequest(
@@ -311,5 +319,5 @@ public sealed record SendAgentStreamEntryRequest(
     string? RecipientRole = null,
     string? RecipientInstanceId = null,
     AgentStreamDeliveryMode? DeliveryMode = null,
-    string? Metadata = null,
+    JsonElement? Metadata = null,
     string? DedupKey = null);

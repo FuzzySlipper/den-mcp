@@ -21,7 +21,7 @@ public sealed class MessageTools
         [Description("Message body (markdown).")] string content,
         [Description("Attach to a task by ID.")] int? task_id = null,
         [Description("Reply to an existing message (forms a thread).")] int? thread_id = null,
-        [Description("Optional JSON metadata, e.g. {\"type\":\"review_request\"}.")] string? metadata = null,
+        [Description("Optional JSON metadata object or JSON-encoded string, e.g. {\"type\":\"review_request\"}.")] JsonElement? metadata = null,
         [Description("Optional canonical intent, e.g. review_feedback or handoff.")] string? intent = null,
         [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
@@ -34,7 +34,7 @@ public sealed class MessageTools
             TaskId = task_id,
             ThreadId = thread_id,
             Intent = parsedIntent,
-            Metadata = metadata is not null ? JsonSerializer.Deserialize<JsonElement>(metadata) : null
+            Metadata = NormalizeMetadata(metadata)
         };
 
         var created = await repo.CreateAsync(msg);
@@ -94,5 +94,21 @@ public sealed class MessageTools
             return null;
 
         return EnumExtensions.ParseMessageIntent(intent);
+    }
+
+    private static JsonElement? NormalizeMetadata(JsonElement? metadata)
+    {
+        if (metadata is null)
+            return null;
+
+        if (metadata.Value.ValueKind == JsonValueKind.String)
+        {
+            var str = metadata.Value.GetString();
+            if (string.IsNullOrWhiteSpace(str))
+                return null;
+            return JsonSerializer.Deserialize<JsonElement>(str);
+        }
+
+        return metadata;
     }
 }

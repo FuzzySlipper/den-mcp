@@ -490,7 +490,7 @@ public class TaskWorkflowSummaryTests : IAsyncLifetime
             ProjectId, sender, content,
             task_id: taskId,
             intent: intent,
-            metadata: metadata,
+            metadata: metadata is not null ? JsonSerializer.Deserialize<JsonElement>(metadata) : null,
             verbose: true);
         return JsonSerializer.Deserialize<Message>(json, JsonOpts)!;
     }

@@ -90,7 +90,7 @@ public sealed class AgentStreamTools
         [Description("Optional target role within a project.")] string? recipient_role = null,
         [Description("Optional exact target instance id.")] string? recipient_instance_id = null,
         [Description("Optional delivery mode: record_only, notify, or wake. Defaults to record_only for note and notify otherwise.")] string? delivery_mode = null,
-        [Description("Optional metadata JSON object string.")] string? metadata = null,
+        [Description("Optional JSON metadata object or JSON-encoded string.")] JsonElement? metadata = null,
         [Description("Optional dedup key for retry-safe appends.")] string? dedup_key = null,
         [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
@@ -107,17 +107,14 @@ public sealed class AgentStreamTools
             }
         }
 
-        JsonElement? parsedMetadata = null;
-        if (!string.IsNullOrWhiteSpace(metadata))
+        JsonElement? parsedMetadata;
+        try
         {
-            try
-            {
-                parsedMetadata = JsonSerializer.Deserialize<JsonElement>(metadata);
-            }
-            catch (JsonException ex)
-            {
-                return JsonSerializer.Serialize(new { error = $"Invalid metadata JSON: {ex.Message}" }, JsonOpts.Default);
-            }
+            parsedMetadata = NormalizeMetadata(metadata);
+        }
+        catch (JsonException ex)
+        {
+            return JsonSerializer.Serialize(new { error = $"Invalid metadata JSON: {ex.Message}" }, JsonOpts.Default);
         }
 
         try
@@ -148,5 +145,21 @@ public sealed class AgentStreamTools
         {
             return JsonSerializer.Serialize(new { error = ex.Message }, JsonOpts.Default);
         }
+    }
+
+    private static JsonElement? NormalizeMetadata(JsonElement? metadata)
+    {
+        if (metadata is null)
+            return null;
+
+        if (metadata.Value.ValueKind == JsonValueKind.String)
+        {
+            var str = metadata.Value.GetString();
+            if (string.IsNullOrWhiteSpace(str))
+                return null;
+            return JsonSerializer.Deserialize<JsonElement>(str);
+        }
+
+        return metadata;
     }
 }

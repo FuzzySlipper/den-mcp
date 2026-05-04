@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using DenMcp.Core.Data;
 using DenMcp.Core.Llm;
 using DenMcp.Core.Models;
@@ -251,7 +252,7 @@ public class DispatchDetectionWiringTests : IAsyncLifetime
 
         await MessageTools.SendMessage(repo, detection, logger,
             ProjectId, "codex", "MCP message content",
-            metadata: """{"type":"review_feedback","recipient":"claude-code"}""");
+            metadata: JsonSerializer.Deserialize<JsonElement>("""{"type":"review_feedback","recipient":"claude-code"}"""));
 
         var dispatches = await GetDispatchesAsync();
         Assert.Empty(dispatches);
@@ -267,7 +268,7 @@ public class DispatchDetectionWiringTests : IAsyncLifetime
 
         await MessageTools.SendMessage(repo, detection, logger,
             ProjectId, "codex", "MCP intent message",
-            metadata: """{"recipient":"claude-code","handoff_kind":"review_feedback"}""",
+            metadata: JsonSerializer.Deserialize<JsonElement>("""{"recipient":"claude-code","handoff_kind":"review_feedback"}"""),
             intent: "review_feedback");
 
         var dispatches = await GetDispatchesAsync();
@@ -284,7 +285,7 @@ public class DispatchDetectionWiringTests : IAsyncLifetime
 
         await MessageTools.SendMessage(repo, detection, logger,
             ProjectId, "claude-code", "MCP role-targeted message",
-            metadata: """{"target_role":"reviewer","handoff_kind":"review_request"}""",
+            metadata: JsonSerializer.Deserialize<JsonElement>("""{"target_role":"reviewer","handoff_kind":"review_request"}"""),
             intent: "review_request");
 
         var dispatches = await GetDispatchesAsync();
@@ -356,7 +357,7 @@ public class DispatchDetectionWiringTests : IAsyncLifetime
 
         var result = await MessageTools.SendMessage(repo, failingDetection, logger,
             ProjectId, "codex", "Should persist despite detection failure",
-            metadata: """{"type":"review_feedback","recipient":"claude-code"}""");
+            metadata: JsonSerializer.Deserialize<JsonElement>("""{"type":"review_feedback","recipient":"claude-code"}"""));
 
         Assert.Contains("\"id\"", result);
         Assert.Contains(ProjectId, result);

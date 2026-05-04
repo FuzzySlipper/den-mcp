@@ -25,7 +25,7 @@ public static class MessageRoutes
                     TaskId = req.TaskId,
                     ThreadId = req.ThreadId,
                     Intent = req.Intent,
-                    Metadata = req.Metadata is not null ? JsonSerializer.Deserialize<JsonElement>(req.Metadata) : null
+                    Metadata = NormalizeMetadata(req.Metadata)
                 };
                 var created = await repo.CreateAsync(msg);
                 try
@@ -114,6 +114,22 @@ public static class MessageRoutes
             return Results.Ok(new { marked = count });
         });
     }
+
+    private static JsonElement? NormalizeMetadata(JsonElement? metadata)
+    {
+        if (metadata is null)
+            return null;
+
+        if (metadata.Value.ValueKind == JsonValueKind.String)
+        {
+            var str = metadata.Value.GetString();
+            if (string.IsNullOrWhiteSpace(str))
+                return null;
+            return JsonSerializer.Deserialize<JsonElement>(str);
+        }
+
+        return metadata;
+    }
 }
 
 public record SendMessageRequest(
@@ -121,7 +137,7 @@ public record SendMessageRequest(
     string Content,
     int? TaskId = null,
     int? ThreadId = null,
-    string? Metadata = null,
+    JsonElement? Metadata = null,
     MessageIntent? Intent = null);
 
 public record MarkReadRequest(string Agent, int[] MessageIds);

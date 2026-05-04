@@ -253,6 +253,48 @@ public class MessageApiTests : IAsyncLifetime
         Assert.Equal(MessageIntent.Handoff, handoff.Intent);
     }
 
+    [Fact]
+    public async Task McpMessageTools_MetadataAcceptsObjectOrString()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+        var detection = scope.ServiceProvider.GetRequiredService<IDispatchDetectionService>();
+        var logger = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<MessageTools>>();
+
+        // Object input path — the natural way agents want to pass metadata
+        var objectJson = await MessageTools.SendMessage(
+            repo, detection, logger,
+            ProjectId, "pi", "Object metadata test",
+            metadata: JsonSerializer.Deserialize<JsonElement>("""{"type":"coder_context_packet","version":1}"""),
+            verbose: true);
+
+        var objectMsg = JsonSerializer.Deserialize<Message>(objectJson, JsonOpts);
+        Assert.NotNull(objectMsg);
+        Assert.Equal("coder_context_packet", objectMsg!.Metadata?.GetProperty("type").GetString());
+        Assert.Equal(1, objectMsg.Metadata?.GetProperty("version").GetInt32());
+
+        // String input path — backward compatible with existing callers
+        var stringJson = await MessageTools.SendMessage(
+            repo, detection, logger,
+            ProjectId, "pi", "String metadata test",
+            metadata: JsonSerializer.Deserialize<JsonElement>("""{"type":"review_request","recipient":"claude-code"}"""),
+            verbose: true);
+
+        var stringMsg = JsonSerializer.Deserialize<Message>(stringJson, JsonOpts);
+        Assert.NotNull(stringMsg);
+        Assert.Equal("review_request", stringMsg!.Metadata?.GetProperty("type").GetString());
+
+        // Null input path — no metadata
+        var nullJson = await MessageTools.SendMessage(
+            repo, detection, logger,
+            ProjectId, "pi", "No metadata test",
+            verbose: true);
+
+        var nullMsg = JsonSerializer.Deserialize<Message>(nullJson, JsonOpts);
+        Assert.NotNull(nullMsg);
+        Assert.Null(nullMsg!.Metadata);
+    }
+
     private sealed class MessageAppFactory : WebApplicationFactory<Program>
     {
         private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"den-mcp-message-api-{Guid.NewGuid()}.db");
