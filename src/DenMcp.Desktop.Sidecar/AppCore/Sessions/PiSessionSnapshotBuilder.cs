@@ -596,6 +596,9 @@ public sealed class PiSessionSnapshotBuilder
             return File.ReadAllText(path, Encoding.UTF8);
         }
 
+        // Deliberately differs from the Rust spike: large append-only Pi session JSONL
+        // files are tailed to a bounded byte window so the observer cannot load an
+        // unbounded artifact into memory while the desktop polls for recent activity.
         var bytesToRead = (int)Math.Min(MaxJsonlBytes, length);
         var buffer = new byte[bytesToRead];
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
@@ -640,6 +643,9 @@ public sealed class PiSessionSnapshotBuilder
             return false;
         }
 
+        // Use path-aware normalization instead of the Rust spike's simple string
+        // prefix check so sibling paths and platform-specific separators/casing are
+        // handled safely when correlating sessions to project roots.
         try
         {
             var normalizedCwd = NormalizePathForPrefix(cwd);
