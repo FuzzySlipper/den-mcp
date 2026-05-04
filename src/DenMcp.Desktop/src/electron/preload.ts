@@ -162,4 +162,14 @@ contextBridge.exposeInMainWorld('denDesktopSidecar', {
   onOperatorStatus: (listener: (event: unknown) => void) => subscribeToEvent('operatorStatus', listener),
   onGitSnapshots: (listener: (event: unknown) => void) => subscribeToEvent('gitSnapshots', listener),
   onSessionSnapshots: (listener: (event: unknown) => void) => subscribeToEvent('sessionSnapshots', listener),
+
+  // Hotkey support
+  registerHotkeys: (actions: Record<string, string>) => ipcRenderer.invoke('den-desktop:hotkeys-register', actions),
+  onHotkeyAction: (listener: (action: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, action: string) => listener(action);
+    ipcRenderer.on('den-desktop:hotkey-action', handler);
+    return () => {
+      ipcRenderer.removeListener('den-desktop:hotkey-action', handler);
+    };
+  },
 });

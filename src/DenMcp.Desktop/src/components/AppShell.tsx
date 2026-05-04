@@ -1,4 +1,4 @@
-import { ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ShellAccent,
   ShellBodyFont,
@@ -7,6 +7,8 @@ import {
   ShellState,
   ShellTabId,
   ShellTheme,
+  defaultHotkeys,
+  hotkeyActions,
   nextConsoleMode,
   nextTheme,
   shellAccents,
@@ -95,6 +97,54 @@ export function AppShell({ state, onStateChange, status, snapshots, sessionSnaps
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, [handleGlobalKeyDown]);
+
+  // Hotkey IPC: register current bindings and listen for action events
+  const hotkeyActionsRef = useRef(state.hotkeys);
+  hotkeyActionsRef.current = state.hotkeys;
+
+  useEffect(() => {
+    const api = (window as any).denDesktopSidecar as Record<string, unknown> | undefined;
+    if (api && typeof api.registerHotkeys === 'function') {
+      api.registerHotkeys(state.hotkeys).catch(() => {
+        // Registration best-effort in Electron; safe to ignore in browser
+      });
+    }
+  }, [state.hotkeys]);
+
+  useEffect(() => {
+    const api = (window as any).denDesktopSidecar as Record<string, unknown> | undefined;
+    if (!api || typeof api.onHotkeyAction !== 'function') return;
+
+    const unsub = api.onHotkeyAction((action: string) => {
+      switch (action) {
+        case 'cycleTabForward': {
+          const tabs = shellTabs.map((t) => t.id);
+          const currentIndex = tabs.indexOf(activeTab);
+          const nextTab = tabs[(currentIndex + 1) % tabs.length];
+          setState({ activeTab: nextTab });
+          break;
+        }
+        case 'goBack':
+          window.history.back();
+          break;
+        case 'focusConsole':
+          // Ensure console is at least preview mode when focusing
+          if (state.consoleMode === 'collapsed') {
+            setState({ consoleMode: 'preview' });
+          }
+          // Focus the console input element
+          setTimeout(() => {
+            const input = document.querySelector<HTMLInputElement>('.console-prompt input');
+            input?.focus();
+          }, 0);
+          break;
+      }
+    });
+
+    return () => {
+      if (typeof unsub === 'function') unsub();
+    };
+  }, [activeTab, state.consoleMode, setState]);
 
   return (
     <div className="desktop-shell" {...dataAttributes}>
@@ -357,6 +407,15 @@ function StatusBar({
 
 function SettingsSurface({ state, onStateChange }: { state: ShellState; onStateChange: (state: ShellState) => void }) {
   const patch = (next: Partial<ShellState>) => onStateChange({ ...state, ...next });
+
+  const handleResetHotkeys = () => {
+    patch({ hotkeys: { ...defaultHotkeys } });
+  };
+
+  const handleHotkeyChange = (action: string, value: string) => {
+    patch({ hotkeys: { ...state.hotkeys, [action]: value } });
+  };
+
   return (
     <section className="shell-settings panel surface-panel">
       <div className="panel-heading">
@@ -375,7 +434,124 @@ function SettingsSurface({ state, onStateChange }: { state: ShellState; onStateC
         <Select label="Rail" value={state.railMode} options={shellRailModes} onChange={(railMode) => patch({ railMode })} />
         <Select label="Console" value={state.consoleMode} options={shellConsoleModes} onChange={(consoleMode) => patch({ consoleMode })} />
       </div>
+
+      <div className="hotkey-section">
+        <div className="panel-heading" style={{ marginTop: 'var(--sp-6)' }}>
+          <div>
+            <p className="eyebrow">Keyboard shortcuts</p>
+            <h2>Hotkeys</h2>
+          </div>
+          <span className="chip accent">local UI state</span>
+        </div>
+        <p className="muted">Configure global keyboard shortcuts. Changes take effect immediately. The "Reset to defaults" button restores the initial bindings.</p>
+        <div className="hotkey-grid">
+          {hotkeyActions.map(({ action, label, description }) => (
+            <HotkeyRow
+              key={action}
+              action={action}
+              label={label}
+              description={description}
+              value={state.hotkeys[action] ?? ''}
+              onChange={handleHotkeyChange}
+            />
+          ))}
+        </div>
+        <div className="button-row" style={{ marginTop: 'var(--sp-3)' }}>
+          <button type="button" onClick={handleResetHotkeys}>Reset to defaults</button>
+        </div>
+      </div>
     </section>
+  );
+}
+
+function HotkeyRow({ action, label, description, value, onChange }: { action: string; label: string; description: string; value: string; onChange: (action: string, value: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [buffer, setBuffer] = useState(value);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const parts: string[] = [];
+    if (e.ctrlKey || e.metaKey) parts.push('Ctrl');
+    if (e.altKey) parts.push('Alt');
+    if (e.shiftKey) parts.push('Shift');
+
+    // Map key names to Electron accelerator format
+    const keyMap: Record<string, string> = {
+      'Tab': 'Tab',
+      '`': '`',
+      '~': '`',
+      'Escape': 'Escape',
+      'Enter': 'Enter',
+      ' ': 'Space',
+      'Backspace': 'Backspace',
+      'Delete': 'Delete',
+      'ArrowUp': 'Up',
+      'ArrowDown': 'Down',
+      'ArrowLeft': 'Left',
+      'ArrowRight': 'Right',
+      'Home': 'Home',
+      'End': 'End',
+      'PageUp': 'PageUp',
+      'PageDown': 'PageDown',
+    };
+
+    let key = e.key;
+    if (keyMap[key]) key = keyMap[key];
+
+    // Ignore modifier-only keydowns
+    if (['Control', 'Shift', 'Alt', 'Meta'].includes(key)) return;
+
+    if (parts.length > 0 && key.length === 1 && key !== 'Tab' && key !== '`') {
+      key = key.toUpperCase();
+    }
+
+    const accelerator = [...parts, key].join('+');
+    setBuffer(accelerator);
+    setEditing(false);
+    onChange(action, accelerator);
+  }, [action, onChange]);
+
+  // Start editing on click
+  const handleStartEdit = () => {
+    setEditing(true);
+    setBuffer('');
+    setTimeout(() => inputRef.current?.focus(), 0);
+  };
+
+  const handleBlur = () => {
+    if (editing && buffer === '') {
+      // If user clicked away without pressing anything, revert
+      setEditing(false);
+    }
+  };
+
+  return (
+    <div className="hotkey-field">
+      <div className="hotkey-field-label">
+        <span className="hotkey-action-label">{label}</span>
+        <span className="hotkey-action-desc">{description}</span>
+      </div>
+      {editing ? (
+        <input
+          ref={inputRef}
+          type="text"
+          className="hotkey-input-capture"
+          value={buffer}
+          readOnly
+          onKeyDown={handleKeyDown}
+          onBlur={handleBlur}
+          placeholder="Press keys..."
+          autoFocus
+        />
+      ) : (
+        <button type="button" className="hotkey-badge" onClick={handleStartEdit} title="Click to change">
+          <kbd>{value || 'none'}</kbd>
+        </button>
+      )}
+    </div>
   );
 }
 

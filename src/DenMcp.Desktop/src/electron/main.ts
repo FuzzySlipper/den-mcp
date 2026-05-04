@@ -14,7 +14,7 @@
  * through typed IPC channels that mirror the DenDesktopSidecarApi contract.
  */
 
-import { app, BrowserWindow, ipcMain, Menu } from 'electron';
+import { app, BrowserWindow, globalShortcut, ipcMain, Menu } from 'electron';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -203,6 +203,50 @@ async function connectBridge(): Promise<void> {
   sidecarApi = createDenDesktopSidecarApi(client, eventSource);
 }
 
+// ── Hotkey state ──
+
+/** Currently registered hotkey accelerators -> action name. */
+const registeredHotkeys = new Map<string, string>();
+
+/**
+ * Register global shortcuts from a map of action name → accelerator.
+ * Unregisters any previously registered hotkeys first.
+ */
+function registerHotkeys(actions: Record<string, string>): void {
+  // Unregister all previously registered shortcuts
+  for (const accelerator of registeredHotkeys.keys()) {
+    globalShortcut.unregister(accelerator);
+  }
+  registeredHotkeys.clear();
+
+  for (const [action, accelerator] of Object.entries(actions)) {
+    if (!accelerator || accelerator === 'Browser_Back') {
+      // Browser_Back is not a globalShortcut — handled via app-command event
+      continue;
+    }
+
+    try {
+      const success = globalShortcut.register(accelerator, () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('den-desktop:hotkey-action', action);
+        }
+      });
+      if (success) {
+        registeredHotkeys.set(accelerator, action);
+      }
+    } catch {
+      // Skip accelerators that globalShortcut cannot parse
+    }
+  }
+}
+
+/** Send a hotkey action to the renderer. */
+function dispatchHotkeyAction(action: string): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('den-desktop:hotkey-action', action);
+  }
+}
+
 // ── IPC bridge setup ──
 
 function setupIpcBridge(): void {
@@ -259,6 +303,11 @@ function setupIpcBridge(): void {
     }
   });
 
+  // Hotkey registration: renderer sends its hotkey config when settings load/change
+  ipcMain.handle('den-desktop:hotkeys-register', async (_event, actions: Record<string, string>) => {
+    registerHotkeys(actions);
+  });
+
   // Progress-enabled console command: direct IPC handler that forwards progress
   // frames from the bridge transport to the renderer via a dedicated IPC channel.
   // This avoids serializing callbacks through the generic sidecar-call bridge.
@@ -311,6 +360,15 @@ function setupRendererContextMenu(win: BrowserWindow): void {
   });
 }
 
+function setupAppCommandHandler(win: BrowserWindow): void {
+  // Handle the Browser_Back app-command (mouse back button on Windows)
+  win.on('app-command', (_event, command) => {
+    if (command === 'browser-backward') {
+      dispatchHotkeyAction('goBack');
+    }
+  });
+}
+
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1440,
@@ -330,6 +388,7 @@ function createWindow(): BrowserWindow {
   });
 
   setupRendererContextMenu(win);
+  setupAppCommandHandler(win);
 
   const loadTarget = resolveRendererLoadTarget({
     isPackaged: app.isPackaged,
@@ -365,6 +424,7 @@ app.on('window-all-closed', () => {
   }
   activeSubscriptions.clear();
   ipcMain.removeHandler('den-desktop:console-run-command-with-progress');
+  globalShortcut.unregisterAll();
   bridgeTransport?.close();
   supervisor?.stop('SIGTERM');
   app.quit();
@@ -382,6 +442,7 @@ app.on('before-quit', () => {
   }
   activeSubscriptions.clear();
   ipcMain.removeHandler('den-desktop:console-run-command-with-progress');
+  globalShortcut.unregisterAll();
   bridgeTransport?.close();
   supervisor?.stop('SIGTERM');
 });

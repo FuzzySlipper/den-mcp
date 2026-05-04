@@ -36,9 +36,25 @@ export interface ShellState {
   activeTab: ShellTabId;
   /** Selected project filter shared across tabs. '_global' shows all projects, null means 'no selection'. */
   selectedProjectId: string | null;
+  /** Hotkey bindings: action name → Electron accelerator string. */
+  hotkeys: Record<string, string>;
 }
 
 export type ShellStatePatch = Partial<ShellState>;
+
+/** Default hotkey bindings: action name → Electron accelerator string. */
+export const defaultHotkeys: Record<string, string> = {
+  'cycleTabForward': 'Ctrl+Tab',
+  'goBack': 'Browser_Back',
+  'focusConsole': 'Ctrl+`',
+};
+
+/** Canonical hotkey action names with user-facing labels. */
+export const hotkeyActions: { action: string; label: string; description: string }[] = [
+  { action: 'cycleTabForward', label: 'Cycle tab forward', description: 'Move to the next tab in the tab bar' },
+  { action: 'goBack', label: 'Go back', description: 'Navigate back (mouse back button or shortcut)' },
+  { action: 'focusConsole', label: 'Focus console', description: 'Jump to the console/command input' },
+];
 
 export const defaultShellState: ShellState = {
   theme: 'amber-dark',
@@ -49,6 +65,7 @@ export const defaultShellState: ShellState = {
   consoleMode: 'preview',
   activeTab: 'operator',
   selectedProjectId: null,
+  hotkeys: { ...defaultHotkeys },
 };
 
 export const shellStateStorageKey = 'den-desktop:shell-state:v1';
@@ -74,6 +91,9 @@ export function parseShellState(value: unknown, fallback: ShellState = defaultSh
     selectedProjectId: typeof input.selectedProjectId === 'string'
       ? (input.selectedProjectId === '_global' || input.selectedProjectId.length > 0 ? input.selectedProjectId : null)
       : (fallback.selectedProjectId ?? null),
+    hotkeys: typeof input.hotkeys === 'object' && input.hotkeys !== null && !Array.isArray(input.hotkeys)
+      ? { ...defaultHotkeys, ...Object.fromEntries(Object.entries(input.hotkeys).filter(([_, v]) => typeof v === 'string')) as Record<string, string> }
+      : { ...fallback.hotkeys },
   };
 }
 
@@ -96,6 +116,7 @@ export function serializeShellState(state: ShellState): string {
     consoleMode: normalized.consoleMode,
     activeTab: normalized.activeTab,
     selectedProjectId: normalized.selectedProjectId,
+    hotkeys: normalized.hotkeys,
   });
 }
 
