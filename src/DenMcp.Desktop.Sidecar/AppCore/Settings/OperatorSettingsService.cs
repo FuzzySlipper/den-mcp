@@ -33,6 +33,14 @@ public sealed record OperatorSettingsStorage
         return ForPath(DefaultSettingsPath());
     }
 
+    /// <summary>
+    /// Returns the standalone default settings path (~/.config/den-desktop/).
+    /// This intentionally diverges from the bridge-runtime path (~/.den-mcp/desktop/)
+    /// configured via <see cref="DesktopSidecarOptions.ConfigPath"/> because the
+    /// bridge always provides an explicit path through DI. Standalone usage or
+    /// tests that construct <see cref="OperatorSettingsService"/> without arguments
+    /// use this default. See review finding R1000-2.
+    /// </summary>
     public static string DefaultSettingsPath(string? homeDirectory = null)
     {
         var home = string.IsNullOrWhiteSpace(homeDirectory)

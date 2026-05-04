@@ -4,6 +4,12 @@ using Den.Bridge.Protocol;
 
 namespace DenMcp.Desktop.Sidecar;
 
+// Bridge protocol DTOs in this file intentionally use camelCase JsonPropertyName
+// values to match the TypeScript consumer interfaces (e.g. tauriApi.ts). This
+// diverges from the project-wide snake_case JSON convention, which is acceptable
+// because the wire-protocol schema is the source of truth and both sides use
+// camelCase. See review finding R1000-1.
+
 public sealed record OperatorStatus
 {
     [JsonPropertyName("phase")]
@@ -75,37 +81,37 @@ public sealed record DenConnectionStatus
 
     public static DenConnectionStatus Unknown(string message) => new() { State = "unknown", Message = message };
 
-    public DenConnectionStatus Connected(string message, string at) => new()
+    public static DenConnectionStatus Connected(DenConnectionStatus previous, string message, string at) => new()
     {
         State = "connected",
         Message = message,
         LastSuccessAt = at,
-        LastFailureAt = LastFailureAt,
+        LastFailureAt = previous.LastFailureAt,
     };
 
-    public DenConnectionStatus Offline(string message, string at, string nextRetryAt) => new()
+    public static DenConnectionStatus Offline(DenConnectionStatus previous, string message, string at, string nextRetryAt) => new()
     {
         State = "offline",
         Message = message,
-        LastSuccessAt = LastSuccessAt,
+        LastSuccessAt = previous.LastSuccessAt,
         LastFailureAt = at,
         NextRetryAt = nextRetryAt,
     };
 
-    public DenConnectionStatus Degraded(string message, string at, string nextRetryAt) => new()
+    public static DenConnectionStatus Degraded(DenConnectionStatus previous, string message, string at, string nextRetryAt) => new()
     {
         State = "degraded",
         Message = message,
-        LastSuccessAt = LastSuccessAt,
+        LastSuccessAt = previous.LastSuccessAt,
         LastFailureAt = at,
         NextRetryAt = nextRetryAt,
     };
 
-    public DenConnectionStatus Misconfigured(string message, string at) => new()
+    public static DenConnectionStatus Misconfigured(DenConnectionStatus previous, string message, string at) => new()
     {
         State = "misconfigured",
         Message = message,
-        LastSuccessAt = LastSuccessAt,
+        LastSuccessAt = previous.LastSuccessAt,
         LastFailureAt = at,
     };
 }
@@ -486,6 +492,11 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
             _gate.Release();
         }
 
+        // Publish an intermediate status frame while observers are "running" so the
+        // UI shows activity before the full data-collection cycle completes. A final
+        // status event is published after all snapshots are gathered. Consumers may
+        // see multiple status events per refresh cycle; this is intentional for UI
+        // responsiveness. See review finding R1000-6.
         await PublishStatusAsync(cancellationToken).ConfigureAwait(false);
 
         var now = NowString();
@@ -497,7 +508,7 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
             {
                 _status = SyncStatus(_status with
                 {
-                    DenConnection = _status.DenConnection.Misconfigured($"Invalid Den server URL: {settings.DenBaseUrl}", now),
+                    DenConnection = DenConnectionStatus.Misconfigured(_status.DenConnection, $"Invalid Den server URL: {settings.DenBaseUrl}", now),
                     ObserverStatuses = [ObserverStatus.Stopped("git"), ObserverStatus.Stopped("session")],
                 });
                 PushDiagnosticLocked("warn", "den", "Den server URL is invalid; observers are waiting for valid settings.");
@@ -522,7 +533,7 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
             {
                 _status = SyncStatus(_status with
                 {
-                    DenConnection = _status.DenConnection.Connected($"Connected to Den ({health.Status})", now),
+                    DenConnection = DenConnectionStatus.Connected(_status.DenConnection, $"Connected to Den ({health.Status})", now),
                     LastSyncAt = now,
                 });
             }
@@ -688,7 +699,7 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
 
             foreach (var error in publishErrors.Take(5))
             {
-                _status = _status with { DenConnection = _status.DenConnection.Degraded(error, NowString(), nextRetryAt) };
+                _status = _status with { DenConnection = DenConnectionStatus.Degraded(_status.DenConnection, error, NowString(), nextRetryAt) };
                 PushDiagnosticLocked("warn", "publish", error);
             }
 
@@ -764,8 +775,8 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
         try
         {
             var connection = state == "degraded"
-                ? _status.DenConnection.Degraded(message, at, nextRetryAt)
-                : _status.DenConnection.Offline(message, at, nextRetryAt);
+                ? DenConnectionStatus.Degraded(_status.DenConnection, message, at, nextRetryAt)
+                : DenConnectionStatus.Offline(_status.DenConnection, message, at, nextRetryAt);
             _status = SyncStatus(_status with { DenConnection = connection });
             PushDiagnosticLocked("warn", "den", message);
             _status = SyncStatus(_status);

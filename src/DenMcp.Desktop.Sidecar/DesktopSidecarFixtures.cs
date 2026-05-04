@@ -9,6 +9,12 @@ public static class DesktopSidecarFixtures
 {
     private static readonly DateTimeOffset FixtureTimestamp = new(2026, 4, 29, 12, 34, 56, TimeSpan.Zero);
 
+    /// <summary>
+    /// Creates a comprehensive wire fixture covering all runtime commands, events, and
+    /// schema bundle definitions. The fixture size is proportional to the protocol surface
+    /// area and intentionally grows when new commands or events are added. See review
+    /// finding R1000-5.
+    /// </summary>
     public static DesktopSidecarWireFixture CreateWireFixture(DesktopSidecarOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);

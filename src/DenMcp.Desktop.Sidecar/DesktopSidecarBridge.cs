@@ -16,6 +16,10 @@ public static class DesktopSidecarBridge
 
         var services = new ServiceCollection();
         services.AddSingleton(options);
+        // The bridge runtime stores settings under options.ConfigPath (default ~/.den-mcp/desktop).
+        // This diverges from OperatorSettingsStorage.DefaultSettingsPath() (~/.config/den-desktop),
+        // but the bridge always provides an explicit path through DI so the runtime path is
+        // the effective one. See review finding R1000-2.
         services.AddSingleton(_ => new OperatorSettingsService(
             OperatorSettingsStorage.ForPath(Path.Combine(options.ConfigPath, OperatorSettingsStorage.SettingsFileName))));
         services.AddSingleton(_ => new DenHttpClient());
@@ -81,7 +85,7 @@ public static class DesktopSidecarBridge
                 DesktopSidecarProtocol.SaveAppearanceSettingsCommand)
             .RegisterCommand<DesktopSidecarEmptyRequest, DesktopSidecarEmptyResponse, RefreshNowHandler>(
                 DesktopSidecarProtocol.RefreshNowCommand)
-            .RegisterCommand<DesktopSidecarEmptyRequest, LocalSnapshotList, ListLocalGitSnapshotsHandler>(
+            .RegisterCommand<DesktopSidecarEmptyRequest, LocalSnapshotList, ListLocalSnapshotsHandler>(
                 DesktopSidecarProtocol.ListLocalGitSnapshotsCommand)
             .RegisterCommand<DesktopSidecarEmptyRequest, LocalSessionSnapshotList, ListLocalSessionSnapshotsHandler>(
                 DesktopSidecarProtocol.ListLocalSessionSnapshotsCommand)
@@ -647,11 +651,11 @@ public sealed class RefreshNowHandler : IBridgeCommandHandler<DesktopSidecarEmpt
     }
 }
 
-public sealed class ListLocalGitSnapshotsHandler : IBridgeCommandHandler<DesktopSidecarEmptyRequest, LocalSnapshotList>
+public sealed class ListLocalSnapshotsHandler : IBridgeCommandHandler<DesktopSidecarEmptyRequest, LocalSnapshotList>
 {
     private readonly OperatorRuntimeService _runtime;
 
-    public ListLocalGitSnapshotsHandler(OperatorRuntimeService runtime) => _runtime = runtime;
+    public ListLocalSnapshotsHandler(OperatorRuntimeService runtime) => _runtime = runtime;
 
     public async ValueTask<LocalSnapshotList?> HandleAsync(DesktopSidecarEmptyRequest request, BridgeRequestContext context, CancellationToken cancellationToken)
     {
