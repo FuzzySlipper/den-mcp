@@ -220,4 +220,71 @@ public class LibrarianGathererTests : IAsyncLifetime
         Assert.Equal(25, LibrarianGatherer.EstimateTokens(new string('x', 100)));
         Assert.Equal(0, LibrarianGatherer.EstimateTokens(""));
     }
+
+    [Fact]
+    public async Task Gather_NonProjectSpace_IncludesDocsTasksMessages()
+    {
+        await _projRepo.CreateAsync(new Project { Id = "personal", Name = "Personal", Kind = "personal" });
+
+        var task = await _taskRepo.CreateAsync(new ProjectTask
+        {
+            ProjectId = "personal",
+            Title = "Buy groceries",
+            Description = "Milk, eggs, bread"
+        });
+
+        await _docRepo.UpsertAsync(new Document
+        {
+            ProjectId = "personal",
+            Slug = "recipes",
+            Title = "Favorite Recipes",
+            Content = "Pancakes require flour, eggs, and milk.",
+            DocType = DocType.Note
+        });
+
+        await _msgRepo.CreateAsync(new Message
+        {
+            ProjectId = "personal",
+            Sender = "user",
+            Content = "Remember to buy organic"
+        });
+
+        var ctx = await _gatherer.GatherAsync("personal", "groceries and recipes", task.Id);
+
+        Assert.Contains("## Task Context", ctx.FormattedText);
+        Assert.Contains("Buy groceries", ctx.FormattedText);
+        Assert.Contains("## Relevant Documents", ctx.FormattedText);
+        Assert.Contains("[doc: personal/recipes]", ctx.FormattedText);
+        Assert.Contains("## Recent Project Messages", ctx.FormattedText);
+        Assert.Contains("Remember to buy organic", ctx.FormattedText);
+    }
+
+    [Fact]
+    public async Task Gather_NonProjectSpace_WithGlobalDocs()
+    {
+        await _projRepo.CreateAsync(new Project { Id = "assistant", Name = "Assistant", Kind = "assistant" });
+
+        await _docRepo.UpsertAsync(new Document
+        {
+            ProjectId = "_global",
+            Slug = "assistant-conventions",
+            Title = "Assistant Conventions",
+            Content = "Always greet users politely.",
+            DocType = DocType.Convention
+        });
+
+        await _docRepo.UpsertAsync(new Document
+        {
+            ProjectId = "assistant",
+            Slug = "persona",
+            Title = "Assistant Persona",
+            Content = "Helpful and concise.",
+            DocType = DocType.Note
+        });
+
+        var ctx = await _gatherer.GatherAsync("assistant", "assistant behavior", includeGlobal: true);
+
+        Assert.Contains("[doc: assistant/persona]", ctx.FormattedText);
+        Assert.Contains("[doc: _global/assistant-conventions]", ctx.FormattedText);
+    }
 }

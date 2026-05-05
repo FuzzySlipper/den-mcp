@@ -9,19 +9,19 @@ namespace DenMcp.Server.Tools;
 [McpServerToolType]
 public sealed class AgentGuidanceTools
 {
-    [McpServerTool(Name = "get_agent_guidance"), Description("Resolve the Den-native agent guidance packet for a project, combining _global and project-scoped guidance entries in deterministic order.")]
+    [McpServerTool(Name = "get_agent_guidance"), Description("Resolve the Den-native agent guidance packet for a project or space, combining _global and space-scoped guidance entries in deterministic order.")]
     public static async Task<string> GetAgentGuidance(
         IAgentGuidanceRepository repo,
-        [Description("Project ID to resolve guidance for.")] string project_id)
+        [Description("Project or space ID to resolve guidance for.")] string project_id)
     {
         var guidance = await repo.ResolveAsync(project_id);
         return JsonSerializer.Serialize(guidance, JsonOpts.Default);
     }
 
-    [McpServerTool(Name = "list_agent_guidance_entries"), Description("List first-class agent guidance entries for a project. Use include_global to also show inherited _global entries.")]
+    [McpServerTool(Name = "list_agent_guidance_entries"), Description("List first-class agent guidance entries for a project or space. Use include_global to also show inherited _global entries.")]
     public static async Task<string> ListAgentGuidanceEntries(
         IAgentGuidanceRepository repo,
-        [Description("Project ID whose entries should be listed.")] string project_id,
+        [Description("Project or space ID whose entries should be listed.")] string project_id,
         [Description("Whether to include _global entries inherited by the project.")] bool include_global = false)
     {
         var entries = await repo.ListAsync(project_id, include_global);
@@ -32,7 +32,7 @@ public sealed class AgentGuidanceTools
     public static async Task<string> AddAgentGuidanceEntry(
         IAgentGuidanceRepository repo,
         IDocumentRepository documents,
-        [Description("Guidance scope project ID. Use '_global' for guidance inherited by all projects.")] string project_id,
+        [Description("Guidance scope project or space ID. Use '_global' for guidance inherited by all projects and spaces.")] string project_id,
         [Description("Document slug to include in resolved guidance.")] string document_slug,
         [Description("Project ID where the referenced document lives. Defaults to project_id.")] string? document_project_id = null,
         [Description("Importance: required or important. Default: important.")] string importance = "important",
@@ -62,10 +62,10 @@ public sealed class AgentGuidanceTools
             : ConciseResponse.AddedAgentGuidanceEntry(entry);
     }
 
-    [McpServerTool(Name = "delete_agent_guidance_entry"), Description("Delete a first-class agent guidance entry by project scope and ID.")]
+    [McpServerTool(Name = "delete_agent_guidance_entry"), Description("Delete a first-class agent guidance entry by project or space scope and ID.")]
     public static async Task<string> DeleteAgentGuidanceEntry(
         IAgentGuidanceRepository repo,
-        [Description("Guidance scope project ID that owns the entry. Use '_global' for global guidance entries.")] string project_id,
+        [Description("Guidance scope project or space ID that owns the entry. Use '_global' for global guidance entries.")] string project_id,
         [Description("Agent guidance entry ID.")] int entry_id)
     {
         var deleted = await repo.DeleteAsync(entry_id, project_id);

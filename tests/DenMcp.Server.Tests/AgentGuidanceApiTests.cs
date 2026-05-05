@@ -137,6 +137,64 @@ public sealed class AgentGuidanceApiTests : IAsyncLifetime
         docResponse.EnsureSuccessStatusCode();
     }
 
+    [Fact]
+    public async Task AgentGuidance_NonProjectSpace_ResolveAndList()
+    {
+        var personalId = $"personal-api-test-{Guid.NewGuid():N}";
+
+        using var scope = _factory.Services.CreateScope();
+        var projects = scope.ServiceProvider.GetRequiredService<IProjectRepository>();
+        var documents = scope.ServiceProvider.GetRequiredService<IDocumentRepository>();
+
+        await projects.CreateAsync(new Project { Id = personalId, Name = "Personal API Test", Kind = "personal" });
+        await documents.UpsertAsync(new Document
+        {
+            ProjectId = personalId,
+            Slug = "personal-policy",
+            Title = "Personal Policy",
+            Content = "Personal space policy content",
+            DocType = DocType.Convention,
+            Tags = ["personal"]
+        });
+
+        var globalResponse = await _client.PostAsJsonAsync("/api/projects/_global/agent-guidance/entries", new
+        {
+            document_slug = "global-guidance",
+            document_project_id = "_global",
+            importance = "required",
+            sort_order = 10
+        });
+        globalResponse.EnsureSuccessStatusCode();
+
+        var localResponse = await _client.PostAsJsonAsync($"/api/projects/{personalId}/agent-guidance/entries", new
+        {
+            document_slug = "personal-policy",
+            document_project_id = personalId,
+            importance = "important",
+            sort_order = 20
+        });
+        localResponse.EnsureSuccessStatusCode();
+
+        var listResponse = await _client.GetAsync($"/api/projects/{personalId}/agent-guidance/entries?includeGlobal=true");
+        listResponse.EnsureSuccessStatusCode();
+        var entries = await listResponse.Content.ReadFromJsonAsync<List<AgentGuidanceEntry>>(JsonOpts);
+        Assert.NotNull(entries);
+        Assert.Equal(2, entries!.Count);
+        Assert.Equal("_global", entries[0].ProjectId);
+        Assert.Equal(personalId, entries[1].ProjectId);
+
+        var resolveResponse = await _client.GetAsync($"/api/projects/{personalId}/agent-guidance");
+        resolveResponse.EnsureSuccessStatusCode();
+        var resolved = await resolveResponse.Content.ReadFromJsonAsync<ResolvedAgentGuidance>(JsonOpts);
+        Assert.NotNull(resolved);
+        Assert.Equal(personalId, resolved!.ProjectId);
+        Assert.Equal(2, resolved.Sources.Count);
+        Assert.Equal("global-guidance", resolved.Sources[0].Slug);
+        Assert.Equal("personal-policy", resolved.Sources[1].Slug);
+        Assert.Contains("Global guidance content", resolved.Content);
+        Assert.Contains("Personal space policy content", resolved.Content);
+    }
+
     private sealed class GuidanceAppFactory : WebApplicationFactory<Program>
     {
         private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"den-mcp-guidance-api-{Guid.NewGuid()}.db");

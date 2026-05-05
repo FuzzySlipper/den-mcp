@@ -69,7 +69,7 @@ public class LibrarianServiceTests : IAsyncLifetime
               "recommendations": ["Start with the test spec"],
               "confidence": "high"
             }
-            """;
+""";
 
         var result = await _service.QueryAsync("proj", "testing approach");
 
@@ -144,6 +144,66 @@ public class LibrarianServiceTests : IAsyncLifetime
 
         Assert.Equal($"Task {otherTask.Id} does not belong to project proj", ex.Message);
         Assert.Null(_llmClient.LastUserMessage);
+    }
+
+    [Fact]
+    public async Task QueryAsync_NonProjectSpace_ReturnsStructuredResponse()
+    {
+        var taskRepo = new TaskRepository(_testDb.Db);
+        var docRepo = new DocumentRepository(_testDb.Db);
+        var msgRepo = new MessageRepository(_testDb.Db);
+        var projRepo = new ProjectRepository(_testDb.Db);
+
+        await projRepo.CreateAsync(new Project { Id = "knowledge", Name = "Knowledge Base", Kind = "knowledge_base" });
+        await docRepo.UpsertAsync(new Document
+        {
+            ProjectId = "knowledge",
+            Slug = "architecture",
+            Title = "System Architecture",
+            Content = "The system uses a modular design with clear boundaries.",
+            DocType = DocType.Spec
+        });
+        await taskRepo.CreateAsync(new ProjectTask
+        {
+            ProjectId = "knowledge",
+            Title = "Document architecture decisions",
+            Description = "Keep ADRs up to date"
+        });
+
+        // Use a fresh service instance seeded with the new space
+        var gatherer = new LibrarianGatherer(taskRepo, docRepo, msgRepo);
+        var config = new LlmConfig
+        {
+            Endpoint = "http://test",
+            Model = "test",
+            MaxTokens = 512,
+            ContextTokenBudget = 4096
+        };
+        var service = new LibrarianService(gatherer, taskRepo, _llmClient, config, NullLogger<LibrarianService>.Instance);
+
+        _llmClient.CannedResponse = """
+            {
+              "relevant_items": [
+                {
+                  "type": "document",
+                  "source_id": "knowledge/architecture",
+                  "project_id": "knowledge",
+                  "summary": "System architecture",
+                  "why_relevant": "Matches the query",
+                  "snippet": "The system uses a modular design with clear boundaries."
+                }
+              ],
+              "recommendations": ["Review the architecture doc"],
+              "confidence": "high"
+            }
+            """;
+
+        var result = await service.QueryAsync("knowledge", "modular design");
+
+        Assert.Equal(LibrarianConfidence.High, result.Confidence);
+        Assert.Single(result.RelevantItems);
+        Assert.Equal("knowledge/architecture", result.RelevantItems[0].SourceId);
+        Assert.Contains("System Architecture", _llmClient.LastSystemPrompt!);
     }
 
     private sealed class StubLlmClient : ILlmClient

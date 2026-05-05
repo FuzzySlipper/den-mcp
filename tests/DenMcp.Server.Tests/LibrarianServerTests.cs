@@ -137,7 +137,52 @@ public class LibrarianServerTests
         Assert.Contains($"\"error\":\"Task {otherTaskId} does not belong to project proj-a\"", json);
     }
 
-    private static async Task SeedProjectAsync(IServiceProvider services, string projectId)
+    [Fact]
+    public async Task QueryRoute_NonProjectSpace_ReturnsSnakeCaseResponse()
+    {
+        const string llmResponse = """
+            {
+              "relevant_items": [
+                {
+                  "type": "document",
+                  "source_id": "personal/recipes",
+                  "project_id": "personal",
+                  "summary": "Recipes doc",
+                  "why_relevant": "Matches the query",
+                  "snippet": "Pancakes require flour."
+                }
+              ],
+              "recommendations": ["Read recipes"],
+              "confidence": "high"
+            }
+            """;
+
+        using var factory = new LibrarianAppFactory(configureLlm: true, llmResponse);
+        using var client = factory.CreateClient();
+        await SeedProjectAsync(factory.Services, "personal", kind: "personal");
+        await SeedDocumentAsync(factory.Services, new Document
+        {
+            ProjectId = "personal",
+            Slug = "recipes",
+            Title = "Recipes",
+            Content = "Pancakes require flour.",
+            DocType = DocType.Note
+        });
+
+        var response = await client.PostAsJsonAsync("/api/projects/personal/librarian/query", new
+        {
+            query = "pancakes"
+        });
+
+        response.EnsureSuccessStatusCode();
+        Assert.Equal(1, factory.StubLlmClient!.CallCount);
+
+        var json = await response.Content.ReadAsStringAsync();
+        Assert.Contains("\"relevant_items\"", json);
+        Assert.Contains("personal/recipes", json);
+    }
+
+    private static async Task SeedProjectAsync(IServiceProvider services, string projectId, string? kind = null)
     {
         using var scope = services.CreateScope();
         var projects = scope.ServiceProvider.GetRequiredService<IProjectRepository>();
@@ -147,7 +192,8 @@ public class LibrarianServerTests
         await projects.CreateAsync(new Project
         {
             Id = projectId,
-            Name = projectId
+            Name = projectId,
+            Kind = kind ?? "project"
         });
     }
 
@@ -162,7 +208,8 @@ public class LibrarianServerTests
             await projects.CreateAsync(new Project
             {
                 Id = projectId,
-                Name = projectId
+                Name = projectId,
+                Kind = "project"
             });
         }
 
