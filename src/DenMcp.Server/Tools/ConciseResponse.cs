@@ -258,6 +258,32 @@ public static class ConciseResponse
         });
     }
 
+    // Topic operations
+
+    public static string CreatedTopic(ConsolidationTopic topic)
+    {
+        return Serialize(new
+        {
+            summary = $"created topic '{topic.Slug}' ({topic.Status})",
+            id = topic.Id,
+            slug = topic.Slug,
+            display_name = topic.DisplayName,
+            status = topic.Status
+        });
+    }
+
+    public static string UpdatedTopic(ConsolidationTopic topic)
+    {
+        return Serialize(new
+        {
+            summary = $"updated topic '{topic.Slug}' ({topic.Status})",
+            id = topic.Id,
+            slug = topic.Slug,
+            display_name = topic.DisplayName,
+            status = topic.Status
+        });
+    }
+
     // Space operations
 
     public static string CreatedSpace(Project project)

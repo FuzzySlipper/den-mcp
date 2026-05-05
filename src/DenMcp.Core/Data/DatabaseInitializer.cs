@@ -751,12 +751,36 @@ public sealed class DatabaseInitializer
             WHERE task_id IS NOT NULL;
         CREATE INDEX IF NOT EXISTS idx_desktop_session_events_event_type_created
             ON desktop_session_events(event_type, created_at DESC, id DESC);
+
+        ------------------------------------------------------------
+        -- CONSOLIDATION TOPICS
+        ------------------------------------------------------------
+        CREATE TABLE IF NOT EXISTS consolidation_topics (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            slug          TEXT NOT NULL UNIQUE,
+            display_name  TEXT NOT NULL,
+            description   TEXT,
+            aliases       TEXT,
+            status        TEXT NOT NULL DEFAULT 'active'
+                          CHECK (status IN ('active', 'inactive', 'deprecated')),
+            owning_space  TEXT REFERENCES projects(id) ON DELETE SET NULL,
+            created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_consolidation_topics_status
+            ON consolidation_topics(status);
+        CREATE INDEX IF NOT EXISTS idx_consolidation_topics_owning_space
+            ON consolidation_topics(owning_space);
+        CREATE INDEX IF NOT EXISTS idx_consolidation_topics_slug_status
+            ON consolidation_topics(slug, status);
         """;
 
     private async Task RunMigrationsAsync(SqliteConnection connection)
     {
         await EnsureAgentGuidanceSchemaAsync(connection);
         await EnsureAgentRunSchemaAsync(connection);
+        await EnsureConsolidationTopicSchemaAsync(connection);
         await EnsureCollaborationSchemaAsync(connection);
         await EnsureAgentWorkspaceSchemaAsync(connection);
         await EnsureDesktopSnapshotSchemaAsync(connection);
@@ -1496,6 +1520,33 @@ public sealed class DatabaseInitializer
             ON blackboard_entries(last_accessed_at ASC)
             WHERE idle_ttl_seconds IS NOT NULL
             """);
+    }
+
+    private static async Task EnsureConsolidationTopicSchemaAsync(SqliteConnection connection)
+    {
+        await using var tableCmd = connection.CreateCommand();
+        tableCmd.CommandText = """
+            CREATE TABLE IF NOT EXISTS consolidation_topics (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                slug          TEXT NOT NULL UNIQUE,
+                display_name  TEXT NOT NULL,
+                description   TEXT,
+                aliases       TEXT,
+                status        TEXT NOT NULL DEFAULT 'active'
+                              CHECK (status IN ('active', 'inactive', 'deprecated')),
+                owning_space  TEXT REFERENCES projects(id) ON DELETE SET NULL,
+                created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """;
+        await tableCmd.ExecuteNonQueryAsync();
+
+        await EnsureIndexAsync(connection, "idx_consolidation_topics_status",
+            "CREATE INDEX IF NOT EXISTS idx_consolidation_topics_status ON consolidation_topics(status)");
+        await EnsureIndexAsync(connection, "idx_consolidation_topics_owning_space",
+            "CREATE INDEX IF NOT EXISTS idx_consolidation_topics_owning_space ON consolidation_topics(owning_space)");
+        await EnsureIndexAsync(connection, "idx_consolidation_topics_slug_status",
+            "CREATE INDEX IF NOT EXISTS idx_consolidation_topics_slug_status ON consolidation_topics(slug, status)");
     }
 
     private static async Task TryAddColumnAsync(SqliteConnection connection, string table, string column, string columnDefinition)
