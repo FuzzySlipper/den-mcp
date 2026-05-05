@@ -30,10 +30,10 @@ public sealed class ProjectTools
             : ConciseResponse.CreatedProject(project);
     }
 
-    [McpServerTool(Name = "list_projects"), Description("List all registered projects.")]
+    [McpServerTool(Name = "list_projects"), Description("List registered projects. Defaults to normal project-kind spaces only, excluding hidden or archived spaces.")]
     public static async Task<string> ListProjects(IProjectRepository repo)
     {
-        var projects = await repo.GetAllAsync();
+        var projects = await repo.ListAsync(kind: "project", includeHidden: false, includeArchived: false);
         return JsonSerializer.Serialize(projects, JsonOpts.Default);
     }
 

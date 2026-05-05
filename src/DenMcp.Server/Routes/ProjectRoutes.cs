@@ -17,7 +17,7 @@ public static class ProjectRoutes
 
         group.MapGet("/", async (IProjectRepository repo) =>
         {
-            var projects = await repo.GetAllAsync();
+            var projects = await repo.ListAsync(kind: "project", includeHidden: false, includeArchived: false);
             return Results.Ok(projects);
         });
 
