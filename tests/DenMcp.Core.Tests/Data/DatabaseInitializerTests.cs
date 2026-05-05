@@ -62,10 +62,12 @@ public class DatabaseInitializerTests : IDisposable
         await conn.OpenAsync();
 
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT name FROM projects WHERE id = '_global'";
-        var result = await cmd.ExecuteScalarAsync();
-
-        Assert.Equal("Global", result);
+        cmd.CommandText = "SELECT name, kind, visibility FROM projects WHERE id = '_global'";
+        await using var reader = await cmd.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal("Global", reader.GetString(0));
+        Assert.Equal("system", reader.GetString(1));
+        Assert.Equal("hidden", reader.GetString(2));
     }
 
     [Fact]
@@ -563,5 +565,114 @@ public class DatabaseInitializerTests : IDisposable
             row => Assert.Equal((5, "pending"), row),
             row => Assert.Equal((6, "pending"), row),
             row => Assert.Equal((7, "pending"), row));
+    }
+
+    [Fact]
+    public async Task InitializeAsync_AddsSpaceMetadataColumnsToProjects()
+    {
+        var initializer = new DatabaseInitializer(_dbPath, NullLogger<DatabaseInitializer>.Instance);
+        await initializer.InitializeAsync();
+
+        await using var conn = new SqliteConnection(initializer.ConnectionString);
+        await conn.OpenAsync();
+
+        var columns = new List<string>();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "PRAGMA table_info(projects)";
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            columns.Add(reader.GetString(1));
+
+        Assert.Contains("kind", columns);
+        Assert.Contains("visibility", columns);
+        Assert.Contains("owner", columns);
+        Assert.Contains("settings_json", columns);
+    }
+
+    [Fact]
+    public async Task InitializeAsync_ProjectsConstraintRejectsInvalidKind()
+    {
+        var initializer = new DatabaseInitializer(_dbPath, NullLogger<DatabaseInitializer>.Instance);
+        await initializer.InitializeAsync();
+
+        await using var conn = new SqliteConnection(initializer.ConnectionString);
+        await conn.OpenAsync();
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO projects (id, name, kind)
+            VALUES ('bad', 'Bad', 'not_a_kind')
+            """;
+
+        await Assert.ThrowsAsync<SqliteException>(() => cmd.ExecuteNonQueryAsync());
+    }
+
+    [Fact]
+    public async Task InitializeAsync_ProjectsConstraintRejectsInvalidVisibility()
+    {
+        var initializer = new DatabaseInitializer(_dbPath, NullLogger<DatabaseInitializer>.Instance);
+        await initializer.InitializeAsync();
+
+        await using var conn = new SqliteConnection(initializer.ConnectionString);
+        await conn.OpenAsync();
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO projects (id, name, visibility)
+            VALUES ('bad', 'Bad', 'not_a_visibility')
+            """;
+
+        await Assert.ThrowsAsync<SqliteException>(() => cmd.ExecuteNonQueryAsync());
+    }
+
+    [Fact]
+    public async Task InitializeAsync_MigratesSpaceMetadataColumnsAndBackfillsGlobal()
+    {
+        await using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                CREATE TABLE projects (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    root_path TEXT,
+                    description TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                INSERT INTO projects (id, name) VALUES ('_global', 'Global');
+                INSERT INTO projects (id, name) VALUES ('existing-proj', 'Existing Project');
+                """;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var initializer = new DatabaseInitializer(_dbPath, NullLogger<DatabaseInitializer>.Instance);
+        await initializer.InitializeAsync();
+
+        await using var verify = new SqliteConnection(initializer.ConnectionString);
+        await verify.OpenAsync();
+
+        var rows = new List<(string Id, string Kind, string Visibility)>();
+        await using var checkCmd = verify.CreateCommand();
+        checkCmd.CommandText = "SELECT id, kind, visibility FROM projects ORDER BY id";
+        await using var reader = await checkCmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            rows.Add((reader.GetString(0), reader.GetString(1), reader.GetString(2)));
+
+        Assert.Collection(
+            rows,
+            row =>
+            {
+                Assert.Equal("_global", row.Id);
+                Assert.Equal("system", row.Kind);
+                Assert.Equal("hidden", row.Visibility);
+            },
+            row =>
+            {
+                Assert.Equal("existing-proj", row.Id);
+                Assert.Equal("project", row.Kind);
+                Assert.Equal("normal", row.Visibility);
+            });
     }
 }
