@@ -14,7 +14,7 @@
  * through typed IPC channels that mirror the DenDesktopSidecarApi contract.
  */
 
-import { app, BrowserWindow, globalShortcut, ipcMain, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu } from 'electron';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -205,39 +205,19 @@ async function connectBridge(): Promise<void> {
 
 // ── Hotkey state ──
 
-/** Currently registered hotkey accelerators -> action name. */
-const registeredHotkeys = new Map<string, string>();
-
 /**
- * Register global shortcuts from a map of action name → accelerator.
- * Unregisters any previously registered hotkeys first.
+ * Window-local hotkey registration compatibility no-op.
+ *
+ * Den Desktop hotkeys are handled locally in the renderer via
+ * window.addEventListener('keydown', …). This function remains
+ * as a no-op so that renderer/preload callers do not break.
+ *
+ * Previously this registered OS-global shortcuts via Electron's
+ * globalShortcut, which blocked other applications while Den
+ * Desktop was minimized or unfocused (task #1166).
  */
-function registerHotkeys(actions: Record<string, string>): void {
-  // Unregister all previously registered shortcuts
-  for (const accelerator of registeredHotkeys.keys()) {
-    globalShortcut.unregister(accelerator);
-  }
-  registeredHotkeys.clear();
-
-  for (const [action, accelerator] of Object.entries(actions)) {
-    if (!accelerator || accelerator === 'Browser_Back') {
-      // Browser_Back is not a globalShortcut — handled via app-command event
-      continue;
-    }
-
-    try {
-      const success = globalShortcut.register(accelerator, () => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('den-desktop:hotkey-action', action);
-        }
-      });
-      if (success) {
-        registeredHotkeys.set(accelerator, action);
-      }
-    } catch {
-      // Skip accelerators that globalShortcut cannot parse
-    }
-  }
+function registerHotkeys(_actions: Record<string, string>): void {
+  // Intentionally empty — hotkeys are window-local in the renderer.
 }
 
 /** Send a hotkey action to the renderer. */
@@ -303,9 +283,10 @@ function setupIpcBridge(): void {
     }
   });
 
-  // Hotkey registration: renderer sends its hotkey config when settings load/change
-  ipcMain.handle('den-desktop:hotkeys-register', async (_event, actions: Record<string, string>) => {
-    registerHotkeys(actions);
+  // Hotkey registration: renderer sends its hotkey config when settings load/change.
+  // This is now a no-op; hotkeys are handled window-local in the renderer (task #1166).
+  ipcMain.handle('den-desktop:hotkeys-register', async (_event, _actions: Record<string, string>) => {
+    // Intentionally empty — globalShortcut removed to avoid capturing keys OS-wide.
   });
 
   // Progress-enabled console command: direct IPC handler that forwards progress
@@ -424,7 +405,6 @@ app.on('window-all-closed', () => {
   }
   activeSubscriptions.clear();
   ipcMain.removeHandler('den-desktop:console-run-command-with-progress');
-  globalShortcut.unregisterAll();
   bridgeTransport?.close();
   supervisor?.stop('SIGTERM');
   app.quit();
@@ -442,7 +422,6 @@ app.on('before-quit', () => {
   }
   activeSubscriptions.clear();
   ipcMain.removeHandler('den-desktop:console-run-command-with-progress');
-  globalShortcut.unregisterAll();
   bridgeTransport?.close();
   supervisor?.stop('SIGTERM');
 });

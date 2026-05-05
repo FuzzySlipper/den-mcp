@@ -1087,6 +1087,17 @@ test('preload API consoleRunCommandWithProgress delegates to progress-enabled IP
   assert.equal(sent[0].hasProgressCallback, true, 'Should pass onProgress callback to transport');
 });
 
+test('main process no longer imports or uses Electron globalShortcut', async () => {
+  const mainSource = await readFile(resolve(__dirname, '../src/electron/main.ts'), 'utf8');
+  // globalShortcut should not appear in the electron import line
+  const importLine = mainSource.split('\n').find((line) => line.includes("from 'electron'"));
+  assert.doesNotMatch(importLine, /globalShortcut/, 'main.ts electron import must not include globalShortcut');
+  // No globalShortcut method calls should remain
+  assert.doesNotMatch(mainSource, /globalShortcut\.register/, 'main.ts must not call globalShortcut.register');
+  assert.doesNotMatch(mainSource, /globalShortcut\.unregister/, 'main.ts must not call globalShortcut.unregister');
+  assert.doesNotMatch(mainSource, /globalShortcut\.unregisterAll/, 'main.ts must not call globalShortcut.unregisterAll');
+});
+
 test('preload event subscription returns unsubscribe function', async () => {
   const fixture = await readFixture();
   const client = createCheckedBridgeClient({

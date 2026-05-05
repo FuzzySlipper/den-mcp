@@ -164,7 +164,10 @@ contextBridge.exposeInMainWorld('denDesktopSidecar', {
   onSessionSnapshots: (listener: (event: unknown) => void) => subscribeToEvent('sessionSnapshots', listener),
 
   // Hotkey support
+  // registerHotkeys is a compatibility no-op: hotkeys are handled window-local
+  // in the renderer. The IPC handler in main.ts is intentionally empty (task #1166).
   registerHotkeys: (actions: Record<string, string>) => ipcRenderer.invoke('den-desktop:hotkeys-register', actions),
+  // onHotkeyAction remains wired for app-command dispatches (e.g. Browser_Back / goBack).
   onHotkeyAction: (listener: (action: string) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, action: string) => listener(action);
     ipcRenderer.on('den-desktop:hotkey-action', handler);

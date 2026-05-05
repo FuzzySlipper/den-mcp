@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  acceleratorMatchesEvent,
   defaultShellState,
   loadShellState,
   nextConsoleMode,
@@ -85,4 +86,71 @@ test('data attributes and console cycling match shell contract', () => {
 
   assert.equal(nextTheme('amber-dark'), 'graphite-dark');
   assert.equal(nextTheme('graphite-dark'), 'amber-dark');
+});
+
+function fakeKeyEvent(props) {
+  return {
+    ctrlKey: false,
+    metaKey: false,
+    altKey: false,
+    shiftKey: false,
+    key: '',
+    ...props,
+  };
+}
+
+test('acceleratorMatchesEvent rejects empty and Browser_Back accelerators', () => {
+  assert.equal(acceleratorMatchesEvent('', fakeKeyEvent({ key: 'Tab', ctrlKey: true })), false);
+  assert.equal(acceleratorMatchesEvent('Browser_Back', fakeKeyEvent({ key: 'Alt', altKey: true })), false);
+});
+
+test('acceleratorMatchesEvent matches Ctrl+Tab', () => {
+  const match = fakeKeyEvent({ key: 'Tab', ctrlKey: true });
+  const noCtrl = fakeKeyEvent({ key: 'Tab' });
+  const withShift = fakeKeyEvent({ key: 'Tab', ctrlKey: true, shiftKey: true });
+
+  assert.equal(acceleratorMatchesEvent('Ctrl+Tab', match), true);
+  assert.equal(acceleratorMatchesEvent('Ctrl+Tab', noCtrl), false);
+  assert.equal(acceleratorMatchesEvent('Ctrl+Tab', withShift), false);
+});
+
+test('acceleratorMatchesEvent matches Ctrl+`', () => {
+  const match = fakeKeyEvent({ key: '`', ctrlKey: true });
+  const noCtrl = fakeKeyEvent({ key: '`' });
+
+  assert.equal(acceleratorMatchesEvent('Ctrl+`', match), true);
+  assert.equal(acceleratorMatchesEvent('Ctrl+`', noCtrl), false);
+});
+
+test('acceleratorMatchesEvent matches Shift+Up', () => {
+  const match = fakeKeyEvent({ key: 'ArrowUp', shiftKey: true });
+  const noShift = fakeKeyEvent({ key: 'ArrowUp' });
+
+  assert.equal(acceleratorMatchesEvent('Shift+Up', match), true);
+  assert.equal(acceleratorMatchesEvent('Shift+Up', noShift), false);
+});
+
+test('acceleratorMatchesEvent matches Alt+Left for goBack', () => {
+  const match = fakeKeyEvent({ key: 'ArrowLeft', altKey: true });
+  const wrongKey = fakeKeyEvent({ key: 'ArrowRight', altKey: true });
+
+  assert.equal(acceleratorMatchesEvent('Alt+Left', match), true);
+  assert.equal(acceleratorMatchesEvent('Alt+Left', wrongKey), false);
+});
+
+test('acceleratorMatchesEvent is case-insensitive for letter keys', () => {
+  const lower = fakeKeyEvent({ key: 'a', ctrlKey: true });
+  const upper = fakeKeyEvent({ key: 'A', ctrlKey: true });
+
+  assert.equal(acceleratorMatchesEvent('Ctrl+A', lower), true);
+  assert.equal(acceleratorMatchesEvent('Ctrl+A', upper), true);
+});
+
+test('acceleratorMatchesEvent requires exact modifier set', () => {
+  const ctrlOnly = fakeKeyEvent({ key: 'A', ctrlKey: true });
+  const ctrlShift = fakeKeyEvent({ key: 'A', ctrlKey: true, shiftKey: true });
+
+  assert.equal(acceleratorMatchesEvent('Ctrl+A', ctrlOnly), true);
+  assert.equal(acceleratorMatchesEvent('Ctrl+A', ctrlShift), false);
+  assert.equal(acceleratorMatchesEvent('Ctrl+Shift+A', ctrlShift), true);
 });

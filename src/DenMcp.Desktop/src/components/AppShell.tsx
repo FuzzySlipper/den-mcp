@@ -7,6 +7,7 @@ import {
   ShellState,
   ShellTabId,
   ShellTheme,
+  acceleratorMatchesEvent,
   defaultHotkeys,
   hotkeyActions,
   nextConsoleMode,
@@ -98,10 +99,53 @@ export function AppShell({ state, onStateChange, status, snapshots, sessionSnaps
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, [handleGlobalKeyDown]);
 
-  // Hotkey IPC: register current bindings and listen for action events
+  // Hotkey handling: window-local keydown matching for configured accelerators.
+  // Browser_Back is handled via app-command in the main process and delivered
+  // through onHotkeyAction below.
   const hotkeyActionsRef = useRef(state.hotkeys);
   hotkeyActionsRef.current = state.hotkeys;
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      for (const [action, accelerator] of Object.entries(hotkeyActionsRef.current)) {
+        if (accelerator === 'Browser_Back') continue;
+        if (acceleratorMatchesEvent(accelerator, e)) {
+          e.preventDefault();
+          switch (action) {
+            case 'cycleTabForward': {
+              const tabs = shellTabs.map((t) => t.id);
+              const currentIndex = tabs.indexOf(activeTab);
+              const nextTab = tabs[(currentIndex + 1) % tabs.length];
+              setState({ activeTab: nextTab });
+              break;
+            }
+            case 'goBack':
+              window.history.back();
+              break;
+            case 'focusConsole':
+              // Ensure console is at least preview mode when focusing
+              if (state.consoleMode === 'collapsed') {
+                setState({ consoleMode: 'preview' });
+              }
+              // Focus the console input element
+              setTimeout(() => {
+                const input = document.querySelector<HTMLInputElement>('.console-prompt input');
+                input?.focus();
+              }, 0);
+              break;
+          }
+          break; // handle first match only
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeTab, state.consoleMode, setState]);
+
+  // Compatibility no-op: the IPC handler in main.ts is intentionally empty
+  // after task #1166. This call is kept so the renderer does not break if
+  // the preload still exposes registerHotkeys.
   useEffect(() => {
     const api = (window as any).denDesktopSidecar as Record<string, unknown> | undefined;
     if (api && typeof api.registerHotkeys === 'function') {
@@ -111,6 +155,7 @@ export function AppShell({ state, onStateChange, status, snapshots, sessionSnaps
     }
   }, [state.hotkeys]);
 
+  // App-command dispatches (e.g. Browser_Back / goBack) still arrive via IPC.
   useEffect(() => {
     const api = (window as any).denDesktopSidecar as Record<string, unknown> | undefined;
     if (!api || typeof api.onHotkeyAction !== 'function') return;
@@ -443,7 +488,7 @@ function SettingsSurface({ state, onStateChange }: { state: ShellState; onStateC
           </div>
           <span className="chip accent">local UI state</span>
         </div>
-        <p className="muted">Configure global keyboard shortcuts. Changes take effect immediately. The "Reset to defaults" button restores the initial bindings.</p>
+        <p className="muted">Configure keyboard shortcuts. Shortcuts are active only while the Den Desktop window is focused. Changes take effect immediately. The "Reset to defaults" button restores the initial bindings.</p>
         <div className="hotkey-grid">
           {hotkeyActions.map(({ action, label, description }) => (
             <HotkeyRow
