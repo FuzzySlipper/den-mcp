@@ -50,6 +50,7 @@ public class DatabaseInitializerTests : IDisposable
         Assert.Contains("agent_runs", tables);
         Assert.Contains("agent_workspaces", tables);
         Assert.Contains("agent_instance_bindings", tables);
+        Assert.Contains("consolidation_topics", tables);
     }
 
     [Fact]

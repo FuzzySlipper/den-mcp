@@ -61,6 +61,7 @@ builder.Services.AddSingleton(new DbConnectionFactory(initializer.ConnectionStri
 
 // Repositories
 builder.Services.AddSingleton<IProjectRepository, ProjectRepository>();
+builder.Services.AddSingleton<ITopicRepository, TopicRepository>();
 builder.Services.AddSingleton<ITaskRepository, TaskRepository>();
 builder.Services.AddSingleton<IReviewRoundRepository, ReviewRoundRepository>();
 builder.Services.AddSingleton<IReviewFindingRepository, ReviewFindingRepository>();
@@ -128,6 +129,7 @@ app.MapGet("/health", () => Results.Ok(new
 // REST API
 app.MapProjectRoutes();
 app.MapSpaceRoutes();
+app.MapTopicRoutes();
 app.MapTaskRoutes();
 app.MapMessageRoutes();
 app.MapDocumentRoutes();
