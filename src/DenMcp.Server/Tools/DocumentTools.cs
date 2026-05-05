@@ -12,7 +12,7 @@ public sealed class DocumentTools
     [McpServerTool(Name = "store_document"), Description("Create or update a document. If a document with the same project_id + slug exists, it is overwritten.")]
     public static async Task<string> StoreDocument(
         IDocumentRepository repo,
-        [Description("Project ID. Use '_global' for cross-project docs.")] string project_id,
+        [Description("Project or space ID. Use '_global' for cross-project docs.")] string project_id,
         [Description("Unique slug within the project, e.g. 'damage-system-spec'.")] string slug,
         [Description("Document title.")] string title,
         [Description("Document content (markdown).")] string content,
@@ -35,10 +35,10 @@ public sealed class DocumentTools
             : ConciseResponse.StoredDocument(doc);
     }
 
-    [McpServerTool(Name = "get_document"), Description("Get a document's full content by project ID and slug.")]
+    [McpServerTool(Name = "get_document"), Description("Get a document's full content by project or space ID and slug.")]
     public static async Task<string> GetDocument(
         IDocumentRepository repo,
-        [Description("Project ID.")] string project_id,
+        [Description("Project or space ID.")] string project_id,
         [Description("Document slug.")] string slug)
     {
         var doc = await repo.GetAsync(project_id, slug);
@@ -47,10 +47,10 @@ public sealed class DocumentTools
         return JsonSerializer.Serialize(doc, JsonOpts.Default);
     }
 
-    [McpServerTool(Name = "list_documents"), Description("List document summaries (without content). Omit project_id to list across all projects.")]
+    [McpServerTool(Name = "list_documents"), Description("List document summaries (without content). Omit project_id to list across all projects and spaces.")]
     public static async Task<string> ListDocuments(
         IDocumentRepository repo,
-        [Description("Project ID. Omit to list across all projects.")] string? project_id = null,
+        [Description("Project or space ID. Omit to list across all projects and spaces.")] string? project_id = null,
         [Description("Filter by type: prd, spec, adr, convention, reference, note.")] string? doc_type = null,
         [Description("Filter by tags (comma-separated). Document must have ALL specified tags.")] string? tags = null)
     {
@@ -64,16 +64,16 @@ public sealed class DocumentTools
     public static async Task<string> SearchDocuments(
         IDocumentRepository repo,
         [Description("FTS5 search query.")] string query,
-        [Description("Scope search to one project.")] string? project_id = null)
+        [Description("Scope search to one project or space.")] string? project_id = null)
     {
         var results = await repo.SearchAsync(query, project_id);
         return JsonSerializer.Serialize(results, JsonOpts.Default);
     }
 
-    [McpServerTool(Name = "delete_document"), Description("Delete a document by project ID and slug.")]
+    [McpServerTool(Name = "delete_document"), Description("Delete a document by project or space ID and slug.")]
     public static async Task<string> DeleteDocument(
         IDocumentRepository repo,
-        [Description("Project ID.")] string project_id,
+        [Description("Project or space ID.")] string project_id,
         [Description("Document slug.")] string slug)
     {
         var deleted = await repo.DeleteAsync(project_id, slug);

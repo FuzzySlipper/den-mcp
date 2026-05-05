@@ -12,11 +12,12 @@ public sealed class LibrarianTools
     [McpServerTool(Name = "query_librarian"), Description(
         "Ask the librarian for context relevant to your current work. " +
         "Returns relevant tasks, documents, and messages with source attribution and recommendations. " +
-        "Best used at the start of a task or when you need background on a topic.")]
+        "Best used at the start of a task or when you need background on a topic. " +
+        "Works with any space ID (project, personal, assistant, knowledge_base, etc.).")]
     public static async Task<string> QueryLibrarian(
         LibrarianService librarian,
         LlmConfig llmConfig,
-        [Description("Project ID to search within.")] string project_id,
+        [Description("Project or space ID to search within.")] string project_id,
         [Description("What you're working on or looking for, e.g. 'I'm starting work on task 47 — implementing FTS5 search'.")] string query,
         [Description("Task ID to enrich search with task context (dependencies, messages, tags).")] int? task_id = null,
         [Description("Whether to also search _global project documents. Default: true.")] bool include_global = true)

@@ -172,4 +172,73 @@ public sealed class AgentGuidanceRepositoryTests : IAsyncLifetime
         var withGlobal = await _guidance.ListAsync("proj", includeGlobal: true);
         Assert.Equal(["_global", "proj"], withGlobal.Select(entry => entry.ProjectId).ToArray());
     }
+
+    [Fact]
+    public async Task Resolve_NonProjectSpace_CombinesGlobalAndSpaceLocalGuidance()
+    {
+        await _projects.CreateAsync(new Project { Id = "personal", Name = "Personal", Kind = "personal" });
+        await _documents.UpsertAsync(new Document
+        {
+            ProjectId = "personal",
+            Slug = "personal-notes",
+            Title = "Personal Notes",
+            Content = "Personal guidance content",
+            DocType = DocType.Note,
+            Tags = ["personal"]
+        });
+
+        await _guidance.UpsertAsync(new AgentGuidanceEntry
+        {
+            ProjectId = "_global",
+            DocumentProjectId = "_global",
+            DocumentSlug = "global-required",
+            Importance = AgentGuidanceImportance.Required,
+            SortOrder = 10
+        });
+        await _guidance.UpsertAsync(new AgentGuidanceEntry
+        {
+            ProjectId = "personal",
+            DocumentProjectId = "personal",
+            DocumentSlug = "personal-notes",
+            Importance = AgentGuidanceImportance.Important,
+            SortOrder = 20
+        });
+
+        var resolved = await _guidance.ResolveAsync("personal");
+
+        Assert.Equal("personal", resolved.ProjectId);
+        Assert.Equal(2, resolved.Sources.Count);
+        Assert.Equal("_global", resolved.Sources[0].ScopeProjectId);
+        Assert.Equal("personal", resolved.Sources[1].ScopeProjectId);
+        Assert.Contains("Global guidance", resolved.Content);
+        Assert.Contains("Personal guidance content", resolved.Content);
+    }
+
+    [Fact]
+    public async Task List_NonProjectSpace_ReturnsSpaceLocalEntries()
+    {
+        await _projects.CreateAsync(new Project { Id = "assistant", Name = "Assistant", Kind = "assistant" });
+        await _documents.UpsertAsync(new Document
+        {
+            ProjectId = "assistant",
+            Slug = "persona",
+            Title = "Assistant Persona",
+            Content = "Be helpful and concise.",
+            DocType = DocType.Convention
+        });
+
+        await _guidance.UpsertAsync(new AgentGuidanceEntry
+        {
+            ProjectId = "assistant",
+            DocumentProjectId = "assistant",
+            DocumentSlug = "persona",
+            Importance = AgentGuidanceImportance.Important,
+            SortOrder = 0
+        });
+
+        var entries = await _guidance.ListAsync("assistant");
+        var entry = Assert.Single(entries);
+        Assert.Equal("assistant", entry.ProjectId);
+        Assert.Equal("persona", entry.DocumentSlug);
+    }
 }
