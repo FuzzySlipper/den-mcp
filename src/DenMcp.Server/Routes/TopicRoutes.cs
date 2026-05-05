@@ -33,16 +33,23 @@ public static class TopicRoutes
         // Create a topic
         group.MapPost("/", async (ITopicRepository repo, TopicCreateRequest req) =>
         {
-            var topic = await repo.CreateAsync(new ConsolidationTopic
+            try
             {
-                Slug = req.Slug,
-                DisplayName = req.DisplayName,
-                Description = req.Description,
-                Aliases = req.Aliases?.ToList(),
-                Status = req.Status ?? "active",
-                OwningSpace = req.OwningSpace
-            });
-            return Results.Created($"/api/topics/{topic.Id}", topic);
+                var topic = await repo.CreateAsync(new ConsolidationTopic
+                {
+                    Slug = req.Slug,
+                    DisplayName = req.DisplayName,
+                    Description = req.Description,
+                    Aliases = req.Aliases?.ToList(),
+                    Status = req.Status ?? "active",
+                    OwningSpace = req.OwningSpace
+                });
+                return Results.Created($"/api/topics/{topic.Id}", topic);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(new { error = ex.Message });
+            }
         });
 
         // Update a topic
@@ -64,6 +71,10 @@ public static class TopicRoutes
             catch (KeyNotFoundException)
             {
                 return Results.NotFound(new { error = $"Topic {id} not found" });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(new { error = ex.Message });
             }
         });
 

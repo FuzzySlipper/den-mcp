@@ -149,6 +149,59 @@ public class TopicRepositoryTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CreateAsync_DuplicateSlug_ThrowsInvalidOperationException()
+    {
+        await _repo.CreateAsync(new ConsolidationTopic
+        {
+            Slug = "duplicate-slug",
+            DisplayName = "Original",
+            Status = "active"
+        });
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await _repo.CreateAsync(new ConsolidationTopic
+            {
+                Slug = "duplicate-slug",
+                DisplayName = "Duplicate",
+                Status = "active"
+            });
+        });
+
+        Assert.Contains("duplicate-slug", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_DuplicateSlug_ThrowsInvalidOperationException()
+    {
+        var topicA = await _repo.CreateAsync(new ConsolidationTopic
+        {
+            Slug = "topic-a",
+            DisplayName = "Topic A",
+            Status = "active"
+        });
+
+        var topicB = await _repo.CreateAsync(new ConsolidationTopic
+        {
+            Slug = "topic-b",
+            DisplayName = "Topic B",
+            Status = "active"
+        });
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await _repo.UpdateAsync(topicB.Id, new ConsolidationTopic
+            {
+                Slug = "topic-a",
+                DisplayName = "Topic B Renamed",
+                Status = "active"
+            });
+        });
+
+        Assert.Contains("topic-a", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Validate_KnownActiveTopic_ReturnsValid()
     {
         await _repo.CreateAsync(new ConsolidationTopic { Slug = "performance", DisplayName = "Performance", Status = "active" });

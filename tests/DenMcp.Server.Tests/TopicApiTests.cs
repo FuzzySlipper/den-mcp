@@ -152,6 +152,22 @@ public sealed class TopicApiTests : IAsyncLifetime
         Assert.Equal("active", doc.RootElement.GetProperty("status").GetString());
     }
 
+    [Fact]
+    public async Task PostTopic_DuplicateSlug_Returns409()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<ITopicRepository>();
+        await repo.CreateAsync(new ConsolidationTopic { Slug = $"dup-{suffix}", DisplayName = "Original", Status = "active" });
+
+        var request = new { slug = $"dup-{suffix}", display_name = "Duplicate", status = "active" };
+        var response = await _client.PostAsJsonAsync("/api/topics", request);
+        Assert.Equal(System.Net.HttpStatusCode.Conflict, response.StatusCode);
+
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("dup-", body);
+    }
+
     // ─── PUT /api/topics/{id} ───────────────────────────────────────────
 
     [Fact]
@@ -177,6 +193,23 @@ public sealed class TopicApiTests : IAsyncLifetime
         var request = new { slug = "missing", display_name = "Missing", status = "active" };
         var response = await _client.PutAsJsonAsync("/api/topics/99999", request);
         Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PutTopic_DuplicateSlug_Returns409()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<ITopicRepository>();
+        var topicA = await repo.CreateAsync(new ConsolidationTopic { Slug = $"put-dup-a-{suffix}", DisplayName = "A", Status = "active" });
+        var topicB = await repo.CreateAsync(new ConsolidationTopic { Slug = $"put-dup-b-{suffix}", DisplayName = "B", Status = "active" });
+
+        var request = new { slug = $"put-dup-a-{suffix}", display_name = "B Renamed", status = "active" };
+        var response = await _client.PutAsJsonAsync($"/api/topics/{topicB.Id}", request);
+        Assert.Equal(System.Net.HttpStatusCode.Conflict, response.StatusCode);
+
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("put-dup-a-", body);
     }
 
     // ─── DELETE /api/topics/{id} ────────────────────────────────────────

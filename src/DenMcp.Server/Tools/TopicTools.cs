@@ -20,18 +20,25 @@ public sealed class TopicTools
         [Description("Optional owning space/project ID.")] string? owning_space = null,
         [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
-        var topic = await repo.CreateAsync(new ConsolidationTopic
+        try
         {
-            Slug = slug,
-            DisplayName = display_name,
-            Description = description,
-            Aliases = aliases?.ToList(),
-            Status = status ?? "active",
-            OwningSpace = owning_space
-        });
-        return verbose
-            ? JsonSerializer.Serialize(topic, JsonOpts.Default)
-            : ConciseResponse.CreatedTopic(topic);
+            var topic = await repo.CreateAsync(new ConsolidationTopic
+            {
+                Slug = slug,
+                DisplayName = display_name,
+                Description = description,
+                Aliases = aliases?.ToList(),
+                Status = status ?? "active",
+                OwningSpace = owning_space
+            });
+            return verbose
+                ? JsonSerializer.Serialize(topic, JsonOpts.Default)
+                : ConciseResponse.CreatedTopic(topic);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return $"{{\"error\":\"{ex.Message}\"}}";
+        }
     }
 
     [McpServerTool(Name = "list_topics"), Description("List consolidation topics. Defaults to active topics only.")]
@@ -67,18 +74,25 @@ public sealed class TopicTools
         [Description("Optional owning space/project ID.")] string? owning_space = null,
         [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
-        var topic = await repo.UpdateAsync(id, new ConsolidationTopic
+        try
         {
-            Slug = slug,
-            DisplayName = display_name,
-            Description = description,
-            Aliases = aliases?.ToList(),
-            Status = status ?? "active",
-            OwningSpace = owning_space
-        });
-        return verbose
-            ? JsonSerializer.Serialize(topic, JsonOpts.Default)
-            : ConciseResponse.UpdatedTopic(topic);
+            var topic = await repo.UpdateAsync(id, new ConsolidationTopic
+            {
+                Slug = slug,
+                DisplayName = display_name,
+                Description = description,
+                Aliases = aliases?.ToList(),
+                Status = status ?? "active",
+                OwningSpace = owning_space
+            });
+            return verbose
+                ? JsonSerializer.Serialize(topic, JsonOpts.Default)
+                : ConciseResponse.UpdatedTopic(topic);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return $"{{\"error\":\"{ex.Message}\"}}";
+        }
     }
 
     [McpServerTool(Name = "delete_topic"), Description("Delete a consolidation topic by id.")]

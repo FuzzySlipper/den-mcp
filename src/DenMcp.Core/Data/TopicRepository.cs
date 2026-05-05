@@ -39,9 +39,19 @@ public sealed class TopicRepository : ITopicRepository
         cmd.Parameters.AddWithValue("@status", topic.Status);
         cmd.Parameters.AddWithValue("@owningSpace", (object?)topic.OwningSpace ?? DBNull.Value);
 
-        await using var reader = await cmd.ExecuteReaderAsync();
-        await reader.ReadAsync();
-        return ReadTopic(reader);
+        try
+        {
+            await using var reader = await cmd.ExecuteReaderAsync();
+            await reader.ReadAsync();
+            return ReadTopic(reader);
+        }
+        catch (SqliteException ex) when (ex.SqliteErrorCode == 19)
+        {
+            var existing = await GetBySlugAsync(topic.Slug);
+            if (existing is not null)
+                throw new InvalidOperationException($"Topic with slug '{topic.Slug}' already exists.");
+            throw;
+        }
     }
 
     public async Task<ConsolidationTopic?> GetByIdAsync(int id)
@@ -131,10 +141,20 @@ public sealed class TopicRepository : ITopicRepository
         cmd.Parameters.AddWithValue("@status", topic.Status);
         cmd.Parameters.AddWithValue("@owningSpace", (object?)topic.OwningSpace ?? DBNull.Value);
 
-        await using var reader = await cmd.ExecuteReaderAsync();
-        if (!await reader.ReadAsync())
-            throw new KeyNotFoundException($"Topic with id {id} not found");
-        return ReadTopic(reader);
+        try
+        {
+            await using var reader = await cmd.ExecuteReaderAsync();
+            if (!await reader.ReadAsync())
+                throw new KeyNotFoundException($"Topic with id {id} not found");
+            return ReadTopic(reader);
+        }
+        catch (SqliteException ex) when (ex.SqliteErrorCode == 19)
+        {
+            var existing = await GetBySlugAsync(topic.Slug);
+            if (existing is not null && existing.Id != id)
+                throw new InvalidOperationException($"Topic with slug '{topic.Slug}' already exists.");
+            throw;
+        }
     }
 
     public async Task<bool> DeleteAsync(int id)
