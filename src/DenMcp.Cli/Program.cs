@@ -14,6 +14,8 @@ try
     {
         "projects" => await ProjectCommands.List(client),
         "project" => await ProjectCommands.Get(client, router),
+        "spaces" => await SpaceCommands.List(client, router),
+        "space" => await SpaceCommands.Get(client, router),
         "tasks" => await TaskCommands.List(client, router),
         "task" => await TaskCommands.Get(client, router),
         "dispatch" => await DispatchCommands.Run(client, router),
@@ -59,6 +61,8 @@ static int ShowHelp()
         Commands:
           projects                       List all projects
           project [id]                   Show project details with stats
+          spaces                         List non-project spaces [--kind <kind>] [--include-hidden] [--include-archived]
+          space <id>                     Show space details with stats
           tasks                          List tasks (top-level)
           task <id>                      Show task details
           dispatch                       List or act on dispatches

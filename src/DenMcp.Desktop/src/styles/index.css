@@ -500,6 +500,18 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid color-mix(i
 .workspace-card.active, .snapshot-card.active { border-color: color-mix(in oklab, var(--accent) 75%, transparent); box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 20%, transparent), var(--shadow-md); }
 .workspace-title { font-weight: 800; }
 .workspace-meta { color: var(--fg-tertiary); font-size: var(--fs-xs); }
+.space-card-list { display: grid; gap: var(--sp-3); margin-top: var(--sp-4); }
+.space-card { display: grid; gap: var(--sp-1); width: 100%; text-align: left; color: var(--fg-primary); background: var(--bg-input); border: var(--bw) solid var(--bd-subtle); border-radius: var(--r-lg); padding: var(--sp-3); }
+.space-title { font-weight: 800; }
+.space-meta { color: var(--fg-tertiary); font-size: var(--fs-xs); }
+.space-description { color: var(--fg-secondary); font-size: var(--fs-xs); }
+.space-kind { text-transform: capitalize; font-weight: 600; }
+.kind-personal { color: var(--st-ok); }
+.kind-assistant { color: var(--st-warn); }
+.kind-knowledge_base { color: var(--st-info); }
+.kind-system { color: var(--fg-muted); }
+.visibility-hidden { color: var(--fg-muted); font-style: italic; }
+.visibility-archived { color: var(--fg-muted); font-style: italic; }
 .snapshot-card, .session-card { border: var(--bw) solid var(--bd-subtle); border-radius: var(--r-xl); background: linear-gradient(180deg, var(--bg-input), color-mix(in oklab, var(--bg-input) 78%, black 22%)); padding: var(--sp-4); }
 .session-card.session-idle { opacity: 0.86; border-color: var(--bd-default); }
 .path-line { margin: var(--sp-1) 0 0; color: var(--fg-muted); font-family: var(--font-mono); overflow-wrap: anywhere; }

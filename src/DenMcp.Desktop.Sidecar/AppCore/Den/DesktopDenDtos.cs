@@ -39,6 +39,36 @@ public sealed record DenProject
     public string? UpdatedAt { get; init; }
 }
 
+public sealed record DenSpace
+{
+    [JsonPropertyName("id")]
+    public string Id { get; init; } = string.Empty;
+
+    [JsonPropertyName("name")]
+    public string Name { get; init; } = string.Empty;
+
+    [JsonPropertyName("kind")]
+    public string Kind { get; init; } = "project";
+
+    [JsonPropertyName("visibility")]
+    public string Visibility { get; init; } = "normal";
+
+    [JsonPropertyName("owner")]
+    public string? Owner { get; init; }
+
+    [JsonPropertyName("root_path")]
+    public string? RootPath { get; init; }
+
+    [JsonPropertyName("description")]
+    public string? Description { get; init; }
+
+    [JsonPropertyName("created_at")]
+    public string? CreatedAt { get; init; }
+
+    [JsonPropertyName("updated_at")]
+    public string? UpdatedAt { get; init; }
+}
+
 public sealed record DenAgentWorkspace
 {
     [JsonPropertyName("id")]

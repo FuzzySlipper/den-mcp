@@ -48,6 +48,12 @@ public sealed record OperatorStatus
     [JsonPropertyName("localSessionSnapshotCount")]
     public int LocalSessionSnapshotCount { get; init; }
 
+    [JsonPropertyName("spaceCount")]
+    public int SpaceCount { get; init; }
+
+    [JsonPropertyName("spaces")]
+    public IReadOnlyList<DenSpace> Spaces { get; init; } = [];
+
     public static OperatorStatus Starting(OperatorSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -272,6 +278,7 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
     private IReadOnlyList<DenAgentWorkspace> _workspaces = [];
     private IReadOnlyList<LocalGitSnapshot> _localSnapshots = [];
     private IReadOnlyList<LocalSessionSnapshot> _localSessionSnapshots = [];
+    private IReadOnlyList<DenSpace> _spaces = [];
 
     public OperatorRuntimeService(
         OperatorSettingsService settingsService,
@@ -560,11 +567,25 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
             }
         }
 
+        IReadOnlyList<DenSpace> spaces = [];
         if (denConnected)
         {
             try
             {
                 workspaces = await _den.ListAgentWorkspacesAsync(settings.DenBaseUrl, cancellationToken).ConfigureAwait(false);
+            }
+            catch (DenHttpClientException ex)
+            {
+                denConnected = false;
+                await RecordDenFailureAsync("degraded", ex.Message, NowString(), nextRetryAt, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        if (denConnected)
+        {
+            try
+            {
+                spaces = await _den.ListSpacesAsync(settings.DenBaseUrl, cancellationToken).ConfigureAwait(false);
             }
             catch (DenHttpClientException ex)
             {
@@ -684,6 +705,7 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
             _workspaces = workspaces;
             _localSnapshots = snapshots;
             _localSessionSnapshots = sessionSnapshots;
+            _spaces = spaces;
             var lastRunAt = NowString();
             _status = _status with
             {
@@ -793,8 +815,22 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
         await _events.PublishAsync(DesktopSidecarProtocol.OperatorStatusEvent, status, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<IReadOnlyList<DenSpace>> ListSpacesAsync(CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return _spaces;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     private OperatorStatus SyncStatus(OperatorStatus status)
     {
+        var nonProjectSpaces = _spaces.Where(s => s.Kind != "project").ToArray();
         return status with
         {
             SourceInstanceId = _settings.SourceInstanceId,
@@ -803,6 +839,8 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
             WorkspaceCount = _workspaces.Count,
             LocalSnapshotCount = _localSnapshots.Count,
             LocalSessionSnapshotCount = _localSessionSnapshots.Count,
+            SpaceCount = nonProjectSpaces.Length,
+            Spaces = nonProjectSpaces,
             Diagnostics = _diagnostics.ToArray(),
         };
     }

@@ -150,6 +150,18 @@ export interface ObserverStatus {
   nextRunAt: string | null;
 }
 
+export interface DenSpace {
+  id: string;
+  name: string;
+  kind: string;
+  visibility: string;
+  owner: string | null;
+  rootPath: string | null;
+  description: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
 export interface OperatorStatus {
   phase: string;
   denConnection: DenConnectionStatus;
@@ -163,6 +175,8 @@ export interface OperatorStatus {
   workspaceCount: number;
   localSnapshotCount: number;
   localSessionSnapshotCount: number;
+  spaceCount: number;
+  spaces: DenSpace[];
 }
 
 export type DesktopSnapshotState =

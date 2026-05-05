@@ -21,6 +21,7 @@ public class OperatorRuntimeServiceTests
                     [{"id":"den-mcp","name":"Den MCP","root_path":"{{Json(root)}}","description":null,"created_at":null,"updated_at":null}]
                     """),
                 JsonResponse("[]"),
+                JsonResponse("[]"),
                 JsonResponse("{}")),
             new FakeGitRunner(StatusOutput()));
 
@@ -55,6 +56,7 @@ public class OperatorRuntimeServiceTests
                     [{"id":"den-mcp","name":"Den MCP","root_path":"{{Json(root)}}","description":null,"created_at":null,"updated_at":null}]
                     """),
                 JsonResponse("[]"),
+                JsonResponse("[]"),
                 JsonResponse("{}")),
             new FakeGitRunner(StatusOutput()));
 
@@ -85,6 +87,7 @@ public class OperatorRuntimeServiceTests
             JsonResponse($$"""
                 [{"id":"den-mcp","name":"Den MCP","root_path":"{{Json(root)}}","description":null,"created_at":null,"updated_at":null}]
                 """),
+            JsonResponse("[]"),
             JsonResponse("[]"),
             JsonResponse("{}"),
             TransportFailure("Den is unavailable"));
@@ -174,6 +177,7 @@ public class OperatorRuntimeServiceTests
                     {"status":"healthy"}
                     """),
                 JsonResponse("[]"),
+                JsonResponse("[]"),
                 JsonResponse("[]")),
             new FakeGitRunner());
         await service.Runtime.StartAsync(runInitialRefresh: false, startBackgroundLoop: false);
@@ -195,6 +199,42 @@ public class OperatorRuntimeServiceTests
         Assert.Equal(OperatorSettings.MinChangedFiles, saved.MaxChangedFiles);
         Assert.Equal(saved, reloaded);
         Assert.Equal("connected", status.DenConnection.State);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_FetchesSpacesAndExposesNonProjectSpaceCount()
+    {
+        using var temp = TempDirectory.Create();
+        var root = temp.CreateDirectory("repo");
+        var service = CreateService(
+            temp,
+            new QueueHandler(
+                JsonResponse("""
+                    {"status":"healthy","version":"1.0"}
+                    """),
+                JsonResponse($$"""
+                    [{"id":"den-mcp","name":"Den MCP","root_path":"{{Json(root)}}","description":null,"created_at":null,"updated_at":null}]
+                    """),
+                JsonResponse("[]"),
+                JsonResponse("""
+                    [{"id":"personal-1","name":"Personal","kind":"personal","visibility":"normal"},{"id":"assistant-1","name":"Assistant","kind":"assistant","visibility":"normal"},{"id":"den-mcp","name":"Den MCP","kind":"project","visibility":"normal"}]
+                    """),
+                JsonResponse("{}")),
+            new FakeGitRunner(StatusOutput()));
+
+        await service.Runtime.StartAsync(runInitialRefresh: false, startBackgroundLoop: false);
+        await service.Runtime.RefreshAsync();
+
+        var status = await service.Runtime.GetStatusAsync();
+        var spaces = await service.Runtime.ListSpacesAsync();
+
+        Assert.Equal("connected", status.DenConnection.State);
+        Assert.Equal(2, status.SpaceCount);
+        Assert.Equal(2, status.Spaces.Count);
+        Assert.Contains(status.Spaces, s => s.Id == "personal-1" && s.Kind == "personal");
+        Assert.Contains(status.Spaces, s => s.Id == "assistant-1" && s.Kind == "assistant");
+        Assert.DoesNotContain(status.Spaces, s => s.Kind == "project");
+        Assert.Equal(3, spaces.Count);
     }
 
     [Fact]

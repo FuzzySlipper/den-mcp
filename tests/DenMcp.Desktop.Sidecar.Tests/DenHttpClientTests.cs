@@ -33,6 +33,25 @@ public class DenHttpClientTests
     }
 
     [Fact]
+    public async Task ListSpaces_ParsesSnakeCaseResponseAndHitsExpectedUrl()
+    {
+        var handler = new RecordingHandler(JsonResponse("""
+            [{"id":"personal-1","name":"Personal","kind":"personal","visibility":"normal","owner":"user-1","root_path":null,"description":null,"created_at":null,"updated_at":null},{"id":"assistant-1","name":"Assistant","kind":"assistant","visibility":"normal","owner":null,"root_path":null,"description":null,"created_at":null,"updated_at":null}]
+            """));
+        var client = new DenHttpClient(new HttpClient(handler));
+
+        var spaces = await client.ListSpacesAsync("http://den.test");
+
+        Assert.Equal(2, spaces.Count);
+        Assert.Equal("personal-1", spaces[0].Id);
+        Assert.Equal("personal", spaces[0].Kind);
+        Assert.Equal("assistant-1", spaces[1].Id);
+        Assert.Equal("assistant", spaces[1].Kind);
+        Assert.Equal("GET", handler.Requests[0].Method);
+        Assert.Equal("http://den.test/api/spaces", handler.Requests[0].Uri);
+    }
+
+    [Fact]
     public async Task ListAgentWorkspaces_AddsLimitAndParsesSnakeCaseResponse()
     {
         var handler = new RecordingHandler(JsonResponse("""
