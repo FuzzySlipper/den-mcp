@@ -18,7 +18,8 @@ public static class DocumentRoutes
                 Title = req.Title,
                 Content = req.Content,
                 DocType = req.DocType is not null ? EnumExtensions.ParseDocType(req.DocType) : DocType.Spec,
-                Tags = req.Tags
+                Tags = req.Tags,
+                Summary = req.Summary
             });
             return Results.Ok(doc);
         });
@@ -31,9 +32,9 @@ public static class DocumentRoutes
                 : Results.NotFound(new { error = $"Document '{slug}' not found" });
         });
 
-        group.MapGet("/", async (IDocumentRepository repo, string projectId, string? docType, string? tags) =>
+        group.MapGet("/", async (IDocumentRepository repo, string projectId, string? doc_type, string? tags) =>
         {
-            var parsedType = docType is not null ? EnumExtensions.ParseDocType(docType) : (DocType?)null;
+            var parsedType = doc_type is not null ? EnumExtensions.ParseDocType(doc_type) : (DocType?)null;
             var tagList = tags?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             var docs = await repo.ListAsync(projectId, parsedType, tagList);
             return Results.Ok(docs);
@@ -61,9 +62,9 @@ public static class DocumentRoutes
         });
 
         // Cross-project document listing
-        app.MapGet("/api/documents", async (IDocumentRepository repo, string? projectId, string? docType, string? tags) =>
+        app.MapGet("/api/documents", async (IDocumentRepository repo, string? projectId, string? doc_type, string? tags) =>
         {
-            var parsedType = docType is not null ? EnumExtensions.ParseDocType(docType) : (DocType?)null;
+            var parsedType = doc_type is not null ? EnumExtensions.ParseDocType(doc_type) : (DocType?)null;
             var tagList = tags?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             var docs = await repo.ListAsync(projectId, parsedType, tagList);
             return Results.Ok(docs);
@@ -76,4 +77,5 @@ public record StoreDocumentRequest(
     string Title,
     string Content,
     string? DocType = null,
-    List<string>? Tags = null);
+    List<string>? Tags = null,
+    string? Summary = null);

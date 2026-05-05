@@ -16,8 +16,9 @@ public sealed class DocumentTools
         [Description("Unique slug within the project, e.g. 'damage-system-spec'.")] string slug,
         [Description("Document title.")] string title,
         [Description("Document content (markdown).")] string content,
-        [Description("Document type: prd, spec, adr, convention, reference, note. Default: spec.")] string doc_type = "spec",
+        [Description("Document type: prd, spec, adr, convention, reference, note, memory. Default: spec.")] string doc_type = "spec",
         [Description("JSON array of string tags.")] string? tags = null,
+        [Description("Optional short summary for indexing and listing.")] string? summary = null,
         [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
         var parsedTags = tags is not null ? JsonSerializer.Deserialize<List<string>>(tags) : null;
@@ -28,7 +29,8 @@ public sealed class DocumentTools
             Title = title,
             Content = content,
             DocType = EnumExtensions.ParseDocType(doc_type),
-            Tags = parsedTags
+            Tags = parsedTags,
+            Summary = summary
         });
         return verbose
             ? JsonSerializer.Serialize(doc, JsonOpts.Default)

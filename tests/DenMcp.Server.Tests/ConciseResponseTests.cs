@@ -955,6 +955,27 @@ public class ConciseResponseTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task StoreDocument_ConciseDefault_IncludesSummaryWhenProvided()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IDocumentRepository>();
+
+        var json = await DocumentTools.StoreDocument(
+            repo,
+            ProjectId,
+            "summary-spec",
+            "Summary Spec",
+            content: "Content",
+            summary: "A concise summary",
+            verbose: false);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        Assert.Equal("A concise summary", root.GetProperty("doc_summary").GetString());
+    }
+
+    [Fact]
     public async Task StoreDocument_VerboseTrue_ReturnsFullRecord()
     {
         using var scope = _factory.Services.CreateScope();

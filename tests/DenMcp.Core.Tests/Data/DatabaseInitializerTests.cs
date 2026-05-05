@@ -678,4 +678,84 @@ public class DatabaseInitializerTests : IDisposable
                 Assert.Equal("normal", row.Visibility);
             });
     }
+
+    [Fact]
+    public async Task InitializeAsync_MigratesDocumentsToAddSummaryAndMemoryDocType()
+    {
+        await using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                CREATE TABLE projects (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT
+                );
+                INSERT INTO projects (id, name) VALUES ('proj', 'Project');
+                CREATE TABLE documents (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    slug TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    doc_type TEXT NOT NULL DEFAULT 'spec'
+                        CHECK (doc_type IN (
+                            'prd',
+                            'spec',
+                            'adr',
+                            'convention',
+                            'reference',
+                            'note'
+                        )),
+                    tags TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    UNIQUE(project_id, slug)
+                );
+                INSERT INTO documents (project_id, slug, title, content, doc_type, tags)
+                VALUES ('proj', 'old-doc', 'Old Doc', 'content', 'spec', '["tag1"]');
+                """;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var initializer = new DatabaseInitializer(_dbPath, NullLogger<DatabaseInitializer>.Instance);
+        await initializer.InitializeAsync();
+
+        await using var verify = new SqliteConnection(initializer.ConnectionString);
+        await verify.OpenAsync();
+
+        // Verify summary column exists
+        var columns = new List<string>();
+        await using var colCmd = verify.CreateCommand();
+        colCmd.CommandText = "PRAGMA table_info(documents)";
+        await using var colReader = await colCmd.ExecuteReaderAsync();
+        while (await colReader.ReadAsync())
+            columns.Add(colReader.GetString(1));
+        Assert.Contains("summary", columns);
+
+        // Verify old data preserved
+        await using var dataCmd = verify.CreateCommand();
+        dataCmd.CommandText = "SELECT slug, doc_type, tags FROM documents WHERE slug = 'old-doc'";
+        await using var dataReader = await dataCmd.ExecuteReaderAsync();
+        Assert.True(await dataReader.ReadAsync());
+        Assert.Equal("old-doc", dataReader.GetString(0));
+        Assert.Equal("spec", dataReader.GetString(1));
+        Assert.Equal("[\"tag1\"]", dataReader.GetString(2));
+
+        // Verify memory doc_type is accepted
+        await using var insertCmd = verify.CreateCommand();
+        insertCmd.CommandText = """
+            INSERT INTO documents (project_id, slug, title, content, doc_type, summary)
+            VALUES ('proj', 'memory-doc', 'Memory Doc', 'memory content', 'memory', 'A memory summary')
+            """;
+        await insertCmd.ExecuteNonQueryAsync();
+
+        await using var fetchCmd = verify.CreateCommand();
+        fetchCmd.CommandText = "SELECT doc_type, summary FROM documents WHERE slug = 'memory-doc'";
+        await using var fetchReader = await fetchCmd.ExecuteReaderAsync();
+        Assert.True(await fetchReader.ReadAsync());
+        Assert.Equal("memory", fetchReader.GetString(0));
+        Assert.Equal("A memory summary", fetchReader.GetString(1));
+    }
 }

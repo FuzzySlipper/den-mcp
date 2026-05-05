@@ -95,6 +95,22 @@ public class DocumentRepositoryTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Search_ReturnsSummary()
+    {
+        await _repo.UpsertAsync(new Document
+        {
+            ProjectId = "proj", Slug = "searchable-summary", Title = "Searchable Summary Doc",
+            Content = "The quick brown fox jumps over the lazy dog.",
+            Summary = "A fox story"
+        });
+
+        var results = await _repo.SearchAsync("fox");
+        Assert.Single(results);
+        Assert.Equal("searchable-summary", results[0].Slug);
+        Assert.Equal("A fox story", results[0].Summary);
+    }
+
+    [Fact]
     public async Task Search_FindsByTitle()
     {
         await _repo.UpsertAsync(new Document
@@ -164,5 +180,26 @@ public class DocumentRepositoryTests : IAsyncLifetime
         var clientDocs = await _repo.ListAsync("proj", tags: ["client"]);
         Assert.Single(clientDocs);
         Assert.Equal("Client Doc", clientDocs[0].Title);
+    }
+
+    [Fact]
+    public async Task Upsert_OverwritesSummary()
+    {
+        await _repo.UpsertAsync(new Document
+        {
+            ProjectId = "proj", Slug = "summary-overwrite", Title = "V1",
+            Content = "Original", Summary = "First summary"
+        });
+        var updated = await _repo.UpsertAsync(new Document
+        {
+            ProjectId = "proj", Slug = "summary-overwrite", Title = "V2",
+            Content = "Updated", Summary = "Second summary"
+        });
+
+        Assert.Equal("Second summary", updated.Summary);
+
+        var fetched = await _repo.GetAsync("proj", "summary-overwrite");
+        Assert.NotNull(fetched);
+        Assert.Equal("Second summary", fetched!.Summary);
     }
 }

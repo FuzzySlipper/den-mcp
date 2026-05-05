@@ -565,6 +565,9 @@ public sealed record DenDocumentSummary
     [JsonPropertyName("tags")]
     public List<string>? Tags { get; init; }
 
+    [JsonPropertyName("summary")]
+    public string? Summary { get; init; }
+
     [JsonPropertyName("created_at")]
     public string? CreatedAt { get; init; }
 
@@ -589,6 +592,9 @@ public sealed record DenDocumentDetail
     [JsonPropertyName("tags")]
     public List<string>? Tags { get; init; }
 
+    [JsonPropertyName("summary")]
+    public string? Summary { get; init; }
+
     [JsonPropertyName("created_at")]
     public string? CreatedAt { get; init; }
 
@@ -612,6 +618,9 @@ public sealed record StoreDocumentApiRequest
 
     [JsonPropertyName("tags")]
     public List<string>? Tags { get; init; }
+
+    [JsonPropertyName("summary")]
+    public string? Summary { get; init; }
 }
 
 // ── Collaboration API DTOs ────────────────────────────────────────────────
