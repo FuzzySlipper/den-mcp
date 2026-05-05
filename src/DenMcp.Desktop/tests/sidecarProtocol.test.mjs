@@ -44,6 +44,9 @@ test('sidecar schema bundle and representative frames are compatible with the ch
     'den_desktop.collaboration.send_compiled_response',
     'den_desktop.console.list_commands',
     'den_desktop.console.run_command',
+    'den_desktop.documents.get',
+    'den_desktop.documents.list',
+    'den_desktop.documents.store',
     'den_desktop.messages.get_snapshot',
     'den_desktop.operator.get_appearance_settings',
     'den_desktop.operator.get_latest_diff_snapshot',
@@ -66,9 +69,6 @@ test('sidecar schema bundle and representative frames are compatible with the ch
     'den_desktop.terminal.resize',
     'den_desktop.terminal.send_input',
     'den_desktop.terminal.terminate',
-    'den_desktop.documents.list',
-    'den_desktop.documents.get',
-    'den_desktop.documents.store',
   ]);
   assert.deepEqual(bundle.events.map((event) => event.event), [
     'den.app_agent.run_state_changed',

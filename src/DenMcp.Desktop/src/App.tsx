@@ -12,6 +12,7 @@ import { DiffPane } from './components/DiffPane';
 import { GitSnapshotPane } from './components/GitSnapshotPane';
 import { SessionPane } from './components/SessionPane';
 import { WorkspaceSummaryPane } from './components/WorkspaceSummaryPane';
+import { SpacesPane } from './components/SpacesPane';
 import { getLatestDiffSnapshot } from './desktop/sidecarBridgeApi';
 import type { DesktopDiffSnapshotLatestResult, GitFileStatus, LocalGitSnapshot, ShellAppearanceSettings } from './desktop/sidecarBridgeApi';
 import { useOperatorRuntime } from './desktop/useOperatorRuntime';
@@ -210,6 +211,7 @@ export function App() {
       </div>
 
       <WorkspaceSummaryPane snapshots={filteredSnapshots} activeKey={activeSnapshot ? snapshotKey(activeSnapshot) : null} onSelect={selectSnapshot} />
+      <SpacesPane spaces={runtime.status?.spaces ?? []} />
     </div>
   );
 

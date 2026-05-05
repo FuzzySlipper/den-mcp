@@ -37,6 +37,22 @@ public sealed class DenApiClient : IDisposable
         return await GetAsync<ProjectWithStats>($"api/projects/{Uri.EscapeDataString(id)}{query}");
     }
 
+    // Spaces
+    public async Task<List<Project>> ListSpacesAsync(string? kind = null, bool includeHidden = false, bool includeArchived = false)
+    {
+        var query = BuildQuery(
+            ("kind", kind),
+            ("includeHidden", includeHidden ? "true" : null),
+            ("includeArchived", includeArchived ? "true" : null));
+        return await GetAsync<List<Project>>($"api/spaces{query}");
+    }
+
+    public async Task<ProjectWithStats> GetSpaceAsync(string id, string? agent = null)
+    {
+        var query = agent is not null ? $"?agent={Uri.EscapeDataString(agent)}" : "";
+        return await GetAsync<ProjectWithStats>($"api/spaces/{Uri.EscapeDataString(id)}{query}");
+    }
+
     // Tasks
     public async Task<ProjectTask> CreateTaskAsync(string projectId, ProjectTask task, int[]? dependsOn = null)
     {

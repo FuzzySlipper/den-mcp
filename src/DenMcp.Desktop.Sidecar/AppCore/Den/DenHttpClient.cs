@@ -64,6 +64,27 @@ public sealed class DenHttpClient
         }
     }
 
+    public async Task<IReadOnlyList<DenSpace>> ListSpacesAsync(string baseUrl, CancellationToken cancellationToken = default)
+    {
+        var response = await SendAsync(
+            () => new HttpRequestMessage(HttpMethod.Get, JoinUrl(baseUrl, "/api/spaces")),
+            "Unable to fetch Den spaces",
+            cancellationToken).ConfigureAwait(false);
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new DenHttpClientException($"Den spaces request returned HTTP {(int)response.StatusCode}");
+            }
+
+            return await ReadJsonAsync<List<DenSpace>>(
+                response,
+                "Unable to parse Den spaces",
+                cancellationToken).ConfigureAwait(false);
+        }
+    }
+
     public async Task<IReadOnlyList<DenAgentWorkspace>> ListAgentWorkspacesAsync(string baseUrl, CancellationToken cancellationToken = default)
     {
         var url = BuildUrl(
