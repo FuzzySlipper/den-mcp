@@ -758,4 +758,83 @@ public class DatabaseInitializerTests : IDisposable
         Assert.Equal("memory", fetchReader.GetString(0));
         Assert.Equal("A memory summary", fetchReader.GetString(1));
     }
+
+    [Fact]
+    public async Task InitializeAsync_MigratesDocumentsWithoutLeavingAgentGuidanceForeignKeysOnTemporaryTable()
+    {
+        await using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                CREATE TABLE projects (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    root_path TEXT,
+                    description TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                INSERT INTO projects (id, name) VALUES ('proj', 'Project');
+                CREATE TABLE documents (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    slug TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    doc_type TEXT NOT NULL DEFAULT 'spec'
+                        CHECK (doc_type IN ('prd', 'spec', 'adr', 'convention', 'reference', 'note')),
+                    tags TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    UNIQUE(project_id, slug)
+                );
+                CREATE TABLE agent_guidance_entries (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id          TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    document_project_id TEXT NOT NULL,
+                    document_slug       TEXT NOT NULL,
+                    importance          TEXT NOT NULL DEFAULT 'important'
+                                        CHECK (importance IN ('required', 'important')),
+                    audience            TEXT,
+                    sort_order          INTEGER NOT NULL DEFAULT 0,
+                    notes               TEXT,
+                    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
+                    UNIQUE(project_id, document_project_id, document_slug),
+                    FOREIGN KEY (document_project_id, document_slug)
+                        REFERENCES documents(project_id, slug) ON DELETE CASCADE
+                );
+                INSERT INTO documents (project_id, slug, title, content, doc_type)
+                VALUES ('proj', 'guidance-doc', 'Guidance Doc', 'content', 'spec');
+                """;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var initializer = new DatabaseInitializer(_dbPath, NullLogger<DatabaseInitializer>.Instance);
+        await initializer.InitializeAsync();
+
+        await using var verify = new SqliteConnection(initializer.ConnectionString);
+        await verify.OpenAsync();
+
+        await using (var schemaCmd = verify.CreateCommand())
+        {
+            schemaCmd.CommandText = "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_guidance_entries'";
+            var schema = Assert.IsType<string>(await schemaCmd.ExecuteScalarAsync());
+            Assert.DoesNotContain("documents_old", schema, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("REFERENCES documents", schema, StringComparison.OrdinalIgnoreCase);
+        }
+
+        await using (var insertCmd = verify.CreateCommand())
+        {
+            insertCmd.CommandText = """
+                INSERT INTO agent_guidance_entries (
+                    project_id, document_project_id, document_slug, importance
+                ) VALUES (
+                    'proj', 'proj', 'guidance-doc', 'required'
+                )
+                """;
+            await insertCmd.ExecuteNonQueryAsync();
+        }
+    }
 }

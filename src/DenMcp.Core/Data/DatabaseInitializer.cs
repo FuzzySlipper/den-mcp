@@ -826,6 +826,7 @@ public sealed class DatabaseInitializer
 
     private async Task RunMigrationsAsync(SqliteConnection connection)
     {
+        await EnsureDocumentsSummaryAndMemoryDocTypeAsync(connection);
         await EnsureAgentGuidanceSchemaAsync(connection);
         await EnsureAgentRunSchemaAsync(connection);
         await EnsureConsolidationTopicSchemaAsync(connection);
@@ -834,7 +835,6 @@ public sealed class DatabaseInitializer
         await EnsureAgentWorkspaceSchemaAsync(connection);
         await EnsureDesktopSnapshotSchemaAsync(connection);
         await EnsureBlackboardSchemaAsync(connection);
-        await EnsureDocumentsSummaryAndMemoryDocTypeAsync(connection);
 
         // Add session_id column to agent_sessions if it doesn't exist.
         // SQLite has no ALTER TABLE ... ADD COLUMN IF NOT EXISTS,
@@ -972,6 +972,8 @@ public sealed class DatabaseInitializer
             """;
         await tableCmd.ExecuteNonQueryAsync();
 
+        await EnsureAgentGuidanceDocumentForeignKeyAsync(connection);
+
         await EnsureIndexAsync(connection, "idx_agent_guidance_scope_order",
             """
             CREATE INDEX IF NOT EXISTS idx_agent_guidance_scope_order
@@ -982,6 +984,67 @@ public sealed class DatabaseInitializer
             CREATE INDEX IF NOT EXISTS idx_agent_guidance_document
             ON agent_guidance_entries(document_project_id, document_slug)
             """);
+    }
+
+    private static async Task EnsureAgentGuidanceDocumentForeignKeyAsync(SqliteConnection connection)
+    {
+        await using var schemaCmd = connection.CreateCommand();
+        schemaCmd.CommandText = "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_guidance_entries'";
+        var schema = (string?)await schemaCmd.ExecuteScalarAsync();
+        if (schema is null || !schema.Contains("documents_old", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        await using (var fkOff = connection.CreateCommand())
+        {
+            fkOff.CommandText = "PRAGMA foreign_keys = OFF;";
+            await fkOff.ExecuteNonQueryAsync();
+        }
+
+        try
+        {
+            await using var migrateCmd = connection.CreateCommand();
+            migrateCmd.CommandText = """
+                BEGIN;
+
+                CREATE TABLE agent_guidance_entries_new (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id          TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    document_project_id TEXT NOT NULL,
+                    document_slug       TEXT NOT NULL,
+                    importance          TEXT NOT NULL DEFAULT 'important'
+                                        CHECK (importance IN ('required', 'important')),
+                    audience            TEXT,
+                    sort_order          INTEGER NOT NULL DEFAULT 0,
+                    notes               TEXT,
+                    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
+                    UNIQUE(project_id, document_project_id, document_slug),
+                    FOREIGN KEY (document_project_id, document_slug)
+                        REFERENCES documents(project_id, slug) ON DELETE CASCADE
+                );
+
+                INSERT INTO agent_guidance_entries_new (
+                    id, project_id, document_project_id, document_slug, importance,
+                    audience, sort_order, notes, created_at, updated_at
+                )
+                SELECT
+                    id, project_id, document_project_id, document_slug, importance,
+                    audience, sort_order, notes, created_at, updated_at
+                FROM agent_guidance_entries;
+
+                DROP TABLE agent_guidance_entries;
+                ALTER TABLE agent_guidance_entries_new RENAME TO agent_guidance_entries;
+
+                COMMIT;
+                """;
+            await migrateCmd.ExecuteNonQueryAsync();
+        }
+        finally
+        {
+            await using var fkOn = connection.CreateCommand();
+            fkOn.CommandText = "PRAGMA foreign_keys = ON;";
+            await fkOn.ExecuteNonQueryAsync();
+        }
     }
 
     private static async Task EnsureAgentRunSchemaAsync(SqliteConnection connection)
