@@ -774,6 +774,52 @@ public sealed class DatabaseInitializer
             ON consolidation_topics(owning_space);
         CREATE INDEX IF NOT EXISTS idx_consolidation_topics_slug_status
             ON consolidation_topics(slug, status);
+
+        ------------------------------------------------------------
+        -- TOPIC CLIP QUEUE
+        ------------------------------------------------------------
+        CREATE TABLE IF NOT EXISTS topic_clip_queue_items (
+            id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_agent           TEXT NOT NULL,
+            source_session_id      TEXT,
+            source_conversation_id TEXT,
+            source_message_id      INTEGER,
+            owning_space           TEXT REFERENCES projects(id) ON DELETE SET NULL,
+            canonical_topic_slugs  TEXT NOT NULL,
+            raw_content            TEXT NOT NULL,
+            status                 TEXT NOT NULL DEFAULT 'pending'
+                                   CHECK (status IN ('pending', 'claimed', 'processed', 'discarded', 'escalated')),
+            claim_key              TEXT,
+            claimed_at             TEXT,
+            claim_expires_at       TEXT,
+            created_at             TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at             TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_topic_clips_status_created
+            ON topic_clip_queue_items(status, created_at);
+        CREATE INDEX IF NOT EXISTS idx_topic_clips_claim_key
+            ON topic_clip_queue_items(claim_key) WHERE claim_key IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_topic_clips_owning_space
+            ON topic_clip_queue_items(owning_space);
+        CREATE INDEX IF NOT EXISTS idx_topic_clips_source_agent
+            ON topic_clip_queue_items(source_agent);
+
+        ------------------------------------------------------------
+        -- CURATION DECISIONS
+        ------------------------------------------------------------
+        CREATE TABLE IF NOT EXISTS curation_decisions (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            clip_id     INTEGER NOT NULL REFERENCES topic_clip_queue_items(id) ON DELETE CASCADE,
+            decision    TEXT NOT NULL
+                        CHECK (decision IN ('processed', 'discarded', 'escalated')),
+            reason      TEXT,
+            decided_by  TEXT NOT NULL,
+            decided_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_curation_decisions_clip
+            ON curation_decisions(clip_id);
         """;
 
     private async Task RunMigrationsAsync(SqliteConnection connection)
@@ -781,6 +827,7 @@ public sealed class DatabaseInitializer
         await EnsureAgentGuidanceSchemaAsync(connection);
         await EnsureAgentRunSchemaAsync(connection);
         await EnsureConsolidationTopicSchemaAsync(connection);
+        await EnsureTopicClipQueueSchemaAsync(connection);
         await EnsureCollaborationSchemaAsync(connection);
         await EnsureAgentWorkspaceSchemaAsync(connection);
         await EnsureDesktopSnapshotSchemaAsync(connection);
@@ -1547,6 +1594,60 @@ public sealed class DatabaseInitializer
             "CREATE INDEX IF NOT EXISTS idx_consolidation_topics_owning_space ON consolidation_topics(owning_space)");
         await EnsureIndexAsync(connection, "idx_consolidation_topics_slug_status",
             "CREATE INDEX IF NOT EXISTS idx_consolidation_topics_slug_status ON consolidation_topics(slug, status)");
+    }
+
+    private static async Task EnsureTopicClipQueueSchemaAsync(SqliteConnection connection)
+    {
+        await using var tableCmd = connection.CreateCommand();
+        tableCmd.CommandText = """
+            CREATE TABLE IF NOT EXISTS topic_clip_queue_items (
+                id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_agent           TEXT NOT NULL,
+                source_session_id      TEXT,
+                source_conversation_id TEXT,
+                source_message_id      INTEGER,
+                owning_space           TEXT REFERENCES projects(id) ON DELETE SET NULL,
+                canonical_topic_slugs  TEXT NOT NULL,
+                raw_content            TEXT NOT NULL,
+                status                 TEXT NOT NULL DEFAULT 'pending'
+                                       CHECK (status IN ('pending', 'claimed', 'processed', 'discarded', 'escalated')),
+                claim_key              TEXT,
+                claimed_at             TEXT,
+                claim_expires_at       TEXT,
+                created_at             TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at             TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """;
+        await tableCmd.ExecuteNonQueryAsync();
+
+        await EnsureIndexAsync(connection, "idx_topic_clips_status_created",
+            "CREATE INDEX IF NOT EXISTS idx_topic_clips_status_created ON topic_clip_queue_items(status, created_at)");
+        await EnsureIndexAsync(connection, "idx_topic_clips_claim_key",
+            """
+            CREATE INDEX IF NOT EXISTS idx_topic_clips_claim_key
+            ON topic_clip_queue_items(claim_key) WHERE claim_key IS NOT NULL
+            """);
+        await EnsureIndexAsync(connection, "idx_topic_clips_owning_space",
+            "CREATE INDEX IF NOT EXISTS idx_topic_clips_owning_space ON topic_clip_queue_items(owning_space)");
+        await EnsureIndexAsync(connection, "idx_topic_clips_source_agent",
+            "CREATE INDEX IF NOT EXISTS idx_topic_clips_source_agent ON topic_clip_queue_items(source_agent)");
+
+        await using var decisionsCmd = connection.CreateCommand();
+        decisionsCmd.CommandText = """
+            CREATE TABLE IF NOT EXISTS curation_decisions (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                clip_id     INTEGER NOT NULL REFERENCES topic_clip_queue_items(id) ON DELETE CASCADE,
+                decision    TEXT NOT NULL
+                            CHECK (decision IN ('processed', 'discarded', 'escalated')),
+                reason      TEXT,
+                decided_by  TEXT NOT NULL,
+                decided_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """;
+        await decisionsCmd.ExecuteNonQueryAsync();
+
+        await EnsureIndexAsync(connection, "idx_curation_decisions_clip",
+            "CREATE INDEX IF NOT EXISTS idx_curation_decisions_clip ON curation_decisions(clip_id)");
     }
 
     private static async Task TryAddColumnAsync(SqliteConnection connection, string table, string column, string columnDefinition)
