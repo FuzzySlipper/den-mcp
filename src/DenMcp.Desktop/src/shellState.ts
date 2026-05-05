@@ -168,3 +168,61 @@ export function applyShellDataAttributes(target: AttributeTarget, state: ShellSt
     target.setAttribute(name, value);
   }
 }
+
+/** Parse an Electron accelerator string into modifier/key expectations. */
+function parseAccelerator(accelerator: string): { key: string; ctrl: boolean; meta: boolean; alt: boolean; shift: boolean } {
+  const parts = accelerator.split('+').map((p) => p.trim());
+  const key = parts.pop()!;
+  const modifiers = new Set(parts);
+  const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+  return {
+    key,
+    ctrl: modifiers.has('Ctrl') || (!isMac && modifiers.has('CommandOrControl')),
+    meta: modifiers.has('Command') || (isMac && modifiers.has('CommandOrControl')),
+    alt: modifiers.has('Alt'),
+    shift: modifiers.has('Shift'),
+  };
+}
+
+/**
+ * Match an Electron accelerator string against a DOM KeyboardEvent.
+ *
+ * Returns true when the event's modifiers and key exactly match the
+ * accelerator. Browser_Back accelerators always return false because
+ * they are handled via the app-command event, not keyboard events.
+ */
+export function acceleratorMatchesEvent(accelerator: string, event: KeyboardEvent): boolean {
+  if (!accelerator || accelerator === 'Browser_Back') return false;
+
+  const parsed = parseAccelerator(accelerator);
+
+  if (event.ctrlKey !== parsed.ctrl) return false;
+  if (event.metaKey !== parsed.meta) return false;
+  if (event.altKey !== parsed.alt) return false;
+  if (event.shiftKey !== parsed.shift) return false;
+
+  const domToElectron: Record<string, string> = {
+    ArrowUp: 'Up',
+    ArrowDown: 'Down',
+    ArrowLeft: 'Left',
+    ArrowRight: 'Right',
+    ' ': 'Space',
+    Escape: 'Escape',
+    Enter: 'Enter',
+    Tab: 'Tab',
+    Backspace: 'Backspace',
+    Delete: 'Delete',
+    Home: 'Home',
+    End: 'End',
+    PageUp: 'PageUp',
+    PageDown: 'PageDown',
+  };
+
+  const eventKey = domToElectron[event.key] ?? event.key;
+
+  if (parsed.key.length === 1 && parsed.key !== '`') {
+    return eventKey.toUpperCase() === parsed.key.toUpperCase();
+  }
+
+  return eventKey === parsed.key;
+}

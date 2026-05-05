@@ -16,7 +16,7 @@ import { SpacesPane } from './components/SpacesPane';
 import { getLatestDiffSnapshot } from './desktop/sidecarBridgeApi';
 import type { DesktopDiffSnapshotLatestResult, GitFileStatus, LocalGitSnapshot, ShellAppearanceSettings } from './desktop/sidecarBridgeApi';
 import { useOperatorRuntime } from './desktop/useOperatorRuntime';
-import { applyShellDataAttributes, defaultShellState, loadShellState, nextConsoleMode, parseShellState, saveShellState, ShellState, ShellTabId } from './shellState';
+import { applyShellDataAttributes, defaultShellState, loadShellState, parseShellState, saveShellState, ShellState, ShellTabId } from './shellState';
 import { GLOBAL_PROJECT_ID } from './railView';
 import { type TaskStatusFilter } from './tasksDashboardView';
 import { buildLatestDiffSnapshotRequest, snapshotKey } from './snapshotView';
@@ -84,17 +84,6 @@ export function App() {
       saveShellState(window.localStorage, shellState);
     }
   }, [shellState, runtime.saveAppearanceSettings]);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === '`') {
-        event.preventDefault();
-        setShellState((current) => ({ ...current, consoleMode: nextConsoleMode(current.consoleMode) }));
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
 
   const activeSnapshot = useMemo(
     () => runtime.snapshots.find((snapshot) => snapshotKey(snapshot) === activeSnapshotKey) ?? runtime.snapshots[0] ?? null,
