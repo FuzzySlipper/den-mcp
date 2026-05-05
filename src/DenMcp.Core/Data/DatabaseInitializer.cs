@@ -38,6 +38,8 @@ public sealed class DatabaseInitializer
         // Migrations for existing databases
         await RunMigrationsAsync(connection);
 
+        await EnsureGlobalProjectAsync(connection);
+
         _logger.LogInformation("Database initialized at {ConnectionString}", _connectionString);
     }
 
@@ -46,16 +48,21 @@ public sealed class DatabaseInitializer
         -- PROJECTS
         ------------------------------------------------------------
         CREATE TABLE IF NOT EXISTS projects (
-            id          TEXT PRIMARY KEY,
-            name        TEXT NOT NULL,
-            root_path   TEXT,
-            description TEXT,
-            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-            updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            id            TEXT PRIMARY KEY,
+            name          TEXT NOT NULL,
+            kind          TEXT NOT NULL DEFAULT 'project'
+                          CHECK (kind IN ('project', 'personal', 'assistant', 'knowledge_base', 'system')),
+            visibility    TEXT NOT NULL DEFAULT 'normal'
+                          CHECK (visibility IN ('normal', 'hidden', 'archived')),
+            owner         TEXT,
+            root_path     TEXT,
+            description   TEXT,
+            settings_json TEXT,
+            created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
-        INSERT OR IGNORE INTO projects (id, name, description)
-        VALUES ('_global', 'Global', 'Cross-project documents and discussions');
+
 
         ------------------------------------------------------------
         -- TASKS
@@ -807,6 +814,13 @@ public sealed class DatabaseInitializer
             "INTEGER NOT NULL DEFAULT 0");
         await TryAddColumnAsync(connection, "agent_runs", "operator_events_json",
             "TEXT");
+        await TryAddColumnAsync(connection, "projects", "kind",
+            "TEXT NOT NULL DEFAULT 'project' CHECK (kind IN ('project', 'personal', 'assistant', 'knowledge_base', 'system'))");
+        await TryAddColumnAsync(connection, "projects", "visibility",
+            "TEXT NOT NULL DEFAULT 'normal' CHECK (visibility IN ('normal', 'hidden', 'archived'))");
+        await TryAddColumnAsync(connection, "projects", "owner", "TEXT");
+        await TryAddColumnAsync(connection, "projects", "settings_json", "TEXT");
+        await BackfillProjectSpaceMetadataAsync(connection);
         await EnsureIndexAsync(connection, "idx_messages_project_intent",
             "CREATE INDEX IF NOT EXISTS idx_messages_project_intent ON messages(project_id, intent)");
         await EnsureIndexAsync(connection, "idx_agent_bindings_project_status",
@@ -1446,6 +1460,16 @@ public sealed class DatabaseInitializer
         }
     }
 
+    private static async Task EnsureGlobalProjectAsync(SqliteConnection connection)
+    {
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            INSERT OR IGNORE INTO projects (id, name, kind, visibility, description)
+            VALUES ('_global', 'Global', 'system', 'hidden', 'Cross-project documents and discussions')
+            """;
+        await cmd.ExecuteNonQueryAsync();
+    }
+
     private static async Task EnsureBlackboardSchemaAsync(SqliteConnection connection)
     {
         await using var tableCmd = connection.CreateCommand();
@@ -1565,6 +1589,17 @@ public sealed class DatabaseInitializer
             "Expired {TerminalTaskDispatchCount} historical dispatches for terminal tasks and {SupersededDispatchCount} superseded task-target dispatches during startup backfill",
             expiredTerminalTaskDispatches,
             expiredSupersededDispatches);
+    }
+
+    private static async Task BackfillProjectSpaceMetadataAsync(SqliteConnection connection)
+    {
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            UPDATE projects
+            SET kind = 'system', visibility = 'hidden'
+            WHERE id = '_global' AND (kind = 'project' OR visibility = 'normal')
+            """;
+        await cmd.ExecuteNonQueryAsync();
     }
 
     private async Task BackfillAgentStreamDedupAsync(SqliteConnection connection)
