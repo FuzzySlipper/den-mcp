@@ -258,6 +258,19 @@ public static class ConciseResponse
         });
     }
 
+    // Space operations
+
+    public static string CreatedSpace(Project project)
+    {
+        return Serialize(new
+        {
+            summary = $"created space '{project.Id}' ({project.Kind})",
+            id = project.Id,
+            name = project.Name,
+            kind = project.Kind
+        });
+    }
+
     // Agent stream operations
 
     public static string SentAgentStreamMessage(AgentStreamMessageCreateResult result)

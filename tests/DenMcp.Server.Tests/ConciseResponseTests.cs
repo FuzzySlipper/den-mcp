@@ -791,6 +791,134 @@ public class ConciseResponseTests : IAsyncLifetime
         Assert.Equal("Full description visible", root.GetProperty("description").GetString());
     }
 
+    // ─── Space tools ─────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task CreateSpace_ConciseDefault_ReturnsSummaryWithIdAndKind()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IProjectRepository>();
+
+        var json = await SpaceTools.CreateSpace(
+            repo,
+            "assistant-space-1",
+            "Assistant Space 1",
+            kind: "assistant",
+            description: "A very long description that should not appear in concise output. ".PadRight(500, 'x'),
+            verbose: false);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        var summary = root.GetProperty("summary").GetString()!;
+        Assert.Contains("created space 'assistant-space-1'", summary);
+        Assert.Contains("assistant", summary);
+
+        Assert.Equal("assistant-space-1", root.GetProperty("id").GetString());
+        Assert.Equal("Assistant Space 1", root.GetProperty("name").GetString());
+        Assert.Equal("assistant", root.GetProperty("kind").GetString());
+
+        // Must NOT contain the description (absent property)
+        Assert.False(root.TryGetProperty("description", out _));
+    }
+
+    [Fact]
+    public async Task CreateSpace_VerboseTrue_ReturnsFullRecord()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IProjectRepository>();
+
+        var json = await SpaceTools.CreateSpace(
+            repo,
+            "verbose-space-1",
+            "Verbose Space",
+            kind: "knowledge_base",
+            description: "Full description visible",
+            verbose: true);
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        Assert.Equal("verbose-space-1", root.GetProperty("id").GetString());
+        Assert.Equal("Verbose Space", root.GetProperty("name").GetString());
+        Assert.Equal("knowledge_base", root.GetProperty("kind").GetString());
+        Assert.Equal("Full description visible", root.GetProperty("description").GetString());
+    }
+
+    [Fact]
+    public async Task ListSpaces_DefaultsToVisibleAllKinds()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IProjectRepository>();
+
+        await repo.CreateAsync(new Project { Id = "proj-visible", Name = "Visible Project" });
+        await repo.CreateAsync(new Project { Id = "proj-hidden", Name = "Hidden Project", Visibility = "hidden" });
+        await repo.CreateAsync(new Project { Id = "assistant-1", Name = "Assistant", Kind = "assistant" });
+
+        var json = await SpaceTools.ListSpaces(repo);
+        using var doc = JsonDocument.Parse(json);
+        var ids = doc.RootElement.EnumerateArray().Select(e => e.GetProperty("id").GetString()).ToHashSet();
+
+        Assert.Contains("proj-visible", ids);
+        Assert.Contains("assistant-1", ids);
+        Assert.DoesNotContain("proj-hidden", ids);
+    }
+
+    [Fact]
+    public async Task ListSpaces_KindFilter()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IProjectRepository>();
+
+        await repo.CreateAsync(new Project { Id = "proj-visible", Name = "Visible Project" });
+        await repo.CreateAsync(new Project { Id = "assistant-1", Name = "Assistant", Kind = "assistant" });
+
+        var json = await SpaceTools.ListSpaces(repo, kind: "assistant");
+        using var doc = JsonDocument.Parse(json);
+        var ids = doc.RootElement.EnumerateArray().Select(e => e.GetProperty("id").GetString()).ToHashSet();
+
+        Assert.Contains("assistant-1", ids);
+        Assert.DoesNotContain("proj-visible", ids);
+    }
+
+    [Fact]
+    public async Task ListProjects_DefaultsToProjectKindOnly()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IProjectRepository>();
+
+        await repo.CreateAsync(new Project { Id = "proj-visible", Name = "Visible Project" });
+        await repo.CreateAsync(new Project { Id = "assistant-1", Name = "Assistant", Kind = "assistant" });
+        await repo.CreateAsync(new Project { Id = "personal-1", Name = "Personal", Kind = "personal" });
+        await repo.CreateAsync(new Project { Id = "kb-1", Name = "Knowledge Base", Kind = "knowledge_base" });
+        await repo.CreateAsync(new Project { Id = "system-1", Name = "System", Kind = "system" });
+
+        var json = await ProjectTools.ListProjects(repo);
+        using var doc = JsonDocument.Parse(json);
+        var ids = doc.RootElement.EnumerateArray().Select(e => e.GetProperty("id").GetString()).ToHashSet();
+
+        Assert.Contains("proj-visible", ids);
+        Assert.DoesNotContain("assistant-1", ids);
+        Assert.DoesNotContain("personal-1", ids);
+        Assert.DoesNotContain("kb-1", ids);
+        Assert.DoesNotContain("system-1", ids);
+    }
+
+    [Fact]
+    public async Task GetSpace_ReturnsStats()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IProjectRepository>();
+        await repo.CreateAsync(new Project { Id = "space-get-test", Name = "Space Get Test", Kind = "assistant" });
+
+        var json = await SpaceTools.GetSpace(repo, "space-get-test");
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        Assert.Equal("space-get-test", root.GetProperty("project").GetProperty("id").GetString());
+        Assert.Equal("assistant", root.GetProperty("project").GetProperty("kind").GetString());
+    }
+
     // ─── Store document ──────────────────────────────────────────────────
 
     [Fact]

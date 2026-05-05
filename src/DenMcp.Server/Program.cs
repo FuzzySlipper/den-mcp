@@ -127,6 +127,7 @@ app.MapGet("/health", () => Results.Ok(new
 
 // REST API
 app.MapProjectRoutes();
+app.MapSpaceRoutes();
 app.MapTaskRoutes();
 app.MapMessageRoutes();
 app.MapDocumentRoutes();
