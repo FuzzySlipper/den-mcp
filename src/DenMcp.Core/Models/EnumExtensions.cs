@@ -32,6 +32,7 @@ public static class EnumExtensions
         DocType.Convention => "convention",
         DocType.Reference => "reference",
         DocType.Note => "note",
+        DocType.Memory => "memory",
         _ => throw new ArgumentOutOfRangeException(nameof(docType), docType, null)
     };
 
@@ -43,6 +44,7 @@ public static class EnumExtensions
         "convention" => DocType.Convention,
         "reference" => DocType.Reference,
         "note" => DocType.Note,
+        "memory" => DocType.Memory,
         _ => throw new ArgumentException($"Unknown doc type: {value}", nameof(value))
     };
 

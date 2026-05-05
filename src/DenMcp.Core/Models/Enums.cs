@@ -17,7 +17,8 @@ public enum DocType
     Adr,
     Convention,
     Reference,
-    Note
+    Note,
+    Memory
 }
 
 public enum AgentGuidanceImportance

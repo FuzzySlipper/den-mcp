@@ -177,9 +177,11 @@ public sealed class DatabaseInitializer
                             'adr',
                             'convention',
                             'reference',
-                            'note'
+                            'note',
+                            'memory'
                         )),
             tags        TEXT,
+            summary     TEXT,
             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
             UNIQUE(project_id, slug)
@@ -824,6 +826,7 @@ public sealed class DatabaseInitializer
 
     private async Task RunMigrationsAsync(SqliteConnection connection)
     {
+        await EnsureDocumentsSummaryAndMemoryDocTypeAsync(connection);
         await EnsureAgentGuidanceSchemaAsync(connection);
         await EnsureAgentRunSchemaAsync(connection);
         await EnsureConsolidationTopicSchemaAsync(connection);
@@ -969,6 +972,8 @@ public sealed class DatabaseInitializer
             """;
         await tableCmd.ExecuteNonQueryAsync();
 
+        await EnsureAgentGuidanceDocumentForeignKeyAsync(connection);
+
         await EnsureIndexAsync(connection, "idx_agent_guidance_scope_order",
             """
             CREATE INDEX IF NOT EXISTS idx_agent_guidance_scope_order
@@ -979,6 +984,67 @@ public sealed class DatabaseInitializer
             CREATE INDEX IF NOT EXISTS idx_agent_guidance_document
             ON agent_guidance_entries(document_project_id, document_slug)
             """);
+    }
+
+    private static async Task EnsureAgentGuidanceDocumentForeignKeyAsync(SqliteConnection connection)
+    {
+        await using var schemaCmd = connection.CreateCommand();
+        schemaCmd.CommandText = "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_guidance_entries'";
+        var schema = (string?)await schemaCmd.ExecuteScalarAsync();
+        if (schema is null || !schema.Contains("documents_old", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        await using (var fkOff = connection.CreateCommand())
+        {
+            fkOff.CommandText = "PRAGMA foreign_keys = OFF;";
+            await fkOff.ExecuteNonQueryAsync();
+        }
+
+        try
+        {
+            await using var migrateCmd = connection.CreateCommand();
+            migrateCmd.CommandText = """
+                BEGIN;
+
+                CREATE TABLE agent_guidance_entries_new (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id          TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    document_project_id TEXT NOT NULL,
+                    document_slug       TEXT NOT NULL,
+                    importance          TEXT NOT NULL DEFAULT 'important'
+                                        CHECK (importance IN ('required', 'important')),
+                    audience            TEXT,
+                    sort_order          INTEGER NOT NULL DEFAULT 0,
+                    notes               TEXT,
+                    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
+                    UNIQUE(project_id, document_project_id, document_slug),
+                    FOREIGN KEY (document_project_id, document_slug)
+                        REFERENCES documents(project_id, slug) ON DELETE CASCADE
+                );
+
+                INSERT INTO agent_guidance_entries_new (
+                    id, project_id, document_project_id, document_slug, importance,
+                    audience, sort_order, notes, created_at, updated_at
+                )
+                SELECT
+                    id, project_id, document_project_id, document_slug, importance,
+                    audience, sort_order, notes, created_at, updated_at
+                FROM agent_guidance_entries;
+
+                DROP TABLE agent_guidance_entries;
+                ALTER TABLE agent_guidance_entries_new RENAME TO agent_guidance_entries;
+
+                COMMIT;
+                """;
+            await migrateCmd.ExecuteNonQueryAsync();
+        }
+        finally
+        {
+            await using var fkOn = connection.CreateCommand();
+            fkOn.CommandText = "PRAGMA foreign_keys = ON;";
+            await fkOn.ExecuteNonQueryAsync();
+        }
     }
 
     private static async Task EnsureAgentRunSchemaAsync(SqliteConnection connection)
@@ -1810,5 +1876,93 @@ public sealed class DatabaseInitializer
               )
             """;
         return await cmd.ExecuteNonQueryAsync();
+    }
+
+    private static async Task EnsureDocumentsSummaryAndMemoryDocTypeAsync(SqliteConnection connection)
+    {
+        await using var schemaCmd = connection.CreateCommand();
+        schemaCmd.CommandText = "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'documents'";
+        var schema = (string?)await schemaCmd.ExecuteScalarAsync();
+        if (schema is not null && schema.Contains("'memory'", StringComparison.Ordinal) && schema.Contains("summary", StringComparison.Ordinal))
+            return;
+
+        // Disable foreign keys temporarily; dropping and recreating the content table
+        // avoids leaving FK references pointing to an intermediate temporary name.
+        await using (var fkOff = connection.CreateCommand())
+        {
+            fkOff.CommandText = "PRAGMA foreign_keys = OFF;";
+            await fkOff.ExecuteNonQueryAsync();
+        }
+
+        try
+        {
+            await using var migrateCmd = connection.CreateCommand();
+            migrateCmd.CommandText = """
+                BEGIN;
+
+                DROP TRIGGER IF EXISTS documents_ai;
+                DROP TRIGGER IF EXISTS documents_ad;
+                DROP TRIGGER IF EXISTS documents_au;
+
+                CREATE TABLE documents_new (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    slug        TEXT NOT NULL,
+                    title       TEXT NOT NULL,
+                    content     TEXT NOT NULL,
+                    doc_type    TEXT NOT NULL DEFAULT 'spec'
+                                CHECK (doc_type IN (
+                                    'prd',
+                                    'spec',
+                                    'adr',
+                                    'convention',
+                                    'reference',
+                                    'note',
+                                    'memory'
+                                )),
+                    tags        TEXT,
+                    summary     TEXT,
+                    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                    UNIQUE(project_id, slug)
+                );
+
+                INSERT INTO documents_new (id, project_id, slug, title, content, doc_type, tags, created_at, updated_at)
+                SELECT id, project_id, slug, title, content, doc_type, tags, created_at, updated_at
+                FROM documents;
+
+                DROP TABLE documents;
+
+                ALTER TABLE documents_new RENAME TO documents;
+
+                CREATE INDEX IF NOT EXISTS idx_documents_project_type ON documents(project_id, doc_type);
+
+                CREATE TRIGGER documents_ai AFTER INSERT ON documents BEGIN
+                    INSERT INTO documents_fts(rowid, title, content, tags)
+                    VALUES (new.id, new.title, new.content, new.tags);
+                END;
+
+                CREATE TRIGGER documents_ad AFTER DELETE ON documents BEGIN
+                    INSERT INTO documents_fts(documents_fts, rowid, title, content, tags)
+                    VALUES ('delete', old.id, old.title, old.content, old.tags);
+                END;
+
+                CREATE TRIGGER documents_au AFTER UPDATE ON documents BEGIN
+                    INSERT INTO documents_fts(documents_fts, rowid, title, content, tags)
+                    VALUES ('delete', old.id, old.title, old.content, old.tags);
+                    INSERT INTO documents_fts(rowid, title, content, tags)
+                    VALUES (new.id, new.title, new.content, new.tags);
+                END;
+
+                COMMIT;
+                """;
+            await migrateCmd.ExecuteNonQueryAsync();
+        }
+        finally
+        {
+            await using var fkOn = connection.CreateCommand();
+            fkOn.CommandText = "PRAGMA foreign_keys = ON;";
+            await fkOn.ExecuteNonQueryAsync();
+        }
     }
 }

@@ -117,6 +117,84 @@ public sealed class DocumentApiTests : IAsyncLifetime
         Assert.Equal(new[] { "ops" }, fetched.Tags);
     }
 
+    [Fact]
+    public async Task RestDocuments_MemoryDocTypeWithSummary_RoundTrips()
+    {
+        var createResponse = await _client.PostAsJsonAsync($"/api/projects/{_projectId}/documents", new
+        {
+            slug = "hermes-memory",
+            title = "Hermes Memory",
+            content = "# Long memory content\n\nDetails here...",
+            doc_type = "memory",
+            tags = new[] { "hermes", "context", "user-preference" },
+            summary = "Short indexable summary of the memory"
+        });
+        createResponse.EnsureSuccessStatusCode();
+
+        var created = await createResponse.Content.ReadFromJsonAsync<Document>(JsonOpts);
+        Assert.NotNull(created);
+        Assert.Equal(DocType.Memory, created!.DocType);
+        Assert.Equal("Short indexable summary of the memory", created.Summary);
+
+        var getResponse = await _client.GetAsync($"/api/projects/{_projectId}/documents/hermes-memory");
+        getResponse.EnsureSuccessStatusCode();
+
+        var fetched = await getResponse.Content.ReadFromJsonAsync<Document>(JsonOpts);
+        Assert.NotNull(fetched);
+        Assert.Equal(DocType.Memory, fetched!.DocType);
+        Assert.Equal("Short indexable summary of the memory", fetched.Summary);
+        Assert.Equal(new[] { "hermes", "context", "user-preference" }, fetched.Tags);
+    }
+
+    [Fact]
+    public async Task RestDocuments_ListIncludesSummary()
+    {
+        await _client.PostAsJsonAsync($"/api/projects/{_projectId}/documents", new
+        {
+            slug = "listed-summary",
+            title = "Listed Summary",
+            content = "Content",
+            summary = "List-visible summary"
+        });
+
+        var listResponse = await _client.GetAsync($"/api/projects/{_projectId}/documents");
+        listResponse.EnsureSuccessStatusCode();
+
+        var docs = await listResponse.Content.ReadFromJsonAsync<List<DocumentSummary>>(JsonOpts);
+        Assert.NotNull(docs);
+        var doc = docs!.FirstOrDefault(d => d.Slug == "listed-summary");
+        Assert.NotNull(doc);
+        Assert.Equal("List-visible summary", doc!.Summary);
+    }
+
+    [Fact]
+    public async Task RestDocuments_ListFiltersByMemoryDocType()
+    {
+        await _client.PostAsJsonAsync($"/api/projects/{_projectId}/documents", new
+        {
+            slug = "memory-a",
+            title = "Memory A",
+            content = "x",
+            doc_type = "memory"
+        });
+        await _client.PostAsJsonAsync($"/api/projects/{_projectId}/documents", new
+        {
+            slug = "spec-a",
+            title = "Spec A",
+            content = "x",
+            doc_type = "spec"
+        });
+
+        var listResponse = await _client.GetAsync($"/api/projects/{_projectId}/documents?doc_type=memory");
+        listResponse.EnsureSuccessStatusCode();
+
+        var docs = await listResponse.Content.ReadFromJsonAsync<List<DocumentSummary>>(JsonOpts);
+        Assert.NotNull(docs);
+        Assert.Single(docs);
+        Assert.Equal("memory-a", docs![0].Slug);
+        Assert.Equal(DocType.Memory, docs[0].DocType);
+    }
+
     private sealed class DocumentAppFactory : WebApplicationFactory<Program>
     {
         private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"den-mcp-document-api-{Guid.NewGuid()}.db");

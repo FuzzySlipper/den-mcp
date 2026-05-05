@@ -182,7 +182,8 @@ public static class ConciseResponse
             project_id = doc.ProjectId,
             slug = doc.Slug,
             title = doc.Title,
-            doc_type = doc.DocType.ToDbValue()
+            doc_type = doc.DocType.ToDbValue(),
+            doc_summary = doc.Summary
         });
     }
 

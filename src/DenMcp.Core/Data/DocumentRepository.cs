@@ -24,15 +24,16 @@ public sealed class DocumentRepository : IDocumentRepository
         await using var conn = await _db.CreateConnectionAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO documents (project_id, slug, title, content, doc_type, tags)
-            VALUES (@projectId, @slug, @title, @content, @docType, @tags)
+            INSERT INTO documents (project_id, slug, title, content, doc_type, tags, summary)
+            VALUES (@projectId, @slug, @title, @content, @docType, @tags, @summary)
             ON CONFLICT(project_id, slug) DO UPDATE SET
                 title = excluded.title,
                 content = excluded.content,
                 doc_type = excluded.doc_type,
                 tags = excluded.tags,
+                summary = excluded.summary,
                 updated_at = datetime('now')
-            RETURNING id, project_id, slug, title, content, doc_type, tags, created_at, updated_at
+            RETURNING id, project_id, slug, title, content, doc_type, tags, summary, created_at, updated_at
             """;
         cmd.Parameters.AddWithValue("@projectId", document.ProjectId);
         cmd.Parameters.AddWithValue("@slug", document.Slug);
@@ -41,6 +42,8 @@ public sealed class DocumentRepository : IDocumentRepository
         cmd.Parameters.AddWithValue("@docType", document.DocType.ToDbValue());
         cmd.Parameters.AddWithValue("@tags",
             document.Tags is { Count: > 0 } ? JsonSerializer.Serialize(document.Tags) : DBNull.Value);
+        cmd.Parameters.AddWithValue("@summary",
+            document.Summary is not null ? document.Summary : DBNull.Value);
 
         await using var reader = await cmd.ExecuteReaderAsync();
         await reader.ReadAsync();
@@ -52,7 +55,7 @@ public sealed class DocumentRepository : IDocumentRepository
         await using var conn = await _db.CreateConnectionAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT id, project_id, slug, title, content, doc_type, tags, created_at, updated_at
+            SELECT id, project_id, slug, title, content, doc_type, tags, summary, created_at, updated_at
             FROM documents WHERE project_id = @projectId AND slug = @slug
             """;
         cmd.Parameters.AddWithValue("@projectId", projectId);
@@ -93,7 +96,7 @@ public sealed class DocumentRepository : IDocumentRepository
 
         var whereClause = where.Count > 0 ? $"WHERE {string.Join(" AND ", where)}" : "";
         cmd.CommandText = $"""
-            SELECT id, project_id, slug, title, doc_type, tags, updated_at
+            SELECT id, project_id, slug, title, doc_type, tags, summary, updated_at
             FROM documents {whereClause}
             ORDER BY updated_at DESC
             """;
@@ -111,7 +114,8 @@ public sealed class DocumentRepository : IDocumentRepository
                 Title = reader.GetString(3),
                 DocType = EnumExtensions.ParseDocType(reader.GetString(4)),
                 Tags = tagsJson is not null ? JsonSerializer.Deserialize<List<string>>(tagsJson) : null,
-                UpdatedAt = DateTime.Parse(reader.GetString(6))
+                Summary = reader.IsDBNull(6) ? null : reader.GetString(6),
+                UpdatedAt = DateTime.Parse(reader.GetString(7))
             });
         }
         return results;
@@ -125,7 +129,7 @@ public sealed class DocumentRepository : IDocumentRepository
         var projectFilter = projectId is not null ? "AND d.project_id = @projectId" : "";
 
         cmd.CommandText = $"""
-            SELECT d.project_id, d.slug, d.title, d.doc_type,
+            SELECT d.project_id, d.slug, d.title, d.doc_type, d.summary,
                    snippet(documents_fts, 1, '<b>', '</b>', '...', 32) as snippet,
                    rank
             FROM documents_fts fts
@@ -147,8 +151,9 @@ public sealed class DocumentRepository : IDocumentRepository
                 Slug = reader.GetString(1),
                 Title = reader.GetString(2),
                 DocType = EnumExtensions.ParseDocType(reader.GetString(3)),
-                Snippet = reader.GetString(4),
-                Rank = reader.GetDouble(5)
+                Summary = reader.IsDBNull(4) ? null : reader.GetString(4),
+                Snippet = reader.GetString(5),
+                Rank = reader.GetDouble(6)
             });
         }
         return results;
@@ -176,8 +181,9 @@ public sealed class DocumentRepository : IDocumentRepository
             Content = reader.GetString(4),
             DocType = EnumExtensions.ParseDocType(reader.GetString(5)),
             Tags = tagsJson is not null ? JsonSerializer.Deserialize<List<string>>(tagsJson) : null,
-            CreatedAt = DateTime.Parse(reader.GetString(7)),
-            UpdatedAt = DateTime.Parse(reader.GetString(8))
+            Summary = reader.IsDBNull(7) ? null : reader.GetString(7),
+            CreatedAt = DateTime.Parse(reader.GetString(8)),
+            UpdatedAt = DateTime.Parse(reader.GetString(9))
         };
     }
 }
