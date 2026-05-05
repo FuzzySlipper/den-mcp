@@ -258,6 +258,37 @@ public static class ConciseResponse
         });
     }
 
+    // Topic clip queue operations
+
+    public static string AppendedTopicClip(TopicClipAppendResult result)
+    {
+        return Serialize(new
+        {
+            summary = $"appended clip #{result.ClipId} with topics [{string.Join(", ", result.CanonicalTopicSlugs ?? new List<string>())}]",
+            clip_id = result.ClipId,
+            canonical_topic_slugs = result.CanonicalTopicSlugs
+        });
+    }
+
+    public static string UpdatedTopicClipStatus(TopicClipStatusUpdateResult result, string status)
+    {
+        var skipText = result.SkippedIds is { Count: > 0 }
+            ? $", {result.SkippedIds.Count} skipped"
+            : "";
+        var notFoundText = result.NotFoundIds is { Count: > 0 }
+            ? $", {result.NotFoundIds.Count} not found"
+            : "";
+        return Serialize(new
+        {
+            summary = $"marked {result.UpdatedCount} clips as {status}{skipText}{notFoundText}",
+            updated_count = result.UpdatedCount,
+            updated_ids = result.UpdatedIds,
+            skipped_ids = result.SkippedIds,
+            not_found_ids = result.NotFoundIds,
+            status
+        });
+    }
+
     // Topic operations
 
     public static string CreatedTopic(ConsolidationTopic topic)
