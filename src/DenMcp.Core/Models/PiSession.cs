@@ -63,6 +63,8 @@ public sealed class PiSessionListOptions
     public required string ProjectId { get; init; }
     public int? TaskId { get; init; }
     public string? State { get; init; }
+    public string? AttentionState { get; init; }
+    public bool? NeedsUserInput { get; init; }
     public int Limit { get; init; } = 50;
 }
 

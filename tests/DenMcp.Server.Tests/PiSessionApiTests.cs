@@ -171,6 +171,105 @@ public sealed class PiSessionApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ListCanFilterByAttentionStateAndNeedsUserInput()
+    {
+        var attentionLaunch = await LaunchSessionAsync("session-filter-attention");
+        attentionLaunch.EnsureSuccessStatusCode();
+        var passiveLaunch = await LaunchSessionAsync("session-filter-passive");
+        passiveLaunch.EnsureSuccessStatusCode();
+
+        var now = DateTime.UtcNow;
+        _factory.FakeHost.SetStatus("session-filter-attention", new PiSessionHostStatus
+        {
+            State = PiSessionStates.Running,
+            LastActivityAt = now,
+            OutputTail = "approval required before proceeding",
+            OutputTailCapturedAt = now,
+        });
+        _factory.FakeHost.SetStatus("session-filter-passive", new PiSessionHostStatus
+        {
+            State = PiSessionStates.Running,
+            LastActivityAt = now.AddSeconds(-1),
+            OutputTail = "still working",
+            OutputTailCapturedAt = now,
+        });
+
+        var needsInput = await _client.GetAsync($"/api/projects/{ProjectId}/pi-sessions?taskId={_task.Id}&needsUserInput=true");
+        needsInput.EnsureSuccessStatusCode();
+        using var needsInputJson = JsonDocument.Parse(await needsInput.Content.ReadAsStringAsync());
+        var needsInputSession = Assert.Single(needsInputJson.RootElement.EnumerateArray());
+        Assert.Equal("session-filter-attention", needsInputSession.GetProperty("session_id").GetString());
+        Assert.True(needsInputSession.GetProperty("needs_user_input").GetBoolean());
+
+        var attentionState = await _client.GetAsync($"/api/projects/{ProjectId}/pi-sessions?taskId={_task.Id}&attentionState=waiting_for_direction");
+        attentionState.EnsureSuccessStatusCode();
+        using var attentionStateJson = JsonDocument.Parse(await attentionState.Content.ReadAsStringAsync());
+        var attentionStateSession = Assert.Single(attentionStateJson.RootElement.EnumerateArray());
+        Assert.Equal("session-filter-attention", attentionStateSession.GetProperty("session_id").GetString());
+
+        var noInput = await _client.GetAsync($"/api/projects/{ProjectId}/pi-sessions?taskId={_task.Id}&needsUserInput=false");
+        noInput.EnsureSuccessStatusCode();
+        using var noInputJson = JsonDocument.Parse(await noInput.Content.ReadAsStringAsync());
+        var noInputSessions = noInputJson.RootElement.EnumerateArray().Select(s => s.GetProperty("session_id").GetString()).ToList();
+        Assert.Contains("session-filter-passive", noInputSessions);
+        Assert.DoesNotContain("session-filter-attention", noInputSessions);
+    }
+
+    [Fact]
+    public async Task StatusRefreshClearsAttentionWhenSessionCompletesAndPostsEvent()
+    {
+        var launch = await LaunchSessionAsync("session-clear-attention");
+        launch.EnsureSuccessStatusCode();
+
+        var now = DateTime.UtcNow;
+        _factory.FakeHost.SetStatus("session-clear-attention", new PiSessionHostStatus
+        {
+            State = PiSessionStates.Running,
+            LastActivityAt = now,
+            OutputTail = "Do you want to continue? [y/N]",
+            OutputTailCapturedAt = now,
+        });
+
+        var promptResponse = await _client.GetAsync($"/api/projects/{ProjectId}/pi-sessions/session-clear-attention");
+        promptResponse.EnsureSuccessStatusCode();
+        using (var promptJson = JsonDocument.Parse(await promptResponse.Content.ReadAsStringAsync()))
+        {
+            var prompted = promptJson.RootElement.GetProperty("session");
+            Assert.Equal("user_input_needed", prompted.GetProperty("attention_state").GetString());
+            Assert.True(prompted.GetProperty("needs_user_input").GetBoolean());
+        }
+
+        _factory.FakeHost.SetStatus("session-clear-attention", new PiSessionHostStatus
+        {
+            State = PiSessionStates.Completed,
+            LastActivityAt = now.AddSeconds(10),
+            OutputTail = "completed",
+            OutputTailCapturedAt = now.AddSeconds(10),
+        });
+
+        var completedResponse = await _client.GetAsync($"/api/projects/{ProjectId}/pi-sessions/session-clear-attention");
+        completedResponse.EnsureSuccessStatusCode();
+        using var completedJson = JsonDocument.Parse(await completedResponse.Content.ReadAsStringAsync());
+        var completed = completedJson.RootElement.GetProperty("session");
+        Assert.Equal("completed", completed.GetProperty("state").GetString());
+        Assert.True(!completed.TryGetProperty("attention_state", out var clearedAttentionState) || clearedAttentionState.ValueKind == JsonValueKind.Null);
+        Assert.True(!completed.TryGetProperty("attention_reason", out var clearedAttentionReason) || clearedAttentionReason.ValueKind == JsonValueKind.Null);
+        Assert.False(completed.GetProperty("needs_user_input").GetBoolean());
+
+        using var scope = _factory.Services.CreateScope();
+        var stream = scope.ServiceProvider.GetRequiredService<IAgentStreamRepository>();
+        var entries = await stream.ListAsync(new AgentStreamListOptions
+        {
+            ProjectId = ProjectId,
+            TaskId = _task.Id,
+            StreamKind = AgentStreamKind.Ops,
+            IncludeDebug = true,
+            Limit = 20,
+        });
+        Assert.Contains(entries, e => e.EventType == "pi_session_attention_cleared");
+    }
+
+    [Fact]
     public async Task StaleActivityIsSurfacedAsStalledAttention()
     {
         var launch = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/pi-sessions", new

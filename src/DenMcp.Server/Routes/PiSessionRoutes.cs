@@ -31,6 +31,8 @@ public static class PiSessionRoutes
             string projectId,
             int? taskId,
             string? state,
+            string? attentionState,
+            bool? needsUserInput,
             int? limit,
             CancellationToken cancellationToken) =>
         {
@@ -39,6 +41,8 @@ public static class PiSessionRoutes
                 ProjectId = projectId,
                 TaskId = taskId,
                 State = state,
+                AttentionState = attentionState,
+                NeedsUserInput = needsUserInput,
                 Limit = limit ?? 50,
             }, cancellationToken);
             return Results.Ok(sessions);

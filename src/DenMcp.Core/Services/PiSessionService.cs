@@ -140,13 +140,32 @@ public sealed class PiSessionService : IPiSessionService
 
     public async Task<List<PiSessionSummary>> ListAsync(PiSessionListOptions options, CancellationToken cancellationToken = default)
     {
-        var records = await _sessions.ListAsync(options).ConfigureAwait(false);
+        var requestedLimit = Math.Clamp(options.Limit, 1, 200);
+        var hasAttentionFilter = !string.IsNullOrWhiteSpace(options.AttentionState) || options.NeedsUserInput is not null;
+        var records = await _sessions.ListAsync(new PiSessionListOptions
+        {
+            ProjectId = options.ProjectId,
+            TaskId = options.TaskId,
+            State = options.State,
+            Limit = hasAttentionFilter ? 200 : requestedLimit,
+        }).ConfigureAwait(false);
+
         var refreshed = new List<PiSessionSummary>(records.Count);
         foreach (var record in records)
         {
             refreshed.Add(ToSummary(await RefreshIfActiveAsync(record, cancellationToken).ConfigureAwait(false)));
         }
-        return refreshed;
+
+        if (!hasAttentionFilter)
+            return refreshed;
+
+        IEnumerable<PiSessionSummary> filtered = refreshed;
+        var attentionState = NormalizeText(options.AttentionState);
+        if (attentionState is not null)
+            filtered = filtered.Where(session => string.Equals(session.AttentionState, attentionState, StringComparison.Ordinal));
+        if (options.NeedsUserInput is { } needsUserInput)
+            filtered = filtered.Where(session => session.NeedsUserInput == needsUserInput);
+        return filtered.Take(requestedLimit).ToList();
     }
 
     public async Task<PiSessionDetail?> GetAsync(string projectId, string sessionId, CancellationToken cancellationToken = default)

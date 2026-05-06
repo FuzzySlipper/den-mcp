@@ -265,20 +265,31 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
             "capture-pane",
             "-p",
             "-t", session.TmuxSessionName,
-            "-S", $"-{OutputTailLineCount}"
+            "-S", $"-{OutputTailLineCount + 1}"
         ], cancellationToken).ConfigureAwait(false);
         if (!capture.Succeeded)
             return null;
 
         var normalized = capture.Stdout.Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd('\n', '\r');
-        var truncated = normalized.Length > OutputTailMaxChars || normalized.Split('\n').Length >= OutputTailLineCount;
-        if (normalized.Length > OutputTailMaxChars)
+        var lineTruncated = false;
+        if (normalized.Length > 0)
+        {
+            var lines = normalized.Split('\n');
+            if (lines.Length > OutputTailLineCount)
+            {
+                lineTruncated = true;
+                normalized = string.Join("\n", lines.Skip(lines.Length - OutputTailLineCount));
+            }
+        }
+
+        var charTruncated = normalized.Length > OutputTailMaxChars;
+        if (charTruncated)
             normalized = normalized[^OutputTailMaxChars..];
 
         return new PiSessionOutputTail(
             normalized,
             _utcNow(),
-            truncated,
+            lineTruncated || charTruncated,
             ComputeSha256(normalized));
     }
 
