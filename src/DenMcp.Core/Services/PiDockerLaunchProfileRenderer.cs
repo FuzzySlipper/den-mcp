@@ -1,0 +1,288 @@
+using System.Security.Cryptography;
+using System.Text;
+using DenMcp.Core.Models;
+
+namespace DenMcp.Core.Services;
+
+public interface IPiDockerLaunchProfileRenderer
+{
+    PiDockerLaunchProfile Render(PiDockerLaunchRenderRequest request);
+}
+
+/// <summary>
+/// Renders the effective Docker Compose inputs for a Den-owned Pi launch without
+/// starting processes. The lifecycle API can consume this contract later without
+/// duplicating Docker/Compose policy.
+/// </summary>
+public sealed class PiDockerLaunchProfileRenderer(PiDockerLaunchProfileOptions options) : IPiDockerLaunchProfileRenderer
+{
+    public PiDockerLaunchProfile Render(PiDockerLaunchRenderRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var projectId = RequireIdentifier(request.ProjectId, "project_id");
+        var sessionId = RequireIdentifier(request.SessionId, "session_id");
+        var composeFile = ResolveConfiguredPath(request.ComposeFile, options.ComposeFile, "compose_file");
+        var service = RequireIdentifier(request.Service ?? options.Service, "service");
+        var devDir = ResolveConfiguredPath(request.DevDir, options.DevDir, "dev_dir");
+        var piStateDir = ResolveStateDir(request.PiStateDir, sessionId);
+        var image = RequireNonEmpty(request.Image ?? options.Image, "image");
+        var piVersion = RequireNonEmpty(request.PiVersion ?? options.PiVersion, "pi_version");
+        var nodeVersion = RequireNonEmpty(request.NodeVersion ?? options.NodeVersion, "node_version");
+        var callbackBindAddress = RequireLoopbackBindAddress(options.HostCallbackBindAddress);
+        var callbackPorts = ValidateCallbackPorts(request.CallbackPorts, callbackBindAddress);
+        var composeProjectName = BuildComposeProjectName(projectId, sessionId);
+        var profileId = $"den-pi-docker:{composeProjectName}";
+
+        var gitConfigPath = ResolveOptionalPath(request.GitConfigPath ?? options.GitConfigPath);
+        var sshDir = ResolveOptionalPath(request.SshDir ?? options.SshDir);
+        var ghConfigDir = ResolveOptionalPath(request.GhConfigDir ?? options.GhConfigDir);
+        var credentialFallbackRoot = ResolveConfiguredPath(null, options.CredentialFallbackRootDir, "credential_fallback_root_dir");
+        gitConfigPath ??= Path.Combine(credentialFallbackRoot, "gitconfig");
+        sshDir ??= Path.Combine(credentialFallbackRoot, "ssh");
+        ghConfigDir ??= Path.Combine(credentialFallbackRoot, "gh");
+
+        var environment = new SortedDictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["DEV_DIR"] = devDir,
+            ["PI_STATE_DIR"] = piStateDir,
+            ["PI_SANDBOX_IMAGE"] = image,
+            ["PI_VERSION"] = piVersion,
+            ["NODE_VERSION"] = nodeVersion,
+            ["PI_SANDBOX_UID"] = options.SandboxUid.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["PI_SANDBOX_GID"] = options.SandboxGid.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["PI_GITCONFIG_PATH"] = gitConfigPath,
+            ["PI_SSH_DIR"] = sshDir,
+            ["PI_GH_CONFIG_DIR"] = ghConfigDir,
+        };
+
+        var volumeMounts = new List<PiDockerVolumeMount>
+        {
+            new() { Source = devDir, Target = PiDockerLaunchProfileDefaults.ContainerDevDir, ReadOnly = false, Purpose = "broad_dev_dir" },
+            new() { Source = piStateDir, Target = PiDockerLaunchProfileDefaults.ContainerPiStateDir, ReadOnly = false, Purpose = "pi_state" },
+            new() { Source = $"{composeProjectName}_{PiDockerLaunchProfileDefaults.CacheVolume}", Target = "/home/pi/.cache", ReadOnly = false, Purpose = "cache_volume" },
+            new() { Source = $"{composeProjectName}_{PiDockerLaunchProfileDefaults.NpmCacheVolume}", Target = "/home/pi/.npm", ReadOnly = false, Purpose = "npm_cache_volume" },
+            new() { Source = gitConfigPath, Target = PiDockerLaunchProfileDefaults.ContainerGitConfigPath, ReadOnly = true, Purpose = "gitconfig_credentials" },
+            new() { Source = sshDir, Target = PiDockerLaunchProfileDefaults.ContainerSshDir, ReadOnly = true, Purpose = "ssh_credentials" },
+            new() { Source = ghConfigDir, Target = PiDockerLaunchProfileDefaults.ContainerGhConfigDir, ReadOnly = true, Purpose = "gh_credentials" },
+        };
+
+        var composePrefix = new List<string>
+        {
+            "compose",
+            "--project-name", composeProjectName,
+            "-f", composeFile,
+        };
+
+        var configArgs = composePrefix.Concat(["config"]).ToList();
+        var buildArgs = composePrefix.Concat(["build", service]).ToList();
+        var runArgs = composePrefix.Concat(["run", "--rm", "--name", $"{composeProjectName}-{service}"]).ToList();
+        foreach (var port in callbackPorts)
+        {
+            runArgs.Add("--publish");
+            runArgs.Add($"{port.BindAddress}:{port.HostPort}:{port.ContainerPort}");
+        }
+
+        runArgs.Add(service);
+
+        var warnings = new List<string>();
+        if (request.PiStateDir is null)
+        {
+            warnings.Add("PI_STATE_DIR is derived per session from PiStateRootDir; override explicitly to reuse an existing auth/config namespace.");
+        }
+
+        if (request.GitConfigPath is null && options.GitConfigPath is null)
+            warnings.Add("PI_GITCONFIG_PATH is using the configured empty fallback; no host git config is exposed unless configured.");
+        if (request.SshDir is null && options.SshDir is null)
+            warnings.Add("PI_SSH_DIR is using the configured empty fallback; no host SSH directory is exposed unless configured.");
+        if (request.GhConfigDir is null && options.GhConfigDir is null)
+            warnings.Add("PI_GH_CONFIG_DIR is using the configured empty fallback; no host gh config is exposed unless configured.");
+
+        return new PiDockerLaunchProfile
+        {
+            ProfileId = profileId,
+            ProjectId = projectId,
+            SessionId = sessionId,
+            TaskId = request.TaskId,
+            WorkspaceId = NullIfWhiteSpace(request.WorkspaceId),
+            Title = NullIfWhiteSpace(request.Title),
+            ComposeProjectName = composeProjectName,
+            ComposeFile = composeFile,
+            Service = service,
+            DevDir = devDir,
+            PiStateDir = piStateDir,
+            Image = image,
+            PiVersion = piVersion,
+            NodeVersion = nodeVersion,
+            Environment = environment,
+            VolumeMounts = volumeMounts,
+            CallbackPorts = callbackPorts,
+            DockerComposeConfigArgs = configArgs,
+            DockerComposeBuildArgs = buildArgs,
+            DockerComposeRunArgs = runArgs,
+            CacheVolumeNames = [$"{composeProjectName}_{PiDockerLaunchProfileDefaults.CacheVolume}", $"{composeProjectName}_{PiDockerLaunchProfileDefaults.NpmCacheVolume}"],
+            RequiredHostPaths = [devDir, piStateDir, gitConfigPath, sshDir, ghConfigDir],
+            Warnings = warnings,
+            KnownLimitations = [
+                "session_id must be unique for each live launch; reusing a session_id intentionally reuses Compose names and PI_STATE_DIR.",
+                "The renderer validates loopback binding and duplicate ports in a single profile, but it does not probe or reserve host ports; the lifecycle API must allocate unique host callback ports before launch.",
+                "The first Den-managed profile intentionally preserves broad DEV_DIR read-write access and does not enforce per-repository file restrictions."
+            ],
+        };
+    }
+
+    private static IReadOnlyList<PiDockerCallbackPort> ValidateCallbackPorts(IReadOnlyList<PiDockerCallbackPort>? callbackPorts, string callbackBindAddress)
+    {
+        if (callbackPorts is null || callbackPorts.Count == 0)
+        {
+            throw new InvalidOperationException("callback_ports must be provided per session so concurrent launches do not silently reuse static host ports.");
+        }
+
+        var hostPorts = new HashSet<int>();
+        var normalized = new List<PiDockerCallbackPort>();
+        foreach (var port in callbackPorts)
+        {
+            ValidatePort(port.HostPort, "callback_ports.host_port");
+            ValidatePort(port.ContainerPort, "callback_ports.container_port");
+            if (!string.Equals(port.BindAddress, callbackBindAddress, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"callback_ports.bind_address must be '{callbackBindAddress}' (host loopback only).");
+            }
+
+            if (!hostPorts.Add(port.HostPort))
+            {
+                throw new InvalidOperationException($"callback_ports contains duplicate host port {port.HostPort}.");
+            }
+
+            normalized.Add(new PiDockerCallbackPort
+            {
+                HostPort = port.HostPort,
+                ContainerPort = port.ContainerPort,
+                BindAddress = port.BindAddress,
+            });
+        }
+
+        return normalized;
+    }
+
+    private static void ValidatePort(int port, string field)
+    {
+        if (port is < 1 or > 65535)
+        {
+            throw new InvalidOperationException($"{field} must be between 1 and 65535.");
+        }
+    }
+
+    private static string RequireLoopbackBindAddress(string? value)
+    {
+        var bindAddress = RequireNonEmpty(value, "host_callback_bind_address");
+        if (!string.Equals(bindAddress, PiDockerLaunchProfileDefaults.LoopbackAddress, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"host_callback_bind_address must be '{PiDockerLaunchProfileDefaults.LoopbackAddress}' (host loopback only).");
+        }
+
+        return bindAddress;
+    }
+
+    private string ResolveStateDir(string? overridePath, string sessionId)
+    {
+        if (!string.IsNullOrWhiteSpace(overridePath))
+        {
+            return ExpandHome(overridePath.Trim());
+        }
+
+        var root = ResolveConfiguredPath(null, options.PiStateRootDir, "pi_state_root_dir");
+        return Path.Combine(root, SafeSlug(sessionId));
+    }
+
+    private static string? ResolveOptionalPath(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : ExpandHome(value.Trim());
+    }
+
+    private static string ResolveConfiguredPath(string? overrideValue, string configuredValue, string field)
+    {
+        var value = !string.IsNullOrWhiteSpace(overrideValue) ? overrideValue : configuredValue;
+        return ExpandHome(RequireNonEmpty(value, field));
+    }
+
+    private static string RequireIdentifier(string? value, string field)
+    {
+        var required = RequireNonEmpty(value, field);
+        if (required.Any(char.IsWhiteSpace))
+        {
+            throw new InvalidOperationException($"{field} must not contain whitespace.");
+        }
+
+        return required;
+    }
+
+    private static string RequireNonEmpty(string? value, string field)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new InvalidOperationException($"{field} is required.");
+        }
+
+        return value.Trim();
+    }
+
+    private static string ExpandHome(string path)
+    {
+        if (path == "~")
+        {
+            return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        }
+
+        if (path.StartsWith("~/", StringComparison.Ordinal))
+        {
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), path[2..]);
+        }
+
+        return path;
+    }
+
+    private static string BuildComposeProjectName(string projectId, string sessionId)
+    {
+        var slug = SafeSlug($"den-pi-{projectId}-{sessionId}");
+        var suffix = ShortHash($"{projectId}:{sessionId}");
+        var maxPrefixLength = 50 - suffix.Length - 1;
+        if (slug.Length > maxPrefixLength)
+        {
+            slug = slug[..maxPrefixLength].Trim('-');
+        }
+
+        return $"{slug}-{suffix}";
+    }
+
+    private static string SafeSlug(string value)
+    {
+        var builder = new StringBuilder();
+        foreach (var c in value.Trim().ToLowerInvariant())
+        {
+            if (c is >= 'a' and <= 'z' or >= '0' and <= '9')
+            {
+                builder.Append(c);
+            }
+            else if (c is '-' or '_' or '.')
+            {
+                builder.Append(c);
+            }
+            else
+            {
+                builder.Append('-');
+            }
+        }
+
+        var slug = builder.ToString().Trim('-', '.', '_');
+        return string.IsNullOrWhiteSpace(slug) ? "den-pi-session" : slug;
+    }
+
+    private static string ShortHash(string value)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(value));
+        return Convert.ToHexString(bytes, 0, 4).ToLowerInvariant();
+    }
+
+    private static string? NullIfWhiteSpace(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+}

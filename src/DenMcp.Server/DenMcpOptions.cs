@@ -1,9 +1,12 @@
+using DenMcp.Core.Models;
+
 namespace DenMcp.Server;
 
 public sealed class DenMcpOptions
 {
     public string DatabasePath { get; set; } = "";
     public string ListenUrl { get; set; } = "http://localhost:5199";
+    public PiDockerLaunchProfileOptions PiSessionHost { get; set; } = new();
 
     public string GetResolvedDatabasePath()
     {

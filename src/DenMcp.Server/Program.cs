@@ -24,6 +24,7 @@ if (builder.Configuration["db-path"] is { } dbPathOverride)
     options.DatabasePath = dbPathOverride;
 
 builder.Services.AddSingleton(options);
+builder.Services.AddSingleton(options.PiSessionHost);
 
 // LLM (librarian)
 var llmConfig = new LlmConfig();
@@ -93,6 +94,7 @@ builder.Services.AddSingleton<IAgentStreamMessageService, AgentStreamMessageServ
 builder.Services.AddSingleton<ISubagentRunService, SubagentRunService>();
 builder.Services.AddSingleton<IAttentionService, AttentionService>();
 builder.Services.AddSingleton<IGitInspectionService, GitInspectionService>();
+builder.Services.AddSingleton<IPiDockerLaunchProfileRenderer, PiDockerLaunchProfileRenderer>();
 
 // Dispatch
 builder.Services.AddSingleton<IRoutingService, RoutingService>();
@@ -147,6 +149,7 @@ app.MapDesktopSessionEventRoutes();
 app.MapCollaborationRoutes();
 app.MapAttentionRoutes();
 app.MapGitInspectionRoutes();
+app.MapPiLaunchProfileRoutes();
 app.MapLibrarianRoutes();
 
 // MCP endpoint
