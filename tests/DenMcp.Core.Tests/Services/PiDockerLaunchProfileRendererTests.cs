@@ -60,6 +60,54 @@ public sealed class PiDockerLaunchProfileRendererTests
     }
 
     [Fact]
+    public void Render_BlanksProviderSecretEnvironmentVariables()
+    {
+        var renderer = new PiDockerLaunchProfileRenderer(new PiDockerLaunchProfileOptions
+        {
+            ComposeFile = "/opt/pi-docker/compose.yaml",
+            DevDir = "/home/patch/dev",
+            PiStateRootDir = "/var/lib/den/pi-state",
+            ProviderSecretEnvironmentVariables = ["OPENAI_API_KEY", "AWS_REGION"],
+        });
+
+        var profile = renderer.Render(new PiDockerLaunchRenderRequest
+        {
+            ProjectId = "den-mcp",
+            SessionId = "session-a",
+            CallbackPorts = [new() { HostPort = 21455, ContainerPort = 1455 }],
+        });
+
+        Assert.Equal(string.Empty, profile.Environment["OPENAI_API_KEY"]);
+        Assert.Equal(string.Empty, profile.Environment["AWS_REGION"]);
+        Assert.Equal(["AWS_REGION", "OPENAI_API_KEY"], profile.ScrubbedEnvironmentVariables);
+        Assert.Contains(profile.Warnings, value => value.Contains("Provider/model credential environment variables are scrubbed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Render_WarnsWhenRequiredPiStateSettingsAreMissing()
+    {
+        var renderer = new PiDockerLaunchProfileRenderer(new PiDockerLaunchProfileOptions
+        {
+            ComposeFile = "/opt/pi-docker/compose.yaml",
+            DevDir = "/home/patch/dev",
+            PiStateRootDir = Path.Combine(Path.GetTempPath(), "den-mcp", "missing-pi-state-root"),
+            RequiredPiStatePaths = ["agent/settings.json"],
+        });
+
+        var profile = renderer.Render(new PiDockerLaunchRenderRequest
+        {
+            ProjectId = "den-mcp",
+            SessionId = "session-a",
+            CallbackPorts = [new() { HostPort = 21455, ContainerPort = 1455 }],
+        });
+
+        Assert.Contains(profile.Warnings, value =>
+            value.Contains("PI_STATE_DIR", StringComparison.Ordinal)
+            && value.Contains("agent/settings.json", StringComparison.Ordinal)
+            && value.Contains("launch will fail", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Render_RequiresExplicitCallbackPorts()
     {
         var renderer = new PiDockerLaunchProfileRenderer(new PiDockerLaunchProfileOptions

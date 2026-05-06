@@ -6,6 +6,78 @@ namespace DenMcp.Core.Tests.Services;
 public sealed class PiSessionHostTests
 {
     [Fact]
+    public async Task Launch_BlanksProviderSecretsInTmuxEnvironmentAndCommand()
+    {
+        var piStateDir = Path.Combine(Path.GetTempPath(), "den-mcp", $"pi-state-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(piStateDir, "agent"));
+        await File.WriteAllTextAsync(Path.Combine(piStateDir, "agent", "settings.json"), "{}");
+        var previousOpenAiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
+        Environment.SetEnvironmentVariable("OPENAI_API_KEY", "server-secret");
+        try
+        {
+            var runner = new FakeProcessRunner(string.Empty);
+            var host = new TmuxDockerPiSessionHost(new PiDockerLaunchProfileOptions
+            {
+                ProviderSecretEnvironmentVariables = ["OPENAI_API_KEY"],
+                RequiredPiStatePaths = ["agent/settings.json"],
+            }, runner);
+            var record = Session();
+            var profile = Profile(piStateDir, new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["PI_STATE_DIR"] = piStateDir,
+                ["OPENAI_API_KEY"] = string.Empty,
+            }, ["OPENAI_API_KEY"]);
+
+            var result = await host.LaunchAsync(new PiSessionLaunchPlan
+            {
+                Record = record,
+                LaunchProfile = profile,
+                LaunchCommand = ["env", "OPENAI_API_KEY=", "docker", "compose", "run", "pi"],
+            });
+
+            Assert.Equal(PiSessionStates.Running, result.State);
+            var newSessionArgs = Assert.Single(runner.Calls, args => args.Count > 0 && args[0] == "new-session");
+            Assert.Contains("OPENAI_API_KEY=", newSessionArgs);
+            Assert.DoesNotContain(newSessionArgs, value => value.Contains("server-secret", StringComparison.Ordinal));
+            var sendKeysArgs = Assert.Single(runner.Calls, args => args.Count > 0 && args[0] == "send-keys" && args.Contains("-l"));
+            Assert.Contains(sendKeysArgs, value => value.Contains("OPENAI_API_KEY=", StringComparison.Ordinal));
+            Assert.DoesNotContain(sendKeysArgs, value => value.Contains("server-secret", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("OPENAI_API_KEY", previousOpenAiKey);
+            if (Directory.Exists(piStateDir))
+                Directory.Delete(piStateDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Launch_FailsBeforeTmuxWhenRequiredPiStateSettingsAreMissing()
+    {
+        var piStateDir = Path.Combine(Path.GetTempPath(), "den-mcp", $"missing-pi-state-{Guid.NewGuid():N}");
+        var runner = new FakeProcessRunner(string.Empty);
+        var host = new TmuxDockerPiSessionHost(new PiDockerLaunchProfileOptions
+        {
+            RequiredPiStatePaths = ["agent/settings.json"],
+        }, runner);
+
+        var result = await host.LaunchAsync(new PiSessionLaunchPlan
+        {
+            Record = Session(),
+            LaunchProfile = Profile(piStateDir, new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["PI_STATE_DIR"] = piStateDir,
+            }, []),
+            LaunchCommand = ["docker", "compose", "run", "pi"],
+        });
+
+        Assert.Equal(PiSessionStates.Failed, result.State);
+        Assert.Contains("PI_STATE_DIR", result.StateReason);
+        Assert.Contains("do not fall back to provider environment secrets", result.StateReason);
+        Assert.Empty(runner.Calls);
+    }
+
+    [Fact]
     public async Task GetStatus_DoesNotMarkExactlyEightyCapturedLinesAsTruncated()
     {
         var runner = new FakeProcessRunner(Lines(80));
@@ -35,6 +107,24 @@ public sealed class PiSessionHostTests
         Assert.Equal("line-2", outputLines[0]);
         Assert.Equal("line-81", outputLines[^1]);
     }
+
+    private static PiDockerLaunchProfile Profile(string piStateDir, IReadOnlyDictionary<string, string> environment, IReadOnlyList<string> scrubbedEnvironmentVariables) => new()
+    {
+        ProfileId = "profile-a",
+        ProjectId = "den-mcp",
+        SessionId = "session-a",
+        ComposeProjectName = "compose-a",
+        ComposeFile = "/opt/pi-docker/compose.yaml",
+        Service = "pi",
+        DevDir = "/tmp/den-mcp/dev",
+        PiStateDir = piStateDir,
+        Image = "pi-sandbox:test",
+        PiVersion = "0.71.0",
+        NodeVersion = "22",
+        Environment = environment,
+        ScrubbedEnvironmentVariables = scrubbedEnvironmentVariables,
+        DockerComposeRunArgs = ["compose", "run", "--name", "container-a", "pi"],
+    };
 
     private static PiSessionRecord Session() => new()
     {
@@ -81,6 +171,14 @@ public sealed class PiSessionHostTests
                 {
                     ExitCode = 0,
                     Stdout = _capturedOutput,
+                });
+            }
+
+            if (args.Count > 0 && (args[0] == "new-session" || args[0] == "set-option" || args[0] == "send-keys"))
+            {
+                return Task.FromResult(new ProcessRunResult
+                {
+                    ExitCode = 0,
                 });
             }
 

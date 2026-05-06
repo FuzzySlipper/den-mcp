@@ -75,7 +75,18 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
     public async Task<PiSessionHostLaunchResult> LaunchAsync(PiSessionLaunchPlan plan, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(plan);
-        Directory.CreateDirectory(plan.LaunchProfile.PiStateDir);
+        var piStateValidationError = ValidatePiState(plan.LaunchProfile);
+        if (piStateValidationError is not null)
+        {
+            return new PiSessionHostLaunchResult
+            {
+                State = PiSessionStates.Failed,
+                StateReason = piStateValidationError,
+            };
+        }
+
+        if (!Directory.Exists(plan.LaunchProfile.PiStateDir))
+            Directory.CreateDirectory(plan.LaunchProfile.PiStateDir);
 
         var newSessionArgs = new List<string> { "new-session", "-d", "-s", plan.Record.TmuxSessionName };
         if (!string.IsNullOrWhiteSpace(plan.LaunchProfile.DevDir))
@@ -295,6 +306,43 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
 
     private Task<ProcessRunResult> RunTmuxAsync(IReadOnlyList<string> args, CancellationToken cancellationToken) =>
         _runner.RunAsync(_options.TmuxExecutable, args, _commandTimeout, cancellationToken);
+
+    private string? ValidatePiState(PiDockerLaunchProfile profile)
+    {
+        var requiredPaths = NormalizeRequiredPiStatePaths(_options.RequiredPiStatePaths);
+        if (requiredPaths.Count == 0)
+            return null;
+
+        if (!Directory.Exists(profile.PiStateDir))
+        {
+            return $"PI_STATE_DIR '{profile.PiStateDir}' does not exist or is not mounted; Den-owned Pi sessions require Pi settings/auth state in PI_STATE_DIR and do not fall back to provider environment secrets (required: {string.Join(", ", requiredPaths)}).";
+        }
+
+        var missing = requiredPaths
+            .Where(path => !File.Exists(Path.Combine(profile.PiStateDir, path)) && !Directory.Exists(Path.Combine(profile.PiStateDir, path)))
+            .ToList();
+        if (missing.Count > 0)
+        {
+            return $"PI_STATE_DIR '{profile.PiStateDir}' is missing required Pi settings/auth state path(s): {string.Join(", ", missing)}. Den-owned Pi sessions do not fall back to provider environment secrets.";
+        }
+
+        return null;
+    }
+
+    private static IReadOnlyList<string> NormalizeRequiredPiStatePaths(IEnumerable<string>? values)
+    {
+        var normalized = new List<string>();
+        foreach (var raw in values ?? [])
+        {
+            var value = raw?.Trim().Replace('\\', '/') ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(value))
+                continue;
+            if (Path.IsPathRooted(value) || value.Split('/', StringSplitOptions.RemoveEmptyEntries).Any(part => part == ".."))
+                throw new InvalidOperationException($"required_pi_state_paths must contain relative paths under PI_STATE_DIR; invalid value '{raw}'.");
+            normalized.Add(value);
+        }
+        return normalized;
+    }
 
     private static string ComputeSha256(string value)
     {

@@ -78,7 +78,10 @@ public sealed class PiSessionApiTests : IAsyncLifetime
         Assert.Equal("host-test", session.GetProperty("host_id").GetString());
         Assert.Equal("running", session.GetProperty("state").GetString());
         Assert.False(string.IsNullOrWhiteSpace(session.GetProperty("tmux_session_name").GetString()));
-        Assert.Contains("docker", session.GetProperty("launch_command").EnumerateArray().Select(v => v.GetString()));
+        var launchCommand = session.GetProperty("launch_command").EnumerateArray().Select(v => v.GetString()).ToList();
+        Assert.Contains("docker", launchCommand);
+        Assert.Contains("OPENAI_API_KEY=", launchCommand);
+        Assert.DoesNotContain(launchCommand, value => value?.Contains("test-key", StringComparison.Ordinal) == true);
         Assert.Equal("pi_docker_compose", session.GetProperty("launch_profile_kind").GetString());
         Assert.Equal("coding", session.GetProperty("tool_profile").GetString());
         Assert.Equal("openai-codex/gpt-5.5", session.GetProperty("model").GetString());
@@ -88,6 +91,8 @@ public sealed class PiSessionApiTests : IAsyncLifetime
         Assert.Single(fakeHost.Launches);
         Assert.Equal("session-a", fakeHost.Launches[0].Record.SessionId);
         Assert.Equal("/srv/dev", fakeHost.Launches[0].LaunchProfile.DevDir);
+        Assert.Equal(string.Empty, fakeHost.Launches[0].LaunchProfile.Environment["OPENAI_API_KEY"]);
+        Assert.Contains("OPENAI_API_KEY", fakeHost.Launches[0].LaunchProfile.ScrubbedEnvironmentVariables);
 
         var listResponse = await _client.GetAsync($"/api/projects/{ProjectId}/pi-sessions?taskId={_task.Id}");
         listResponse.EnsureSuccessStatusCode();

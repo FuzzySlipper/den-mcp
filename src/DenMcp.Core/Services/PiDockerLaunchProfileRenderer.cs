@@ -33,6 +33,9 @@ public sealed class PiDockerLaunchProfileRenderer(PiDockerLaunchProfileOptions o
         var callbackPorts = ValidateCallbackPorts(request.CallbackPorts, callbackBindAddress);
         var composeProjectName = BuildComposeProjectName(projectId, sessionId);
         var profileId = $"den-pi-docker:{composeProjectName}";
+        var scrubbedEnvironmentVariables = options.ScrubProviderEnvironmentVariables
+            ? NormalizeEnvironmentVariableNames(options.ProviderSecretEnvironmentVariables, nameof(options.ProviderSecretEnvironmentVariables))
+            : [];
 
         var gitConfigPath = ResolveOptionalPath(request.GitConfigPath ?? options.GitConfigPath);
         var sshDir = ResolveOptionalPath(request.SshDir ?? options.SshDir);
@@ -55,6 +58,12 @@ public sealed class PiDockerLaunchProfileRenderer(PiDockerLaunchProfileOptions o
             ["PI_SSH_DIR"] = sshDir,
             ["PI_GH_CONFIG_DIR"] = ghConfigDir,
         };
+        foreach (var name in scrubbedEnvironmentVariables)
+        {
+            if (environment.ContainsKey(name))
+                throw new InvalidOperationException($"provider secret environment variable '{name}' conflicts with a required Pi launch environment variable.");
+            environment[name] = string.Empty;
+        }
 
         var volumeMounts = new List<PiDockerVolumeMount>
         {
@@ -88,8 +97,15 @@ public sealed class PiDockerLaunchProfileRenderer(PiDockerLaunchProfileOptions o
         var warnings = new List<string>();
         if (request.PiStateDir is null)
         {
-            warnings.Add("PI_STATE_DIR is derived per session from PiStateRootDir; override explicitly to reuse an existing auth/config namespace.");
+            warnings.Add("PI_STATE_DIR is derived per session from PiStateRootDir; configure/populate that session state before launch or override PiStateDir to reuse an existing Pi auth/config namespace.");
         }
+
+        if (scrubbedEnvironmentVariables.Count > 0)
+            warnings.Add($"Provider/model credential environment variables are scrubbed to empty for Docker Compose interpolation: {string.Join(", ", scrubbedEnvironmentVariables)}. Pi credentials must come from the mounted PI_STATE_DIR.");
+        else
+            warnings.Add("Provider/model credential environment variable scrubbing is disabled; Den-owned Pi sessions may inherit server process model credentials.");
+
+        AddPiStateWarnings(warnings, piStateDir, NormalizeRequiredPiStatePaths(options.RequiredPiStatePaths));
 
         if (request.GitConfigPath is null && options.GitConfigPath is null)
             warnings.Add("PI_GITCONFIG_PATH is using the configured empty fallback; no host git config is exposed unless configured.");
@@ -115,6 +131,7 @@ public sealed class PiDockerLaunchProfileRenderer(PiDockerLaunchProfileOptions o
             PiVersion = piVersion,
             NodeVersion = nodeVersion,
             Environment = environment,
+            ScrubbedEnvironmentVariables = scrubbedEnvironmentVariables,
             VolumeMounts = volumeMounts,
             CallbackPorts = callbackPorts,
             DockerComposeConfigArgs = configArgs,
@@ -171,6 +188,60 @@ public sealed class PiDockerLaunchProfileRenderer(PiDockerLaunchProfileOptions o
         {
             throw new InvalidOperationException($"{field} must be between 1 and 65535.");
         }
+    }
+
+    private static IReadOnlyList<string> NormalizeEnvironmentVariableNames(IEnumerable<string>? values, string field)
+    {
+        var normalized = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var raw in values ?? [])
+        {
+            var value = RequireNonEmpty(raw, field).ToUpperInvariant();
+            if (!IsEnvironmentVariableName(value))
+                throw new InvalidOperationException($"{field} contains invalid environment variable name '{raw}'.");
+            normalized.Add(value);
+        }
+        return normalized.ToList();
+    }
+
+    private static bool IsEnvironmentVariableName(string value) =>
+        value.Length > 0
+        && (value[0] is >= 'A' and <= 'Z' or '_')
+        && value.All(c => c is >= 'A' and <= 'Z' or >= '0' and <= '9' or '_');
+
+    private static IReadOnlyList<string> NormalizeRequiredPiStatePaths(IEnumerable<string>? values)
+    {
+        var normalized = new List<string>();
+        foreach (var raw in values ?? [])
+        {
+            var value = raw?.Trim().Replace('\\', '/') ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(value))
+                continue;
+            if (Path.IsPathRooted(value) || value.Split('/', StringSplitOptions.RemoveEmptyEntries).Any(part => part == ".."))
+                throw new InvalidOperationException($"required_pi_state_paths must contain relative paths under PI_STATE_DIR; invalid value '{raw}'.");
+            normalized.Add(value);
+        }
+        return normalized;
+    }
+
+    private static void AddPiStateWarnings(List<string> warnings, string piStateDir, IReadOnlyList<string> requiredPiStatePaths)
+    {
+        if (requiredPiStatePaths.Count == 0)
+        {
+            warnings.Add("No required Pi state files are configured; launch cannot preflight whether mounted Pi settings/auth state exists.");
+            return;
+        }
+
+        if (!Directory.Exists(piStateDir))
+        {
+            warnings.Add($"PI_STATE_DIR '{piStateDir}' does not exist; launch will fail unless the mounted Pi settings/auth state is created first (required: {string.Join(", ", requiredPiStatePaths)}).");
+            return;
+        }
+
+        var missing = requiredPiStatePaths
+            .Where(path => !File.Exists(Path.Combine(piStateDir, path)) && !Directory.Exists(Path.Combine(piStateDir, path)))
+            .ToList();
+        if (missing.Count > 0)
+            warnings.Add($"PI_STATE_DIR '{piStateDir}' is missing required Pi settings/auth state path(s): {string.Join(", ", missing)}. Den-owned Pi sessions do not fall back to provider environment secrets.");
     }
 
     private static string RequireLoopbackBindAddress(string? value)

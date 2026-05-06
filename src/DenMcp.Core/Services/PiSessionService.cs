@@ -80,7 +80,7 @@ public sealed class PiSessionService : IPiSessionService
             CallbackPorts = request.CallbackPorts,
         });
 
-        var launchCommand = new[] { _options.DockerExecutable }.Concat(profile.DockerComposeRunArgs).ToList();
+        var launchCommand = BuildLaunchCommand(_options.DockerExecutable, profile);
         var now = _utcNow();
         var record = new PiSessionRecord
         {
@@ -516,6 +516,19 @@ public sealed class PiSessionService : IPiSessionService
         {
             return [];
         }
+    }
+
+    private static List<string> BuildLaunchCommand(string dockerExecutable, PiDockerLaunchProfile profile)
+    {
+        var command = new List<string>();
+        if (profile.ScrubbedEnvironmentVariables.Count > 0)
+        {
+            command.Add("env");
+            command.AddRange(profile.ScrubbedEnvironmentVariables.Select(name => $"{name}="));
+        }
+        command.Add(dockerExecutable);
+        command.AddRange(profile.DockerComposeRunArgs);
+        return command;
     }
 
     private static string? ExtractContainerName(PiDockerLaunchProfile profile)

@@ -24,6 +24,9 @@ public sealed class PiDockerLaunchProfileOptions
     public string? HostId { get; set; }
     public string TmuxExecutable { get; set; } = "tmux";
     public string DockerExecutable { get; set; } = "docker";
+    public bool ScrubProviderEnvironmentVariables { get; set; } = true;
+    public string[] ProviderSecretEnvironmentVariables { get; set; } = PiDockerLaunchProfileDefaults.ProviderSecretEnvironmentVariables.ToArray();
+    public string[] RequiredPiStatePaths { get; set; } = ["agent/settings.json"];
 }
 
 public sealed class PiDockerLaunchRenderRequest
@@ -70,6 +73,7 @@ public sealed class PiDockerLaunchProfile
     public required string PiVersion { get; init; }
     public required string NodeVersion { get; init; }
     public IReadOnlyDictionary<string, string> Environment { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
+    public IReadOnlyList<string> ScrubbedEnvironmentVariables { get; init; } = [];
     public IReadOnlyList<PiDockerVolumeMount> VolumeMounts { get; init; } = [];
     public IReadOnlyList<PiDockerCallbackPort> CallbackPorts { get; init; } = [];
     public IReadOnlyList<string> DockerComposeConfigArgs { get; init; } = [];
@@ -99,6 +103,35 @@ public static class PiDockerLaunchProfileDefaults
     public const string ContainerGhConfigDir = "/home/pi/.config/gh";
     public const string CacheVolume = "pi-cache";
     public const string NpmCacheVolume = "pi-npm-cache";
+
+    /// <summary>Provider/model credentials intentionally blanked for Den-owned Docker launches.</summary>
+    public static readonly IReadOnlyList<string> ProviderSecretEnvironmentVariables = [
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "OPENAI_API_KEY",
+        "OPENAI_ORG_ID",
+        "OPENAI_PROJECT_ID",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "MISTRAL_API_KEY",
+        "GROQ_API_KEY",
+        "OPENROUTER_API_KEY",
+        "AWS_PROFILE",
+        "AWS_REGION",
+        "AWS_DEFAULT_REGION",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AZURE_OPENAI_API_KEY",
+        "AZURE_OPENAI_ENDPOINT",
+        "AZURE_API_KEY",
+        "COHERE_API_KEY",
+        "TOGETHER_API_KEY",
+        "XAI_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "PERPLEXITY_API_KEY",
+    ];
 
     /// <summary>Callback ports preserved from the inspected pi-docker compose service.</summary>
     public static readonly IReadOnlyList<int> CallbackContainerPorts = [1455, 53692, 8085, 51121];
