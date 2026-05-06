@@ -14,6 +14,14 @@ public static class PiSessionStates
     public static bool IsActive(string? state) => state is Launching or Running or Terminating;
 }
 
+public static class PiSessionAttentionStates
+{
+    public const string UserInputNeeded = "user_input_needed";
+    public const string WaitingForDirection = "waiting_for_direction";
+    public const string Blocked = "blocked";
+    public const string Stalled = "stalled";
+}
+
 public sealed class PiSessionLaunchRequest
 {
     public string? SessionId { get; init; }
@@ -83,6 +91,15 @@ public sealed class PiSessionRecord
     public DateTime CreatedAt { get; init; }
     public DateTime? StartedAt { get; init; }
     public DateTime? LastActivityAt { get; init; }
+    public string? OutputTail { get; init; }
+    public DateTime? OutputTailCapturedAt { get; init; }
+    public bool OutputTailTruncated { get; init; }
+    public string? OutputTailSha256 { get; init; }
+    public string? AttentionState { get; init; }
+    public string? AttentionReason { get; init; }
+    public DateTime? AttentionSinceAt { get; init; }
+    public DateTime? AttentionUpdatedAt { get; init; }
+    public bool NeedsUserInput { get; init; }
     public DateTime? EndedAt { get; init; }
     public DateTime UpdatedAt { get; init; }
     public DateTime? TerminationRequestedAt { get; init; }
@@ -132,6 +149,14 @@ public sealed class PiSessionSummary
     public DateTime CreatedAt { get; init; }
     public DateTime? StartedAt { get; init; }
     public DateTime? LastActivityAt { get; init; }
+    public string? OutputTail { get; init; }
+    public DateTime? OutputTailCapturedAt { get; init; }
+    public bool OutputTailTruncated { get; init; }
+    public string? AttentionState { get; init; }
+    public string? AttentionReason { get; init; }
+    public DateTime? AttentionSinceAt { get; init; }
+    public DateTime? AttentionUpdatedAt { get; init; }
+    public bool NeedsUserInput { get; init; }
     public DateTime? EndedAt { get; init; }
     public DateTime UpdatedAt { get; init; }
     public DateTime? TerminationRequestedAt { get; init; }

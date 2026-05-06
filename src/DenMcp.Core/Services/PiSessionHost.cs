@@ -28,6 +28,10 @@ public sealed class PiSessionHostStatus
     public DateTime? LastActivityAt { get; init; }
     public string? ContainerId { get; init; }
     public string? ContainerName { get; init; }
+    public string? OutputTail { get; init; }
+    public DateTime? OutputTailCapturedAt { get; init; }
+    public bool OutputTailTruncated { get; init; }
+    public string? OutputTailSha256 { get; init; }
 }
 
 public sealed class PiSessionHostControlResult
@@ -50,6 +54,8 @@ public interface IPiSessionHost
 public sealed class TmuxDockerPiSessionHost : IPiSessionHost
 {
     private const string LabelPrefix = "@den.";
+    private const int OutputTailLineCount = 80;
+    private const int OutputTailMaxChars = 12000;
     private readonly PiDockerLaunchProfileOptions _options;
     private readonly IProcessRunner _runner;
     private readonly Func<DateTime> _utcNow;
@@ -149,12 +155,17 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
             if (parts.Length < 3 || !string.Equals(parts[0], session.TmuxSessionName, StringComparison.Ordinal))
                 continue;
 
+            var output = await CaptureOutputTailAsync(session, cancellationToken).ConfigureAwait(false);
             return new PiSessionHostStatus
             {
                 State = PiSessionStates.Running,
                 LastActivityAt = FromUnixSeconds(parts[2]) ?? session.LastActivityAt,
                 ContainerId = session.ContainerId,
                 ContainerName = session.ContainerName,
+                OutputTail = output?.Tail,
+                OutputTailCapturedAt = output?.CapturedAt,
+                OutputTailTruncated = output?.Truncated ?? false,
+                OutputTailSha256 = output?.TailSha256,
             };
         }
 
@@ -248,8 +259,37 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
         }
     }
 
+    private async Task<PiSessionOutputTail?> CaptureOutputTailAsync(PiSessionRecord session, CancellationToken cancellationToken)
+    {
+        var capture = await RunTmuxAsync([
+            "capture-pane",
+            "-p",
+            "-t", session.TmuxSessionName,
+            "-S", $"-{OutputTailLineCount}"
+        ], cancellationToken).ConfigureAwait(false);
+        if (!capture.Succeeded)
+            return null;
+
+        var normalized = capture.Stdout.Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd('\n', '\r');
+        var truncated = normalized.Length > OutputTailMaxChars || normalized.Split('\n').Length >= OutputTailLineCount;
+        if (normalized.Length > OutputTailMaxChars)
+            normalized = normalized[^OutputTailMaxChars..];
+
+        return new PiSessionOutputTail(
+            normalized,
+            _utcNow(),
+            truncated,
+            ComputeSha256(normalized));
+    }
+
     private Task<ProcessRunResult> RunTmuxAsync(IReadOnlyList<string> args, CancellationToken cancellationToken) =>
         _runner.RunAsync(_options.TmuxExecutable, args, _commandTimeout, cancellationToken);
+
+    private static string ComputeSha256(string value)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(value));
+        return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
 
     private static string? ExtractContainerName(PiDockerLaunchProfile profile)
     {
@@ -293,6 +333,8 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
         return "'" + value.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
     }
 }
+
+internal sealed record PiSessionOutputTail(string Tail, DateTime CapturedAt, bool Truncated, string TailSha256);
 
 public static class PiSessionNaming
 {

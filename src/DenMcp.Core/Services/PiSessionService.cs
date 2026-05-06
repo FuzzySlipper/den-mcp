@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using DenMcp.Core.Data;
 using DenMcp.Core.Models;
@@ -17,6 +19,8 @@ public interface IPiSessionService
 public sealed class PiSessionService : IPiSessionService
 {
     private const string LaunchProfileKind = "pi_docker_compose";
+    private const int OutputTailMaxChars = 12000;
+    private static readonly TimeSpan StalledActivityThreshold = TimeSpan.FromMinutes(30);
     private readonly IPiSessionRepository _sessions;
     private readonly IPiDockerLaunchProfileRenderer _renderer;
     private readonly ITaskRepository _tasks;
@@ -229,21 +233,133 @@ public sealed class PiSessionService : IPiSessionService
             return record;
 
         var status = await _host.GetStatusAsync(record, cancellationToken).ConfigureAwait(false);
-        if (status.State == record.State && status.LastActivityAt is null && status.ContainerId is null && status.ContainerName is null)
-            return record;
+        var attention = DetectAttention(status);
+        var outputTail = NormalizeOutputTail(status.OutputTail);
+        var outputCaptured = outputTail is not null;
+        var outputSha256 = outputCaptured
+            ? status.OutputTailSha256 ?? ComputeSha256(outputTail!)
+            : null;
+        var outputChanged = outputCaptured && !string.Equals(outputSha256, record.OutputTailSha256, StringComparison.Ordinal);
+        var attentionChanged = !string.Equals(attention.State, record.AttentionState, StringComparison.Ordinal)
+            || attention.NeedsUserInput != record.NeedsUserInput;
+        var stateChanged = status.State != record.State;
+        var stateReasonChanged = !string.Equals(status.StateReason, record.StateReason, StringComparison.Ordinal);
+        var lastActivityChanged = status.LastActivityAt is { } observedActivity
+            && (record.LastActivityAt is null || observedActivity.ToUniversalTime() > record.LastActivityAt.Value.ToUniversalTime());
+        var containerIdChanged = status.ContainerId is not null && !string.Equals(status.ContainerId, record.ContainerId, StringComparison.Ordinal);
+        var containerNameChanged = status.ContainerName is not null && !string.Equals(status.ContainerName, record.ContainerName, StringComparison.Ordinal);
 
-        var updated = await _sessions.UpdateStateAsync(
+        if (!stateChanged
+            && !stateReasonChanged
+            && !lastActivityChanged
+            && !containerIdChanged
+            && !containerNameChanged
+            && !outputChanged
+            && !attentionChanged)
+        {
+            return record;
+        }
+
+        var updated = await _sessions.UpdateRuntimeAsync(
             record.ProjectId,
             record.SessionId,
             status.State,
             status.StateReason,
-            lastActivityAt: status.LastActivityAt,
-            containerId: status.ContainerId,
-            containerName: status.ContainerName).ConfigureAwait(false);
+            lastActivityChanged ? status.LastActivityAt : null,
+            containerIdChanged ? status.ContainerId : null,
+            containerNameChanged ? status.ContainerName : null,
+            outputCaptured,
+            outputTail,
+            outputCaptured ? status.OutputTailCapturedAt ?? _utcNow() : null,
+            outputCaptured && status.OutputTailTruncated,
+            outputSha256,
+            attention.State,
+            attention.Reason,
+            attention.NeedsUserInput,
+            attention.State is null ? null : _utcNow()).ConfigureAwait(false);
 
-        if (status.State != record.State)
+        if (stateChanged)
             await AuditAsync(updated, "pi_session_status_changed", "den", status.StateReason, new { from_state = record.State, to_state = status.State }, cancellationToken).ConfigureAwait(false);
+        if (outputChanged)
+            await AuditAsync(updated, "pi_session_output_tail_updated", "den", null, new { output_tail_sha256 = outputSha256, output_tail_truncated = updated.OutputTailTruncated }, cancellationToken).ConfigureAwait(false);
+        if (attentionChanged && attention.State is not null)
+            await AuditAsync(updated, "pi_session_attention_needed", "den", attention.Reason, new { attention_state = attention.State, needs_user_input = attention.NeedsUserInput }, cancellationToken).ConfigureAwait(false);
+        if (attentionChanged && attention.State is null && record.AttentionState is not null)
+            await AuditAsync(updated, "pi_session_attention_cleared", "den", null, new { previous_attention_state = record.AttentionState }, cancellationToken).ConfigureAwait(false);
         return updated;
+    }
+
+    private AttentionObservation DetectAttention(PiSessionHostStatus status)
+    {
+        var output = status.OutputTail ?? string.Empty;
+        if (ContainsAny(output,
+                "waiting for direction",
+                "waiting for user",
+                "needs user input",
+                "need user input",
+                "please respond",
+                "approval required"))
+        {
+            return new AttentionObservation(
+                PiSessionAttentionStates.WaitingForDirection,
+                "Recent output indicates the session is waiting for operator direction.",
+                NeedsUserInput: true);
+        }
+
+        if (ContainsAny(output,
+                "do you want to continue",
+                "proceed?",
+                "continue?",
+                "[y/n]",
+                "[y/N]",
+                "[Y/n]"))
+        {
+            return new AttentionObservation(
+                PiSessionAttentionStates.UserInputNeeded,
+                "Recent output appears to be prompting for user input.",
+                NeedsUserInput: true);
+        }
+
+        if (ContainsAny(output,
+                "blocked:",
+                "blocked by",
+                "cannot proceed",
+                "unable to proceed"))
+        {
+            return new AttentionObservation(
+                PiSessionAttentionStates.Blocked,
+                "Recent output indicates the session is blocked.",
+                NeedsUserInput: true);
+        }
+
+        if (status.State == PiSessionStates.Running
+            && status.LastActivityAt is { } lastActivityAt
+            && _utcNow() - lastActivityAt.ToUniversalTime() >= StalledActivityThreshold)
+        {
+            return new AttentionObservation(
+                PiSessionAttentionStates.Stalled,
+                $"No host-reported activity for at least {StalledActivityThreshold.TotalMinutes:0} minutes.",
+                NeedsUserInput: false);
+        }
+
+        return AttentionObservation.None;
+    }
+
+    private static bool ContainsAny(string value, params string[] needles) =>
+        needles.Any(needle => value.Contains(needle, StringComparison.OrdinalIgnoreCase));
+
+    private static string? NormalizeOutputTail(string? outputTail)
+    {
+        if (outputTail is null)
+            return null;
+        var normalized = outputTail.Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd('\n', '\r');
+        return normalized.Length <= OutputTailMaxChars ? normalized : normalized[^OutputTailMaxChars..];
+    }
+
+    private static string ComputeSha256(string value)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(value));
+        return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
     private async Task AuditAsync(PiSessionRecord record, string eventType, string requestedBy, string? reason, object? payload, CancellationToken cancellationToken)
@@ -268,7 +384,7 @@ public sealed class PiSessionService : IPiSessionService
             ProjectId = record.ProjectId,
             TaskId = record.TaskId,
             Sender = requestedBy,
-            DeliveryMode = AgentStreamDeliveryMode.RecordOnly,
+            DeliveryMode = eventType == "pi_session_attention_needed" ? AgentStreamDeliveryMode.Notify : AgentStreamDeliveryMode.RecordOnly,
             Body = $"Pi session {record.SessionId} {eventType.Replace("pi_session_", string.Empty, StringComparison.Ordinal).Replace('_', ' ')}.",
             Metadata = JsonSerializer.SerializeToElement(new
             {
@@ -282,6 +398,14 @@ public sealed class PiSessionService : IPiSessionService
                 container_id = record.ContainerId,
                 container_name = record.ContainerName,
                 state = record.State,
+                last_activity_at = record.LastActivityAt,
+                output_tail_captured_at = record.OutputTailCapturedAt,
+                output_tail_sha256 = record.OutputTailSha256,
+                output_tail_truncated = record.OutputTailTruncated,
+                attention_state = record.AttentionState,
+                attention_reason = record.AttentionReason,
+                attention_since_at = record.AttentionSinceAt,
+                needs_user_input = record.NeedsUserInput,
                 launch_profile_kind = record.LaunchProfileKind,
                 launch_profile_id = record.LaunchProfileId,
                 requested_by = requestedBy,
@@ -322,6 +446,14 @@ public sealed class PiSessionService : IPiSessionService
         CreatedAt = record.CreatedAt,
         StartedAt = record.StartedAt,
         LastActivityAt = record.LastActivityAt,
+        OutputTail = record.OutputTail,
+        OutputTailCapturedAt = record.OutputTailCapturedAt,
+        OutputTailTruncated = record.OutputTailTruncated,
+        AttentionState = record.AttentionState,
+        AttentionReason = record.AttentionReason,
+        AttentionSinceAt = record.AttentionSinceAt,
+        AttentionUpdatedAt = record.AttentionUpdatedAt,
+        NeedsUserInput = record.NeedsUserInput,
         EndedAt = record.EndedAt,
         UpdatedAt = record.UpdatedAt,
         TerminationRequestedAt = record.TerminationRequestedAt,
@@ -340,7 +472,7 @@ public sealed class PiSessionService : IPiSessionService
         TmuxSessionName = record.TmuxSessionName,
         CommandExecutable = "tmux",
         CommandArgs = ["attach-session", "-t", record.TmuxSessionName],
-        Warnings = ["Attach info exposes the server host tmux session name; raw terminal output capture is owned by the follow-up output/attention task."],
+        Warnings = ["Attach info exposes the server host tmux session name; bounded output and attention snapshots are available on the Den pi-session record."],
     };
 
     private static PiDockerLaunchProfile? DeserializeProfile(PiSessionRecord record)
@@ -388,4 +520,9 @@ public sealed class PiSessionService : IPiSessionService
     }
 
     private static string? NormalizeText(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private sealed record AttentionObservation(string? State, string? Reason, bool NeedsUserInput)
+    {
+        public static readonly AttentionObservation None = new(null, null, false);
+    }
 }

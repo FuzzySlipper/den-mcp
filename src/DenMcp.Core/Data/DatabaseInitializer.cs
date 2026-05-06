@@ -608,6 +608,15 @@ public sealed class DatabaseInitializer
             created_at                 TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
             started_at                 TEXT,
             last_activity_at           TEXT,
+            output_tail                TEXT CHECK (output_tail IS NULL OR length(output_tail) <= 12000),
+            output_tail_captured_at    TEXT,
+            output_tail_truncated      INTEGER NOT NULL DEFAULT 0,
+            output_tail_sha256         TEXT,
+            attention_state            TEXT CHECK (attention_state IS NULL OR attention_state IN ('user_input_needed', 'waiting_for_direction', 'blocked', 'stalled')),
+            attention_reason           TEXT CHECK (attention_reason IS NULL OR length(attention_reason) <= 2000),
+            attention_since_at         TEXT,
+            attention_updated_at       TEXT,
+            needs_user_input           INTEGER NOT NULL DEFAULT 0,
             ended_at                   TEXT,
             updated_at                 TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
             termination_requested_at   TEXT,
@@ -1415,6 +1424,15 @@ public sealed class DatabaseInitializer
                 created_at                 TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
                 started_at                 TEXT,
                 last_activity_at           TEXT,
+                output_tail                TEXT CHECK (output_tail IS NULL OR length(output_tail) <= 12000),
+                output_tail_captured_at    TEXT,
+                output_tail_truncated      INTEGER NOT NULL DEFAULT 0,
+                output_tail_sha256         TEXT,
+                attention_state            TEXT CHECK (attention_state IS NULL OR attention_state IN ('user_input_needed', 'waiting_for_direction', 'blocked', 'stalled')),
+                attention_reason           TEXT CHECK (attention_reason IS NULL OR length(attention_reason) <= 2000),
+                attention_since_at         TEXT,
+                attention_updated_at       TEXT,
+                needs_user_input           INTEGER NOT NULL DEFAULT 0,
                 ended_at                   TEXT,
                 updated_at                 TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
                 termination_requested_at   TEXT,
@@ -1445,6 +1463,16 @@ public sealed class DatabaseInitializer
             )
             """;
         await eventsCmd.ExecuteNonQueryAsync();
+
+        await TryAddColumnAsync(connection, "pi_sessions", "output_tail", "TEXT CHECK (output_tail IS NULL OR length(output_tail) <= 12000)");
+        await TryAddColumnAsync(connection, "pi_sessions", "output_tail_captured_at", "TEXT");
+        await TryAddColumnAsync(connection, "pi_sessions", "output_tail_truncated", "INTEGER NOT NULL DEFAULT 0");
+        await TryAddColumnAsync(connection, "pi_sessions", "output_tail_sha256", "TEXT");
+        await TryAddColumnAsync(connection, "pi_sessions", "attention_state", "TEXT CHECK (attention_state IS NULL OR attention_state IN ('user_input_needed', 'waiting_for_direction', 'blocked', 'stalled'))");
+        await TryAddColumnAsync(connection, "pi_sessions", "attention_reason", "TEXT CHECK (attention_reason IS NULL OR length(attention_reason) <= 2000)");
+        await TryAddColumnAsync(connection, "pi_sessions", "attention_since_at", "TEXT");
+        await TryAddColumnAsync(connection, "pi_sessions", "attention_updated_at", "TEXT");
+        await TryAddColumnAsync(connection, "pi_sessions", "needs_user_input", "INTEGER NOT NULL DEFAULT 0");
 
         await EnsureIndexAsync(connection, "idx_pi_sessions_project_state_updated",
             "CREATE INDEX IF NOT EXISTS idx_pi_sessions_project_state_updated ON pi_sessions(project_id, state, updated_at DESC, session_id DESC)");

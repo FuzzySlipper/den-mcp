@@ -114,6 +114,92 @@ public sealed class PiSessionApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task StatusRefreshCapturesBoundedOutputAndSurfacesAttention()
+    {
+        var launch = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/pi-sessions", new
+        {
+            session_id = "session-attention",
+            task_id = _task.Id,
+            run_id = "run-attention",
+            requested_by = "hermes",
+            callback_ports = new[] { new { host_port = 21458, container_port = 1455 } },
+        });
+        launch.EnsureSuccessStatusCode();
+
+        var now = DateTime.UtcNow;
+        _factory.FakeHost.SetStatus("session-attention", new PiSessionHostStatus
+        {
+            State = PiSessionStates.Running,
+            LastActivityAt = now,
+            OutputTail = "working\nDo you want to continue? [y/N]",
+            OutputTailCapturedAt = now.AddSeconds(1),
+            OutputTailTruncated = true,
+        });
+
+        var detailResponse = await _client.GetAsync($"/api/projects/{ProjectId}/pi-sessions/session-attention");
+        detailResponse.EnsureSuccessStatusCode();
+        using var detailJson = JsonDocument.Parse(await detailResponse.Content.ReadAsStringAsync());
+        var session = detailJson.RootElement.GetProperty("session");
+        Assert.Equal("run-attention", session.GetProperty("run_id").GetString());
+        Assert.Contains("Do you want to continue", session.GetProperty("output_tail").GetString());
+        Assert.True(session.GetProperty("output_tail_truncated").GetBoolean());
+        Assert.Equal("user_input_needed", session.GetProperty("attention_state").GetString());
+        Assert.True(session.GetProperty("needs_user_input").GetBoolean());
+        Assert.True(session.TryGetProperty("attention_since_at", out _));
+        Assert.True(session.TryGetProperty("last_activity_at", out _));
+
+        var listResponse = await _client.GetAsync($"/api/projects/{ProjectId}/pi-sessions?taskId={_task.Id}");
+        listResponse.EnsureSuccessStatusCode();
+        using var listJson = JsonDocument.Parse(await listResponse.Content.ReadAsStringAsync());
+        var listed = listJson.RootElement.EnumerateArray().Single(s => s.GetProperty("session_id").GetString() == "session-attention");
+        Assert.Equal("user_input_needed", listed.GetProperty("attention_state").GetString());
+        Assert.True(listed.GetProperty("needs_user_input").GetBoolean());
+
+        using var scope = _factory.Services.CreateScope();
+        var stream = scope.ServiceProvider.GetRequiredService<IAgentStreamRepository>();
+        var entries = await stream.ListAsync(new AgentStreamListOptions
+        {
+            ProjectId = ProjectId,
+            TaskId = _task.Id,
+            StreamKind = AgentStreamKind.Ops,
+            IncludeDebug = true,
+            Limit = 20,
+        });
+        var attentionEntry = Assert.Single(entries, e => e.EventType == "pi_session_attention_needed");
+        Assert.Equal(AgentStreamDeliveryMode.Notify, attentionEntry.DeliveryMode);
+        Assert.Contains(entries, e => e.EventType == "pi_session_output_tail_updated");
+    }
+
+    [Fact]
+    public async Task StaleActivityIsSurfacedAsStalledAttention()
+    {
+        var launch = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/pi-sessions", new
+        {
+            session_id = "session-stalled",
+            task_id = _task.Id,
+            requested_by = "hermes",
+            callback_ports = new[] { new { host_port = 21459, container_port = 1455 } },
+        });
+        launch.EnsureSuccessStatusCode();
+
+        _factory.FakeHost.SetStatus("session-stalled", new PiSessionHostStatus
+        {
+            State = PiSessionStates.Running,
+            LastActivityAt = DateTime.UtcNow.AddMinutes(-45),
+            OutputTail = "still compiling",
+            OutputTailCapturedAt = DateTime.UtcNow,
+        });
+
+        var detailResponse = await _client.GetAsync($"/api/projects/{ProjectId}/pi-sessions/session-stalled");
+        detailResponse.EnsureSuccessStatusCode();
+        using var detailJson = JsonDocument.Parse(await detailResponse.Content.ReadAsStringAsync());
+        var session = detailJson.RootElement.GetProperty("session");
+        Assert.Equal("stalled", session.GetProperty("attention_state").GetString());
+        Assert.False(session.GetProperty("needs_user_input").GetBoolean());
+        Assert.Contains("No host-reported activity", session.GetProperty("attention_reason").GetString());
+    }
+
+    [Fact]
     public async Task TerminateAndCleanupAreExplicitAndAudited()
     {
         var launch = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/pi-sessions", new
@@ -269,6 +355,8 @@ public sealed class PiSessionApiTests : IAsyncLifetime
                 ContainerName = plan.Record.ContainerName,
             });
         }
+
+        public void SetStatus(string sessionId, PiSessionHostStatus status) => _statuses[sessionId] = status;
 
         public Task<PiSessionHostStatus> GetStatusAsync(PiSessionRecord session, CancellationToken cancellationToken = default) =>
             Task.FromResult(_statuses.GetValueOrDefault(session.SessionId) ?? new PiSessionHostStatus { State = PiSessionStates.Stale });

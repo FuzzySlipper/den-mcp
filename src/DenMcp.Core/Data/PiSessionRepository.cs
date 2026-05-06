@@ -19,6 +19,23 @@ public interface IPiSessionRepository
         DateTime? endedAt = null,
         string? containerId = null,
         string? containerName = null);
+    Task<PiSessionRecord> UpdateRuntimeAsync(
+        string projectId,
+        string sessionId,
+        string state,
+        string? stateReason,
+        DateTime? lastActivityAt,
+        string? containerId,
+        string? containerName,
+        bool outputCaptured,
+        string? outputTail,
+        DateTime? outputTailCapturedAt,
+        bool outputTailTruncated,
+        string? outputTailSha256,
+        string? attentionState,
+        string? attentionReason,
+        bool needsUserInput,
+        DateTime? attentionObservedAt);
     Task<PiSessionRecord> MarkTerminationRequestedAsync(string projectId, string sessionId, string requestedBy, string? reason);
     Task<PiSessionRecord> MarkCleanupRequestedAsync(string projectId, string sessionId, string requestedBy, string? reason);
     Task<PiSessionRecord> MarkCleanupCompletedAsync(string projectId, string sessionId, string? stateReason = null);
@@ -32,7 +49,9 @@ public sealed class PiSessionRepository : IPiSessionRepository
         model, provider, host_id, tmux_session_name, container_id, container_name,
         state, state_reason, launch_profile_kind, launch_profile_id, launch_profile_json,
         launch_command_json, launch_command_display, created_at, started_at, last_activity_at,
-        ended_at, updated_at, termination_requested_at, termination_requested_by,
+        output_tail, output_tail_captured_at, output_tail_truncated, output_tail_sha256,
+        attention_state, attention_reason, attention_since_at, attention_updated_at,
+        needs_user_input, ended_at, updated_at, termination_requested_at, termination_requested_by,
         termination_reason, cleanup_requested_at, cleanup_requested_by, cleanup_reason,
         cleanup_completed_at
         """;
@@ -63,7 +82,9 @@ public sealed class PiSessionRepository : IPiSessionRepository
                 model, provider, host_id, tmux_session_name, container_id, container_name,
                 state, state_reason, launch_profile_kind, launch_profile_id, launch_profile_json,
                 launch_command_json, launch_command_display, created_at, started_at, last_activity_at,
-                ended_at, updated_at, termination_requested_at, termination_requested_by,
+                output_tail, output_tail_captured_at, output_tail_truncated, output_tail_sha256,
+                attention_state, attention_reason, attention_since_at, attention_updated_at,
+                needs_user_input, ended_at, updated_at, termination_requested_at, termination_requested_by,
                 termination_reason, cleanup_requested_at, cleanup_requested_by, cleanup_reason,
                 cleanup_completed_at
             ) VALUES (
@@ -71,7 +92,9 @@ public sealed class PiSessionRepository : IPiSessionRepository
                 @model, @provider, @hostId, @tmuxSessionName, @containerId, @containerName,
                 @state, @stateReason, @launchProfileKind, @launchProfileId, @launchProfileJson,
                 @launchCommandJson, @launchCommandDisplay, @createdAt, @startedAt, @lastActivityAt,
-                @endedAt, @updatedAt, @terminationRequestedAt, @terminationRequestedBy,
+                @outputTail, @outputTailCapturedAt, @outputTailTruncated, @outputTailSha256,
+                @attentionState, @attentionReason, @attentionSinceAt, @attentionUpdatedAt,
+                @needsUserInput, @endedAt, @updatedAt, @terminationRequestedAt, @terminationRequestedBy,
                 @terminationReason, @cleanupRequestedAt, @cleanupRequestedBy, @cleanupReason,
                 @cleanupCompletedAt
             )
@@ -162,6 +185,11 @@ public sealed class PiSessionRepository : IPiSessionRepository
                 ended_at = COALESCE(@endedAt, ended_at),
                 container_id = COALESCE(@containerId, container_id),
                 container_name = COALESCE(@containerName, container_name),
+                attention_state = CASE WHEN @state IN ('launching', 'running', 'terminating') THEN attention_state ELSE NULL END,
+                attention_reason = CASE WHEN @state IN ('launching', 'running', 'terminating') THEN attention_reason ELSE NULL END,
+                attention_since_at = CASE WHEN @state IN ('launching', 'running', 'terminating') THEN attention_since_at ELSE NULL END,
+                attention_updated_at = CASE WHEN @state IN ('launching', 'running', 'terminating') THEN attention_updated_at ELSE NULL END,
+                needs_user_input = CASE WHEN @state IN ('launching', 'running', 'terminating') THEN needs_user_input ELSE 0 END,
                 updated_at = @updatedAt
             WHERE project_id = @projectId AND session_id = @sessionId
             RETURNING {Columns}
@@ -175,6 +203,71 @@ public sealed class PiSessionRepository : IPiSessionRepository
         cmd.Parameters.AddWithValue("@endedAt", ToDbTimeOrNull(endedAt));
         cmd.Parameters.AddWithValue("@containerId", NullIfWhiteSpace(containerId));
         cmd.Parameters.AddWithValue("@containerName", NullIfWhiteSpace(containerName));
+        cmd.Parameters.AddWithValue("@updatedAt", ToDbTime(now));
+        return await ExecuteReturningRecordAsync(cmd, sessionId);
+    }
+
+    public async Task<PiSessionRecord> UpdateRuntimeAsync(
+        string projectId,
+        string sessionId,
+        string state,
+        string? stateReason,
+        DateTime? lastActivityAt,
+        string? containerId,
+        string? containerName,
+        bool outputCaptured,
+        string? outputTail,
+        DateTime? outputTailCapturedAt,
+        bool outputTailTruncated,
+        string? outputTailSha256,
+        string? attentionState,
+        string? attentionReason,
+        bool needsUserInput,
+        DateTime? attentionObservedAt)
+    {
+        var now = _utcNow();
+        await using var conn = await _db.CreateConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"""
+            UPDATE pi_sessions
+            SET state = @state,
+                state_reason = @stateReason,
+                last_activity_at = COALESCE(@lastActivityAt, last_activity_at),
+                container_id = COALESCE(@containerId, container_id),
+                container_name = COALESCE(@containerName, container_name),
+                output_tail = CASE WHEN @outputCaptured = 1 THEN @outputTail ELSE output_tail END,
+                output_tail_captured_at = CASE WHEN @outputCaptured = 1 THEN @outputTailCapturedAt ELSE output_tail_captured_at END,
+                output_tail_truncated = CASE WHEN @outputCaptured = 1 THEN @outputTailTruncated ELSE output_tail_truncated END,
+                output_tail_sha256 = CASE WHEN @outputCaptured = 1 THEN @outputTailSha256 ELSE output_tail_sha256 END,
+                attention_since_at = CASE
+                    WHEN @attentionState IS NULL THEN NULL
+                    WHEN attention_state = @attentionState THEN COALESCE(attention_since_at, @attentionObservedAt)
+                    ELSE @attentionObservedAt
+                END,
+                attention_state = @attentionState,
+                attention_reason = @attentionReason,
+                attention_updated_at = CASE WHEN @attentionState IS NULL THEN NULL ELSE @attentionObservedAt END,
+                needs_user_input = @needsUserInput,
+                updated_at = @updatedAt
+            WHERE project_id = @projectId AND session_id = @sessionId
+            RETURNING {Columns}
+            """;
+        cmd.Parameters.AddWithValue("@projectId", projectId.Trim());
+        cmd.Parameters.AddWithValue("@sessionId", sessionId.Trim());
+        cmd.Parameters.AddWithValue("@state", state.Trim());
+        cmd.Parameters.AddWithValue("@stateReason", NullIfWhiteSpace(stateReason));
+        cmd.Parameters.AddWithValue("@lastActivityAt", ToDbTimeOrNull(lastActivityAt));
+        cmd.Parameters.AddWithValue("@containerId", NullIfWhiteSpace(containerId));
+        cmd.Parameters.AddWithValue("@containerName", NullIfWhiteSpace(containerName));
+        cmd.Parameters.AddWithValue("@outputCaptured", outputCaptured ? 1 : 0);
+        cmd.Parameters.AddWithValue("@outputTail", NullIfWhiteSpace(outputTail));
+        cmd.Parameters.AddWithValue("@outputTailCapturedAt", ToDbTimeOrNull(outputTailCapturedAt));
+        cmd.Parameters.AddWithValue("@outputTailTruncated", outputTailTruncated ? 1 : 0);
+        cmd.Parameters.AddWithValue("@outputTailSha256", NullIfWhiteSpace(outputTailSha256));
+        cmd.Parameters.AddWithValue("@attentionState", NullIfWhiteSpace(attentionState));
+        cmd.Parameters.AddWithValue("@attentionReason", NullIfWhiteSpace(attentionReason));
+        cmd.Parameters.AddWithValue("@needsUserInput", needsUserInput ? 1 : 0);
+        cmd.Parameters.AddWithValue("@attentionObservedAt", ToDbTimeOrNull(attentionObservedAt));
         cmd.Parameters.AddWithValue("@updatedAt", ToDbTime(now));
         return await ExecuteReturningRecordAsync(cmd, sessionId);
     }
@@ -295,6 +388,15 @@ public sealed class PiSessionRepository : IPiSessionRepository
         cmd.Parameters.AddWithValue("@createdAt", ToDbTime(record.CreatedAt == default ? createdAt : record.CreatedAt));
         cmd.Parameters.AddWithValue("@startedAt", ToDbTimeOrNull(record.StartedAt));
         cmd.Parameters.AddWithValue("@lastActivityAt", ToDbTimeOrNull(record.LastActivityAt));
+        cmd.Parameters.AddWithValue("@outputTail", NullIfWhiteSpace(record.OutputTail));
+        cmd.Parameters.AddWithValue("@outputTailCapturedAt", ToDbTimeOrNull(record.OutputTailCapturedAt));
+        cmd.Parameters.AddWithValue("@outputTailTruncated", record.OutputTailTruncated ? 1 : 0);
+        cmd.Parameters.AddWithValue("@outputTailSha256", NullIfWhiteSpace(record.OutputTailSha256));
+        cmd.Parameters.AddWithValue("@attentionState", NullIfWhiteSpace(record.AttentionState));
+        cmd.Parameters.AddWithValue("@attentionReason", NullIfWhiteSpace(record.AttentionReason));
+        cmd.Parameters.AddWithValue("@attentionSinceAt", ToDbTimeOrNull(record.AttentionSinceAt));
+        cmd.Parameters.AddWithValue("@attentionUpdatedAt", ToDbTimeOrNull(record.AttentionUpdatedAt));
+        cmd.Parameters.AddWithValue("@needsUserInput", record.NeedsUserInput ? 1 : 0);
         cmd.Parameters.AddWithValue("@endedAt", ToDbTimeOrNull(record.EndedAt));
         cmd.Parameters.AddWithValue("@updatedAt", ToDbTime(record.UpdatedAt == default ? updatedAt : record.UpdatedAt));
         cmd.Parameters.AddWithValue("@terminationRequestedAt", ToDbTimeOrNull(record.TerminationRequestedAt));
@@ -331,15 +433,24 @@ public sealed class PiSessionRepository : IPiSessionRepository
         CreatedAt = FromDbTime(reader.GetString(20)),
         StartedAt = reader.IsDBNull(21) ? null : FromDbTime(reader.GetString(21)),
         LastActivityAt = reader.IsDBNull(22) ? null : FromDbTime(reader.GetString(22)),
-        EndedAt = reader.IsDBNull(23) ? null : FromDbTime(reader.GetString(23)),
-        UpdatedAt = FromDbTime(reader.GetString(24)),
-        TerminationRequestedAt = reader.IsDBNull(25) ? null : FromDbTime(reader.GetString(25)),
-        TerminationRequestedBy = reader.IsDBNull(26) ? null : reader.GetString(26),
-        TerminationReason = reader.IsDBNull(27) ? null : reader.GetString(27),
-        CleanupRequestedAt = reader.IsDBNull(28) ? null : FromDbTime(reader.GetString(28)),
-        CleanupRequestedBy = reader.IsDBNull(29) ? null : reader.GetString(29),
-        CleanupReason = reader.IsDBNull(30) ? null : reader.GetString(30),
-        CleanupCompletedAt = reader.IsDBNull(31) ? null : FromDbTime(reader.GetString(31)),
+        OutputTail = reader.IsDBNull(23) ? null : reader.GetString(23),
+        OutputTailCapturedAt = reader.IsDBNull(24) ? null : FromDbTime(reader.GetString(24)),
+        OutputTailTruncated = !reader.IsDBNull(25) && reader.GetInt32(25) != 0,
+        OutputTailSha256 = reader.IsDBNull(26) ? null : reader.GetString(26),
+        AttentionState = reader.IsDBNull(27) ? null : reader.GetString(27),
+        AttentionReason = reader.IsDBNull(28) ? null : reader.GetString(28),
+        AttentionSinceAt = reader.IsDBNull(29) ? null : FromDbTime(reader.GetString(29)),
+        AttentionUpdatedAt = reader.IsDBNull(30) ? null : FromDbTime(reader.GetString(30)),
+        NeedsUserInput = !reader.IsDBNull(31) && reader.GetInt32(31) != 0,
+        EndedAt = reader.IsDBNull(32) ? null : FromDbTime(reader.GetString(32)),
+        UpdatedAt = FromDbTime(reader.GetString(33)),
+        TerminationRequestedAt = reader.IsDBNull(34) ? null : FromDbTime(reader.GetString(34)),
+        TerminationRequestedBy = reader.IsDBNull(35) ? null : reader.GetString(35),
+        TerminationReason = reader.IsDBNull(36) ? null : reader.GetString(36),
+        CleanupRequestedAt = reader.IsDBNull(37) ? null : FromDbTime(reader.GetString(37)),
+        CleanupRequestedBy = reader.IsDBNull(38) ? null : reader.GetString(38),
+        CleanupReason = reader.IsDBNull(39) ? null : reader.GetString(39),
+        CleanupCompletedAt = reader.IsDBNull(40) ? null : FromDbTime(reader.GetString(40)),
     };
 
     private static PiSessionEvent ReadEvent(SqliteDataReader reader) => new()
