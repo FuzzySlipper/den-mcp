@@ -21,6 +21,9 @@ public sealed class PiDockerLaunchProfileOptions
     public string? GhConfigDir { get; set; }
     public string CredentialFallbackRootDir { get; set; } = "~/.local/share/den-mcp/pi-credential-fallbacks";
     public string HostCallbackBindAddress { get; set; } = PiDockerLaunchProfileDefaults.LoopbackAddress;
+    public string? HostId { get; set; }
+    public string TmuxExecutable { get; set; } = "tmux";
+    public string DockerExecutable { get; set; } = "docker";
     public List<int> DefaultCallbackContainerPorts { get; set; } = [.. PiDockerLaunchProfileDefaults.CallbackContainerPorts];
 }
 

@@ -1,0 +1,301 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+using DenMcp.Core.Data;
+using DenMcp.Core.Llm;
+using DenMcp.Core.Models;
+using DenMcp.Core.Services;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging.Abstractions;
+
+namespace DenMcp.Server.Tests;
+
+public sealed class PiSessionApiTests : IAsyncLifetime
+{
+    private const string ProjectId = "den-mcp";
+    private PiSessionAppFactory _factory = null!;
+    private HttpClient _client = null!;
+    private ProjectTask _task = null!;
+
+    public async Task InitializeAsync()
+    {
+        _factory = new PiSessionAppFactory();
+        _client = _factory.CreateClient();
+
+        using var scope = _factory.Services.CreateScope();
+        var projects = scope.ServiceProvider.GetRequiredService<IProjectRepository>();
+        var tasks = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+        await projects.CreateAsync(new Project { Id = ProjectId, Name = "Den MCP" });
+        _task = await tasks.CreateAsync(new ProjectTask
+        {
+            ProjectId = ProjectId,
+            Title = "Launch pi",
+            Status = DenMcp.Core.Models.TaskStatus.InProgress,
+        });
+    }
+
+    public Task DisposeAsync()
+    {
+        _client.Dispose();
+        _factory.Dispose();
+        return Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task Launch_List_Status_AndAttach_ReturnDurableSessionMetadata()
+    {
+        var response = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/pi-sessions", new
+        {
+            session_id = "session-a",
+            task_id = _task.Id,
+            workspace_id = "workspace-a",
+            run_id = "run-a",
+            title = "Pi coder",
+            requested_by = "hermes",
+            tool_profile = "coding",
+            model = "openai-codex/gpt-5.5",
+            provider = "openai-codex",
+            callback_ports = new[]
+            {
+                new { host_port = 21455, container_port = 1455 },
+            },
+        });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
+        using var createdJson = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var detail = createdJson.RootElement;
+        var session = detail.GetProperty("session");
+        Assert.Equal("session-a", session.GetProperty("session_id").GetString());
+        Assert.Equal(ProjectId, session.GetProperty("project_id").GetString());
+        Assert.Equal(_task.Id, session.GetProperty("task_id").GetInt32());
+        Assert.Equal("workspace-a", session.GetProperty("workspace_id").GetString());
+        Assert.Equal("run-a", session.GetProperty("run_id").GetString());
+        Assert.Equal("host-test", session.GetProperty("host_id").GetString());
+        Assert.Equal("running", session.GetProperty("state").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(session.GetProperty("tmux_session_name").GetString()));
+        Assert.Contains("docker", session.GetProperty("launch_command").EnumerateArray().Select(v => v.GetString()));
+        Assert.Equal("pi_docker_compose", session.GetProperty("launch_profile_kind").GetString());
+        Assert.Equal("coding", session.GetProperty("tool_profile").GetString());
+        Assert.Equal("openai-codex/gpt-5.5", session.GetProperty("model").GetString());
+        Assert.Equal("external_attach_info", detail.GetProperty("attach").GetProperty("mode").GetString());
+
+        var fakeHost = _factory.FakeHost;
+        Assert.Single(fakeHost.Launches);
+        Assert.Equal("session-a", fakeHost.Launches[0].Record.SessionId);
+        Assert.Equal("/srv/dev", fakeHost.Launches[0].LaunchProfile.DevDir);
+
+        var listResponse = await _client.GetAsync($"/api/projects/{ProjectId}/pi-sessions?taskId={_task.Id}");
+        listResponse.EnsureSuccessStatusCode();
+        using var listJson = JsonDocument.Parse(await listResponse.Content.ReadAsStringAsync());
+        var listed = Assert.Single(listJson.RootElement.EnumerateArray());
+        Assert.Equal("session-a", listed.GetProperty("session_id").GetString());
+        Assert.Equal("running", listed.GetProperty("state").GetString());
+        Assert.True(listed.TryGetProperty("last_activity_at", out _));
+
+        var statusResponse = await _client.GetAsync($"/api/projects/{ProjectId}/pi-sessions/session-a");
+        statusResponse.EnsureSuccessStatusCode();
+        using var statusJson = JsonDocument.Parse(await statusResponse.Content.ReadAsStringAsync());
+        Assert.Equal("session-a", statusJson.RootElement.GetProperty("session").GetProperty("session_id").GetString());
+
+        var attachResponse = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/pi-sessions/session-a/attach", new
+        {
+            requested_by = "hermes",
+            mode = "external_attach_info",
+        });
+        attachResponse.EnsureSuccessStatusCode();
+        using var attachJson = JsonDocument.Parse(await attachResponse.Content.ReadAsStringAsync());
+        Assert.Equal("tmux", attachJson.RootElement.GetProperty("backend").GetString());
+        Assert.Contains("attach-session", attachJson.RootElement.GetProperty("command_args").EnumerateArray().Select(v => v.GetString()));
+    }
+
+    [Fact]
+    public async Task TerminateAndCleanupAreExplicitAndAudited()
+    {
+        var launch = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/pi-sessions", new
+        {
+            session_id = "session-b",
+            task_id = _task.Id,
+            requested_by = "hermes",
+            callback_ports = new[] { new { host_port = 21456, container_port = 1455 } },
+        });
+        launch.EnsureSuccessStatusCode();
+
+        var terminate = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/pi-sessions/session-b/terminate", new
+        {
+            requested_by = "hermes",
+            reason = "done",
+        });
+        terminate.EnsureSuccessStatusCode();
+        using var terminatedJson = JsonDocument.Parse(await terminate.Content.ReadAsStringAsync());
+        var terminated = terminatedJson.RootElement.GetProperty("session");
+        Assert.Equal("completed", terminated.GetProperty("state").GetString());
+        Assert.Equal("hermes", terminated.GetProperty("termination_requested_by").GetString());
+        Assert.Equal("done", terminated.GetProperty("termination_reason").GetString());
+        Assert.True(terminated.TryGetProperty("ended_at", out _));
+
+        var cleanup = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/pi-sessions/session-b/cleanup", new
+        {
+            requested_by = "hermes",
+            reason = "remove compose leftovers",
+        });
+        cleanup.EnsureSuccessStatusCode();
+        using var cleanupJson = JsonDocument.Parse(await cleanup.Content.ReadAsStringAsync());
+        var cleaned = cleanupJson.RootElement.GetProperty("session");
+        Assert.Equal("hermes", cleaned.GetProperty("cleanup_requested_by").GetString());
+        Assert.Equal("remove compose leftovers", cleaned.GetProperty("cleanup_reason").GetString());
+        Assert.True(cleaned.TryGetProperty("cleanup_completed_at", out _));
+
+        using var scope = _factory.Services.CreateScope();
+        var stream = scope.ServiceProvider.GetRequiredService<IAgentStreamRepository>();
+        var entries = await stream.ListAsync(new AgentStreamListOptions
+        {
+            ProjectId = ProjectId,
+            TaskId = _task.Id,
+            StreamKind = AgentStreamKind.Ops,
+            IncludeDebug = true,
+            Limit = 20,
+        });
+        Assert.Contains(entries, e => e.EventType == "pi_session_terminate_requested");
+        Assert.Contains(entries, e => e.EventType == "pi_session_cleanup_completed");
+    }
+
+    [Fact]
+    public async Task LaunchRejectsMissingTaskLink()
+    {
+        var response = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/pi-sessions", new
+        {
+            session_id = "session-c",
+            callback_ports = new[] { new { host_port = 21457, container_port = 1455 } },
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Contains("task_id is required", json.RootElement.GetProperty("error").GetString());
+    }
+
+    private sealed class PiSessionAppFactory : WebApplicationFactory<Program>
+    {
+        private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"den-mcp-pi-session-api-{Guid.NewGuid()}.db");
+        public FakePiSessionHost FakeHost { get; } = new();
+
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            builder.UseEnvironment("Testing");
+            builder.ConfigureAppConfiguration((_, config) =>
+            {
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["DenMcp:DatabasePath"] = _dbPath,
+                    ["DenMcp:Llm:Endpoint"] = "",
+                    ["DenMcp:Llm:Model"] = "test-model",
+                    ["DenMcp:PiSessionHost:ComposeFile"] = "/opt/pi-docker/compose.yaml",
+                    ["DenMcp:PiSessionHost:DevDir"] = "/srv/dev",
+                    ["DenMcp:PiSessionHost:PiStateRootDir"] = "/srv/pi-state",
+                    ["DenMcp:PiSessionHost:Image"] = "pi-sandbox:test",
+                    ["DenMcp:PiSessionHost:PiVersion"] = "0.71.0",
+                    ["DenMcp:PiSessionHost:NodeVersion"] = "22",
+                    ["DenMcp:PiSessionHost:GitConfigPath"] = "/home/patch/.gitconfig",
+                    ["DenMcp:PiSessionHost:SshDir"] = "/home/patch/.ssh",
+                    ["DenMcp:PiSessionHost:GhConfigDir"] = "/home/patch/.config/gh",
+                    ["DenMcp:PiSessionHost:HostId"] = "host-test",
+                });
+            });
+
+            builder.ConfigureTestServices(services =>
+            {
+                var initializer = new DatabaseInitializer(_dbPath, NullLogger<DatabaseInitializer>.Instance);
+                initializer.InitializeAsync().GetAwaiter().GetResult();
+
+                services.RemoveAll<DbConnectionFactory>();
+                services.AddSingleton(new DbConnectionFactory(initializer.ConnectionString));
+
+                services.RemoveAll<ILlmClient>();
+                services.AddSingleton<ILlmClient>(new NoOpLlmClient());
+
+                services.RemoveAll<PiDockerLaunchProfileOptions>();
+                services.AddSingleton(new PiDockerLaunchProfileOptions
+                {
+                    ComposeFile = "/opt/pi-docker/compose.yaml",
+                    DevDir = "/srv/dev",
+                    PiStateRootDir = "/srv/pi-state",
+                    Image = "pi-sandbox:test",
+                    PiVersion = "0.71.0",
+                    NodeVersion = "22",
+                    GitConfigPath = "/home/patch/.gitconfig",
+                    SshDir = "/home/patch/.ssh",
+                    GhConfigDir = "/home/patch/.config/gh",
+                    HostId = "host-test",
+                });
+
+                services.RemoveAll<IPiSessionHost>();
+                services.AddSingleton<IPiSessionHost>(FakeHost);
+            });
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            if (disposing && File.Exists(_dbPath))
+                File.Delete(_dbPath);
+        }
+    }
+
+    private sealed class FakePiSessionHost : IPiSessionHost
+    {
+        private readonly Dictionary<string, PiSessionHostStatus> _statuses = new(StringComparer.Ordinal);
+        public List<PiSessionLaunchPlan> Launches { get; } = [];
+        public string HostId => "host-test";
+
+        public Task<PiSessionHostLaunchResult> LaunchAsync(PiSessionLaunchPlan plan, CancellationToken cancellationToken = default)
+        {
+            Launches.Add(plan);
+            var now = DateTime.UtcNow;
+            _statuses[plan.Record.SessionId] = new PiSessionHostStatus
+            {
+                State = PiSessionStates.Running,
+                LastActivityAt = now.AddSeconds(1),
+                ContainerName = plan.Record.ContainerName,
+            };
+            return Task.FromResult(new PiSessionHostLaunchResult
+            {
+                State = PiSessionStates.Running,
+                StartedAt = now,
+                LastActivityAt = now,
+                ContainerName = plan.Record.ContainerName,
+            });
+        }
+
+        public Task<PiSessionHostStatus> GetStatusAsync(PiSessionRecord session, CancellationToken cancellationToken = default) =>
+            Task.FromResult(_statuses.GetValueOrDefault(session.SessionId) ?? new PiSessionHostStatus { State = PiSessionStates.Stale });
+
+        public Task<PiSessionHostControlResult> TerminateAsync(PiSessionRecord session, CancellationToken cancellationToken = default)
+        {
+            _statuses[session.SessionId] = new PiSessionHostStatus { State = PiSessionStates.Completed };
+            return Task.FromResult(new PiSessionHostControlResult
+            {
+                Succeeded = true,
+                State = PiSessionStates.Completed,
+                EndedAt = DateTime.UtcNow,
+                StateReason = "terminated by fake host",
+            });
+        }
+
+        public Task<PiSessionHostControlResult> CleanupAsync(PiSessionRecord session, PiDockerLaunchProfile? profile, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new PiSessionHostControlResult
+            {
+                Succeeded = true,
+                State = session.State,
+                StateReason = "cleanup by fake host",
+            });
+    }
+
+    private sealed class NoOpLlmClient : ILlmClient
+    {
+        public Task<string> CompleteAsync(string systemPrompt, string userMessage, CancellationToken ct = default) => Task.FromResult("{}");
+    }
+}

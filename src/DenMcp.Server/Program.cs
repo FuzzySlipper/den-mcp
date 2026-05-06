@@ -77,6 +77,7 @@ builder.Services.AddSingleton<DispatchRepository>();
 builder.Services.AddSingleton<IAgentStreamRepository, AgentStreamRepository>();
 builder.Services.AddSingleton<IAgentRunRepository, AgentRunRepository>();
 builder.Services.AddSingleton<IAgentWorkspaceRepository, AgentWorkspaceRepository>();
+builder.Services.AddSingleton<IPiSessionRepository, PiSessionRepository>();
 builder.Services.AddSingleton<IDesktopSnapshotRepository, DesktopSnapshotRepository>();
 builder.Services.AddSingleton<IDesktopSessionEventRepository, DesktopSessionEventRepository>();
 builder.Services.AddSingleton<ICollaborationRepository, CollaborationRepository>();
@@ -95,6 +96,9 @@ builder.Services.AddSingleton<ISubagentRunService, SubagentRunService>();
 builder.Services.AddSingleton<IAttentionService, AttentionService>();
 builder.Services.AddSingleton<IGitInspectionService, GitInspectionService>();
 builder.Services.AddSingleton<IPiDockerLaunchProfileRenderer, PiDockerLaunchProfileRenderer>();
+builder.Services.AddSingleton<IProcessRunner, SystemProcessRunner>();
+builder.Services.AddSingleton<IPiSessionHost, TmuxDockerPiSessionHost>();
+builder.Services.AddSingleton<IPiSessionService, PiSessionService>();
 
 // Dispatch
 builder.Services.AddSingleton<IRoutingService, RoutingService>();
@@ -150,6 +154,7 @@ app.MapCollaborationRoutes();
 app.MapAttentionRoutes();
 app.MapGitInspectionRoutes();
 app.MapPiLaunchProfileRoutes();
+app.MapPiSessionRoutes();
 app.MapLibrarianRoutes();
 
 // MCP endpoint
