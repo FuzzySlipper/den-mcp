@@ -24,7 +24,6 @@ public sealed class PiDockerLaunchProfileOptions
     public string? HostId { get; set; }
     public string TmuxExecutable { get; set; } = "tmux";
     public string DockerExecutable { get; set; } = "docker";
-    public List<int> DefaultCallbackContainerPorts { get; set; } = [.. PiDockerLaunchProfileDefaults.CallbackContainerPorts];
 }
 
 public sealed class PiDockerLaunchRenderRequest

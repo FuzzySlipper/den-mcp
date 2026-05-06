@@ -15,7 +15,8 @@ Server config lives under `DenMcp:PiSessionHost`:
 - `GitConfigPath`, `SshDir`, `GhConfigDir`: optional read-only credential mount sources.
 - `CredentialFallbackRootDir`: empty fallback mount roots used when a credential path is intentionally not configured.
 - `HostCallbackBindAddress`: fixed to host loopback (`127.0.0.1`).
-- `DefaultCallbackContainerPorts`: documented pi-docker callback container ports (`1455`, `53692`, `8085`, `51121`).
+
+The pi-docker callback container ports are currently `1455`, `53692`, `8085`, and `51121`, but they are not applied as launch defaults. Each launch must provide explicit host/container callback mappings.
 
 ## Rendering API
 
