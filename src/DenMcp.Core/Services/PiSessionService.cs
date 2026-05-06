@@ -365,7 +365,7 @@ public sealed class PiSessionService : IPiSessionService
     private async Task AuditAsync(PiSessionRecord record, string eventType, string requestedBy, string? reason, object? payload, CancellationToken cancellationToken)
     {
         var payloadJson = payload is null ? null : JsonSerializer.Serialize(payload, PiSessionJson.Options);
-        await _sessions.AppendEventAsync(new PiSessionEvent
+        var sessionEvent = await _sessions.AppendEventAsync(new PiSessionEvent
         {
             ProjectId = record.ProjectId,
             TaskId = record.TaskId,
@@ -411,7 +411,7 @@ public sealed class PiSessionService : IPiSessionService
                 requested_by = requestedBy,
                 reason
             }),
-            DedupKey = $"pi-session:{record.ProjectId}:{record.SessionId}:{eventType}:{Guid.NewGuid():N}"
+            DedupKey = $"pi-session-event:{sessionEvent.Id}"
         }).ConfigureAwait(false);
     }
 
@@ -511,9 +511,11 @@ public sealed class PiSessionService : IPiSessionService
 
     private static string? NormalizeIdentifier(string? value)
     {
-        var normalized = NormalizeText(value);
-        if (normalized is null)
+        if (value is null)
             return null;
+        var normalized = value.Trim();
+        if (normalized.Length == 0)
+            throw new InvalidOperationException("session_id must not be empty.");
         if (normalized.Any(char.IsWhiteSpace))
             throw new InvalidOperationException("session_id must not contain whitespace.");
         return normalized;

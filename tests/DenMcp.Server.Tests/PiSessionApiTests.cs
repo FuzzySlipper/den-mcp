@@ -248,6 +248,98 @@ public sealed class PiSessionApiTests : IAsyncLifetime
         });
         Assert.Contains(entries, e => e.EventType == "pi_session_terminate_requested");
         Assert.Contains(entries, e => e.EventType == "pi_session_cleanup_completed");
+        foreach (var piSessionEntry in entries.Where(e => e.EventType.StartsWith("pi_session_", StringComparison.Ordinal)))
+        {
+            Assert.NotNull(piSessionEntry.DedupKey);
+            Assert.StartsWith("pi-session-event:", piSessionEntry.DedupKey);
+        }
+    }
+
+    [Fact]
+    public async Task TerminateAlreadyCompletedSessionReturnsConflict()
+    {
+        var launch = await LaunchSessionAsync("session-completed");
+        launch.EnsureSuccessStatusCode();
+
+        var terminate = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/pi-sessions/session-completed/terminate", new
+        {
+            requested_by = "hermes",
+            reason = "done",
+        });
+        terminate.EnsureSuccessStatusCode();
+
+        var secondTerminate = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/pi-sessions/session-completed/terminate", new
+        {
+            requested_by = "hermes",
+            reason = "retry",
+        });
+
+        Assert.Equal(HttpStatusCode.Conflict, secondTerminate.StatusCode);
+        using var json = JsonDocument.Parse(await secondTerminate.Content.ReadAsStringAsync());
+        Assert.Contains("already completed", json.RootElement.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task CleanupActiveSessionReturnsConflict()
+    {
+        var launch = await LaunchSessionAsync("session-active-cleanup");
+        launch.EnsureSuccessStatusCode();
+
+        var cleanup = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/pi-sessions/session-active-cleanup/cleanup", new
+        {
+            requested_by = "hermes",
+            reason = "too soon",
+        });
+
+        Assert.Equal(HttpStatusCode.Conflict, cleanup.StatusCode);
+        using var json = JsonDocument.Parse(await cleanup.Content.ReadAsStringAsync());
+        Assert.Contains("terminate it before cleanup", json.RootElement.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task MissingSessionEndpointsReturnNotFound()
+    {
+        var detail = await _client.GetAsync($"/api/projects/{ProjectId}/pi-sessions/missing-session");
+        Assert.Equal(HttpStatusCode.NotFound, detail.StatusCode);
+
+        var attach = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/pi-sessions/missing-session/attach", new
+        {
+            requested_by = "hermes",
+        });
+        Assert.Equal(HttpStatusCode.NotFound, attach.StatusCode);
+
+        var terminate = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/pi-sessions/missing-session/terminate", new
+        {
+            requested_by = "hermes",
+            reason = "not there",
+        });
+        Assert.Equal(HttpStatusCode.NotFound, terminate.StatusCode);
+
+        var cleanup = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/pi-sessions/missing-session/cleanup", new
+        {
+            requested_by = "hermes",
+            reason = "not there",
+        });
+        Assert.Equal(HttpStatusCode.NotFound, cleanup.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("session with spaces")]
+    [InlineData("session\twith-tab")]
+    public async Task LaunchRejectsExplicitInvalidSessionId(string sessionId)
+    {
+        var response = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/pi-sessions", new
+        {
+            session_id = sessionId,
+            task_id = _task.Id,
+            callback_ports = new[] { new { host_port = 21460, container_port = 1455 } },
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Contains("session_id must", json.RootElement.GetProperty("error").GetString());
     }
 
     [Fact]
@@ -263,6 +355,15 @@ public sealed class PiSessionApiTests : IAsyncLifetime
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Contains("task_id is required", json.RootElement.GetProperty("error").GetString());
     }
+
+    private Task<HttpResponseMessage> LaunchSessionAsync(string sessionId) =>
+        _client.PostAsJsonAsync($"/api/projects/{ProjectId}/pi-sessions", new
+        {
+            session_id = sessionId,
+            task_id = _task.Id,
+            requested_by = "hermes",
+            callback_ports = new[] { new { host_port = 21461, container_port = 1455 } },
+        });
 
     private sealed class PiSessionAppFactory : WebApplicationFactory<Program>
     {
