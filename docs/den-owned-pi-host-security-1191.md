@@ -68,6 +68,10 @@ The Den server configuration under `DenMcp:PiSessionHost` / the Pi launch profil
     "PiSessionHost": {
       "HostId": "den-pi-host-1",
       "TmuxExecutable": "/usr/bin/tmux",
+      "TmuxShellCommand": [
+        "/bin/sh",
+        "-i"
+      ],
       "DockerExecutable": "/usr/bin/docker",
       "ComposeFile": "/home/patch/dev/linux/pi-docker/compose.yaml",
       "Service": "pi",
@@ -108,6 +112,7 @@ Operators should validate these paths on the Den server host before enabling lau
 - Optional credential paths for git config, SSH, and GH config.
 - Callback container ports and per-session host port assignments.
 - Host id plus `tmux` and `docker` executable paths used by the lifecycle host.
+- `TmuxShellCommand`: an installed interactive shell argv used for the initial tmux pane; keep it explicit (for example `["/bin/sh", "-i"]` or `["/bin/bash", "-i"]`) for service accounts whose passwd shell is `/usr/sbin/nologin`.
 - Provider-secret scrubbing names and required Pi state paths.
 
 ## Observability and attention

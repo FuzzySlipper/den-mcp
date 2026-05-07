@@ -12,6 +12,10 @@ Server config lives under `DenMcp:PiSessionHost` in the Den server config file (
     "PiSessionHost": {
       "HostId": "den-pi-host-1",
       "TmuxExecutable": "tmux",
+      "TmuxShellCommand": [
+        "/bin/sh",
+        "-i"
+      ],
       "DockerExecutable": "docker",
       "ComposeFile": "/home/patch/dev/linux/pi-docker/compose.yaml",
       "Service": "pi",
@@ -50,6 +54,7 @@ Key fields:
 
 - `HostId`: stable id recorded on Den Pi session records; defaults to the server machine name when empty.
 - `TmuxExecutable`, `DockerExecutable`: explicit executable names or absolute paths used by the lifecycle host.
+- `TmuxShellCommand`: explicit tmux pane shell argv, default `["/bin/sh", "-i"]`; set to an installed interactive shell (for example `["/bin/bash", "-i"]`) so service users with `/usr/sbin/nologin` passwd shells still get a stable pane.
 - `ComposeFile`: base pi-docker compose file, default `/home/patch/dev/linux/pi-docker/compose.yaml`.
 - `Service`: compose service to run, default `pi`.
 - `DevDir`: broad host development root mounted read-write at `/home/pi/dev`.

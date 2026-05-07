@@ -23,6 +23,7 @@ public sealed class PiDockerLaunchProfileOptions
     public string HostCallbackBindAddress { get; set; } = PiDockerLaunchProfileDefaults.LoopbackAddress;
     public string? HostId { get; set; }
     public string TmuxExecutable { get; set; } = "tmux";
+    public string[] TmuxShellCommand { get; set; } = PiDockerLaunchProfileDefaults.TmuxShellCommand.ToArray();
     public string DockerExecutable { get; set; } = "docker";
     public bool ScrubProviderEnvironmentVariables { get; set; } = true;
     public string[] ProviderSecretEnvironmentVariables { get; set; } = PiDockerLaunchProfileDefaults.ProviderSecretEnvironmentVariables.ToArray();
@@ -103,6 +104,9 @@ public static class PiDockerLaunchProfileDefaults
     public const string ContainerGhConfigDir = "/home/pi/.config/gh";
     public const string CacheVolume = "pi-cache";
     public const string NpmCacheVolume = "pi-npm-cache";
+
+    /// <summary>Explicit tmux pane shell argv; avoids service-account passwd shells such as nologin.</summary>
+    public static readonly IReadOnlyList<string> TmuxShellCommand = ["/bin/sh", "-i"];
 
     /// <summary>Provider/model credentials intentionally blanked for Den-owned Docker launches.</summary>
     public static readonly IReadOnlyList<string> ProviderSecretEnvironmentVariables = [

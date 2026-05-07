@@ -99,6 +99,7 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
             newSessionArgs.Add("-e");
             newSessionArgs.Add($"{pair.Key}={pair.Value}");
         }
+        newSessionArgs.AddRange(NormalizeTmuxShellCommand(_options.TmuxShellCommand));
 
         var create = await RunTmuxAsync(newSessionArgs, cancellationToken).ConfigureAwait(false);
         if (!create.Succeeded)
@@ -306,6 +307,18 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
 
     private Task<ProcessRunResult> RunTmuxAsync(IReadOnlyList<string> args, CancellationToken cancellationToken) =>
         _runner.RunAsync(_options.TmuxExecutable, args, _commandTimeout, cancellationToken);
+
+    private static IReadOnlyList<string> NormalizeTmuxShellCommand(IEnumerable<string>? values)
+    {
+        var normalized = values?
+            .Select(value => value?.Trim() ?? string.Empty)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .ToArray();
+
+        return normalized is { Length: > 0 }
+            ? normalized
+            : PiDockerLaunchProfileDefaults.TmuxShellCommand;
+    }
 
     private string? ValidatePiState(PiDockerLaunchProfile profile)
     {
