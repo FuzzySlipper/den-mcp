@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-NEW_ROOT=/data/dev/den-mcp-new
-FINAL_ROOT=/data/dev/den-mcp
-OLD_ROOT=/data/dev/den-mcp
+NEW_ROOT=/data/services/den-mcp-new
+FINAL_ROOT=/data/services/den-mcp
+OLD_ROOT=/data/services/den-mcp
+PI_DOCKER_DIR="$FINAL_ROOT/pi-docker"
+PI_STATE_ROOT="$FINAL_ROOT/pi-sessions"
+PI_CREDENTIAL_FALLBACK_ROOT="$FINAL_ROOT/pi-credential-fallbacks"
+DEV_ROOT=/data/dev
 SERVER_USER=den-mcp
 SERVER_GROUP=den-mcp
 
@@ -38,6 +42,21 @@ copy_live_database() {
   fi
 }
 
+copy_live_pi_session_paths() {
+  for name in pi-sessions pi-credential-fallbacks; do
+    if [[ -e "$OLD_ROOT/$name" && ! -e "$NEW_ROOT/$name" ]]; then
+      echo "Preserving live $name in staged tree..."
+      cp -a "$OLD_ROOT/$name" "$NEW_ROOT/$name"
+    fi
+  done
+
+  if [[ -d "$OLD_ROOT/pi-docker" && ! -d "$NEW_ROOT/pi-docker" ]]; then
+    echo "Preserving live pi-docker compose assets in staged tree..."
+    cp -a "$OLD_ROOT/pi-docker" "$NEW_ROOT/pi-docker"
+    rm -f "$NEW_ROOT/pi-docker/.env"
+  fi
+}
+
 install_units() {
   install -m 0644 "$FINAL_ROOT/repo/deploy/den-mcp.service" /etc/systemd/system/den-mcp.service
 }
@@ -63,6 +82,22 @@ fix_permissions() {
   chmod 755 "$FINAL_ROOT" "$FINAL_ROOT/server" "$FINAL_ROOT/repo"
   chmod 700 "$FINAL_ROOT/server/.den-mcp" "$FINAL_ROOT/server/env"
   chmod 600 "$FINAL_ROOT/server/env/server.env"
+}
+
+prepare_pi_session_paths() {
+  if [[ -d "$PI_DOCKER_DIR" ]]; then
+    rm -f "$PI_DOCKER_DIR/.env"
+    chown -R "$SERVER_USER:$SERVER_GROUP" "$PI_DOCKER_DIR"
+    chmod -R u=rwX,go=rX "$PI_DOCKER_DIR"
+  fi
+
+  install -d -o "$SERVER_USER" -g "$SERVER_GROUP" -m 0755 \
+    "$PI_STATE_ROOT" \
+    "$PI_CREDENTIAL_FALLBACK_ROOT" \
+    "$PI_CREDENTIAL_FALLBACK_ROOT/ssh" \
+    "$PI_CREDENTIAL_FALLBACK_ROOT/gh"
+  install -o "$SERVER_USER" -g "$SERVER_GROUP" -m 0644 /dev/null "$PI_CREDENTIAL_FALLBACK_ROOT/gitconfig"
+  install -d -m 0755 "$DEV_ROOT"
 }
 
 wait_for_http() {
@@ -95,6 +130,7 @@ main() {
   cleanup_legacy_signal_units
 
   copy_live_database
+  copy_live_pi_session_paths
 
   echo "Replacing live tree..."
   rm -rf "$FINAL_ROOT"
@@ -102,6 +138,7 @@ main() {
 
   install_units
   fix_permissions
+  prepare_pi_session_paths
 
   echo "Reloading and starting service..."
   systemctl daemon-reload

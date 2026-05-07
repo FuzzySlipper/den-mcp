@@ -7,7 +7,13 @@ SSH_TARGET="${SSH_TARGET:-patch@192.168.1.10}"
 SERVICE_NAME="${SERVICE_NAME:-den-mcp.service}"
 REMOTE_SERVER_ROOT="${REMOTE_SERVER_ROOT:-/data/services/den-mcp/server}"
 REMOTE_STAGE_DIR="${REMOTE_STAGE_DIR:-/tmp/den-mcp-live-publish}"
+PI_DOCKER_SOURCE="${PI_DOCKER_SOURCE:-/home/patch/dev/linux/pi-docker}"
+REMOTE_PI_DOCKER_DIR="${REMOTE_PI_DOCKER_DIR:-/data/services/den-mcp/pi-docker}"
+REMOTE_PI_STATE_ROOT="${REMOTE_PI_STATE_ROOT:-/data/services/den-mcp/pi-sessions}"
+REMOTE_PI_CREDENTIAL_FALLBACK_ROOT="${REMOTE_PI_CREDENTIAL_FALLBACK_ROOT:-/data/services/den-mcp/pi-credential-fallbacks}"
+REMOTE_DEV_ROOT="${REMOTE_DEV_ROOT:-/data/dev}"
 SKIP_RESTART=0
+SKIP_PI_DOCKER_ASSETS=0
 TEMP_PUBLISH_DIR_CREATED=0
 
 usage() {
@@ -21,11 +27,14 @@ Run this as your normal user, not with local sudo. The script uses your SSH
 config/keys locally and remote sudo on the server.
 
 Options:
-  --skip-restart     Publish and sync only; do not restart services
-  -h, --help         Show this help
+  --skip-restart            Publish and sync only; do not restart services
+  --skip-pi-docker-assets   Do not deploy pi-docker compose assets/state roots
+  -h, --help                Show this help
 
 Environment overrides:
-  PUBLISH_DIR, SSH_TARGET, SERVICE_NAME, REMOTE_SERVER_ROOT, REMOTE_STAGE_DIR
+  PUBLISH_DIR, SSH_TARGET, SERVICE_NAME, REMOTE_SERVER_ROOT, REMOTE_STAGE_DIR,
+  PI_DOCKER_SOURCE, REMOTE_PI_DOCKER_DIR, REMOTE_PI_STATE_ROOT,
+  REMOTE_PI_CREDENTIAL_FALLBACK_ROOT, REMOTE_DEV_ROOT
 EOF
 }
 
@@ -34,6 +43,9 @@ parse_args() {
     case "$1" in
       --skip-restart)
         SKIP_RESTART=1
+        ;;
+      --skip-pi-docker-assets)
+        SKIP_PI_DOCKER_ASSETS=1
         ;;
       -h|--help)
         usage
@@ -132,6 +144,51 @@ sync_server_tree() {
   "
 }
 
+sync_pi_docker_assets() {
+  if [[ "$SKIP_PI_DOCKER_ASSETS" -eq 1 ]]; then
+    echo "Skipping pi-docker asset deployment."
+    return
+  fi
+
+  if [[ ! -d "$PI_DOCKER_SOURCE" ]]; then
+    cat >&2 <<EOF
+pi-docker source not found: $PI_DOCKER_SOURCE
+
+Set PI_DOCKER_SOURCE to the local pi-docker checkout, or pass
+--skip-pi-docker-assets if this deploy intentionally should not update Den-owned
+Pi session compose assets.
+EOF
+    exit 1
+  fi
+
+  if [[ ! -f "$PI_DOCKER_SOURCE/compose.yaml" ]]; then
+    echo "pi-docker source is missing compose.yaml: $PI_DOCKER_SOURCE" >&2
+    exit 1
+  fi
+
+  local remote_asset_stage="$REMOTE_STAGE_DIR/pi-docker"
+  echo "Uploading pi-docker assets from $PI_DOCKER_SOURCE to $SSH_TARGET:$remote_asset_stage ..."
+  ssh "$SSH_TARGET" "rm -rf '$remote_asset_stage' && mkdir -p '$remote_asset_stage'"
+  rsync -a --delete --exclude '.env' "$PI_DOCKER_SOURCE/" "$SSH_TARGET:$remote_asset_stage/"
+
+  echo "Installing pi-docker assets and service-accessible Pi session paths on $SSH_TARGET ..."
+  ssh -t "$SSH_TARGET" "
+    sudo install -d -o den-mcp -g den-mcp -m 0755 '$REMOTE_PI_DOCKER_DIR' &&
+    sudo rsync -a --delete --chown=den-mcp:den-mcp --exclude '.env' \
+      '$remote_asset_stage/' '$REMOTE_PI_DOCKER_DIR/' &&
+    sudo rm -f '$REMOTE_PI_DOCKER_DIR/.env' &&
+    sudo chmod -R u=rwX,go=rX '$REMOTE_PI_DOCKER_DIR' &&
+    sudo install -d -o den-mcp -g den-mcp -m 0755 \
+      '$REMOTE_PI_STATE_ROOT' \
+      '$REMOTE_PI_CREDENTIAL_FALLBACK_ROOT' \
+      '$REMOTE_PI_CREDENTIAL_FALLBACK_ROOT/ssh' \
+      '$REMOTE_PI_CREDENTIAL_FALLBACK_ROOT/gh' &&
+    sudo install -o den-mcp -g den-mcp -m 0644 /dev/null '$REMOTE_PI_CREDENTIAL_FALLBACK_ROOT/gitconfig' &&
+    sudo install -d -m 0755 '$REMOTE_DEV_ROOT' &&
+    rm -rf '$remote_asset_stage'
+  "
+}
+
 restart_remote() {
   if [[ "$SKIP_RESTART" -eq 1 ]]; then
     echo "Skipping remote service restart."
@@ -150,8 +207,10 @@ main() {
   trap cleanup EXIT
   publish_server
   sync_server_tree
+  sync_pi_docker_assets
   restart_remote
   echo "Deploy complete."
+  echo "Reminder: live appsettings.json is preserved; ensure DenMcp:PiSessionHost uses $REMOTE_PI_DOCKER_DIR/compose.yaml, $REMOTE_DEV_ROOT, $REMOTE_PI_STATE_ROOT, and $REMOTE_PI_CREDENTIAL_FALLBACK_ROOT."
 }
 
 main "$@"

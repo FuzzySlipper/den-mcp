@@ -66,21 +66,21 @@ The Den server configuration under `DenMcp:PiSessionHost` / the Pi launch profil
 {
   "DenMcp": {
     "PiSessionHost": {
-      "HostId": "den-pi-host-1",
+      "HostId": "den-srv",
       "TmuxExecutable": "/usr/bin/tmux",
       "TmuxShellCommand": [
         "/bin/sh",
         "-i"
       ],
       "DockerExecutable": "/usr/bin/docker",
-      "ComposeFile": "/home/patch/dev/linux/pi-docker/compose.yaml",
+      "ComposeFile": "/data/services/den-mcp/pi-docker/compose.yaml",
       "Service": "pi",
-      "DevDir": "/srv/dev",
-      "PiStateRootDir": "/var/lib/den-mcp/pi-sessions",
+      "DevDir": "/data/dev",
+      "PiStateRootDir": "/data/services/den-mcp/pi-sessions",
       "GitConfigPath": "",
       "SshDir": "",
       "GhConfigDir": "",
-      "CredentialFallbackRootDir": "/var/lib/den-mcp/pi-credential-fallbacks",
+      "CredentialFallbackRootDir": "/data/services/den-mcp/pi-credential-fallbacks",
       "HostCallbackBindAddress": "127.0.0.1",
       "ScrubProviderEnvironmentVariables": true,
       "ProviderSecretEnvironmentVariables": [
@@ -103,6 +103,8 @@ The Den server configuration under `DenMcp:PiSessionHost` / the Pi launch profil
   }
 }
 ```
+
+On den-srv, the pi-docker compose assets must be copied to `/data/services/den-mcp/pi-docker` with any local `.env` excluded or removed; Den renders all intended compose environment directly. The `den-mcp` service user must be able to traverse/read that tree, traverse `/data/dev`, and read/write the configured Pi state root. The credential fallback root should contain only an empty `gitconfig` file plus empty `ssh` and `gh` directories unless specific read-only credential paths are deliberately configured.
 
 Operators should validate these paths on the Den server host before enabling launch APIs in a shared environment:
 

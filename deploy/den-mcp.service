@@ -6,11 +6,11 @@ After=network.target
 Type=exec
 User=den-mcp
 Group=den-mcp
-WorkingDirectory=/data/dev/den-mcp/server
-Environment=HOME=/data/dev/den-mcp/server
-Environment=DOTNET_BUNDLE_EXTRACT_BASE_DIR=/data/dev/den-mcp/server/.net
-EnvironmentFile=/data/dev/den-mcp/server/env/server.env
-ExecStart=/data/dev/den-mcp/server/DenMcp.Server
+WorkingDirectory=/data/services/den-mcp/server
+Environment=HOME=/data/services/den-mcp/server
+Environment=DOTNET_BUNDLE_EXTRACT_BASE_DIR=/data/services/den-mcp/server/.net
+EnvironmentFile=/data/services/den-mcp/server/env/server.env
+ExecStart=/data/services/den-mcp/server/DenMcp.Server
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true

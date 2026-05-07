@@ -6,6 +6,24 @@ namespace DenMcp.Core.Tests.Services;
 public sealed class PiDockerLaunchProfileRendererTests
 {
     [Fact]
+    public void Options_DefaultsUseDenSrvServiceAccessiblePaths()
+    {
+        var options = new PiDockerLaunchProfileOptions();
+
+        Assert.Equal("/data/services/den-mcp/pi-docker/compose.yaml", options.ComposeFile);
+        Assert.Equal("/data/dev", options.DevDir);
+        Assert.Equal("/data/services/den-mcp/pi-sessions", options.PiStateRootDir);
+        Assert.Equal("/data/services/den-mcp/pi-credential-fallbacks", options.CredentialFallbackRootDir);
+        Assert.Equal("/usr/bin/tmux", options.TmuxExecutable);
+        Assert.Equal("/usr/bin/docker", options.DockerExecutable);
+        Assert.All(new[] { options.ComposeFile, options.DevDir, options.PiStateRootDir, options.CredentialFallbackRootDir }, path =>
+        {
+            Assert.DoesNotContain("~", path, StringComparison.Ordinal);
+            Assert.DoesNotContain("/home/patch", path, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
     public void Render_ReturnsEffectiveComposeSettingsForSession()
     {
         var renderer = new PiDockerLaunchProfileRenderer(new PiDockerLaunchProfileOptions

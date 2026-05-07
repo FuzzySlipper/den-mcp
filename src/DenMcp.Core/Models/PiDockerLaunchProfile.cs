@@ -7,10 +7,10 @@ namespace DenMcp.Core.Models;
 /// </summary>
 public sealed class PiDockerLaunchProfileOptions
 {
-    public string ComposeFile { get; set; } = "/home/patch/dev/linux/pi-docker/compose.yaml";
+    public string ComposeFile { get; set; } = "/data/services/den-mcp/pi-docker/compose.yaml";
     public string Service { get; set; } = "pi";
-    public string DevDir { get; set; } = "~/dev";
-    public string PiStateRootDir { get; set; } = "~/.local/share/den-mcp/pi-sessions";
+    public string DevDir { get; set; } = "/data/dev";
+    public string PiStateRootDir { get; set; } = "/data/services/den-mcp/pi-sessions";
     public string Image { get; set; } = "pi-sandbox:latest";
     public string PiVersion { get; set; } = "0.71.0";
     public string NodeVersion { get; set; } = "22";
@@ -19,12 +19,12 @@ public sealed class PiDockerLaunchProfileOptions
     public string? GitConfigPath { get; set; }
     public string? SshDir { get; set; }
     public string? GhConfigDir { get; set; }
-    public string CredentialFallbackRootDir { get; set; } = "~/.local/share/den-mcp/pi-credential-fallbacks";
+    public string CredentialFallbackRootDir { get; set; } = "/data/services/den-mcp/pi-credential-fallbacks";
     public string HostCallbackBindAddress { get; set; } = PiDockerLaunchProfileDefaults.LoopbackAddress;
     public string? HostId { get; set; }
-    public string TmuxExecutable { get; set; } = "tmux";
+    public string TmuxExecutable { get; set; } = "/usr/bin/tmux";
     public string[] TmuxShellCommand { get; set; } = PiDockerLaunchProfileDefaults.TmuxShellCommand.ToArray();
-    public string DockerExecutable { get; set; } = "docker";
+    public string DockerExecutable { get; set; } = "/usr/bin/docker";
     public bool ScrubProviderEnvironmentVariables { get; set; } = true;
     public string[] ProviderSecretEnvironmentVariables { get; set; } = PiDockerLaunchProfileDefaults.ProviderSecretEnvironmentVariables.ToArray();
     public string[] RequiredPiStatePaths { get; set; } = ["agent/settings.json"];

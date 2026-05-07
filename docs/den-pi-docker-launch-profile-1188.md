@@ -1,6 +1,6 @@
 # Den-managed Pi Docker launch profile (#1188)
 
-This slice adapts the existing `/home/patch/dev/linux/pi-docker` Compose setup into a Den-rendered launch profile. It does not start or supervise sessions; the lifecycle API is a later slice.
+This slice adapts the pi-docker Compose setup into a Den-rendered launch profile. On den-srv the compose assets are deployed to `/data/services/den-mcp/pi-docker` so the `den-mcp` service user can read them without traversing `/home/patch`. It does not start or supervise sessions; the lifecycle API is a later slice.
 
 ## Configuration points
 
@@ -10,17 +10,17 @@ Server config lives under `DenMcp:PiSessionHost` in the Den server config file (
 {
   "DenMcp": {
     "PiSessionHost": {
-      "HostId": "den-pi-host-1",
-      "TmuxExecutable": "tmux",
+      "HostId": "den-srv",
+      "TmuxExecutable": "/usr/bin/tmux",
       "TmuxShellCommand": [
         "/bin/sh",
         "-i"
       ],
-      "DockerExecutable": "docker",
-      "ComposeFile": "/home/patch/dev/linux/pi-docker/compose.yaml",
+      "DockerExecutable": "/usr/bin/docker",
+      "ComposeFile": "/data/services/den-mcp/pi-docker/compose.yaml",
       "Service": "pi",
-      "DevDir": "/srv/dev",
-      "PiStateRootDir": "/var/lib/den-mcp/pi-sessions",
+      "DevDir": "/data/dev",
+      "PiStateRootDir": "/data/services/den-mcp/pi-sessions",
       "Image": "pi-sandbox:latest",
       "PiVersion": "0.71.0",
       "NodeVersion": "22",
@@ -29,7 +29,7 @@ Server config lives under `DenMcp:PiSessionHost` in the Den server config file (
       "GitConfigPath": "",
       "SshDir": "",
       "GhConfigDir": "",
-      "CredentialFallbackRootDir": "/var/lib/den-mcp/pi-credential-fallbacks",
+      "CredentialFallbackRootDir": "/data/services/den-mcp/pi-credential-fallbacks",
       "HostCallbackBindAddress": "127.0.0.1",
       "ScrubProviderEnvironmentVariables": true,
       "ProviderSecretEnvironmentVariables": [
@@ -52,10 +52,10 @@ Server config lives under `DenMcp:PiSessionHost` in the Den server config file (
 
 Key fields:
 
-- `HostId`: stable id recorded on Den Pi session records; defaults to the server machine name when empty.
-- `TmuxExecutable`, `DockerExecutable`: explicit executable names or absolute paths used by the lifecycle host.
+- `HostId`: stable id recorded on Den Pi session records; den-srv uses explicit `den-srv` in the deployed config.
+- `TmuxExecutable`, `DockerExecutable`: explicit executable names or absolute paths used by the lifecycle host; den-srv uses `/usr/bin/tmux` and `/usr/bin/docker`.
 - `TmuxShellCommand`: explicit tmux pane shell argv, default `["/bin/sh", "-i"]`; set to an installed interactive shell (for example `["/bin/bash", "-i"]`) so service users with `/usr/sbin/nologin` passwd shells still get a stable pane.
-- `ComposeFile`: base pi-docker compose file, default `/home/patch/dev/linux/pi-docker/compose.yaml`.
+- `ComposeFile`: base pi-docker compose file, default `/data/services/den-mcp/pi-docker/compose.yaml` for the den-srv service user.
 - `Service`: compose service to run, default `pi`.
 - `DevDir`: broad host development root mounted read-write at `/home/pi/dev`.
 - `PiStateRootDir`: root for per-session `PI_STATE_DIR` directories mounted read-write at `/home/pi/.pi`.
@@ -68,6 +68,19 @@ Key fields:
 - `RequiredPiStatePaths`: relative paths under `PI_STATE_DIR` that must exist before launch; defaults to `agent/settings.json` so missing Pi settings surface immediately instead of being hidden by provider environment fallback.
 
 The pi-docker callback container ports are currently `1455`, `53692`, `8085`, and `51121`, but they are not applied as launch defaults. Each launch must provide explicit host/container callback mappings.
+
+## den-srv deployment paths
+
+The live den-srv systemd service runs as Unix user `den-mcp` with HOME under `/data/services/den-mcp/server`. Do not point the deployed `PiSessionHost` at `/home/patch` or `~` paths: `/home/patch` is not traversable by the service user, and `~` expands to the service HOME.
+
+Use `scripts/deploy-live-server.sh` to deploy compose assets along with the server publish output. The script copies the local pi-docker checkout from `PI_DOCKER_SOURCE` (default `/home/patch/dev/linux/pi-docker`) to `REMOTE_PI_DOCKER_DIR` (default `/data/services/den-mcp/pi-docker`) with `.env` excluded and removed on the remote side. It also creates:
+
+- `/data/services/den-mcp/pi-sessions` for per-session `PI_STATE_DIR` roots;
+- `/data/services/den-mcp/pi-credential-fallbacks/gitconfig` as an empty read-only gitconfig fallback;
+- `/data/services/den-mcp/pi-credential-fallbacks/ssh` and `/data/services/den-mcp/pi-credential-fallbacks/gh` as empty credential fallback directories;
+- `/data/dev` as the service-traversable development root mounted at `/home/pi/dev`.
+
+The live deploy script intentionally preserves `/data/services/den-mcp/server/appsettings.json`; manually apply the explicit JSON above to that deployed config file and restart `den-mcp.service` before smoke testing. After deploying task #1214's tmux shell fix and these paths, rerun render plus lifecycle cleanup/launch smoke checks against the live service.
 
 ## Rendering API
 
