@@ -10,11 +10,25 @@ This document describes the first Den-owned Pi session host model delivered unde
 
 ## What Docker provides — and what it does not
 
-Pi runs inside Docker to provide containment, repeatability, and operational friction against accidental host changes. This is **not an airtight security sandbox**.
+Pi runs inside Docker to provide containment, repeatability, and operational friction against accidental host changes. On den-srv, Den-owned Pi sessions are intended to use a dedicated rootless Docker daemon owned by a runtime user such as `docker-rt`, reached through an explicit `DOCKER_HOST` socket path. This is **not an airtight security sandbox**.
 
 Assume a Pi session may read or modify anything mounted into the container. A malicious or compromised process inside the container may also attempt container breakout or abuse network access. Do not treat this model as a boundary for hostile code.
 
 Use this model for trusted agent work where the goal is controlled process ownership, reproducible environment setup, and clearer operator visibility — not for executing untrusted workloads.
+
+## Docker daemon ownership and socket access
+
+Do **not** give the `den-mcp` service user access to the rootful `/var/run/docker.sock` or add it to the host `docker` group for Den-owned Pi sessions. The rootful Docker group is effectively root-equivalent on the host.
+
+The den-srv target model is instead:
+
+- A dedicated Unix runtime user, for example `docker-rt`, owns the rootless Docker daemon.
+- Rootless Docker data lives under `/data/docker-rt` or a similar `/data/...` directory owned by that runtime user.
+- The daemon is started durably by systemd, typically a `docker-rt` user service with linger enabled, not by an interactive `patch` login shell.
+- Den remains the control plane as `den-mcp` and reaches only that daemon through `DenMcp:PiSessionHost:DockerHost`, for example `unix:///run/den-mcp/docker-rt/docker.sock`.
+- Socket access is explicit: use a dedicated Den/rootless-runtime group or ACLs on the configured socket path. That permission grants control over containers/images/volumes owned by `docker-rt`; it is narrower than rootful Docker access but still powerful and should not be granted casually.
+
+Rootless limitations still apply. Rootless containers do not provide the same networking, privileged container, low-port binding, overlay/storage-driver, cgroup, or host-device behavior as rootful Docker. If a workload depends on rootful features, treat that as a deployment decision rather than silently falling back to `/var/run/docker.sock`.
 
 ## Filesystem access
 
@@ -73,6 +87,7 @@ The Den server configuration under `DenMcp:PiSessionHost` / the Pi launch profil
         "-i"
       ],
       "DockerExecutable": "/usr/bin/docker",
+      "DockerHost": "unix:///run/den-mcp/docker-rt/docker.sock",
       "ComposeFile": "/data/services/den-mcp/pi-docker/compose.yaml",
       "Service": "pi",
       "DevDir": "/data/dev",
@@ -118,7 +133,7 @@ The Den server configuration under `DenMcp:PiSessionHost` / the Pi launch profil
 }
 ```
 
-On den-srv, the pi-docker compose assets must be copied to `/data/services/den-mcp/pi-docker` with any local `.env` excluded or removed; Den renders all intended compose environment directly. The `den-mcp` service user must be able to traverse/read that tree, traverse `/data/dev`, and read/write the configured Pi state root. The credential fallback root should contain only an empty `gitconfig` file plus empty `ssh` and `gh` directories unless specific read-only credential paths are deliberately configured.
+On den-srv, the pi-docker compose assets must be copied to `/data/services/den-mcp/pi-docker` with any local `.env` excluded or removed; Den renders all intended compose environment directly. The `den-mcp` service user must be able to traverse/read that tree, traverse `/data/dev`, read/write the configured Pi state root, and connect to the configured rootless Docker socket. The credential fallback root should contain only an empty `gitconfig` file plus empty `ssh` and `gh` directories unless specific read-only credential paths are deliberately configured.
 
 Operators should validate these paths on the Den server host before enabling launch APIs in a shared environment:
 
@@ -128,6 +143,7 @@ Operators should validate these paths on the Den server host before enabling lau
 - Optional credential paths for git config, SSH, and GH config.
 - Callback container ports and per-session host port assignments.
 - Host id plus `tmux` and `docker` executable paths used by the lifecycle host.
+- `DockerHost`: explicit rootless daemon socket endpoint; validate as `den-mcp` with `docker version`, `docker compose version`, and `docker ps` using the same `DOCKER_HOST`.
 - `TmuxShellCommand`: an installed interactive shell argv used for the initial tmux pane; keep it explicit (for example `["/bin/sh", "-i"]` or `["/bin/bash", "-i"]`) for service accounts whose passwd shell is `/usr/sbin/nologin`.
 - Provider-secret scrubbing names and required Pi state paths.
 

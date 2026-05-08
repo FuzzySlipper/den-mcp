@@ -56,6 +56,8 @@ public sealed class PiLaunchProfileApiTests : IAsyncLifetime
         Assert.Equal("pi-sandbox:test", root.GetProperty("image").GetString());
         Assert.Equal("0.71.0", root.GetProperty("pi_version").GetString());
         Assert.Equal("22", root.GetProperty("node_version").GetString());
+        Assert.Equal("unix:///run/den-mcp/docker-rt/docker.sock", root.GetProperty("docker_host").GetString());
+        Assert.Equal("unix:///run/den-mcp/docker-rt/docker.sock", root.GetProperty("environment").GetProperty("DOCKER_HOST").GetString());
         Assert.Contains("--project-name", root.GetProperty("docker_compose_run_args").EnumerateArray().Select(v => v.GetString()));
         Assert.Contains("127.0.0.1:21455:1455", root.GetProperty("docker_compose_run_args").EnumerateArray().Select(v => v.GetString()));
         Assert.Contains("127.0.0.1:28085:8085", root.GetProperty("docker_compose_run_args").EnumerateArray().Select(v => v.GetString()));
@@ -100,6 +102,7 @@ public sealed class PiLaunchProfileApiTests : IAsyncLifetime
                     ["DenMcp:PiSessionHost:GitConfigPath"] = "/home/patch/.gitconfig",
                     ["DenMcp:PiSessionHost:SshDir"] = "/home/patch/.ssh",
                     ["DenMcp:PiSessionHost:GhConfigDir"] = "/home/patch/.config/gh",
+                    ["DenMcp:PiSessionHost:DockerHost"] = "unix:///run/den-mcp/docker-rt/docker.sock",
                 });
             });
         }

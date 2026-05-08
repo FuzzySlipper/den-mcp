@@ -29,6 +29,7 @@ public sealed class PiDockerLaunchProfileRenderer(PiDockerLaunchProfileOptions o
         var image = RequireNonEmpty(request.Image ?? options.Image, "image");
         var piVersion = RequireNonEmpty(request.PiVersion ?? options.PiVersion, "pi_version");
         var nodeVersion = RequireNonEmpty(request.NodeVersion ?? options.NodeVersion, "node_version");
+        var dockerHost = NormalizeDockerHost(options.DockerHost);
         var callbackBindAddress = RequireLoopbackBindAddress(options.HostCallbackBindAddress);
         var callbackPorts = ValidateCallbackPorts(request.CallbackPorts, callbackBindAddress);
         var composeProjectName = BuildComposeProjectName(projectId, sessionId);
@@ -58,6 +59,9 @@ public sealed class PiDockerLaunchProfileRenderer(PiDockerLaunchProfileOptions o
             ["PI_SSH_DIR"] = sshDir,
             ["PI_GH_CONFIG_DIR"] = ghConfigDir,
         };
+        if (dockerHost is not null)
+            environment["DOCKER_HOST"] = dockerHost;
+
         foreach (var name in scrubbedEnvironmentVariables)
         {
             if (environment.ContainsKey(name))
@@ -105,6 +109,11 @@ public sealed class PiDockerLaunchProfileRenderer(PiDockerLaunchProfileOptions o
         else
             warnings.Add("Provider/model credential environment variable scrubbing is disabled; Den-owned Pi sessions may inherit server process model credentials.");
 
+        if (dockerHost is not null)
+            warnings.Add($"Docker CLI calls for launch and cleanup use explicit DOCKER_HOST '{dockerHost}'.");
+        else
+            warnings.Add("DOCKER_HOST is not configured; Docker CLI calls will use the Docker client's default daemon socket.");
+
         AddPiStateWarnings(warnings, piStateDir, NormalizeRequiredPiStatePaths(options.RequiredPiStatePaths));
 
         if (request.GitConfigPath is null && options.GitConfigPath is null)
@@ -130,6 +139,7 @@ public sealed class PiDockerLaunchProfileRenderer(PiDockerLaunchProfileOptions o
             Image = image,
             PiVersion = piVersion,
             NodeVersion = nodeVersion,
+            DockerHost = dockerHost,
             Environment = environment,
             ScrubbedEnvironmentVariables = scrubbedEnvironmentVariables,
             VolumeMounts = volumeMounts,
@@ -242,6 +252,17 @@ public sealed class PiDockerLaunchProfileRenderer(PiDockerLaunchProfileOptions o
             .ToList();
         if (missing.Count > 0)
             warnings.Add($"PI_STATE_DIR '{piStateDir}' is missing required Pi settings/auth state path(s): {string.Join(", ", missing)}. Den-owned Pi sessions do not fall back to provider environment secrets.");
+    }
+
+    private static string? NormalizeDockerHost(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var dockerHost = value.Trim();
+        if (dockerHost.Any(char.IsControl) || dockerHost.Any(char.IsWhiteSpace))
+            throw new InvalidOperationException("docker_host must not contain whitespace or control characters.");
+        return dockerHost;
     }
 
     private static string RequireLoopbackBindAddress(string? value)

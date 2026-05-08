@@ -16,6 +16,7 @@ public sealed class PiDockerLaunchProfileRendererTests
         Assert.Equal("/data/services/den-mcp/pi-credential-fallbacks", options.CredentialFallbackRootDir);
         Assert.Equal("/usr/bin/tmux", options.TmuxExecutable);
         Assert.Equal("/usr/bin/docker", options.DockerExecutable);
+        Assert.Null(options.DockerHost);
         Assert.All(new[] { options.ComposeFile, options.DevDir, options.PiStateRootDir, options.CredentialFallbackRootDir }, path =>
         {
             Assert.DoesNotContain("~", path, StringComparison.Ordinal);
@@ -37,6 +38,7 @@ public sealed class PiDockerLaunchProfileRendererTests
             GitConfigPath = "/home/patch/.gitconfig",
             SshDir = "/home/patch/.ssh",
             GhConfigDir = "/home/patch/.config/gh",
+            DockerHost = "unix:///run/den-mcp/docker-rt/docker.sock",
         });
 
         var profile = renderer.Render(new PiDockerLaunchRenderRequest
@@ -60,6 +62,8 @@ public sealed class PiDockerLaunchProfileRendererTests
         Assert.Equal("/home/patch/.gitconfig", profile.Environment["PI_GITCONFIG_PATH"]);
         Assert.Equal("/home/patch/.ssh", profile.Environment["PI_SSH_DIR"]);
         Assert.Equal("/home/patch/.config/gh", profile.Environment["PI_GH_CONFIG_DIR"]);
+        Assert.Equal("unix:///run/den-mcp/docker-rt/docker.sock", profile.DockerHost);
+        Assert.Equal("unix:///run/den-mcp/docker-rt/docker.sock", profile.Environment["DOCKER_HOST"]);
 
         Assert.Contains(profile.VolumeMounts, m => m.Source == "/home/patch/dev" && m.Target == "/home/pi/dev" && !m.ReadOnly);
         Assert.Contains(profile.VolumeMounts, m => m.Source == "/var/lib/den/pi-state/session-a" && m.Target == "/home/pi/.pi" && !m.ReadOnly);

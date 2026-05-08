@@ -79,7 +79,8 @@ public sealed class PiSessionApiTests : IAsyncLifetime
         Assert.Equal("running", session.GetProperty("state").GetString());
         Assert.False(string.IsNullOrWhiteSpace(session.GetProperty("tmux_session_name").GetString()));
         var launchCommand = session.GetProperty("launch_command").EnumerateArray().Select(v => v.GetString()).ToList();
-        Assert.Contains("docker", launchCommand);
+        Assert.Contains(launchCommand, value => value is "docker" or "/usr/bin/docker");
+        Assert.Contains("DOCKER_HOST=unix:///run/den-mcp/docker-rt/docker.sock", launchCommand);
         Assert.Contains("OPENAI_API_KEY=", launchCommand);
         Assert.DoesNotContain(launchCommand, value => value?.Contains("test-key", StringComparison.Ordinal) == true);
         Assert.Equal("pi_docker_compose", session.GetProperty("launch_profile_kind").GetString());
@@ -91,6 +92,8 @@ public sealed class PiSessionApiTests : IAsyncLifetime
         Assert.Single(fakeHost.Launches);
         Assert.Equal("session-a", fakeHost.Launches[0].Record.SessionId);
         Assert.Equal("/srv/dev", fakeHost.Launches[0].LaunchProfile.DevDir);
+        Assert.Equal("unix:///run/den-mcp/docker-rt/docker.sock", fakeHost.Launches[0].LaunchProfile.DockerHost);
+        Assert.Equal("unix:///run/den-mcp/docker-rt/docker.sock", fakeHost.Launches[0].LaunchProfile.Environment["DOCKER_HOST"]);
         Assert.Equal(string.Empty, fakeHost.Launches[0].LaunchProfile.Environment["OPENAI_API_KEY"]);
         Assert.Contains("OPENAI_API_KEY", fakeHost.Launches[0].LaunchProfile.ScrubbedEnvironmentVariables);
 
@@ -494,6 +497,7 @@ public sealed class PiSessionApiTests : IAsyncLifetime
                     ["DenMcp:PiSessionHost:SshDir"] = "/home/patch/.ssh",
                     ["DenMcp:PiSessionHost:GhConfigDir"] = "/home/patch/.config/gh",
                     ["DenMcp:PiSessionHost:HostId"] = "host-test",
+                    ["DenMcp:PiSessionHost:DockerHost"] = "unix:///run/den-mcp/docker-rt/docker.sock",
                 });
             });
 
@@ -521,6 +525,7 @@ public sealed class PiSessionApiTests : IAsyncLifetime
                     SshDir = "/home/patch/.ssh",
                     GhConfigDir = "/home/patch/.config/gh",
                     HostId = "host-test",
+                    DockerHost = "unix:///run/den-mcp/docker-rt/docker.sock",
                 });
 
                 services.RemoveAll<IPiSessionHost>();

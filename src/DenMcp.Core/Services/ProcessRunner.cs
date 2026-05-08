@@ -13,7 +13,12 @@ public sealed record ProcessRunResult
 
 public interface IProcessRunner
 {
-    Task<ProcessRunResult> RunAsync(string executable, IReadOnlyList<string> args, TimeSpan timeout, CancellationToken cancellationToken = default);
+    Task<ProcessRunResult> RunAsync(
+        string executable,
+        IReadOnlyList<string> args,
+        TimeSpan timeout,
+        CancellationToken cancellationToken = default,
+        IReadOnlyDictionary<string, string>? environment = null);
 }
 
 /// <summary>
@@ -22,7 +27,12 @@ public interface IProcessRunner
 /// </summary>
 public sealed class SystemProcessRunner : IProcessRunner
 {
-    public async Task<ProcessRunResult> RunAsync(string executable, IReadOnlyList<string> args, TimeSpan timeout, CancellationToken cancellationToken = default)
+    public async Task<ProcessRunResult> RunAsync(
+        string executable,
+        IReadOnlyList<string> args,
+        TimeSpan timeout,
+        CancellationToken cancellationToken = default,
+        IReadOnlyDictionary<string, string>? environment = null)
     {
         if (string.IsNullOrWhiteSpace(executable))
             throw new ArgumentException("Executable is required.", nameof(executable));
@@ -42,6 +52,12 @@ public sealed class SystemProcessRunner : IProcessRunner
 
         foreach (var arg in args)
             startInfo.ArgumentList.Add(arg);
+
+        if (environment is not null)
+        {
+            foreach (var pair in environment)
+                startInfo.Environment[pair.Key] = pair.Value;
+        }
 
         try
         {

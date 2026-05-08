@@ -25,6 +25,7 @@ public sealed class PiDockerLaunchProfileOptions
     public string TmuxExecutable { get; set; } = "/usr/bin/tmux";
     public string[] TmuxShellCommand { get; set; } = PiDockerLaunchProfileDefaults.TmuxShellCommand.ToArray();
     public string DockerExecutable { get; set; } = "/usr/bin/docker";
+    public string? DockerHost { get; set; }
     public bool ScrubProviderEnvironmentVariables { get; set; } = true;
     public string[] ProviderSecretEnvironmentVariables { get; set; } = PiDockerLaunchProfileDefaults.ProviderSecretEnvironmentVariables.ToArray();
     public string[] RequiredPiStatePaths { get; set; } = ["agent/settings.json"];
@@ -73,6 +74,7 @@ public sealed class PiDockerLaunchProfile
     public required string Image { get; init; }
     public required string PiVersion { get; init; }
     public required string NodeVersion { get; init; }
+    public string? DockerHost { get; init; }
     public IReadOnlyDictionary<string, string> Environment { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
     public IReadOnlyList<string> ScrubbedEnvironmentVariables { get; init; } = [];
     public IReadOnlyList<PiDockerVolumeMount> VolumeMounts { get; init; } = [];

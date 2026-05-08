@@ -117,6 +117,33 @@ public sealed class PiSessionHostTests
     }
 
     [Fact]
+    public async Task Cleanup_UsesLaunchProfileDockerEnvironment()
+    {
+        var runner = new FakeProcessRunner(string.Empty);
+        var host = new TmuxDockerPiSessionHost(new PiDockerLaunchProfileOptions
+        {
+            DockerExecutable = "/usr/bin/docker",
+            DockerHost = "unix:///run/den-mcp/docker-rt/fallback.sock",
+        }, runner);
+        var profile = Profile("/tmp/den-mcp/pi-state", new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["DOCKER_HOST"] = "unix:///run/den-mcp/docker-rt/docker.sock",
+            ["DEV_DIR"] = "/tmp/den-mcp/dev",
+            ["OPENAI_API_KEY"] = string.Empty,
+            ["PI_STATE_DIR"] = "/tmp/den-mcp/pi-state",
+        }, ["OPENAI_API_KEY"]);
+
+        var result = await host.CleanupAsync(Session(), profile);
+
+        Assert.True(result.Succeeded);
+        var cleanupCallIndex = runner.Calls.FindIndex(args => args.Count > 0 && args[0] == "compose" && args.Contains("down"));
+        Assert.True(cleanupCallIndex >= 0);
+        Assert.Equal("unix:///run/den-mcp/docker-rt/docker.sock", runner.Environments[cleanupCallIndex]["DOCKER_HOST"]);
+        Assert.Equal("/tmp/den-mcp/dev", runner.Environments[cleanupCallIndex]["DEV_DIR"]);
+        Assert.Equal(string.Empty, runner.Environments[cleanupCallIndex]["OPENAI_API_KEY"]);
+    }
+
+    [Fact]
     public async Task GetStatus_DoesNotMarkExactlyEightyCapturedLinesAsTruncated()
     {
         var runner = new FakeProcessRunner(Lines(80));
@@ -162,6 +189,7 @@ public sealed class PiSessionHostTests
         NodeVersion = "22",
         Environment = environment,
         ScrubbedEnvironmentVariables = scrubbedEnvironmentVariables,
+        DockerHost = environment.TryGetValue("DOCKER_HOST", out var dockerHost) ? dockerHost : null,
         DockerComposeRunArgs = ["compose", "run", "--name", "container-a", "pi"],
     };
 
@@ -186,15 +214,24 @@ public sealed class PiSessionHostTests
     {
         private readonly string _capturedOutput;
         public List<IReadOnlyList<string>> Calls { get; } = [];
+        public List<IReadOnlyDictionary<string, string>> Environments { get; } = [];
 
         public FakeProcessRunner(string capturedOutput)
         {
             _capturedOutput = capturedOutput;
         }
 
-        public Task<ProcessRunResult> RunAsync(string executable, IReadOnlyList<string> args, TimeSpan timeout, CancellationToken cancellationToken = default)
+        public Task<ProcessRunResult> RunAsync(
+            string executable,
+            IReadOnlyList<string> args,
+            TimeSpan timeout,
+            CancellationToken cancellationToken = default,
+            IReadOnlyDictionary<string, string>? environment = null)
         {
             Calls.Add(args.ToArray());
+            Environments.Add(environment is null
+                ? new Dictionary<string, string>(StringComparer.Ordinal)
+                : new Dictionary<string, string>(environment, StringComparer.Ordinal));
             if (args.Count > 0 && args[0] == "list-sessions")
             {
                 return Task.FromResult(new ProcessRunResult
@@ -210,6 +247,14 @@ public sealed class PiSessionHostTests
                 {
                     ExitCode = 0,
                     Stdout = _capturedOutput,
+                });
+            }
+
+            if (args.Count > 0 && args[0] == "compose" && args.Contains("down"))
+            {
+                return Task.FromResult(new ProcessRunResult
+                {
+                    ExitCode = 0,
                 });
             }
 

@@ -230,7 +230,12 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
             "down",
             "--remove-orphans"
         };
-        var result = await _runner.RunAsync(_options.DockerExecutable, args, TimeSpan.FromSeconds(60), cancellationToken).ConfigureAwait(false);
+        var result = await _runner.RunAsync(
+            _options.DockerExecutable,
+            args,
+            TimeSpan.FromSeconds(60),
+            cancellationToken,
+            BuildDockerProcessEnvironment(profile)).ConfigureAwait(false);
         if (!result.Succeeded)
         {
             return new PiSessionHostControlResult
@@ -269,6 +274,16 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
                 continue;
             await RunTmuxAsync(["set-option", "-t", plan.Record.TmuxSessionName, LabelPrefix + pair.Key, pair.Value], cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    private IReadOnlyDictionary<string, string> BuildDockerProcessEnvironment(PiDockerLaunchProfile profile)
+    {
+        var environment = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (var pair in profile.Environment)
+            environment[pair.Key] = pair.Value;
+        if (!environment.ContainsKey("DOCKER_HOST") && !string.IsNullOrWhiteSpace(_options.DockerHost))
+            environment["DOCKER_HOST"] = _options.DockerHost.Trim();
+        return environment;
     }
 
     private async Task<PiSessionOutputTail?> CaptureOutputTailAsync(PiSessionRecord session, CancellationToken cancellationToken)

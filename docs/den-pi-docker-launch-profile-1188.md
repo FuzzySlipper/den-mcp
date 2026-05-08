@@ -17,6 +17,7 @@ Server config lives under `DenMcp:PiSessionHost` in the Den server config file (
         "-i"
       ],
       "DockerExecutable": "/usr/bin/docker",
+      "DockerHost": "unix:///run/den-mcp/docker-rt/docker.sock",
       "ComposeFile": "/data/services/den-mcp/pi-docker/compose.yaml",
       "Service": "pi",
       "DevDir": "/data/dev",
@@ -71,6 +72,7 @@ Key fields:
 
 - `HostId`: stable id recorded on Den Pi session records; den-srv uses explicit `den-srv` in the deployed config.
 - `TmuxExecutable`, `DockerExecutable`: explicit executable names or absolute paths used by the lifecycle host; den-srv uses `/usr/bin/tmux` and `/usr/bin/docker`.
+- `DockerHost`: optional explicit Docker daemon endpoint mapped to `DOCKER_HOST` for launch and cleanup. den-srv uses `unix:///run/den-mcp/docker-rt/docker.sock`, a dedicated rootless Docker daemon owned by `docker-rt`; leaving this empty lets the Docker CLI fall back to its default socket and is not the intended live Den-owned Pi configuration.
 - `TmuxShellCommand`: explicit tmux pane shell argv, default `["/bin/sh", "-i"]`; set to an installed interactive shell (for example `["/bin/bash", "-i"]`) so service users with `/usr/sbin/nologin` passwd shells still get a stable pane.
 - `ComposeFile`: base pi-docker compose file, default `/data/services/den-mcp/pi-docker/compose.yaml` for the den-srv service user.
 - `Service`: compose service to run, default `pi`.
@@ -90,6 +92,16 @@ The pi-docker callback container ports are currently `1455`, `53692`, `8085`, an
 
 The live den-srv systemd service runs as Unix user `den-mcp` with HOME under `/data/services/den-mcp/server`. Do not point the deployed `PiSessionHost` at `/home/patch` or `~` paths: `/home/patch` is not traversable by the service user, and `~` expands to the service HOME.
 
+Docker access is intentionally through a dedicated rootless runtime user, not through `/var/run/docker.sock` and not through the rootful `docker` group. The recommended live shape is:
+
+- Unix user: `docker-rt` (service/runtime account only).
+- Docker data root: `/data/docker-rt`, owned by `docker-rt` and not writable by `den-mcp`.
+- Rootless daemon: managed by a durable systemd user service for `docker-rt` with linger enabled, for example an override that starts rootless dockerd with `--data-root /data/docker-rt -H unix:///run/den-mcp/docker-rt/docker.sock`.
+- Socket access: the socket directory is a deliberate shared runtime path such as `/run/den-mcp/docker-rt`, with group ownership/mode or ACLs granting `den-mcp` access to that rootless daemon socket only. A group used for this must be a Den/rootless-runtime group (for example `den-pi-docker`), not the rootful host `docker` group.
+- Den config: `DenMcp:PiSessionHost:DockerHost` is set to the exact socket endpoint (`unix:///run/den-mcp/docker-rt/docker.sock`) so tmux launches and cleanup both target the same daemon without relying on any `patch` login state.
+
+With that config, the rendered launch profile includes `DOCKER_HOST`; tmux receives it via `tmux new-session -e`, the recorded shell command prefixes it with `env DOCKER_HOST=...`, and cleanup passes it through the bounded process runner when invoking `docker compose down`.
+
 Use `scripts/deploy-live-server.sh` to deploy compose assets along with the server publish output. The script copies the local pi-docker checkout from `PI_DOCKER_SOURCE` (default `/home/patch/dev/linux/pi-docker`) to `REMOTE_PI_DOCKER_DIR` (default `/data/services/den-mcp/pi-docker`) with `.env` excluded and removed on the remote side. It also creates:
 
 - `/data/services/den-mcp/pi-sessions` for per-session `PI_STATE_DIR` roots;
@@ -97,7 +109,15 @@ Use `scripts/deploy-live-server.sh` to deploy compose assets along with the serv
 - `/data/services/den-mcp/pi-credential-fallbacks/ssh` and `/data/services/den-mcp/pi-credential-fallbacks/gh` as empty credential fallback directories;
 - `/data/dev` as the service-traversable development root mounted at `/home/pi/dev`.
 
-The live deploy script intentionally preserves `/data/services/den-mcp/server/appsettings.json`; manually apply the explicit JSON above to that deployed config file and restart `den-mcp.service` before smoke testing. After deploying task #1214's tmux shell fix and these paths, rerun render plus lifecycle cleanup/launch smoke checks against the live service.
+The live deploy script intentionally preserves `/data/services/den-mcp/server/appsettings.json`; manually apply the explicit JSON above to that deployed config file and restart `den-mcp.service` before smoke testing. Also validate the same environment the service will use before launching a session:
+
+```bash
+sudo -u den-mcp env DOCKER_HOST=unix:///run/den-mcp/docker-rt/docker.sock docker version
+sudo -u den-mcp env DOCKER_HOST=unix:///run/den-mcp/docker-rt/docker.sock docker compose version
+sudo -u den-mcp env DOCKER_HOST=unix:///run/den-mcp/docker-rt/docker.sock docker ps
+```
+
+Ensure `pi-sandbox:latest` exists in the dedicated rootless daemon's image store; rootful images and images under another rootless user are separate and must be rebuilt, loaded, or imported for `docker-rt` if missing. After deploying task #1214's tmux shell fix and these paths, rerun render plus lifecycle cleanup/launch smoke checks against the live service.
 
 ## Rendering API
 
@@ -117,7 +137,7 @@ The response includes:
 
 - compose project name and profile id
 - compose file/service reference
-- environment values (`DEV_DIR`, `PI_STATE_DIR`, image/version, credential paths, and scrubbed provider variables blanked to empty strings)
+- environment values (`DEV_DIR`, `PI_STATE_DIR`, image/version, credential paths, `DOCKER_HOST` when configured, and scrubbed provider variables blanked to empty strings)
 - `scrubbed_environment_variables`, the exact provider/model env names Den will blank for launch
 - effective volume mounts and read-only/read-write posture
 - `docker compose ... config`, `build`, and `run` argument vectors
