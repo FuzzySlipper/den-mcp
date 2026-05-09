@@ -99,7 +99,7 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
             newSessionArgs.Add("-e");
             newSessionArgs.Add($"{pair.Key}={pair.Value}");
         }
-        newSessionArgs.AddRange(NormalizeTmuxShellCommand(_options.TmuxShellCommand));
+        newSessionArgs.Add(RenderShellCommand(NormalizeTmuxShellCommand(_options.TmuxShellCommand)));
 
         var create = await RunTmuxAsync(newSessionArgs, cancellationToken).ConfigureAwait(false);
         if (!create.Succeeded)

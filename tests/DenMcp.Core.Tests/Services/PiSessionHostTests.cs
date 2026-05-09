@@ -37,7 +37,7 @@ public sealed class PiSessionHostTests
 
             Assert.Equal(PiSessionStates.Running, result.State);
             var newSessionArgs = Assert.Single(runner.Calls, args => args.Count > 0 && args[0] == "new-session");
-            Assert.Equal(PiDockerLaunchProfileDefaults.TmuxShellCommand, newSessionArgs.TakeLast(PiDockerLaunchProfileDefaults.TmuxShellCommand.Count));
+            Assert.Equal("/bin/sh -i", newSessionArgs[^1]);
             Assert.Contains("OPENAI_API_KEY=", newSessionArgs);
             Assert.DoesNotContain(newSessionArgs, value => value.Contains("server-secret", StringComparison.Ordinal));
             var sendKeysArgs = Assert.Single(runner.Calls, args => args.Count > 0 && args[0] == "send-keys" && args.Contains("-l"));
@@ -81,7 +81,7 @@ public sealed class PiSessionHostTests
 
             Assert.Equal(PiSessionStates.Running, result.State);
             var newSessionArgs = Assert.Single(runner.Calls, args => args.Count > 0 && args[0] == "new-session");
-            Assert.Equal(["/bin/bash", "-i"], newSessionArgs.TakeLast(2));
+            Assert.Equal("/bin/bash -i", newSessionArgs[^1]);
         }
         finally
         {
