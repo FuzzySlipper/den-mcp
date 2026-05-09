@@ -21,7 +21,7 @@ public sealed class PiSessionHostTests
             {
                 ProviderSecretEnvironmentVariables = ["OPENAI_API_KEY"],
                 RequiredPiStatePaths = ["agent/settings.json"],
-            }, runner);
+            }, runner, delayAsync: NoDelay);
             var record = Session();
             var profile = Profile(piStateDir, new Dictionary<string, string>(StringComparer.Ordinal)
             {
@@ -66,7 +66,7 @@ public sealed class PiSessionHostTests
             {
                 TmuxShellCommand = ["/bin/bash", "-i"],
                 RequiredPiStatePaths = ["agent/settings.json"],
-            }, runner);
+            }, runner, delayAsync: NoDelay);
             var record = Session();
             var profile = Profile(piStateDir, new Dictionary<string, string>(StringComparer.Ordinal)
             {
@@ -120,7 +120,7 @@ public sealed class PiSessionHostTests
             };
             if (configureTmuxShellCommand)
                 options.TmuxShellCommand = tmuxShellCommand!;
-            var host = new TmuxDockerPiSessionHost(options, runner);
+            var host = new TmuxDockerPiSessionHost(options, runner, delayAsync: NoDelay);
             var record = Session();
             var profile = Profile(piStateDir, new Dictionary<string, string>(StringComparer.Ordinal)
             {
@@ -172,6 +172,44 @@ public sealed class PiSessionHostTests
     }
 
     [Fact]
+    public async Task Launch_MarksFailedWhenDockerFailureAppearsDuringLaunchPolling()
+    {
+        var piStateDir = Path.Combine(Path.GetTempPath(), "den-mcp", $"pi-state-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(piStateDir, "agent"));
+        await File.WriteAllTextAsync(Path.Combine(piStateDir, "agent", "settings.json"), "{}");
+        try
+        {
+            const string output = "permission denied while trying to connect to the Docker API at unix:///var/run/docker.sock";
+            var runner = new FakeProcessRunner([string.Empty, output]);
+            var host = new TmuxDockerPiSessionHost(new PiDockerLaunchProfileOptions
+            {
+                RequiredPiStatePaths = ["agent/settings.json"],
+            }, runner, delayAsync: NoDelay);
+            var profile = Profile(piStateDir, new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["PI_STATE_DIR"] = piStateDir,
+            }, []);
+
+            var result = await host.LaunchAsync(new PiSessionLaunchPlan
+            {
+                Record = Session(),
+                LaunchProfile = profile,
+                LaunchCommand = ["docker", "compose", "run", "pi"],
+            });
+
+            Assert.Equal(PiSessionStates.Failed, result.State);
+            Assert.Contains("Docker launch command failed", result.StateReason);
+            Assert.Equal("container-a", result.ContainerName);
+            Assert.True(runner.Calls.Count(args => args.Count > 0 && args[0] == "capture-pane") >= 2);
+        }
+        finally
+        {
+            if (Directory.Exists(piStateDir))
+                Directory.Delete(piStateDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Cleanup_UsesLaunchProfileDockerEnvironment()
     {
         var runner = new FakeProcessRunner(string.Empty);
@@ -196,6 +234,17 @@ public sealed class PiSessionHostTests
         Assert.Equal("unix:///run/den-mcp/docker-rt/docker.sock", runner.Environments[cleanupCallIndex]["DOCKER_HOST"]);
         Assert.Equal("/tmp/den-mcp/dev", runner.Environments[cleanupCallIndex]["DEV_DIR"]);
         Assert.Equal(string.Empty, runner.Environments[cleanupCallIndex]["OPENAI_API_KEY"]);
+    }
+
+    [Fact]
+    public void ExtractContainerName_FallsBackToComposeProjectAndServiceWhenNameFlagIsAbsent()
+    {
+        var profile = Profile("/tmp/den-mcp/pi-state", new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["PI_STATE_DIR"] = "/tmp/den-mcp/pi-state",
+        }, [], ["compose", "run", "pi"]);
+
+        Assert.Equal("compose-a-pi", PiSessionContainerNames.Extract(profile));
     }
 
     [Fact]
@@ -293,7 +342,11 @@ public sealed class PiSessionHostTests
         Assert.Equal("line-81", outputLines[^1]);
     }
 
-    private static PiDockerLaunchProfile Profile(string piStateDir, IReadOnlyDictionary<string, string> environment, IReadOnlyList<string> scrubbedEnvironmentVariables) => new()
+    private static PiDockerLaunchProfile Profile(
+        string piStateDir,
+        IReadOnlyDictionary<string, string> environment,
+        IReadOnlyList<string> scrubbedEnvironmentVariables,
+        IReadOnlyList<string>? dockerComposeRunArgs = null) => new()
     {
         ProfileId = "profile-a",
         ProjectId = "den-mcp",
@@ -309,8 +362,10 @@ public sealed class PiSessionHostTests
         Environment = environment,
         ScrubbedEnvironmentVariables = scrubbedEnvironmentVariables,
         DockerHost = environment.TryGetValue("DOCKER_HOST", out var dockerHost) ? dockerHost : null,
-        DockerComposeRunArgs = ["compose", "run", "--name", "container-a", "pi"],
+        DockerComposeRunArgs = dockerComposeRunArgs ?? ["compose", "run", "--name", "container-a", "pi"],
     };
+
+    private static Task NoDelay(TimeSpan _, CancellationToken __) => Task.CompletedTask;
 
     private static PiSessionRecord Session(string? containerName = null, string? launchProfileJson = null, DateTime? startedAt = null) => new()
     {
@@ -333,14 +388,21 @@ public sealed class PiSessionHostTests
 
     private sealed class FakeProcessRunner : IProcessRunner
     {
-        private readonly string _capturedOutput;
+        private readonly Queue<string> _capturedOutputs;
         private readonly ProcessRunResult? _inspectResult;
         public List<IReadOnlyList<string>> Calls { get; } = [];
         public List<IReadOnlyDictionary<string, string>> Environments { get; } = [];
 
         public FakeProcessRunner(string capturedOutput, ProcessRunResult? inspectResult = null)
+            : this([capturedOutput], inspectResult)
         {
-            _capturedOutput = capturedOutput;
+        }
+
+        public FakeProcessRunner(IReadOnlyList<string> capturedOutputs, ProcessRunResult? inspectResult = null)
+        {
+            _capturedOutputs = capturedOutputs.Count == 0
+                ? new Queue<string>([string.Empty])
+                : new Queue<string>(capturedOutputs);
             _inspectResult = inspectResult;
         }
 
@@ -366,10 +428,11 @@ public sealed class PiSessionHostTests
 
             if (args.Count > 0 && args[0] == "capture-pane")
             {
+                var capturedOutput = _capturedOutputs.Count > 1 ? _capturedOutputs.Dequeue() : _capturedOutputs.Peek();
                 return Task.FromResult(new ProcessRunResult
                 {
                     ExitCode = 0,
-                    Stdout = _capturedOutput,
+                    Stdout = capturedOutput,
                 });
             }
 

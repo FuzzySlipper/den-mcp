@@ -95,7 +95,7 @@ public sealed class PiSessionService : IPiSessionService
             Provider = NormalizeText(request.Provider),
             HostId = _host.HostId,
             TmuxSessionName = PiSessionNaming.CreateTmuxSessionName(projectId, sessionId),
-            ContainerName = ExtractContainerName(profile),
+            ContainerName = PiSessionContainerNames.Extract(profile),
             State = PiSessionStates.Launching,
             LaunchProfileKind = LaunchProfileKind,
             LaunchProfileId = profile.ProfileId,
@@ -534,16 +534,6 @@ public sealed class PiSessionService : IPiSessionService
         command.Add(dockerExecutable);
         command.AddRange(profile.DockerComposeRunArgs);
         return command;
-    }
-
-    private static string? ExtractContainerName(PiDockerLaunchProfile profile)
-    {
-        for (var i = 0; i < profile.DockerComposeRunArgs.Count - 1; i++)
-        {
-            if (profile.DockerComposeRunArgs[i] == "--name")
-                return profile.DockerComposeRunArgs[i + 1];
-        }
-        return null;
     }
 
     private static string? NormalizeIdentifier(string? value)

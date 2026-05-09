@@ -58,16 +58,24 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
     private const int OutputTailLineCount = 80;
     private const int OutputTailMaxChars = 12000;
     private static readonly TimeSpan ContainerStartupGracePeriod = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan LaunchFailureDetectionWindow = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan LaunchFailureDetectionPollInterval = TimeSpan.FromMilliseconds(100);
     private readonly PiDockerLaunchProfileOptions _options;
     private readonly IProcessRunner _runner;
     private readonly Func<DateTime> _utcNow;
+    private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
     private readonly TimeSpan _commandTimeout = TimeSpan.FromSeconds(15);
 
-    public TmuxDockerPiSessionHost(PiDockerLaunchProfileOptions options, IProcessRunner runner, Func<DateTime>? utcNow = null)
+    public TmuxDockerPiSessionHost(
+        PiDockerLaunchProfileOptions options,
+        IProcessRunner runner,
+        Func<DateTime>? utcNow = null,
+        Func<TimeSpan, CancellationToken, Task>? delayAsync = null)
     {
         _options = options;
         _runner = runner;
         _utcNow = utcNow ?? (() => DateTime.UtcNow);
+        _delayAsync = delayAsync ?? Task.Delay;
     }
 
     public string HostId => string.IsNullOrWhiteSpace(_options.HostId)
@@ -136,14 +144,14 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
             };
         }
 
-        var output = await CaptureOutputTailAsync(plan.Record, cancellationToken).ConfigureAwait(false);
-        if (TryDetectDockerLaunchFailure(output?.Tail) is { } outputFailure)
+        var outputFailure = await DetectLaunchOutputFailureAsync(plan.Record, cancellationToken).ConfigureAwait(false);
+        if (outputFailure is not null)
         {
             return new PiSessionHostLaunchResult
             {
                 State = PiSessionStates.Failed,
                 StateReason = outputFailure,
-                ContainerName = ExtractContainerName(plan.LaunchProfile),
+                ContainerName = PiSessionContainerNames.Extract(plan.LaunchProfile),
             };
         }
 
@@ -151,7 +159,7 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
         return new PiSessionHostLaunchResult
         {
             State = PiSessionStates.Running,
-            ContainerName = ExtractContainerName(plan.LaunchProfile),
+            ContainerName = PiSessionContainerNames.Extract(plan.LaunchProfile),
             StartedAt = now,
             LastActivityAt = now,
         };
@@ -306,6 +314,27 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
                 environment["DOCKER_HOST"] = dockerHost.Trim();
         }
         return environment;
+    }
+
+    private async Task<string?> DetectLaunchOutputFailureAsync(PiSessionRecord session, CancellationToken cancellationToken)
+    {
+        var elapsed = TimeSpan.Zero;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var output = await CaptureOutputTailAsync(session, cancellationToken).ConfigureAwait(false);
+            if (TryDetectDockerLaunchFailure(output?.Tail) is { } outputFailure)
+                return outputFailure;
+
+            if (elapsed >= LaunchFailureDetectionWindow)
+                return null;
+
+            var delay = LaunchFailureDetectionWindow - elapsed;
+            if (delay > LaunchFailureDetectionPollInterval)
+                delay = LaunchFailureDetectionPollInterval;
+            await _delayAsync(delay, cancellationToken).ConfigureAwait(false);
+            elapsed += delay;
+        }
     }
 
     private async Task<PiSessionOutputTail?> CaptureOutputTailAsync(PiSessionRecord session, CancellationToken cancellationToken)
@@ -523,16 +552,6 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
-    private static string? ExtractContainerName(PiDockerLaunchProfile profile)
-    {
-        for (var i = 0; i < profile.DockerComposeRunArgs.Count - 1; i++)
-        {
-            if (profile.DockerComposeRunArgs[i] == "--name")
-                return profile.DockerComposeRunArgs[i + 1];
-        }
-        return $"{profile.ComposeProjectName}-{profile.Service}";
-    }
-
     private static DateTime? FromUnixSeconds(string value) =>
         long.TryParse(value, out var seconds)
             ? DateTimeOffset.FromUnixTimeSeconds(seconds).UtcDateTime
@@ -574,6 +593,19 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
 internal sealed record PiSessionOutputTail(string Tail, DateTime CapturedAt, bool Truncated, string TailSha256);
 
 internal sealed record PiSessionContainerObservation(string State, string? StateReason, string? ContainerId, string? ContainerName);
+
+internal static class PiSessionContainerNames
+{
+    public static string? Extract(PiDockerLaunchProfile profile)
+    {
+        for (var i = 0; i < profile.DockerComposeRunArgs.Count - 1; i++)
+        {
+            if (profile.DockerComposeRunArgs[i] == "--name")
+                return profile.DockerComposeRunArgs[i + 1];
+        }
+        return $"{profile.ComposeProjectName}-{profile.Service}";
+    }
+}
 
 public static class PiSessionNaming
 {
