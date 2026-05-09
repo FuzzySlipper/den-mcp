@@ -4,7 +4,7 @@
 Usage:
     ./scripts/import-taskmaster.py <tasks.json> <den-project-id> [--den-url http://localhost:5199]
     ./scripts/import-taskmaster.py .taskmaster/tasks/tasks.json den-mcp
-    ./scripts/import-taskmaster.py /home/patch/dev/other-project/.taskmaster/tasks/tasks.json other-project
+    ./scripts/import-taskmaster.py /path/to/other-project/.taskmaster/tasks/tasks.json other-project
 
 The script:
   1. Reads all tasks (and subtasks) from the taskmaster JSON

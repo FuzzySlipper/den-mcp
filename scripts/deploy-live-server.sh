@@ -7,7 +7,14 @@ SSH_TARGET="${SSH_TARGET:-patch@192.168.1.10}"
 SERVICE_NAME="${SERVICE_NAME:-den-mcp.service}"
 REMOTE_SERVER_ROOT="${REMOTE_SERVER_ROOT:-/data/services/den-mcp/server}"
 REMOTE_STAGE_DIR="${REMOTE_STAGE_DIR:-/tmp/den-mcp-live-publish}"
-PI_DOCKER_SOURCE="${PI_DOCKER_SOURCE:-/home/patch/dev/linux/pi-docker}"
+DEFAULT_PI_DOCKER_SOURCE=""
+for candidate in "$REPO_ROOT/../pi-docker" "$REPO_ROOT/../linux/pi-docker"; do
+  if [[ -f "$candidate/compose.yaml" ]]; then
+    DEFAULT_PI_DOCKER_SOURCE="$(CDPATH='' cd -- "$candidate" && pwd)"
+    break
+  fi
+done
+PI_DOCKER_SOURCE="${PI_DOCKER_SOURCE:-$DEFAULT_PI_DOCKER_SOURCE}"
 REMOTE_PI_DOCKER_DIR="${REMOTE_PI_DOCKER_DIR:-/data/services/den-mcp/pi-docker}"
 REMOTE_PI_STATE_ROOT="${REMOTE_PI_STATE_ROOT:-/data/services/den-mcp/pi-sessions}"
 REMOTE_PI_CREDENTIAL_FALLBACK_ROOT="${REMOTE_PI_CREDENTIAL_FALLBACK_ROOT:-/data/services/den-mcp/pi-credential-fallbacks}"
@@ -35,6 +42,10 @@ Environment overrides:
   PUBLISH_DIR, SSH_TARGET, SERVICE_NAME, REMOTE_SERVER_ROOT, REMOTE_STAGE_DIR,
   PI_DOCKER_SOURCE, REMOTE_PI_DOCKER_DIR, REMOTE_PI_STATE_ROOT,
   REMOTE_PI_CREDENTIAL_FALLBACK_ROOT, REMOTE_DEV_ROOT
+
+PI_DOCKER_SOURCE defaults to a sibling pi-docker checkout when one is found at
+../pi-docker or ../linux/pi-docker relative to this repository. Set it explicitly
+when using another checkout layout, or pass --skip-pi-docker-assets.
 EOF
 }
 
@@ -148,6 +159,18 @@ sync_pi_docker_assets() {
   if [[ "$SKIP_PI_DOCKER_ASSETS" -eq 1 ]]; then
     echo "Skipping pi-docker asset deployment."
     return
+  fi
+
+  if [[ -z "$PI_DOCKER_SOURCE" ]]; then
+    cat >&2 <<EOF
+pi-docker source was not provided and no sibling checkout was found.
+
+Set PI_DOCKER_SOURCE to the local pi-docker checkout, or pass
+--skip-pi-docker-assets if this deploy intentionally should not update Den-owned
+Pi session compose assets. The automatic lookup checks ../pi-docker and
+../linux/pi-docker relative to this repository.
+EOF
+    exit 1
   fi
 
   if [[ ! -d "$PI_DOCKER_SOURCE" ]]; then

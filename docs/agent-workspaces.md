@@ -50,7 +50,7 @@ Create/upsert request body:
   "id": "ws_809",
   "task_id": 809,
   "branch": "task/809-agent-workspace-backend",
-  "worktree_path": "/home/patch/dev/den-mcp",
+  "worktree_path": "/path/to/den-mcp-worktree",
   "base_branch": "main",
   "base_commit": "d502319ce49c964e82c639f4913972442b191e2c",
   "head_commit": "...",

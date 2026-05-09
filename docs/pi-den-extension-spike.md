@@ -259,7 +259,7 @@ and should not create Codex-targeted dispatches by default.
 Install or link the tracked resources into Pi from this repo path:
 
 ```bash
-pi install /home/patch/dev/den-mcp/pi-dev
+pi install /path/to/den-mcp/pi-dev
 ```
 
 If Pi is already loading that path from user settings, leave the project root

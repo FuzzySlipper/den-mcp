@@ -102,7 +102,7 @@ Docker access is intentionally through a dedicated rootless runtime user, not th
 
 With that config, the rendered launch profile includes `DOCKER_HOST`; tmux receives it via `tmux new-session -e`, the recorded shell command prefixes it with `env DOCKER_HOST=...`, and cleanup passes it through the bounded process runner when invoking `docker compose down`.
 
-Use `scripts/deploy-live-server.sh` to deploy compose assets along with the server publish output. The script copies the local pi-docker checkout from `PI_DOCKER_SOURCE` (default `/home/patch/dev/linux/pi-docker`) to `REMOTE_PI_DOCKER_DIR` (default `/data/services/den-mcp/pi-docker`) with `.env` excluded and removed on the remote side. It also creates:
+Use `scripts/deploy-live-server.sh` to deploy compose assets along with the server publish output. The script copies the local pi-docker checkout from `PI_DOCKER_SOURCE` (or from a detected sibling checkout at `../pi-docker` or `../linux/pi-docker`) to `REMOTE_PI_DOCKER_DIR` (default `/data/services/den-mcp/pi-docker`) with `.env` excluded and removed on the remote side. It also creates:
 
 - `/data/services/den-mcp/pi-sessions` for per-session `PI_STATE_DIR` roots;
 - `/data/services/den-mcp/pi-credential-fallbacks/gitconfig` as an empty read-only gitconfig fallback;

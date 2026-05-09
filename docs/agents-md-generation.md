@@ -91,7 +91,7 @@ during `--all`. This keeps rollout incremental.
 Generate for `den-mcp` from the current checkout:
 
 ```bash
-python3 scripts/generate_agents.py --root /home/patch/dev/den-mcp
+python3 scripts/generate_agents.py --root /path/to/den-mcp
 ```
 
 Generate by Den project id:
