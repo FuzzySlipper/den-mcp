@@ -25,6 +25,8 @@ FIELD_LABELS = {
     "CredentialFallbackRootDir": "credential fallback root",
 }
 
+PATH_KEYS = tuple(DEN_SRV_CONVENTIONS.keys())
+
 HOME_PATH_PATTERNS = [
     re.compile(r"(?:^|[\s:=,])(/home/[^\s:'\",]+)"),
     re.compile(r"(?:^|[\s:=,])(/root(?:/[^\s:'\",]*)?)"),
@@ -130,6 +132,9 @@ def main() -> int:
         )
         return 1
 
+    warnings: List[str] = []
+
+    den_mcp_configured = "DenMcp" in settings and settings.get("DenMcp") is not None
     den_mcp = settings.get("DenMcp", {})
     if den_mcp is None:
         den_mcp = {}
@@ -140,6 +145,9 @@ def main() -> int:
         )
         return 1
 
+    pi_session_host_configured = (
+        "PiSessionHost" in den_mcp and den_mcp.get("PiSessionHost") is not None
+    )
     pi_session_host = den_mcp.get("PiSessionHost", {})
     if pi_session_host is None:
         pi_session_host = {}
@@ -149,6 +157,30 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+
+    configured_path_keys = [
+        key for key in PATH_KEYS if pi_session_host.get(key) not in (None, "")
+    ]
+    if not den_mcp_configured:
+        warnings.append(
+            "DenMcp section is missing; PiSessionHost path values will rely on built-in "
+            "defaults for any unset convention paths."
+        )
+    elif not pi_session_host_configured:
+        warnings.append(
+            "DenMcp:PiSessionHost section is missing; path values will rely on built-in "
+            "defaults for any unset convention paths."
+        )
+    elif not pi_session_host:
+        warnings.append(
+            "DenMcp:PiSessionHost section is empty; path values will rely on built-in "
+            "defaults for any unset convention paths."
+        )
+    elif not configured_path_keys:
+        warnings.append(
+            "DenMcp:PiSessionHost does not set any explicit path keys "
+            f"({', '.join(PATH_KEYS)}); unset convention paths will rely on built-in defaults."
+        )
 
     errors: List[str] = []
 
@@ -174,6 +206,11 @@ def main() -> int:
                 "If this is intentional, rerun the deploy with the matching REMOTE_* override; "
                 "otherwise update the preserved live appsettings.json."
             )
+
+    if warnings:
+        print("\nPiSessionHost deploy preflight warnings:")
+        for warning in warnings:
+            print(f"  Warning: {warning}")
 
     for value_path, string_value in iter_strings(pi_session_host, "DenMcp:PiSessionHost"):
         reason = unsafe_path_reason(string_value)
