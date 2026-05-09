@@ -1,3 +1,4 @@
+using System.Text.Json;
 using DenMcp.Core.Models;
 using DenMcp.Core.Services;
 
@@ -144,6 +145,70 @@ public sealed class PiSessionHostTests
     }
 
     [Fact]
+    public async Task GetStatus_MarksFailedWhenOutputShowsDockerSocketPermissionDenied()
+    {
+        const string output = "permission denied while trying to connect to the Docker API at unix:///var/run/docker.sock";
+        var runner = new FakeProcessRunner(output);
+        var host = new TmuxDockerPiSessionHost(new PiDockerLaunchProfileOptions(), runner);
+
+        var status = await host.GetStatusAsync(Session());
+
+        Assert.Equal(PiSessionStates.Failed, status.State);
+        Assert.Contains("Docker launch command failed", status.StateReason);
+        Assert.Equal(output, status.OutputTail);
+    }
+
+    [Fact]
+    public async Task GetStatus_MarksFailedWhenKnownContainerIsMissingAfterStartupGracePeriod()
+    {
+        var now = new DateTime(2026, 5, 9, 12, 0, 0, DateTimeKind.Utc);
+        var profile = Profile("/tmp/den-mcp/pi-state", new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["DOCKER_HOST"] = "unix:///run/den-mcp/docker-rt/docker.sock",
+            ["PI_STATE_DIR"] = "/tmp/den-mcp/pi-state",
+        }, []);
+        var runner = new FakeProcessRunner(string.Empty, new ProcessRunResult
+        {
+            ExitCode = 1,
+            Stderr = "Error: No such object: container-a",
+        });
+        var host = new TmuxDockerPiSessionHost(new PiDockerLaunchProfileOptions
+        {
+            DockerExecutable = "/usr/bin/docker",
+            DockerHost = "unix:///run/den-mcp/docker-rt/fallback.sock",
+        }, runner, () => now);
+
+        var status = await host.GetStatusAsync(Session(
+            containerName: "container-a",
+            launchProfileJson: JsonSerializer.Serialize(profile, PiSessionJson.Options),
+            startedAt: now.AddSeconds(-30)));
+
+        Assert.Equal(PiSessionStates.Failed, status.State);
+        Assert.Contains("Expected Docker container 'container-a' was not found", status.StateReason);
+        var inspectCallIndex = runner.Calls.FindIndex(args => args.Count > 0 && args[0] == "inspect");
+        Assert.True(inspectCallIndex >= 0);
+        Assert.Equal("container-a", runner.Calls[inspectCallIndex][^1]);
+        Assert.Equal("unix:///run/den-mcp/docker-rt/docker.sock", runner.Environments[inspectCallIndex]["DOCKER_HOST"]);
+    }
+
+    [Fact]
+    public async Task GetStatus_RecordsRunningDockerContainerIdWhenContainerIsPresent()
+    {
+        var runner = new FakeProcessRunner(string.Empty, new ProcessRunResult
+        {
+            ExitCode = 0,
+            Stdout = "container-id-a\trunning\t0\t\n",
+        });
+        var host = new TmuxDockerPiSessionHost(new PiDockerLaunchProfileOptions(), runner);
+
+        var status = await host.GetStatusAsync(Session(containerName: "container-a"));
+
+        Assert.Equal(PiSessionStates.Running, status.State);
+        Assert.Equal("container-id-a", status.ContainerId);
+        Assert.Equal("container-a", status.ContainerName);
+    }
+
+    [Fact]
     public async Task GetStatus_DoesNotMarkExactlyEightyCapturedLinesAsTruncated()
     {
         var runner = new FakeProcessRunner(Lines(80));
@@ -193,18 +258,20 @@ public sealed class PiSessionHostTests
         DockerComposeRunArgs = ["compose", "run", "--name", "container-a", "pi"],
     };
 
-    private static PiSessionRecord Session() => new()
+    private static PiSessionRecord Session(string? containerName = null, string? launchProfileJson = null, DateTime? startedAt = null) => new()
     {
         SessionId = "session-a",
         ProjectId = "den-mcp",
         HostId = "host-test",
         TmuxSessionName = "tmux-session-a",
+        ContainerName = containerName,
         State = PiSessionStates.Running,
         LaunchProfileKind = "test",
-        LaunchProfileJson = "{}",
+        LaunchProfileJson = launchProfileJson ?? "{}",
         LaunchCommandJson = "[]",
         LaunchCommandDisplay = "test",
-        CreatedAt = DateTime.UtcNow,
+        CreatedAt = startedAt ?? DateTime.UtcNow,
+        StartedAt = startedAt,
         UpdatedAt = DateTime.UtcNow,
     };
 
@@ -213,12 +280,14 @@ public sealed class PiSessionHostTests
     private sealed class FakeProcessRunner : IProcessRunner
     {
         private readonly string _capturedOutput;
+        private readonly ProcessRunResult? _inspectResult;
         public List<IReadOnlyList<string>> Calls { get; } = [];
         public List<IReadOnlyDictionary<string, string>> Environments { get; } = [];
 
-        public FakeProcessRunner(string capturedOutput)
+        public FakeProcessRunner(string capturedOutput, ProcessRunResult? inspectResult = null)
         {
             _capturedOutput = capturedOutput;
+            _inspectResult = inspectResult;
         }
 
         public Task<ProcessRunResult> RunAsync(
@@ -255,6 +324,15 @@ public sealed class PiSessionHostTests
                 return Task.FromResult(new ProcessRunResult
                 {
                     ExitCode = 0,
+                });
+            }
+
+            if (args.Count > 0 && args[0] == "inspect")
+            {
+                return Task.FromResult(_inspectResult ?? new ProcessRunResult
+                {
+                    ExitCode = 1,
+                    Stderr = "unexpected inspect command",
                 });
             }
 

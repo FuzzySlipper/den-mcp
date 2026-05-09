@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using DenMcp.Core.Models;
 
 namespace DenMcp.Core.Services;
@@ -56,6 +57,7 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
     private const string LabelPrefix = "@den.";
     private const int OutputTailLineCount = 80;
     private const int OutputTailMaxChars = 12000;
+    private static readonly TimeSpan ContainerStartupGracePeriod = TimeSpan.FromSeconds(5);
     private readonly PiDockerLaunchProfileOptions _options;
     private readonly IProcessRunner _runner;
     private readonly Func<DateTime> _utcNow;
@@ -134,6 +136,17 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
             };
         }
 
+        var output = await CaptureOutputTailAsync(plan.Record, cancellationToken).ConfigureAwait(false);
+        if (TryDetectDockerLaunchFailure(output?.Tail) is { } outputFailure)
+        {
+            return new PiSessionHostLaunchResult
+            {
+                State = PiSessionStates.Failed,
+                StateReason = outputFailure,
+                ContainerName = ExtractContainerName(plan.LaunchProfile),
+            };
+        }
+
         var now = _utcNow();
         return new PiSessionHostLaunchResult
         {
@@ -168,12 +181,15 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
                 continue;
 
             var output = await CaptureOutputTailAsync(session, cancellationToken).ConfigureAwait(false);
+            var observedLastActivity = FromUnixSeconds(parts[2]) ?? session.LastActivityAt;
+            var container = await InspectContainerAsync(session, output?.Tail, cancellationToken).ConfigureAwait(false);
             return new PiSessionHostStatus
             {
-                State = PiSessionStates.Running,
-                LastActivityAt = FromUnixSeconds(parts[2]) ?? session.LastActivityAt,
-                ContainerId = session.ContainerId,
-                ContainerName = session.ContainerName,
+                State = container?.State ?? PiSessionStates.Running,
+                StateReason = container?.StateReason,
+                LastActivityAt = observedLastActivity,
+                ContainerId = container?.ContainerId ?? session.ContainerId,
+                ContainerName = container?.ContainerName ?? session.ContainerName,
                 OutputTail = output?.Tail,
                 OutputTailCapturedAt = output?.CapturedAt,
                 OutputTailTruncated = output?.Truncated ?? false,
@@ -281,8 +297,14 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
         var environment = new SortedDictionary<string, string>(StringComparer.Ordinal);
         foreach (var pair in profile.Environment)
             environment[pair.Key] = pair.Value;
-        if (!environment.ContainsKey("DOCKER_HOST") && !string.IsNullOrWhiteSpace(_options.DockerHost))
-            environment["DOCKER_HOST"] = _options.DockerHost.Trim();
+        if (!environment.ContainsKey("DOCKER_HOST"))
+        {
+            var dockerHost = !string.IsNullOrWhiteSpace(profile.DockerHost)
+                ? profile.DockerHost
+                : _options.DockerHost;
+            if (!string.IsNullOrWhiteSpace(dockerHost))
+                environment["DOCKER_HOST"] = dockerHost.Trim();
+        }
         return environment;
     }
 
@@ -318,6 +340,129 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
             _utcNow(),
             lineTruncated || charTruncated,
             ComputeSha256(normalized));
+    }
+
+    private async Task<PiSessionContainerObservation?> InspectContainerAsync(PiSessionRecord session, string? outputTail, CancellationToken cancellationToken)
+    {
+        if (TryDetectDockerLaunchFailure(outputTail) is { } outputFailure)
+        {
+            return new PiSessionContainerObservation(
+                PiSessionStates.Failed,
+                outputFailure,
+                session.ContainerId,
+                session.ContainerName);
+        }
+
+        if (string.IsNullOrWhiteSpace(session.ContainerName))
+            return null;
+
+        var result = await _runner.RunAsync(
+            _options.DockerExecutable,
+            ["inspect", "--format", "{{.Id}}\t{{.State.Status}}\t{{.State.ExitCode}}\t{{.State.Error}}", session.ContainerName],
+            _commandTimeout,
+            cancellationToken,
+            BuildDockerProcessEnvironment(session)).ConfigureAwait(false);
+
+        if (!result.Succeeded)
+        {
+            var error = TrimError(string.Join("\n", new[] { result.Stderr, result.Stdout }.Where(value => !string.IsNullOrWhiteSpace(value))));
+            if (IsContainerMissingError(error) && IsWithinContainerStartupGracePeriod(session))
+                return null;
+
+            var reason = IsContainerMissingError(error)
+                ? $"Expected Docker container '{session.ContainerName}' was not found after launch."
+                : $"Docker container status check failed for '{session.ContainerName}': {error}";
+            return new PiSessionContainerObservation(
+                PiSessionStates.Failed,
+                TrimError(reason),
+                session.ContainerId,
+                session.ContainerName);
+        }
+
+        return ParseDockerInspectOutput(session, result.Stdout);
+    }
+
+    private PiSessionContainerObservation? ParseDockerInspectOutput(PiSessionRecord session, string stdout)
+    {
+        var line = stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(line))
+            return new PiSessionContainerObservation(PiSessionStates.Failed, $"Docker container status check for '{session.ContainerName}' returned no status output.", session.ContainerId, session.ContainerName);
+
+        var parts = line.Split('\t');
+        var containerId = parts.ElementAtOrDefault(0);
+        var status = parts.ElementAtOrDefault(1);
+        var exitCodeText = parts.ElementAtOrDefault(2);
+        var stateError = parts.ElementAtOrDefault(3);
+        if (string.IsNullOrWhiteSpace(status))
+            return new PiSessionContainerObservation(PiSessionStates.Failed, $"Docker container status check for '{session.ContainerName}' returned an empty status.", NormalizeText(containerId) ?? session.ContainerId, session.ContainerName);
+
+        if (status.Equals("running", StringComparison.OrdinalIgnoreCase)
+            || status.Equals("created", StringComparison.OrdinalIgnoreCase)
+            || status.Equals("restarting", StringComparison.OrdinalIgnoreCase)
+            || status.Equals("paused", StringComparison.OrdinalIgnoreCase))
+        {
+            return new PiSessionContainerObservation(PiSessionStates.Running, null, NormalizeText(containerId) ?? session.ContainerId, session.ContainerName);
+        }
+
+        var exitCode = int.TryParse(exitCodeText, out var parsedExitCode) ? parsedExitCode : (int?)null;
+        var state = status.Equals("exited", StringComparison.OrdinalIgnoreCase) && exitCode == 0
+            ? PiSessionStates.Completed
+            : PiSessionStates.Failed;
+        var reason = state == PiSessionStates.Completed
+            ? $"Docker container '{session.ContainerName}' exited with code 0."
+            : $"Docker container '{session.ContainerName}' is {status}{(exitCode is null ? string.Empty : $" with exit code {exitCode}")}{(string.IsNullOrWhiteSpace(stateError) ? string.Empty : $": {stateError}")}.";
+        return new PiSessionContainerObservation(state, TrimError(reason), NormalizeText(containerId) ?? session.ContainerId, session.ContainerName);
+    }
+
+    private IReadOnlyDictionary<string, string> BuildDockerProcessEnvironment(PiSessionRecord session)
+    {
+        var profile = DeserializeProfile(session);
+        if (profile is not null)
+            return BuildDockerProcessEnvironment(profile);
+
+        var environment = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        if (!string.IsNullOrWhiteSpace(_options.DockerHost))
+            environment["DOCKER_HOST"] = _options.DockerHost.Trim();
+        return environment;
+    }
+
+    private static PiDockerLaunchProfile? DeserializeProfile(PiSessionRecord session)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<PiDockerLaunchProfile>(session.LaunchProfileJson, PiSessionJson.Options);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private bool IsWithinContainerStartupGracePeriod(PiSessionRecord session)
+    {
+        var launchedAt = session.StartedAt ?? session.CreatedAt;
+        if (launchedAt == default)
+            return false;
+        return _utcNow() - launchedAt.ToUniversalTime() < ContainerStartupGracePeriod;
+    }
+
+    private static bool IsContainerMissingError(string error) =>
+        error.Contains("No such object", StringComparison.OrdinalIgnoreCase)
+        || error.Contains("No such container", StringComparison.OrdinalIgnoreCase);
+
+    private static string? TryDetectDockerLaunchFailure(string? outputTail)
+    {
+        if (string.IsNullOrWhiteSpace(outputTail))
+            return null;
+
+        var failureLine = outputTail
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault(line => ContainsAny(line,
+                "permission denied while trying to connect to the docker api",
+                "permission denied while trying to connect to the docker daemon socket",
+                "cannot connect to the docker daemon",
+                "is the docker daemon running?"));
+        return failureLine is null ? null : TrimError($"Docker launch command failed: {failureLine}");
     }
 
     private Task<ProcessRunResult> RunTmuxAsync(IReadOnlyList<string> args, CancellationToken cancellationToken) =>
@@ -393,6 +538,11 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
             ? DateTimeOffset.FromUnixTimeSeconds(seconds).UtcDateTime
             : null;
 
+    private static bool ContainsAny(string value, params string[] needles) =>
+        needles.Any(needle => value.Contains(needle, StringComparison.OrdinalIgnoreCase));
+
+    private static string? NormalizeText(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
     private static string TrimError(string? value)
     {
         var trimmed = string.IsNullOrWhiteSpace(value) ? "unknown host error" : value.Trim();
@@ -422,6 +572,8 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
 }
 
 internal sealed record PiSessionOutputTail(string Tail, DateTime CapturedAt, bool Truncated, string TailSha256);
+
+internal sealed record PiSessionContainerObservation(string State, string? StateReason, string? ContainerId, string? ContainerName);
 
 public static class PiSessionNaming
 {
