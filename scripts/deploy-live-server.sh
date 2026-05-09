@@ -189,6 +189,14 @@ EOF
   "
 }
 
+validate_remote_pi_session_host_config() {
+  local remote_appsettings="$REMOTE_SERVER_ROOT/appsettings.json"
+  local expected_compose_file="$REMOTE_PI_DOCKER_DIR/compose.yaml"
+
+  echo "Validating live PiSessionHost appsettings on $SSH_TARGET before restart ..."
+  ssh "$SSH_TARGET" "python3_path=\$(command -v python3) || { echo 'Deploy preflight failed: python3 is required on the remote host to validate live appsettings.' >&2; exit 1; }; sudo \"\$python3_path\" - '$remote_appsettings' --expected-compose-file '$expected_compose_file' --expected-dev-dir '$REMOTE_DEV_ROOT' --expected-pi-state-root-dir '$REMOTE_PI_STATE_ROOT' --expected-credential-fallback-root-dir '$REMOTE_PI_CREDENTIAL_FALLBACK_ROOT'" < "$REPO_ROOT/scripts/validate-pi-session-host-appsettings.py"
+}
+
 restart_remote() {
   if [[ "$SKIP_RESTART" -eq 1 ]]; then
     echo "Skipping remote service restart."
@@ -208,9 +216,10 @@ main() {
   publish_server
   sync_server_tree
   sync_pi_docker_assets
+  validate_remote_pi_session_host_config
   restart_remote
   echo "Deploy complete."
-  echo "Reminder: live appsettings.json is preserved; ensure DenMcp:PiSessionHost uses $REMOTE_PI_DOCKER_DIR/compose.yaml, $REMOTE_DEV_ROOT, $REMOTE_PI_STATE_ROOT, and $REMOTE_PI_CREDENTIAL_FALLBACK_ROOT."
+  echo "Verified preserved live appsettings.json DenMcp:PiSessionHost uses service-accessible Pi paths for this deploy."
 }
 
 main "$@"

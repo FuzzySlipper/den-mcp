@@ -109,7 +109,9 @@ Use `scripts/deploy-live-server.sh` to deploy compose assets along with the serv
 - `/data/services/den-mcp/pi-credential-fallbacks/ssh` and `/data/services/den-mcp/pi-credential-fallbacks/gh` as empty credential fallback directories;
 - `/data/dev` as the service-traversable development root mounted at `/home/pi/dev`.
 
-The live deploy script intentionally preserves `/data/services/den-mcp/server/appsettings.json`; manually apply the explicit JSON above to that deployed config file and restart `den-mcp.service` before smoke testing. Also validate the same environment the service will use before launching a session:
+The live deploy script intentionally preserves `/data/services/den-mcp/server/appsettings.json`. Before restarting, `scripts/deploy-live-server.sh` now preflights the preserved live `DenMcp:PiSessionHost` section and fails if deployed runtime paths still point at `/home/patch`, another `/home/<user>` tree, or an unexpanded `~`. The same preflight verifies the den-srv path conventions it will deploy: `ComposeFile` under `/data/services/den-mcp/pi-docker`, `DevDir` at `/data/dev`, `PiStateRootDir` under `/data/services/den-mcp/pi-sessions`, and `CredentialFallbackRootDir` under `/data/services/den-mcp/pi-credential-fallbacks` unless the deploy is run with matching `REMOTE_*` overrides.
+
+Manual migration step for existing live installs: edit the preserved deployed config (for example `ssh den-srv` then `sudoedit /data/services/den-mcp/server/appsettings.json`) and apply the explicit JSON above before rerunning the deploy/restart. Also validate the same environment the service will use before launching a session:
 
 ```bash
 sudo -u den-mcp env DOCKER_HOST=unix:///run/den-mcp/docker-rt/docker.sock docker version
