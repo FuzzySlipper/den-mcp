@@ -91,6 +91,60 @@ public sealed class PiSessionHostTests
         }
     }
 
+    public static TheoryData<string, string[]?, bool, string> TmuxShellCommandNormalizationCases => new()
+    {
+        { "default options", null, false, "/bin/sh -i" },
+        { "null command", null, true, "/bin/sh -i" },
+        { "empty command", [], true, "/bin/sh -i" },
+        { "whitespace-only command", ["", "  ", "\t"], true, "/bin/sh -i" },
+        { "single-arg command", ["/bin/sh"], true, "/bin/sh" },
+    };
+
+    [Theory]
+    [MemberData(nameof(TmuxShellCommandNormalizationCases))]
+    public async Task Launch_NormalizesTmuxShellCommandFallbackEdges(
+        string _,
+        string[]? tmuxShellCommand,
+        bool configureTmuxShellCommand,
+        string expectedShellCommand)
+    {
+        var piStateDir = Path.Combine(Path.GetTempPath(), "den-mcp", $"pi-state-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(piStateDir, "agent"));
+        await File.WriteAllTextAsync(Path.Combine(piStateDir, "agent", "settings.json"), "{}");
+        try
+        {
+            var runner = new FakeProcessRunner(string.Empty);
+            var options = new PiDockerLaunchProfileOptions
+            {
+                RequiredPiStatePaths = ["agent/settings.json"],
+            };
+            if (configureTmuxShellCommand)
+                options.TmuxShellCommand = tmuxShellCommand!;
+            var host = new TmuxDockerPiSessionHost(options, runner);
+            var record = Session();
+            var profile = Profile(piStateDir, new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["PI_STATE_DIR"] = piStateDir,
+            }, []);
+
+            var result = await host.LaunchAsync(new PiSessionLaunchPlan
+            {
+                Record = record,
+                LaunchProfile = profile,
+                LaunchCommand = ["docker", "compose", "run", "pi"],
+            });
+
+            Assert.Equal(PiSessionStates.Running, result.State);
+            var newSessionArgs = Assert.Single(runner.Calls, args => args.Count > 0 && args[0] == "new-session");
+            Assert.Equal(expectedShellCommand, newSessionArgs[^1]);
+        }
+        finally
+        {
+            if (Directory.Exists(piStateDir))
+                Directory.Delete(piStateDir, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task Launch_FailsBeforeTmuxWhenRequiredPiStateSettingsAreMissing()
     {
