@@ -78,6 +78,19 @@ public sealed class PiLaunchProfileApiTests : IAsyncLifetime
         Assert.Contains("callback_ports must be provided per session", json.RootElement.GetProperty("error").GetString());
     }
 
+    [Fact]
+    public async Task Defaults_ConfiguredArraysReplaceDefaultsInsteadOfAppending()
+    {
+        using var response = await _client.GetAsync("/api/projects/den-mcp/pi-launch-profile/defaults");
+        response.EnsureSuccessStatusCode();
+
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var root = json.RootElement;
+
+        Assert.Equal(["/bin/sh", "-i"], root.GetProperty("tmux_shell_command").EnumerateArray().Select(v => v.GetString()!).ToArray());
+        Assert.Equal(["agent/settings.json"], root.GetProperty("required_pi_state_paths").EnumerateArray().Select(v => v.GetString()!).ToArray());
+    }
+
     private sealed class PiLaunchProfileAppFactory : WebApplicationFactory<Program>
     {
         private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"den-mcp-pi-launch-profile-{Guid.NewGuid()}.db");
@@ -103,6 +116,9 @@ public sealed class PiLaunchProfileApiTests : IAsyncLifetime
                     ["DenMcp:PiSessionHost:SshDir"] = "/home/patch/.ssh",
                     ["DenMcp:PiSessionHost:GhConfigDir"] = "/home/patch/.config/gh",
                     ["DenMcp:PiSessionHost:DockerHost"] = "unix:///run/den-mcp/docker-rt/docker.sock",
+                    ["DenMcp:PiSessionHost:TmuxShellCommand:0"] = "/bin/sh",
+                    ["DenMcp:PiSessionHost:TmuxShellCommand:1"] = "-i",
+                    ["DenMcp:PiSessionHost:RequiredPiStatePaths:0"] = "agent/settings.json",
                 });
             });
         }

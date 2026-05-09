@@ -15,7 +15,9 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Configuration (appsettings.json + environment variables + CLI args)
 var options = new DenMcpOptions();
+PreparePiSessionHostArraysForBinding(options.PiSessionHost);
 builder.Configuration.GetSection("DenMcp").Bind(options);
+ApplyPiSessionHostArrayDefaults(options.PiSessionHost);
 
 // CLI overrides: --port and --db-path
 if (builder.Configuration["port"] is { } port)
@@ -162,6 +164,26 @@ app.MapMcp("/mcp");
 
 // SPA fallback — serves index.html for unmatched routes
 app.MapFallbackToFile("index.html");
+
+static void PreparePiSessionHostArraysForBinding(PiDockerLaunchProfileOptions options)
+{
+    // Microsoft.Extensions.Configuration binds array values by extending existing
+    // initialized collections. Clear array defaults before binding so configured
+    // arrays replace defaults instead of appending to them.
+    options.TmuxShellCommand = [];
+    options.ProviderSecretEnvironmentVariables = [];
+    options.RequiredPiStatePaths = [];
+}
+
+static void ApplyPiSessionHostArrayDefaults(PiDockerLaunchProfileOptions options)
+{
+    if (options.TmuxShellCommand.Length == 0)
+        options.TmuxShellCommand = PiDockerLaunchProfileDefaults.TmuxShellCommand.ToArray();
+    if (options.ProviderSecretEnvironmentVariables.Length == 0)
+        options.ProviderSecretEnvironmentVariables = PiDockerLaunchProfileDefaults.ProviderSecretEnvironmentVariables.ToArray();
+    if (options.RequiredPiStatePaths.Length == 0)
+        options.RequiredPiStatePaths = ["agent/settings.json"];
+}
 
 app.Run();
 
