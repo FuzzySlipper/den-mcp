@@ -27,14 +27,14 @@ test('space visibility hidden is distinct from normal', () => {
   assert.notEqual(normal.visibility, hidden.visibility);
 });
 
-test('space list excludes project-kind spaces in sidecar filtering', () => {
+test('space list keeps project-kind spaces for unified switching', () => {
   const spaces = [
     space({ id: 'proj-1', name: 'Project', kind: 'project' }),
     space({ id: 'personal-1', name: 'Personal', kind: 'personal' }),
     space({ id: 'assistant-1', name: 'Assistant', kind: 'assistant' }),
   ];
-  const nonProject = spaces.filter((s) => s.kind !== 'project');
-  assert.equal(nonProject.length, 2);
-  assert.equal(nonProject[0].kind, 'personal');
-  assert.equal(nonProject[1].kind, 'assistant');
+  assert.equal(spaces.length, 3);
+  assert.equal(spaces[0].kind, 'project');
+  assert.equal(spaces[1].kind, 'personal');
+  assert.equal(spaces[2].kind, 'assistant');
 });

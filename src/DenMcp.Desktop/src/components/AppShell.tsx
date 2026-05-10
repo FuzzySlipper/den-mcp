@@ -21,13 +21,13 @@ import {
   shellTabs,
   shellThemes,
 } from '../shellState';
-import { DiagnosticEntry, LocalGitSnapshot, LocalSessionSnapshot, OperatorStatus } from '../desktop/sidecarBridgeApi';
+import { DenSpace, DiagnosticEntry, LocalGitSnapshot, LocalSessionSnapshot, OperatorStatus } from '../desktop/sidecarBridgeApi';
 import { IpcHealth } from '../desktop/ipcHealth';
 import { buildConsoleLines, ConsoleCommandHistoryEntry, ConsoleCommandLine } from '../consoleLines';
 import { type TaskStatusFilter } from '../tasksDashboardView';
 import { ConsoleDock } from './ConsoleDock';
 import { CommandPalette, type CommandPaletteCallbacks } from './CommandPalette';
-import { GLOBAL_PROJECT_ID, globalRailRow, isMultiWorkspaceProject, projectRows, workspaceRowLabel, workspaceRowsForProject } from '../railView';
+import { GLOBAL_PROJECT_ID, globalRailRow, isMultiWorkspaceProject, spaceRows, workspaceRowLabel, workspaceRowsForProject } from '../railView';
 
 interface AppShellProps {
   state: ShellState;
@@ -35,6 +35,7 @@ interface AppShellProps {
   status: OperatorStatus | null;
   snapshots: LocalGitSnapshot[];
   sessionSnapshots: LocalSessionSnapshot[];
+  spaces: DenSpace[];
   diagnostics: DiagnosticEntry[];
   ipcHealth: IpcHealth | null;
   children: Record<ShellTabId, ReactNode>;
@@ -54,7 +55,7 @@ interface AppShellProps {
   onTaskStatusFilterOverride?: (filter: TaskStatusFilter | null) => void;
 }
 
-export function AppShell({ state, onStateChange, status, snapshots, sessionSnapshots, diagnostics, ipcHealth, children, activeProjectId, activeSnapshotKey, onSelectProject, onSelectSnapshot, onRunConsoleCommand, consoleCommands, consoleCommandHistory, activeProgressLines, activeProgressCommand, taskStatusFilterOverride, onTaskStatusFilterOverride }: AppShellProps) {
+export function AppShell({ state, onStateChange, status, snapshots, sessionSnapshots, spaces, diagnostics, ipcHealth, children, activeProjectId, activeSnapshotKey, onSelectProject, onSelectSnapshot, onRunConsoleCommand, consoleCommands, consoleCommandHistory, activeProgressLines, activeProgressCommand, taskStatusFilterOverride, onTaskStatusFilterOverride }: AppShellProps) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const setState = (patch: Partial<ShellState>) => onStateChange({ ...state, ...patch });
   const activeTab = shellTabs.some((tab) => tab.id === state.activeTab) ? state.activeTab : 'operator';
@@ -205,7 +206,7 @@ export function AppShell({ state, onStateChange, status, snapshots, sessionSnaps
       <CommandPalette open={paletteOpen} callbacks={paletteCallbacks} />
       <TabBar activeTab={activeTab} onSelect={(tab) => setState({ activeTab: tab })} />
       <div className="shell-main">
-        <LeftRail snapshots={snapshots} activeProjectId={activeProjectId} activeSnapshotKey={activeSnapshotKey} mode={state.railMode} onModeChange={(railMode) => setState({ railMode })} onSelectProject={onSelectProject} onSelectSnapshot={onSelectSnapshot} />
+        <LeftRail spaces={spaces} snapshots={snapshots} activeProjectId={activeProjectId} activeSnapshotKey={activeSnapshotKey} mode={state.railMode} onModeChange={(railMode) => setState({ railMode })} onSelectProject={onSelectProject} onSelectSnapshot={onSelectSnapshot} />
         <section className="tab-canvas" aria-label={`${activeTabTitle} tab content`}>
           {activeTab === 'settings' ? (
             <div className="settings-tab tab-stack">
@@ -299,6 +300,7 @@ function TabBar({ activeTab, onSelect }: { activeTab: ShellTabId; onSelect: (tab
 }
 
 function LeftRail({
+  spaces,
   snapshots,
   activeProjectId,
   activeSnapshotKey,
@@ -307,6 +309,7 @@ function LeftRail({
   onSelectProject,
   onSelectSnapshot,
 }: {
+  spaces: DenSpace[];
   snapshots: LocalGitSnapshot[];
   activeProjectId?: string | null;
   activeSnapshotKey?: string | null;
@@ -316,7 +319,7 @@ function LeftRail({
   onSelectSnapshot?: (snapshot: LocalGitSnapshot) => void;
 }) {
   const isGlobalActive = activeProjectId === GLOBAL_PROJECT_ID;
-  const rows = projectRows(snapshots, activeProjectId ?? null);
+  const rows = spaceRows(spaces, snapshots, activeProjectId ?? null);
   const allRows = [globalRailRow(isGlobalActive), ...rows];
   const collapsed = mode === 'collapsed';
   // Track which multi-workspace project is expanded in the rail.
@@ -324,24 +327,25 @@ function LeftRail({
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
 
   const handleProjectClick = (projectId: string) => {
+    onSelectProject?.(projectId);
     if (isMultiWorkspaceProject(snapshots, projectId)) {
-      // Toggle expand/collapse for multi-workspace projects
+      // Toggle expand/collapse for multi-workspace projects while still selecting the project/space.
       setExpandedProjectId((prev) => prev === projectId ? null : projectId);
     } else {
-      // Single-workspace: select directly
-      onSelectProject?.(projectId);
+      setExpandedProjectId(null);
     }
   };
 
   const handleWorkspaceClick = (snapshot: LocalGitSnapshot) => {
+    onSelectProject?.(snapshot.scope.projectId);
     onSelectSnapshot?.(snapshot);
     setExpandedProjectId(null);
   };
 
   return (
-    <aside className="left-rail" aria-label="Project rail">
+    <aside className="left-rail" aria-label="Space rail">
       <div className="rail-header">
-        <span>Projects · {rows.length}</span>
+        <span>Spaces · {rows.length}</span>
         <button
           type="button"
           className="rail-toggle"
@@ -354,7 +358,7 @@ function LeftRail({
       </div>
       <div className="rail-list">
         {allRows.map((row) => {
-          const multi = row.workspaceCount > 1;
+          const multi = row.kind === 'project' && row.workspaceCount > 1;
           const expanded = expandedProjectId === row.id;
           const workspaces = multi && expanded ? workspaceRowsForProject(snapshots, row.id) : [];
           return (
@@ -362,7 +366,7 @@ function LeftRail({
               <button
                 type="button"
                 className={`rail-project ${row.active ? 'active' : ''} ${row.id === GLOBAL_PROJECT_ID ? 'global' : ''} ${multi ? 'multi-workspace' : ''} ${expanded ? 'expanded' : ''}`}
-                title={collapsed ? `${row.name} · ${row.subtitle}` : undefined}
+                title={`${row.name} · ${row.subtitle}`}
                 aria-pressed={row.active}
                 aria-expanded={multi ? expanded : undefined}
                 onClick={() => handleProjectClick(row.id)}
@@ -374,6 +378,8 @@ function LeftRail({
                 </span>
                 {row.id === GLOBAL_PROJECT_ID ? (
                   <span className="rail-global-badge" aria-hidden="true">◈</span>
+                ) : row.kind !== 'project' && !collapsed ? (
+                  <span className="rail-space-badge">{row.visibility && row.visibility !== 'normal' ? row.visibility : row.kind}</span>
                 ) : multi && !collapsed ? (
                   <span className={`rail-expand-indicator ${expanded ? 'expanded' : ''}`} aria-hidden="true">{expanded ? '▾' : '▸'}</span>
                 ) : (
@@ -418,8 +424,10 @@ function LeftRail({
       <button type="button" className="rail-action" disabled title="Task creation is not wired in this desktop slice yet">+ New Task</button>
       <div className="rail-card">
         <span className="rail-card-label">Today</span>
-        <span><b>{snapshots.length}</b> workspaces observed</span>
+        <span><b>{rows.length}</b> spaces listed</span>
+        <span><b>{snapshots.length}</b> repo/workspace snapshots observed</span>
         <span><b>{snapshots.reduce((sum, snapshot) => sum + snapshot.request.dirty_counts.total, 0)}</b> dirty files</span>
+        <span>Git/terminal controls apply only to project or root-backed spaces.</span>
       </div>
     </aside>
   );

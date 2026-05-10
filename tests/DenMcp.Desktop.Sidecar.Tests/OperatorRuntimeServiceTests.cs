@@ -202,7 +202,7 @@ public class OperatorRuntimeServiceTests
     }
 
     [Fact]
-    public async Task RefreshAsync_FetchesSpacesAndExposesNonProjectSpaceCount()
+    public async Task RefreshAsync_FetchesSpacesAndExposesAllSpaceMetadata()
     {
         using var temp = TempDirectory.Create();
         var root = temp.CreateDirectory("repo");
@@ -229,12 +229,13 @@ public class OperatorRuntimeServiceTests
         var spaces = await service.Runtime.ListSpacesAsync();
 
         Assert.Equal("connected", status.DenConnection.State);
-        Assert.Equal(2, status.SpaceCount);
-        Assert.Equal(2, status.Spaces.Count);
+        Assert.Equal(3, status.SpaceCount);
+        Assert.Equal(3, status.Spaces.Count);
         Assert.Contains(status.Spaces, s => s.Id == "personal-1" && s.Kind == "personal");
         Assert.Contains(status.Spaces, s => s.Id == "assistant-1" && s.Kind == "assistant");
-        Assert.DoesNotContain(status.Spaces, s => s.Kind == "project");
+        Assert.Contains(status.Spaces, s => s.Id == "den-mcp" && s.Kind == "project");
         Assert.Equal(3, spaces.Count);
+        Assert.Contains(service.Http.Requests, request => request.Uri.Contains("/api/spaces", StringComparison.Ordinal) && request.Uri.Contains("includeHidden=true", StringComparison.Ordinal));
     }
 
     [Fact]

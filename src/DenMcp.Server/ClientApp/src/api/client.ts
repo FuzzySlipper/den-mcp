@@ -1,6 +1,7 @@
 import type {
   Project,
   ProjectWithStats,
+  Space,
   TaskSummary,
   TaskDetail,
   ProjectTask,
@@ -70,7 +71,22 @@ function buildQuery(params: Record<string, string | number | boolean | undefined
   return parts.length > 0 ? `?${parts.join('&')}` : '';
 }
 
-// Projects
+// Spaces / Projects
+
+export interface ListSpacesOpts {
+  kind?: string;
+  includeHidden?: boolean;
+  includeArchived?: boolean;
+}
+
+export function listSpaces(opts: ListSpacesOpts = {}): Promise<Space[]> {
+  const q = buildQuery({
+    kind: opts.kind,
+    includeHidden: opts.includeHidden,
+    includeArchived: opts.includeArchived,
+  });
+  return get(`/api/spaces${q}`);
+}
 
 export function listProjects(): Promise<Project[]> {
   return get('/api/projects');

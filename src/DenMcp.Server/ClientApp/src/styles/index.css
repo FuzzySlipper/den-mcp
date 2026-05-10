@@ -175,7 +175,7 @@ html, body, #root {
   background: var(--border);
 }
 
-/* Projects sidebar — bottom left */
+/* Spaces sidebar — bottom left */
 .panel-projects { grid-column: 1; grid-row: 3; }
 
 /* Tasks/Docs main area — bottom right */
@@ -192,8 +192,75 @@ html, body, #root {
   font-size: 12px;
 }
 
+button.list-item {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
 .list-item:hover { background: var(--bg-hover); }
 .list-item.selected { background: var(--bg-selected); color: var(--text-bright); }
+
+.panel-subheader {
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.space-list-item {
+  display: grid;
+  gap: 2px;
+  white-space: normal;
+}
+
+.space-list-title,
+.space-list-id,
+.space-list-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.space-list-title {
+  color: var(--text-bright);
+  white-space: nowrap;
+}
+
+.space-list-id {
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.space-list-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  font-size: 10px;
+}
+
+.space-kind,
+.space-visibility,
+.space-capability {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 5px;
+  color: var(--text-muted);
+}
+
+.space-kind.kind-project,
+.space-capability {
+  color: var(--accent);
+}
+
+.space-visibility.visibility-hidden,
+.space-visibility.visibility-archived,
+.space-capability-muted {
+  color: var(--orange);
+}
 
 /* Status colors */
 .status-planned { color: var(--text-muted); }

@@ -34,7 +34,7 @@ export interface ShellState {
   railMode: ShellRailMode;
   consoleMode: ShellConsoleMode;
   activeTab: ShellTabId;
-  /** Selected project filter shared across tabs. '_global' shows all projects, null means 'no selection'. */
+  /** Selected space/project filter shared across tabs. '_global' shows all spaces, null means 'no selection'. Kept as selectedProjectId for storage compatibility. */
   selectedProjectId: string | null;
   /** Hotkey bindings: action name → Electron accelerator string. */
   hotkeys: Record<string, string>;

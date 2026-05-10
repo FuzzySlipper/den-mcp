@@ -29,11 +29,12 @@ interface Props {
   projectId: string | null;
   projects: Project[];
   isGlobal: boolean;
+  scopeSupportsGit?: boolean;
   focus?: GitFocus | null;
   onClearFocus?: () => void;
 }
 
-export function GitView({ projectId, projects, isGlobal, focus, onClearFocus }: Props) {
+export function GitView({ projectId, projects, isGlobal, scopeSupportsGit = true, focus, onClearFocus }: Props) {
   const [targets, setTargets] = useState<GitStatusTarget[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,7 +49,7 @@ export function GitView({ projectId, projects, isGlobal, focus, onClearFocus }: 
     let cancelled = false;
 
     async function load() {
-      if (!projectId) {
+      if (!projectId || !scopeSupportsGit) {
         setTargets([]);
         return;
       }
@@ -89,7 +90,7 @@ export function GitView({ projectId, projects, isGlobal, focus, onClearFocus }: 
 
     void load();
     return () => { cancelled = true; };
-  }, [appliedFocusKey, focus, isGlobal, projectId, projects, selectedTargetId]);
+  }, [appliedFocusKey, focus, isGlobal, projectId, projects, scopeSupportsGit, selectedTargetId]);
 
   const selectedTarget = useMemo(
     () => targets.find(target => target.id === selectedTargetId) ?? targets[0] ?? null,
@@ -167,7 +168,11 @@ export function GitView({ projectId, projects, isGlobal, focus, onClearFocus }: 
       </div>
 
       {!loading && targets.length === 0 && (
-        <div className="empty-state">No git targets found for this scope.</div>
+        <div className="empty-state">
+          {scopeSupportsGit
+            ? 'No git targets found for this scope.'
+            : 'Git, workspace, and terminal snapshots are project/root-path features and are not shown for this non-project space.'}
+        </div>
       )}
 
       {selectedTarget && (

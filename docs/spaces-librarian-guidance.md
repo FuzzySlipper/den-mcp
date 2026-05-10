@@ -59,13 +59,25 @@ These parameters accept any space ID. Future aliases such as
 `/api/spaces/{spaceId}/librarian/query` may be added, but the existing routes
 remain fully functional.
 
+## UI switching behavior
+
+The Den web/operator view and Den Desktop expose a unified space/project switcher.
+Selecting a space scopes task, message, document, guidance, librarian, and
+collaboration views to that space ID where the existing compatibility APIs accept
+`project_id` parameters.
+
+Project-kind spaces remain the normal repo-backed workflow. Non-project spaces
+are labeled with their `kind`, `visibility`, and root-path capability so they are
+not presented as code projects unless they have a meaningful `root_path` or local
+workspace snapshot.
+
 ## Boundaries and non-goals
 
 - **No automatic cross-space search.** Agents must query each space explicitly.
-- **No git/review/workspace assumptions** are introduced for non-project
-  spaces. Project-only APIs (git inspection, workspace snapshots, review branch
-  workflows) may return clear not-applicable errors when called with a
-  non-project space ID.
+- **Git, terminal, review-branch, and workspace snapshot surfaces remain
+  project/root-path oriented.** The UIs show this as an intentional boundary and
+  avoid implying that personal, assistant, knowledge-base, or system spaces are
+  repo-backed when they do not have a root path.
 - **No guidance taxonomy redesign.** Space-kind-scoped guidance is deferred to
   future work.
 

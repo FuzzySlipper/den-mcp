@@ -48,7 +48,7 @@ public class DenHttpClientTests
         Assert.Equal("assistant-1", spaces[1].Id);
         Assert.Equal("assistant", spaces[1].Kind);
         Assert.Equal("GET", handler.Requests[0].Method);
-        Assert.Equal("http://den.test/api/spaces", handler.Requests[0].Uri);
+        Assert.Equal("http://den.test/api/spaces?includeHidden=true&includeArchived=true", handler.Requests[0].Uri);
     }
 
     [Fact]

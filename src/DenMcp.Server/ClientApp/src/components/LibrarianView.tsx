@@ -1,5 +1,5 @@
 import { useMemo, useState, type FormEvent } from 'react';
-import type { DocumentSummary, LibrarianResponse, Project, RelevantItem } from '../api/types';
+import type { DocumentSummary, LibrarianResponse, RelevantItem, Space } from '../api/types';
 import { queryLibrarian } from '../api/client';
 import {
   documentRefFromLibrarianItem,
@@ -11,7 +11,7 @@ import {
 } from '../librarian';
 
 interface Props {
-  projects: Project[];
+  projects: Space[];
   currentProjectId: string | null;
   onOpenTask: (taskId: number, projectId?: string | null) => void;
   onOpenDocument: (doc: DocumentSummary) => void;
@@ -76,7 +76,7 @@ export function LibrarianView({ projects, currentProjectId, onOpenTask, onOpenDo
           <label>
             Scope
             <select value={scope} onChange={event => setScope(event.target.value as 'current' | '_global')}>
-              <option value="current">Current project{currentProjectId ? ` (${currentProjectId})` : ''}</option>
+              <option value="current">Current space{currentProjectId ? ` (${currentProjectId})` : ''}</option>
               <option value="_global">_global</option>
             </select>
           </label>
@@ -109,7 +109,7 @@ export function LibrarianView({ projects, currentProjectId, onOpenTask, onOpenDo
         {Number.isNaN(taskId) && (
           <div className="detail-error" role="alert">Task id must be a number.</div>
         )}
-        {!targetProjectId && <div className="empty">Select a project before querying the librarian.</div>}
+        {!targetProjectId && <div className="empty">Select a space before querying the librarian.</div>}
       </form>
 
       {error && <div className="detail-error" role="alert">Librarian query failed: {error}</div>}
@@ -134,7 +134,7 @@ export function LibrarianView({ projects, currentProjectId, onOpenTask, onOpenDo
 
 interface ResultsProps {
   response: LibrarianResponse;
-  projects: Project[];
+  projects: Space[];
   fallbackProjectId: string | null;
   onOpenTask: (taskId: number, projectId?: string | null) => void;
   onOpenDocument: (doc: DocumentSummary) => void;
@@ -189,7 +189,7 @@ function LibrarianResults({ response, projects, fallbackProjectId, onOpenTask, o
 
 interface ItemProps {
   item: RelevantItem;
-  projects: Project[];
+  projects: Space[];
   fallbackProjectId: string | null;
   onOpenTask: (taskId: number, projectId?: string | null) => void;
   onOpenDocument: (doc: DocumentSummary) => void;

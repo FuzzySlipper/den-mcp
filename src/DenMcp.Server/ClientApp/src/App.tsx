@@ -1,8 +1,9 @@
 import { useState, useCallback, useMemo } from 'react';
-import type { AgentStreamEntry, DispatchEntry, Document, DocumentSummary, Message, MessageIntent, SubagentRunSummary } from './api/types';
+import type { AgentStreamEntry, DispatchEntry, Document, DocumentSummary, Message, MessageIntent, Space, SubagentRunSummary } from './api/types';
 import {
   getDispatch,
   listProjects,
+  listSpaces,
   listTasks,
   getMessage,
   getMessageFeed,
@@ -46,8 +47,36 @@ import {
   thoughtItemsFromSubagentRunDetail,
 } from './thoughts';
 
+const GLOBAL_SPACE: Space = {
+  id: '_global',
+  name: 'Global',
+  kind: 'system',
+  visibility: 'normal',
+  owner: null,
+  root_path: null,
+  description: 'Cross-space documents and feeds',
+  created_at: null,
+  updated_at: null,
+};
+
+function withGlobalSpace(spaces: Space[] | null | undefined): Space[] {
+  const list = spaces ?? [];
+  return list.some(space => space.id === GLOBAL_SPACE.id) ? list : [GLOBAL_SPACE, ...list];
+}
+
+function defaultSpaceId(spaces: Space[]): string | null {
+  return spaces.find(space => space.kind === 'project' && space.visibility === 'normal')?.id
+    ?? spaces.find(space => space.id !== GLOBAL_SPACE.id)?.id
+    ?? spaces[0]?.id
+    ?? null;
+}
+
+function spaceSupportsGit(space: Space | null | undefined, isGlobal: boolean): boolean {
+  return isGlobal || space?.kind === 'project' || Boolean(space?.root_path?.trim());
+}
+
 export default function App() {
-  const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
   const [selectedTaskProjectId, setSelectedTaskProjectId] = useState<string | null>(null);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
@@ -80,29 +109,32 @@ export default function App() {
 
   const fetchProjects = useCallback(() => listProjects(), []);
   const { data: projects } = usePolling(fetchProjects, 5000);
+  const fetchSpaces = useCallback(() => listSpaces({ includeHidden: true, includeArchived: true }), []);
+  const { data: fetchedSpaces } = usePolling(fetchSpaces, 5000);
+  const spaces = useMemo(() => withGlobalSpace(fetchedSpaces), [fetchedSpaces]);
 
-  // Auto-select first project
-  const effectiveProject = selectedProject
-    ?? (projects && projects.length > 0 ? projects[0].id : null);
-
-  const isGlobal = effectiveProject === '_global';
+  // Auto-select a normal project-kind space when possible to preserve existing project-centric startup.
+  const effectiveSpaceId = selectedSpaceId ?? defaultSpaceId(spaces);
+  const activeSpace = spaces.find(space => space.id === effectiveSpaceId) ?? null;
+  const isGlobal = effectiveSpaceId === '_global';
+  const activeSpaceSupportsGit = spaceSupportsGit(activeSpace, isGlobal);
 
   const fetchTasks = useCallback(
-    () => effectiveProject
-      ? listTasks(effectiveProject, { tree: true, status: statusFilter ?? undefined })
+    () => effectiveSpaceId
+      ? listTasks(effectiveSpaceId, { tree: true, status: statusFilter ?? undefined })
       : Promise.resolve([]),
-    [effectiveProject, statusFilter],
+    [effectiveSpaceId, statusFilter],
   );
   const { data: tasks } = usePolling(fetchTasks, 5000);
 
   const fetchMessages = useCallback(
-    () => effectiveProject
-      ? getMessageFeed(effectiveProject, {
+    () => effectiveSpaceId
+      ? getMessageFeed(effectiveSpaceId, {
         limit: 15,
         intent: messageIntentFilter || undefined,
       })
       : Promise.resolve([]),
-    [effectiveProject, messageIntentFilter],
+    [effectiveSpaceId, messageIntentFilter],
   );
   const { data: messages } = usePolling(fetchMessages, 5000);
 
@@ -117,9 +149,9 @@ export default function App() {
   }, [thoughtTaskFilter]);
 
   const fetchAgentStream = useCallback(
-    () => effectiveProject
+    () => effectiveSpaceId
       ? listAgentStream({
-        projectId: isGlobal ? (streamProjectFilter.trim() || undefined) : effectiveProject,
+        projectId: isGlobal ? (streamProjectFilter.trim() || undefined) : effectiveSpaceId,
         taskId: parsedStreamTaskId,
         streamKind: streamKindFilter,
         eventType: streamEventFilter || undefined,
@@ -128,7 +160,7 @@ export default function App() {
       })
       : Promise.resolve([]),
     [
-      effectiveProject,
+      effectiveSpaceId,
       isGlobal,
       parsedStreamTaskId,
       streamEventFilter,
@@ -140,15 +172,15 @@ export default function App() {
   const { data: agentStream } = usePolling(fetchAgentStream, 5000);
 
   const fetchSubagentRuns = useCallback(
-    () => effectiveProject
+    () => effectiveSpaceId
       ? listSubagentRuns({
-        projectId: isGlobal ? (streamProjectFilter.trim() || undefined) : effectiveProject,
+        projectId: isGlobal ? (streamProjectFilter.trim() || undefined) : effectiveSpaceId,
         taskId: parsedStreamTaskId,
         state: subagentRunFilter === 'all' ? undefined : subagentRunFilter,
         limit: subagentRunLimit,
       })
       : Promise.resolve([]),
-    [effectiveProject, isGlobal, parsedStreamTaskId, streamProjectFilter, subagentRunFilter, subagentRunLimit],
+    [effectiveSpaceId, isGlobal, parsedStreamTaskId, streamProjectFilter, subagentRunFilter, subagentRunLimit],
   );
   const {
     data: subagentRuns,
@@ -157,20 +189,20 @@ export default function App() {
     refresh: refreshSubagentRuns,
   } = usePolling(fetchSubagentRuns, 2000);
   const subagentRunEvents = useMemo(
-    () => effectiveProject
+    () => effectiveSpaceId
       ? subagentRunEventsUrl({
-        projectId: isGlobal ? (streamProjectFilter.trim() || undefined) : effectiveProject,
+        projectId: isGlobal ? (streamProjectFilter.trim() || undefined) : effectiveSpaceId,
         taskId: parsedStreamTaskId,
       })
       : null,
-    [effectiveProject, isGlobal, parsedStreamTaskId, streamProjectFilter],
+    [effectiveSpaceId, isGlobal, parsedStreamTaskId, streamProjectFilter],
   );
   useEventSourceRefresh(subagentRunEvents, 'subagent_run_updated', refreshSubagentRuns);
 
   const fetchThoughts = useCallback(async () => {
-    if (!effectiveProject || feedMode !== 'thoughts') return [];
+    if (!effectiveSpaceId || feedMode !== 'thoughts') return [];
 
-    const projectFilter = isGlobal ? (thoughtProjectFilter.trim() || undefined) : effectiveProject;
+    const projectFilter = isGlobal ? (thoughtProjectFilter.trim() || undefined) : effectiveSpaceId;
     const [streamEntries, runs] = await Promise.all([
       listAgentStream({
         projectId: projectFilter,
@@ -205,7 +237,7 @@ export default function App() {
       role: thoughtRoleFilter,
     });
   }, [
-    effectiveProject,
+    effectiveSpaceId,
     feedMode,
     isGlobal,
     parsedThoughtTaskId,
@@ -220,27 +252,27 @@ export default function App() {
     refresh: refreshThoughts,
   } = usePolling(fetchThoughts, 4000);
   const thoughtSubagentRunEvents = useMemo(
-    () => effectiveProject
+    () => effectiveSpaceId
       ? subagentRunEventsUrl({
-        projectId: isGlobal ? (thoughtProjectFilter.trim() || undefined) : effectiveProject,
+        projectId: isGlobal ? (thoughtProjectFilter.trim() || undefined) : effectiveSpaceId,
         taskId: parsedThoughtTaskId,
       })
       : null,
-    [effectiveProject, isGlobal, parsedThoughtTaskId, thoughtProjectFilter],
+    [effectiveSpaceId, isGlobal, parsedThoughtTaskId, thoughtProjectFilter],
   );
   useEventSourceRefresh(thoughtSubagentRunEvents, 'subagent_run_updated', refreshThoughts);
 
   const fetchDocs = useCallback(
-    () => effectiveProject
-      ? listDocuments(isGlobal ? undefined : effectiveProject)
+    () => effectiveSpaceId
+      ? listDocuments(isGlobal ? undefined : effectiveSpaceId)
       : Promise.resolve([]),
-    [effectiveProject, isGlobal],
+    [effectiveSpaceId, isGlobal],
   );
   const { data: documents, refresh: refreshDocs } = usePolling(fetchDocs, 5000);
 
   const fetchAgents = useCallback(
-    () => listActiveAgents(isGlobal ? undefined : (effectiveProject ?? undefined)),
-    [effectiveProject, isGlobal],
+    () => listActiveAgents(isGlobal ? undefined : (effectiveSpaceId ?? undefined)),
+    [effectiveSpaceId, isGlobal],
   );
   const { data: agents } = usePolling(fetchAgents, 5000);
 
@@ -282,7 +314,7 @@ export default function App() {
   const sortLabel = sortMode !== 'priority' ? ` \u2195${sortMode}` : '';
 
   const handleProjectSelect = useCallback((id: string) => {
-    setSelectedProject(id);
+    setSelectedSpaceId(id);
     setSelectedTaskId(null);
     setSelectedTaskProjectId(null);
     setSelectedMessage(null);
@@ -293,9 +325,9 @@ export default function App() {
   }, []);
 
   const handleTaskSelect = useCallback((taskId: number, projectId?: string | null) => {
-    const targetProjectId = projectId?.trim() || effectiveProject;
-    if (targetProjectId && targetProjectId !== selectedProject) {
-      setSelectedProject(targetProjectId);
+    const targetProjectId = projectId?.trim() || effectiveSpaceId;
+    if (targetProjectId && targetProjectId !== selectedSpaceId) {
+      setSelectedSpaceId(targetProjectId);
     }
     setSelectedTaskId(taskId);
     setSelectedTaskProjectId(targetProjectId ?? null);
@@ -305,7 +337,7 @@ export default function App() {
     setSelectedDispatch(null);
     setSelectedDoc(null);
     setViewMode('tasks');
-  }, [effectiveProject, selectedProject]);
+  }, [effectiveSpaceId, selectedSpaceId]);
 
   const handleMessageSelect = useCallback((message: Message) => {
     setSelectedMessage(message);
@@ -342,8 +374,8 @@ export default function App() {
   }, []);
 
   const applyDocumentSelection = useCallback((doc: DocumentSummary) => {
-    if (doc.project_id && doc.project_id !== selectedProject) {
-      setSelectedProject(doc.project_id);
+    if (doc.project_id && doc.project_id !== selectedSpaceId) {
+      setSelectedSpaceId(doc.project_id);
     }
     setSelectedDoc(doc);
     setDocumentDetailDirty(false);
@@ -354,7 +386,7 @@ export default function App() {
     setSelectedStreamEntry(null);
     setSelectedSubagentRun(null);
     setSelectedDispatch(null);
-  }, [selectedProject]);
+  }, [selectedSpaceId]);
 
   const handleDocumentSelect = useCallback((doc: DocumentSummary) => {
     const action = documentSelectionAction(selectedDoc, doc, documentDetailDirty);
@@ -417,8 +449,8 @@ export default function App() {
   }, []);
 
   const handleOpenGitFocus = useCallback((focus: GitFocus) => {
-    if (focus.projectId !== selectedProject) {
-      setSelectedProject(focus.projectId);
+    if (focus.projectId !== selectedSpaceId) {
+      setSelectedSpaceId(focus.projectId);
     }
     setGitFocus(focus);
     setViewMode('git');
@@ -429,7 +461,7 @@ export default function App() {
     setSelectedSubagentRun(null);
     setSelectedDispatch(null);
     setSelectedDoc(null);
-  }, [selectedProject]);
+  }, [selectedSpaceId]);
 
   const handleStreamThreadOpen = useCallback(async (entry: AgentStreamEntry) => {
     if (!entry.project_id || entry.thread_id == null) {
@@ -456,7 +488,7 @@ export default function App() {
       <div className="panel panel-messages">
         <div className="panel-header">
           {feedTitle}
-          {effectiveProject && (
+          {effectiveSpaceId && (
             <span className="count">
               ({feedCount}{feedMode === 'messages' ? messageFilterLabel : ''})
             </span>
@@ -515,7 +547,7 @@ export default function App() {
                   className="feed-text-filter"
                   value={streamProjectFilter}
                   onChange={e => setStreamProjectFilter(e.target.value)}
-                  placeholder="Project"
+                  placeholder="Space"
                 />
               )}
 
@@ -575,7 +607,7 @@ export default function App() {
                   className="feed-text-filter"
                   value={thoughtProjectFilter}
                   onChange={e => setThoughtProjectFilter(e.target.value)}
-                  placeholder="Project"
+                  placeholder="Space"
                 />
               )}
 
@@ -681,10 +713,10 @@ export default function App() {
         </div>
       </div>
 
-      {/* Projects sidebar — bottom left */}
+      {/* Spaces sidebar — bottom left */}
       <ProjectSidebar
-        projects={projects ?? []}
-        selectedId={effectiveProject}
+        spaces={spaces}
+        selectedId={effectiveSpaceId}
         onSelect={handleProjectSelect}
       />
 
@@ -692,9 +724,9 @@ export default function App() {
       <div className="panel panel-main">
         <div className="panel-header">
           {viewMode === 'tasks'
-            ? <>Tasks {effectiveProject && <span className="count">({taskCount}{filterLabel}{sortLabel})</span>}</>
+            ? <>Tasks {effectiveSpaceId && <span className="count">({taskCount}{filterLabel}{sortLabel})</span>}</>
             : viewMode === 'documents'
-              ? <>Documents {effectiveProject && <span className="count">({sortedDocs.length})</span>}</>
+              ? <>Documents {effectiveSpaceId && <span className="count">({sortedDocs.length})</span>}</>
               : viewMode === 'git'
                 ? <>Git</>
                 : <>Librarian</>
@@ -720,22 +752,23 @@ export default function App() {
           ) : viewMode === 'documents' ? (
             <DocumentList
               documents={sortedDocs}
-              projectId={effectiveProject}
+              projectId={effectiveSpaceId}
               isGlobal={isGlobal}
               onSelect={handleDocumentSelect}
             />
           ) : viewMode === 'git' ? (
             <GitView
-              projectId={effectiveProject}
+              projectId={activeSpaceSupportsGit ? effectiveSpaceId : null}
               projects={projects ?? []}
               isGlobal={isGlobal}
+              scopeSupportsGit={activeSpaceSupportsGit}
               focus={gitFocus}
               onClearFocus={() => setGitFocus(null)}
             />
           ) : (
             <LibrarianView
-              projects={projects ?? []}
-              currentProjectId={effectiveProject}
+              projects={spaces}
+              currentProjectId={effectiveSpaceId}
               onOpenTask={handleTaskSelect}
               onOpenDocument={handleDocumentSelect}
               onOpenMessage={(projectId, messageId) => void handleMessageOpen(projectId, messageId)}
@@ -746,10 +779,10 @@ export default function App() {
       </div>
 
       {/* Detail overlays */}
-      {selectedTaskId != null && effectiveProject && (
+      {selectedTaskId != null && effectiveSpaceId && (
         <TaskDetail
-          key={`${selectedTaskProjectId ?? effectiveProject}:${selectedTaskId}`}
-          projectId={selectedTaskProjectId ?? effectiveProject}
+          key={`${selectedTaskProjectId ?? effectiveSpaceId}:${selectedTaskId}`}
+          projectId={selectedTaskProjectId ?? effectiveSpaceId}
           taskId={selectedTaskId}
           onSelectTask={handleTaskSelect}
           onSelectMessage={handleMessageSelect}

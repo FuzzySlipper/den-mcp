@@ -144,10 +144,11 @@ export function App() {
     selectSnapshot(snapshot);
   };
 
-  // Effective project filter: '_global' or a specific project ID, or null for 'no selection'
+  // Effective space filter: '_global' or a specific space ID, or null for 'no selection'.
+  // The persisted field keeps the historical selectedProjectId name for localStorage compatibility.
   const effectiveProjectFilter = selectedProjectId;
 
-  // Filter snapshots by selected project for tabs that need filtering.
+  // Filter snapshots by selected space/project for tabs that need repo-backed filtering.
   // When '_global' is selected (or no snapshots yet), show all snapshots.
   const filteredSnapshots = useMemo(() => {
     if (!effectiveProjectFilter || effectiveProjectFilter === GLOBAL_PROJECT_ID) {
@@ -156,7 +157,22 @@ export function App() {
     return runtime.snapshots.filter((s) => s.scope.projectId === effectiveProjectFilter);
   }, [runtime.snapshots, effectiveProjectFilter]);
 
-  // Filter session snapshots by selected project.
+  const activeContextSnapshot = useMemo(() => {
+    if (!effectiveProjectFilter || effectiveProjectFilter === GLOBAL_PROJECT_ID) {
+      return activeSnapshot;
+    }
+    return activeSnapshot?.scope.projectId === effectiveProjectFilter ? activeSnapshot : null;
+  }, [activeSnapshot, effectiveProjectFilter]);
+
+  useEffect(() => {
+    if (activeSnapshot && !activeContextSnapshot) {
+      setSelectedFile(null);
+      setDiff(null);
+      setDiffError(null);
+    }
+  }, [activeContextSnapshot, activeSnapshot]);
+
+  // Filter session snapshots by selected space/project.
   const filteredSessionSnapshots = useMemo(() => {
     if (!effectiveProjectFilter || effectiveProjectFilter === GLOBAL_PROJECT_ID) {
       return runtime.sessionSnapshots;
@@ -199,8 +215,8 @@ export function App() {
         />
       </div>
 
-      <WorkspaceSummaryPane snapshots={filteredSnapshots} activeKey={activeSnapshot ? snapshotKey(activeSnapshot) : null} onSelect={selectSnapshot} />
-      <SpacesPane spaces={runtime.status?.spaces ?? []} />
+      <WorkspaceSummaryPane snapshots={filteredSnapshots} activeKey={activeContextSnapshot ? snapshotKey(activeContextSnapshot) : null} onSelect={selectSnapshot} />
+      <SpacesPane spaces={runtime.status?.spaces ?? []} activeSpaceId={effectiveProjectFilter} onSelectSpace={selectProject} />
     </div>
   );
 
@@ -216,12 +232,12 @@ export function App() {
       <div className="git-workbench-grid">
         <GitSnapshotPane
           snapshots={filteredSnapshots}
-          activeSnapshotKey={activeSnapshot ? snapshotKey(activeSnapshot) : null}
+          activeSnapshotKey={activeContextSnapshot ? snapshotKey(activeContextSnapshot) : null}
           selectedFilePath={selectedFile?.path ?? null}
           onSelectSnapshot={selectSnapshot}
           onSelectFile={selectFile}
         />
-        <DiffPane snapshot={activeSnapshot} file={selectedFile} diff={diff} loading={diffLoading} error={diffError} />
+        <DiffPane snapshot={activeContextSnapshot} file={selectedFile} diff={diff} loading={diffLoading} error={diffError} />
       </div>
     </div>
   );
@@ -241,7 +257,7 @@ export function App() {
 
   // Collaboration tab state — derive project/task context from the effective project filter
   const collabProjectId = effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (effectiveProjectFilter ?? null);
-  const collabTaskId = activeSnapshot?.scope.taskId ?? null;
+  const collabTaskId = activeContextSnapshot?.scope.taskId ?? null;
   const collaborationState = useCollaborationState(
     runtime.status?.denBaseUrl ?? null,
     collabProjectId,
@@ -265,21 +281,21 @@ export function App() {
   );
 
   const agentSelection = useMemo(() => {
-    if (!activeSnapshot) return null;
+    if (!activeContextSnapshot) return null;
     return {
-      project_id: activeSnapshot.scope.projectId,
-      task_id: activeSnapshot.scope.taskId,
-      workspace_id: activeSnapshot.scope.workspaceId,
+      project_id: activeContextSnapshot.scope.projectId,
+      task_id: activeContextSnapshot.scope.taskId,
+      workspace_id: activeContextSnapshot.scope.workspaceId,
       current_tab: shellState.activeTab,
       selected_file_path: selectedFile?.path ?? null,
     };
-  }, [activeSnapshot, shellState.activeTab, selectedFile]);
+  }, [activeContextSnapshot, shellState.activeTab, selectedFile]);
 
   const tabContent: Record<ShellTabId, ReactNode> = {
     operator: operatorTab,
     agent: <AgentPane selection={agentSelection} />,
-    tasks: <TasksDashboardPane projectId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (effectiveProjectFilter ?? null)} parentTaskId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (activeSnapshot?.scope.taskId ?? null)} statusFilterOverride={taskStatusFilterOverride} onNavigateToMessagesTab={(taskId) => setShellState((current) => ({ ...current, activeTab: 'messages' as ShellTabId }))} onNavigateToDocsTab={() => setShellState((current) => ({ ...current, activeTab: 'docs' as ShellTabId }))} />,
-    messages: <MessagesPane projectId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (effectiveProjectFilter ?? null)} taskId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (activeSnapshot?.scope.taskId ?? null)} />,
+    tasks: <TasksDashboardPane projectId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (effectiveProjectFilter ?? null)} parentTaskId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (activeContextSnapshot?.scope.taskId ?? null)} statusFilterOverride={taskStatusFilterOverride} onNavigateToMessagesTab={(taskId) => setShellState((current) => ({ ...current, activeTab: 'messages' as ShellTabId }))} onNavigateToDocsTab={() => setShellState((current) => ({ ...current, activeTab: 'docs' as ShellTabId }))} />,
+    messages: <MessagesPane projectId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (effectiveProjectFilter ?? null)} taskId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (activeContextSnapshot?.scope.taskId ?? null)} />,
     docs: <DocsPane projectId={effectiveProjectFilter === GLOBAL_PROJECT_ID ? null : (effectiveProjectFilter ?? null)} />,
     git: gitTab,
     compare: <StubSurface eyebrow="Compare" title="Multi-worktree compare" description="Routed surface reserved for pinned worktree panes and side-by-side terminal/output comparison without making renderer state authoritative." />,
@@ -303,10 +319,11 @@ export function App() {
       status={runtime.status}
       snapshots={runtime.snapshots}
       sessionSnapshots={runtime.sessionSnapshots}
+      spaces={runtime.status?.spaces ?? []}
       diagnostics={runtime.status?.diagnostics ?? []}
       ipcHealth={runtime.ipcHealth}
       activeProjectId={selectedProjectId}
-      activeSnapshotKey={activeSnapshot ? snapshotKey(activeSnapshot) : null}
+      activeSnapshotKey={activeContextSnapshot ? snapshotKey(activeContextSnapshot) : null}
       onSelectProject={selectProject}
       onSelectSnapshot={handleSelectSnapshot}
       onRunConsoleCommand={runConsoleCommand}

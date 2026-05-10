@@ -52,7 +52,7 @@ public sealed record OperatorStatus
     public int SpaceCount { get; init; }
 
     [JsonPropertyName("spaces")]
-    public IReadOnlyList<DenSpace> Spaces { get; init; } = [];
+    public IReadOnlyList<OperatorSpace> Spaces { get; init; } = [];
 
     public static OperatorStatus Starting(OperatorSettings settings)
     {
@@ -66,6 +66,49 @@ public sealed record OperatorStatus
             ObserverStatuses = [ObserverStatus.Stopped("git"), ObserverStatus.Stopped("session")],
         };
     }
+}
+
+public sealed record OperatorSpace
+{
+    [JsonPropertyName("id")]
+    public string Id { get; init; } = string.Empty;
+
+    [JsonPropertyName("name")]
+    public string Name { get; init; } = string.Empty;
+
+    [JsonPropertyName("kind")]
+    public string Kind { get; init; } = "project";
+
+    [JsonPropertyName("visibility")]
+    public string Visibility { get; init; } = "normal";
+
+    [JsonPropertyName("owner")]
+    public string? Owner { get; init; }
+
+    [JsonPropertyName("rootPath")]
+    public string? RootPath { get; init; }
+
+    [JsonPropertyName("description")]
+    public string? Description { get; init; }
+
+    [JsonPropertyName("createdAt")]
+    public string? CreatedAt { get; init; }
+
+    [JsonPropertyName("updatedAt")]
+    public string? UpdatedAt { get; init; }
+
+    public static OperatorSpace FromDen(DenSpace space) => new()
+    {
+        Id = space.Id,
+        Name = space.Name,
+        Kind = space.Kind,
+        Visibility = space.Visibility,
+        Owner = space.Owner,
+        RootPath = space.RootPath,
+        Description = space.Description,
+        CreatedAt = space.CreatedAt,
+        UpdatedAt = space.UpdatedAt,
+    };
 }
 
 public sealed record DenConnectionStatus
@@ -830,7 +873,6 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
 
     private OperatorStatus SyncStatus(OperatorStatus status)
     {
-        var nonProjectSpaces = _spaces.Where(s => s.Kind != "project").ToArray();
         return status with
         {
             SourceInstanceId = _settings.SourceInstanceId,
@@ -839,8 +881,8 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
             WorkspaceCount = _workspaces.Count,
             LocalSnapshotCount = _localSnapshots.Count,
             LocalSessionSnapshotCount = _localSessionSnapshots.Count,
-            SpaceCount = nonProjectSpaces.Length,
-            Spaces = nonProjectSpaces,
+            SpaceCount = _spaces.Count,
+            Spaces = _spaces.Select(OperatorSpace.FromDen).ToArray(),
             Diagnostics = _diagnostics.ToArray(),
         };
     }

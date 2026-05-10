@@ -3,9 +3,25 @@ import test from 'node:test';
 import {
   isMultiWorkspaceProject,
   projectRows,
+  spaceRows,
   workspaceRowLabel,
   workspaceRowsForProject,
 } from '../src/railView.ts';
+
+function space(overrides = {}) {
+  return {
+    id: 'personal-1',
+    name: 'Personal',
+    kind: 'personal',
+    visibility: 'normal',
+    owner: null,
+    rootPath: null,
+    description: null,
+    createdAt: null,
+    updatedAt: null,
+    ...overrides,
+  };
+}
 
 function snapshot(overrides = {}) {
   return {
@@ -99,6 +115,24 @@ test('projectRows marks state as warn when snapshot has warnings', () => {
     snapshot({ request: { ...snapshot().request, warnings: ['something off'] } }),
   ]);
   assert.equal(rows[0].state, 'warn');
+});
+
+test('spaceRows includes non-project spaces and project snapshot metadata', () => {
+  const rows = spaceRows([
+    space({ id: 'den-mcp', name: 'Den MCP', kind: 'project', rootPath: '/repo' }),
+    space({ id: 'personal-1', name: 'Personal', kind: 'personal' }),
+    space({ id: 'kb-1', name: 'Knowledge', kind: 'knowledge_base', visibility: 'hidden' }),
+  ], [snapshot()], 'personal-1');
+
+  assert.equal(rows.length, 3);
+  assert.equal(rows[0].id, 'den-mcp');
+  assert.equal(rows[0].workspaceCount, 1);
+  assert.equal(rows[0].repoBacked, true);
+  assert.equal(rows[1].id, 'kb-1');
+  assert.match(rows[1].subtitle, /hidden/);
+  assert.equal(rows[2].id, 'personal-1');
+  assert.equal(rows[2].active, true);
+  assert.equal(rows[2].repoBacked, false);
 });
 
 test('isMultiWorkspaceProject returns true for multi-workspace projects', () => {

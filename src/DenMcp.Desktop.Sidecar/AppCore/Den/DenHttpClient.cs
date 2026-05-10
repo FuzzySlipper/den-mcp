@@ -66,8 +66,16 @@ public sealed class DenHttpClient
 
     public async Task<IReadOnlyList<DenSpace>> ListSpacesAsync(string baseUrl, CancellationToken cancellationToken = default)
     {
+        var url = BuildUrl(
+            baseUrl,
+            "/api/spaces",
+            new[]
+            {
+                new QueryParameter("includeHidden", "true"),
+                new QueryParameter("includeArchived", "true"),
+            });
         var response = await SendAsync(
-            () => new HttpRequestMessage(HttpMethod.Get, JoinUrl(baseUrl, "/api/spaces")),
+            () => new HttpRequestMessage(HttpMethod.Get, url),
             "Unable to fetch Den spaces",
             cancellationToken).ConfigureAwait(false);
 
