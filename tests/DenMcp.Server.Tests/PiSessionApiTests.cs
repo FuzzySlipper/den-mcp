@@ -48,6 +48,61 @@ public sealed class PiSessionApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CoderPathTools_StartAndVerify_UseDenPacketLaunchAndCompletionState()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var tasks = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+        var messages = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+        var service = scope.ServiceProvider.GetRequiredService<IPiSessionService>();
+        var sessions = scope.ServiceProvider.GetRequiredService<IPiSessionRepository>();
+
+        var started = await CoderPathTools.StartCoderWorkerPath(
+            tasks,
+            messages,
+            service,
+            ProjectId,
+            _task.Id,
+            requested_by: "hermes",
+            branch: "task/1242-coder-worker-path",
+            base_branch: "main",
+            base_commit: "base1242",
+            session_id: "coder-path-a",
+            run_id: "coder-path-run-a",
+            callback_ports: "[{\"host_port\":21465,\"container_port\":1455}]",
+            verbose: true);
+        using var startedJson = JsonDocument.Parse(started);
+        Assert.Equal("launched", startedJson.RootElement.GetProperty("path_state").GetString());
+        Assert.Equal("coder", startedJson.RootElement.GetProperty("worker_run").GetProperty("role").GetString());
+
+        var incomplete = await CoderPathTools.VerifyCoderWorkerCompletion(messages, ProjectId, run_id: "coder-path-run-a", task_id: _task.Id, verbose: true);
+        using var incompleteJson = JsonDocument.Parse(incomplete);
+        Assert.Equal("incomplete", incompleteJson.RootElement.GetProperty("verdict").GetString());
+        Assert.Equal("missing_packet", incompleteJson.RootElement.GetProperty("completion_state").GetString());
+
+        await CompletionTools.PostWorkerCompletionPacket(
+            service,
+            sessions,
+            messages,
+            ProjectId,
+            run_id: "coder-path-run-a",
+            requested_by: "pi-worker",
+            status: "completed",
+            role: "coder",
+            packet_type: "implementation_packet",
+            summary: "Done",
+            branch: "task/1242-coder-worker-path",
+            head_commit: "head1242",
+            tests_run: "[\"dotnet build\"]",
+            verbose: true);
+
+        var verified = await CoderPathTools.VerifyCoderWorkerCompletion(messages, ProjectId, run_id: "coder-path-run-a", task_id: _task.Id, verbose: true);
+        using var verifiedJson = JsonDocument.Parse(verified);
+        Assert.Equal("ready_for_review", verifiedJson.RootElement.GetProperty("verdict").GetString());
+        Assert.True(verifiedJson.RootElement.GetProperty("checks").GetProperty("implementation_packet_exists").GetBoolean());
+        Assert.True(verifiedJson.RootElement.GetProperty("checks").GetProperty("head_commit_reported").GetBoolean());
+    }
+
+    [Fact]
     public async Task RoleWorkerTools_LaunchCoderWorker_PreparesPacketAndLaunchesCoderRole()
     {
         using var scope = _factory.Services.CreateScope();
