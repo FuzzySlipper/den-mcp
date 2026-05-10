@@ -79,17 +79,14 @@ public sealed class CompletionTools
             Metadata = metadata,
         }).ConfigureAwait(false);
 
-        var newState = normalizedStatus == "completed" ? PiSessionStates.Completed : PiSessionStates.Failed;
         var stateReason = normalizedStatus == "completed"
             ? $"worker completion packet #{message.Id}: completed"
             : $"worker completion packet #{message.Id}: {normalizedStatus}{(resolvedFailure is null ? string.Empty : $" ({resolvedFailure})")}";
-        await sessions.UpdateStateAsync(
+        await sessions.MarkCompletionObservedAsync(
             project_id,
             detail.Session.SessionId,
-            newState,
             stateReason,
-            lastActivityAt: DateTime.UtcNow,
-            endedAt: DateTime.UtcNow).ConfigureAwait(false);
+            lastActivityAt: DateTime.UtcNow).ConfigureAwait(false);
 
         return SerializeCompletionResult(message, "created", isMalformed ? "malformed" : "present", verbose);
     }

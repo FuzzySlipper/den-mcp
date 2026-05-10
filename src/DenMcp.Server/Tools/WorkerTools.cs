@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using DenMcp.Core.Data;
 using DenMcp.Core.Models;
 using DenMcp.Core.Services;
 using ModelContextProtocol.Server;
@@ -55,6 +56,7 @@ public sealed class WorkerTools
                 return SerializeLaunchResult(existing, normalizedRole, "existing", prompt_packet_message_id, state_file_ref, session_mode, timeout_seconds, branch, base_branch, base_commit, head_commit, null, verbose);
 
             var workerRunId = NormalizeIdentifier(run_id) ?? NewRunId();
+            var startupPrompt = BuildStartupPrompt(project_id, task_id, normalizedRole, prompt_packet_message_id, state_file_ref);
             var title = $"Den Pi {normalizedRole} worker";
             var detail = await service.LaunchAsync(project_id, new PiSessionLaunchRequest
             {
@@ -71,6 +73,10 @@ public sealed class WorkerTools
                 PiStateDir = pi_state_dir,
                 ComposeFile = compose_file,
                 CallbackPorts = ParseCallbackPorts(callback_ports),
+                PromptPacketMessageId = prompt_packet_message_id,
+                StateFileRef = state_file_ref,
+                StartupPrompt = startupPrompt,
+                TimeoutSeconds = timeout_seconds,
             }).ConfigureAwait(false);
 
             return SerializeLaunchResult(detail, normalizedRole, "created", prompt_packet_message_id, state_file_ref, session_mode, timeout_seconds, branch, base_branch, base_commit, head_commit, null, verbose);
@@ -117,6 +123,84 @@ public sealed class WorkerTools
             .Select(s => ToWorkerRun(new PiSessionDetail { Session = s }))
             .ToList();
         return Serialize(new { worker_runs = workers, count = workers.Count, summary = $"listed {workers.Count} worker run(s)" }, verbose: true);
+    }
+
+    [McpServerTool(Name = "get_worker_run_status"), Description("Get a Den Pi worker run status projection combining runtime state, launch handles, and latest completion-packet state.")]
+    public static async Task<string> GetWorkerRunStatus(
+        IPiSessionService service,
+        IMessageRepository messages,
+        [Description("Project ID.")] string project_id,
+        [Description("Worker run id, or session id as fallback.")] string run_id,
+        [Description("Optional task id to narrow completion lookup.")] int? task_id = null,
+        [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
+    {
+        var detail = await FindByRunOrSessionAsync(service, project_id, run_id, task_id).ConfigureAwait(false);
+        if (detail is null)
+            return Error($"Worker run {run_id} not found in project {project_id}.");
+        var completion = await FindLatestCompletionAsync(messages, project_id, RunId(detail.Session), detail.Session.TaskId, Role(detail.Session)).ConfigureAwait(false);
+        return Serialize(new
+        {
+            summary = $"worker {RunId(detail.Session)} runtime={ToWorkerStatus(detail.Session)} completion={CompletionProjectionState(completion, detail.Session)} cleanup={CleanupState(detail.Session)}",
+            worker_run = ToWorkerRun(detail),
+            completion = CompletionProjection(completion),
+            reconciliation = ReconcileRuntimeAndCompletion(detail.Session, completion),
+            operator_guidance = new
+            {
+                attach = OperatorAttach(detail),
+                recent_output_handle = $"pi-session://{detail.Session.SessionId}/recent-output",
+                cleanup = CleanupState(detail.Session) == "eligible" ? "cleanup_worker_run may be called idempotently after preserving needed forensics." : "Cleanup is not currently eligible or already completed."
+            }
+        }, verbose: true);
+    }
+
+    [McpServerTool(Name = "cleanup_worker_run"), Description("Idempotently cleanup a terminal Den Pi worker run and report cleanup lifecycle state.")]
+    public static async Task<string> CleanupWorkerRun(
+        IPiSessionService service,
+        [Description("Project ID.")] string project_id,
+        [Description("Worker run id, or session id as fallback.")] string run_id,
+        [Description("Actor requesting cleanup.")] string requested_by,
+        [Description("Optional reason.")] string? reason = null,
+        [Description("Optional task id to narrow run lookup.")] int? task_id = null,
+        [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
+    {
+        try
+        {
+            var detail = await FindByRunOrSessionAsync(service, project_id, run_id, task_id).ConfigureAwait(false);
+            if (detail is null)
+                return Error($"Worker run {run_id} not found in project {project_id}.");
+            if (detail.Session.CleanupCompletedAt is not null)
+            {
+                return Serialize(new
+                {
+                    worker_run = ToWorkerRun(detail),
+                    cleanup = new { status = "noop", state = "cleaned_up", reason = "cleanup was already completed", completed_at = detail.Session.CleanupCompletedAt }
+                }, verbose: true);
+            }
+            if (PiSessionStates.IsActive(detail.Session.State))
+            {
+                return Serialize(new
+                {
+                    worker_run = ToWorkerRun(detail),
+                    cleanup = new { status = "blocked", state = "not_eligible_active", reason = $"worker is {detail.Session.State}; terminate before cleanup" }
+                }, verbose: true);
+            }
+            var cleaned = await service.CleanupAsync(project_id, detail.Session.SessionId, new PiSessionControlRequest
+            {
+                RequestedBy = requested_by,
+                Reason = reason,
+            }).ConfigureAwait(false);
+            if (cleaned is null)
+                return Error($"Worker run {run_id} disappeared before cleanup completed.");
+            return Serialize(new
+            {
+                worker_run = ToWorkerRun(cleaned),
+                cleanup = new { status = "cleaned_up", state = CleanupState(cleaned.Session), reason }
+            }, verbose: true);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Error(ex.Message);
+        }
     }
 
     [McpServerTool(Name = "abort_worker_run"), Description("Request cancellation of a raw Den Pi worker run. Current substrate maps this to Pi session termination.")]
@@ -200,6 +284,10 @@ public sealed class WorkerTools
                 PiVersion = profile.PiVersion,
                 NodeVersion = profile.NodeVersion,
                 CallbackPorts = profile.CallbackPorts,
+                PromptPacketMessageId = profile.PromptPacketMessageId,
+                StateFileRef = profile.StateFileRef,
+                StartupPrompt = profile.StartupPrompt,
+                TimeoutSeconds = profile.TimeoutSeconds,
             }).ConfigureAwait(false);
 
             return SerializeLaunchResult(detail, role, "created", null, $"rerun:{RunId(original.Session)}", "fresh", null, null, null, null, null, RunId(original.Session), verbose);
@@ -285,8 +373,15 @@ public sealed class WorkerTools
             session_mode = sessionModeOverride ?? "fresh",
             rerun_of_run_id = rerunOfRunId,
             prompt_ref = promptPacketMessageId is null ? null : new { kind = "task_message", message_id = promptPacketMessageId },
-            state_file_ref = stateFileRef,
-            timeout_seconds = timeoutSeconds,
+            state_file_ref = stateFileRef ?? detail.LaunchProfile?.StateFileRef,
+            timeout_seconds = timeoutSeconds ?? detail.LaunchProfile?.TimeoutSeconds,
+            startup_contract = new
+            {
+                prompt_packet_message_id = promptPacketMessageId ?? detail.LaunchProfile?.PromptPacketMessageId,
+                state_file_ref = stateFileRef ?? detail.LaunchProfile?.StateFileRef,
+                delivered_via_environment = detail.LaunchProfile?.Environment.ContainsKey("DEN_WORKER_STARTUP_PROMPT") == true,
+                environment_keys = detail.LaunchProfile?.Environment.Keys.Where(k => k.StartsWith("DEN_WORKER_", StringComparison.Ordinal)).ToArray(),
+            },
             session = new
             {
                 host_id = s.HostId,
@@ -306,8 +401,21 @@ public sealed class WorkerTools
             {
                 output_tail = s.OutputTail,
                 output_tail_truncated = s.OutputTailTruncated,
+                output_tail_captured_at = s.OutputTailCapturedAt,
                 attention_state = s.AttentionState,
+                attention_reason = s.AttentionReason,
                 needs_user_input = s.NeedsUserInput,
+            },
+            lifecycle = new
+            {
+                runtime_state = s.State,
+                completion_packet_state = CompletionPacketState(s),
+                cleanup_state = CleanupState(s),
+                termination_requested_at = s.TerminationRequestedAt,
+                cleanup_requested_at = s.CleanupRequestedAt,
+                cleanup_completed_at = s.CleanupCompletedAt,
+                stale = s.State == PiSessionStates.Stale,
+                diagnostics = LifecycleDiagnostics(s),
             },
             requested_repo = new
             {
@@ -360,6 +468,189 @@ public sealed class WorkerTools
         if (reason.Contains("spawn", StringComparison.OrdinalIgnoreCase) || reason.Contains("tmux", StringComparison.OrdinalIgnoreCase) || reason.Contains("docker", StringComparison.OrdinalIgnoreCase))
             return "spawn_error";
         return "infrastructure";
+    }
+
+    private static async Task<Message?> FindLatestCompletionAsync(IMessageRepository messages, string projectId, string? runId, int? taskId, string? role)
+    {
+        var candidates = await messages.GetMessagesAsync(projectId, taskId: taskId, limit: 100).ConfigureAwait(false);
+        var normalizedRole = string.IsNullOrWhiteSpace(role) ? null : NormalizeRole(role);
+        return candidates.FirstOrDefault(m => IsCompletion(m)
+            && (string.IsNullOrWhiteSpace(runId) || string.Equals(MetadataString(m, "run_id"), runId, StringComparison.Ordinal) || string.Equals(MetadataString(m, "session_id"), runId, StringComparison.Ordinal))
+            && (normalizedRole is null || string.Equals(MetadataString(m, "role"), normalizedRole, StringComparison.Ordinal)));
+    }
+
+    private static object? CompletionProjection(Message? completion)
+    {
+        if (completion is null)
+            return null;
+        return new
+        {
+            message_id = completion.Id,
+            status = MetadataString(completion, "status"),
+            packet_type = MetadataString(completion, "type"),
+            role = MetadataString(completion, "role"),
+            run_id = MetadataString(completion, "run_id"),
+            session_id = MetadataString(completion, "session_id"),
+            failure_category = MetadataString(completion, "failure_category"),
+            recovery_guidance = MetadataString(completion, "recovery_guidance"),
+            final_repo = new
+            {
+                branch = MetadataString(completion, "branch"),
+                base_commit = MetadataString(completion, "base_commit"),
+                head_commit = MetadataString(completion, "head_commit"),
+            },
+            review_round_id = MetadataInt(completion, "review_round_id"),
+            tests_reported = MetadataHasValue(completion, "tests_run"),
+            created_at = completion.CreatedAt,
+        };
+    }
+
+    private static string CompletionProjectionState(Message? completion, PiSessionSummary session)
+    {
+        if (completion is null)
+            return CompletionPacketState(session);
+        return string.Equals(MetadataString(completion, "status"), "completed", StringComparison.Ordinal)
+            ? "posted_completed"
+            : "posted_non_success";
+    }
+
+    private static object ReconcileRuntimeAndCompletion(PiSessionSummary session, Message? completion)
+    {
+        var runtimeTerminal = !PiSessionStates.IsActive(session.State);
+        var completionPresent = completion is not null;
+        var diagnostics = new List<string>();
+        if (runtimeTerminal && !completionPresent)
+            diagnostics.Add("Runtime is terminal but no structured completion packet was found; do not treat process exit as worker success.");
+        if (!runtimeTerminal && completionPresent)
+            diagnostics.Add("Completion packet is present while runtime still appears active; verify process/container state before cleanup.");
+        if (session.State == PiSessionStates.Stale)
+            diagnostics.Add("Runtime state is stale; inspect tmux/container output and consider timeout handling.");
+        return new
+        {
+            runtime_state = session.State,
+            runtime_terminal = runtimeTerminal,
+            completion_packet_present = completionPresent,
+            completion_packet_message_id = completion?.Id,
+            completion_state = CompletionProjectionState(completion, session),
+            diagnostics,
+        };
+    }
+
+    private static object OperatorAttach(PiSessionDetail detail)
+    {
+        var attach = detail.Attach;
+        return new
+        {
+            mode = attach?.Mode ?? "external_attach_info",
+            backend = attach?.Backend ?? "tmux",
+            tmux_session_name = attach?.TmuxSessionName ?? detail.Session.TmuxSessionName,
+            command_executable = attach?.CommandExecutable ?? "tmux",
+            command_args = attach?.CommandArgs ?? ["attach-session", "-t", detail.Session.TmuxSessionName],
+            warnings = attach?.Warnings ?? ["tmux is observability/break-glass only; Den state and completion packets drive automation."],
+        };
+    }
+
+    private static bool IsCompletion(Message message) =>
+        MetadataBool(message, "completion_packet") || string.Equals(MetadataString(message, "schema"), "den_worker_completion", StringComparison.Ordinal);
+
+    private static bool MetadataHasValue(Message message, string key)
+    {
+        if (message.Metadata is JsonElement meta && meta.ValueKind == JsonValueKind.Object && meta.TryGetProperty(key, out var prop))
+            return prop.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined;
+        return false;
+    }
+
+    private static string? MetadataString(Message message, string key)
+    {
+        if (message.Metadata is JsonElement meta && meta.ValueKind == JsonValueKind.Object && meta.TryGetProperty(key, out var prop))
+        {
+            return prop.ValueKind switch
+            {
+                JsonValueKind.String => prop.GetString(),
+                JsonValueKind.Number => prop.GetRawText(),
+                JsonValueKind.True => "true",
+                JsonValueKind.False => "false",
+                _ => null,
+            };
+        }
+        return null;
+    }
+
+    private static int? MetadataInt(Message message, string key)
+    {
+        if (message.Metadata is JsonElement meta && meta.ValueKind == JsonValueKind.Object && meta.TryGetProperty(key, out var prop) && prop.ValueKind == JsonValueKind.Number && prop.TryGetInt32(out var value))
+            return value;
+        return null;
+    }
+
+    private static bool MetadataBool(Message message, string key)
+    {
+        if (message.Metadata is JsonElement meta && meta.ValueKind == JsonValueKind.Object && meta.TryGetProperty(key, out var prop))
+            return prop.ValueKind == JsonValueKind.True || (prop.ValueKind == JsonValueKind.String && bool.TryParse(prop.GetString(), out var parsed) && parsed);
+        return false;
+    }
+
+    private static string BuildStartupPrompt(string projectId, int? taskId, string role, int? promptPacketMessageId, string? stateFileRef)
+    {
+        var packetLine = promptPacketMessageId is null
+            ? "- prompt_packet_message_id: `not provided`"
+            : $"- prompt_packet_message_id: `{promptPacketMessageId}`";
+        var stateLine = string.IsNullOrWhiteSpace(stateFileRef)
+            ? "- state_file_ref: `not provided`"
+            : $"- state_file_ref: `{stateFileRef.Trim()}`";
+        return $"""
+            You are a Den Pi {role} worker.
+
+            Startup contract:
+            1. Read the Den packet/state reference below before doing work.
+            2. Treat the referenced Den packet/state file as authoritative task context.
+            3. This startup prompt is intentionally bounded; do not expect large prompt bodies in process args.
+            4. Keep secrets and raw reasoning out of logs and completion packets.
+            5. Post a structured Den worker completion packet when finished or blocked.
+
+            Packet reference:
+            - project_id: `{projectId}`
+            - task_id: `{taskId?.ToString() ?? "none"}`
+            - role: `{role}`
+            {packetLine}
+            {stateLine}
+            """.Trim();
+    }
+
+    private static string CompletionPacketState(PiSessionSummary session)
+    {
+        if (session.State == PiSessionStates.Completed && session.StateReason?.Contains("worker completion packet #", StringComparison.OrdinalIgnoreCase) == true)
+            return "posted_completed";
+        if (session.State == PiSessionStates.Failed && session.StateReason?.Contains("worker completion packet #", StringComparison.OrdinalIgnoreCase) == true)
+            return "posted_non_success";
+        if (PiSessionStates.IsActive(session.State))
+            return "pending";
+        return "missing_or_untracked";
+    }
+
+    private static string CleanupState(PiSessionSummary session)
+    {
+        if (session.CleanupCompletedAt is not null)
+            return "cleaned_up";
+        if (session.CleanupRequestedAt is not null)
+            return "cleanup_pending";
+        if (PiSessionStates.IsActive(session.State))
+            return "not_eligible_active";
+        return "eligible";
+    }
+
+    private static IReadOnlyList<string> LifecycleDiagnostics(PiSessionSummary session)
+    {
+        var diagnostics = new List<string>();
+        if (session.State == PiSessionStates.Stale)
+            diagnostics.Add("Session is stale; inspect tmux/container state and consider cleanup after preserving needed forensics.");
+        if (session.State == PiSessionStates.Completed && CompletionPacketState(session) == "missing_or_untracked")
+            diagnostics.Add("Runtime is completed but no worker completion packet marker is present in state_reason; verify Den completion before advancing orchestration.");
+        if (session.CleanupRequestedAt is not null && session.CleanupCompletedAt is null)
+            diagnostics.Add("Cleanup has been requested but not completed.");
+        if (session.NeedsUserInput)
+            diagnostics.Add("Recent output/attention state indicates operator input may be needed.");
+        return diagnostics;
     }
 
     private static IReadOnlyList<PiDockerCallbackPort> ParseCallbackPorts(string? json)

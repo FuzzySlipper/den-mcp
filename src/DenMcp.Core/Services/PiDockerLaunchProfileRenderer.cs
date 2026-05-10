@@ -32,6 +32,7 @@ public sealed class PiDockerLaunchProfileRenderer(PiDockerLaunchProfileOptions o
         var dockerHost = NormalizeDockerHost(options.DockerHost);
         var callbackBindAddress = RequireLoopbackBindAddress(options.HostCallbackBindAddress);
         var callbackPorts = ValidateCallbackPorts(request.CallbackPorts, callbackBindAddress);
+        var startupPrompt = NormalizeStartupPrompt(request.StartupPrompt);
         var composeProjectName = BuildComposeProjectName(projectId, sessionId);
         var profileId = $"den-pi-docker:{composeProjectName}";
         var scrubbedEnvironmentVariables = options.ScrubProviderEnvironmentVariables
@@ -58,7 +59,23 @@ public sealed class PiDockerLaunchProfileRenderer(PiDockerLaunchProfileOptions o
             ["PI_GITCONFIG_PATH"] = gitConfigPath,
             ["PI_SSH_DIR"] = sshDir,
             ["PI_GH_CONFIG_DIR"] = ghConfigDir,
+            ["DEN_WORKER_PROJECT_ID"] = projectId,
+            ["DEN_WORKER_SESSION_ID"] = sessionId,
         };
+        if (request.TaskId is not null)
+            environment["DEN_WORKER_TASK_ID"] = request.TaskId.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (!string.IsNullOrWhiteSpace(request.WorkerRole))
+            environment["DEN_WORKER_ROLE"] = request.WorkerRole.Trim();
+        if (!string.IsNullOrWhiteSpace(request.WorkerRunId))
+            environment["DEN_WORKER_RUN_ID"] = request.WorkerRunId.Trim();
+        if (request.PromptPacketMessageId is not null)
+            environment["DEN_WORKER_PROMPT_PACKET_MESSAGE_ID"] = request.PromptPacketMessageId.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (!string.IsNullOrWhiteSpace(request.StateFileRef))
+            environment["DEN_WORKER_STATE_FILE_REF"] = request.StateFileRef.Trim();
+        if (startupPrompt is not null)
+            environment["DEN_WORKER_STARTUP_PROMPT"] = startupPrompt;
+        if (request.TimeoutSeconds is not null)
+            environment["DEN_WORKER_TIMEOUT_SECONDS"] = request.TimeoutSeconds.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
         if (dockerHost is not null)
             environment["DOCKER_HOST"] = dockerHost;
 
@@ -155,7 +172,24 @@ public sealed class PiDockerLaunchProfileRenderer(PiDockerLaunchProfileOptions o
                 "The renderer validates loopback binding and duplicate ports in a single profile, but it does not probe or reserve host ports; the lifecycle API must allocate unique host callback ports before launch.",
                 "The first Den-managed profile intentionally preserves broad DEV_DIR read-write access and does not enforce per-repository file restrictions."
             ],
+            WorkerRole = NullIfWhiteSpace(request.WorkerRole),
+            WorkerRunId = NullIfWhiteSpace(request.WorkerRunId),
+            PromptPacketMessageId = request.PromptPacketMessageId,
+            StateFileRef = NullIfWhiteSpace(request.StateFileRef),
+            StartupPrompt = startupPrompt,
+            TimeoutSeconds = request.TimeoutSeconds,
         };
+    }
+
+
+    private static string? NormalizeStartupPrompt(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+        var normalized = value.Trim();
+        if (normalized.Length > 4000)
+            throw new InvalidOperationException("startup_prompt must be a bounded packet-reference prompt (max 4000 characters); do not embed large task context in launch environment.");
+        return normalized;
     }
 
     private static IReadOnlyList<PiDockerCallbackPort> ValidateCallbackPorts(IReadOnlyList<PiDockerCallbackPort>? callbackPorts, string callbackBindAddress)

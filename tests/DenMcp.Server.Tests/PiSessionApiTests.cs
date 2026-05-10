@@ -151,12 +151,14 @@ public sealed class PiSessionApiTests : IAsyncLifetime
         Assert.Equal("review_recorded", reviewerVerifyJson.RootElement.GetProperty("verdict").GetString());
 
         // Stage 3: full-loop smoke: orchestrator next-action decision + cleanup/status handles.
-        var coderStatus = await WorkerTools.GetWorkerRun(service, ProjectId, "smoke-coder-run", verbose: true);
-        var reviewerStatus = await WorkerTools.GetWorkerRun(service, ProjectId, "smoke-reviewer-run", verbose: true);
+        var coderStatus = await WorkerTools.GetWorkerRunStatus(service, messages, ProjectId, "smoke-coder-run", task_id: smokeTask.Id, verbose: true);
+        var reviewerStatus = await WorkerTools.GetWorkerRunStatus(service, messages, ProjectId, "smoke-reviewer-run", task_id: smokeTask.Id, verbose: true);
         using var coderStatusJson = JsonDocument.Parse(coderStatus);
         using var reviewerStatusJson = JsonDocument.Parse(reviewerStatus);
-        Assert.Equal("completed", coderStatusJson.RootElement.GetProperty("worker_run").GetProperty("status").GetString());
-        Assert.Equal("completed", reviewerStatusJson.RootElement.GetProperty("worker_run").GetProperty("status").GetString());
+        Assert.Equal("running", coderStatusJson.RootElement.GetProperty("worker_run").GetProperty("status").GetString());
+        Assert.Equal("running", reviewerStatusJson.RootElement.GetProperty("worker_run").GetProperty("status").GetString());
+        Assert.Equal("posted_completed", coderStatusJson.RootElement.GetProperty("reconciliation").GetProperty("completion_state").GetString());
+        Assert.Equal("posted_completed", reviewerStatusJson.RootElement.GetProperty("reconciliation").GetProperty("completion_state").GetString());
         Assert.Equal("request_review_or_mark_done", DecideNextAction(coderVerifyJson.RootElement.GetProperty("verdict").GetString(), reviewerVerifyJson.RootElement.GetProperty("verdict").GetString()));
 
         var coderPacket = await messages.GetByIdAsync(coderPacketId);
@@ -514,7 +516,13 @@ public sealed class PiSessionApiTests : IAsyncLifetime
 
         var worker = await WorkerTools.GetWorkerRun(service, ProjectId, "run-complete-a", verbose: true);
         using var workerJson = JsonDocument.Parse(worker);
-        Assert.Equal("completed", workerJson.RootElement.GetProperty("worker_run").GetProperty("status").GetString());
+        Assert.Equal("running", workerJson.RootElement.GetProperty("worker_run").GetProperty("status").GetString());
+        Assert.Equal("pending", workerJson.RootElement.GetProperty("worker_run").GetProperty("lifecycle").GetProperty("completion_packet_state").GetString());
+
+        var status = await WorkerTools.GetWorkerRunStatus(service, messages, ProjectId, "run-complete-a", task_id: _task.Id, verbose: true);
+        using var statusJson = JsonDocument.Parse(status);
+        Assert.Equal(messageId, statusJson.RootElement.GetProperty("completion").GetProperty("message_id").GetInt32());
+        Assert.Contains(statusJson.RootElement.GetProperty("reconciliation").GetProperty("diagnostics").EnumerateArray(), item => item.GetString()!.Contains("runtime still appears active", StringComparison.Ordinal));
     }
 
     [Fact]

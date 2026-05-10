@@ -49,6 +49,12 @@ public sealed class PiDockerLaunchRenderRequest
     public string? SshDir { get; init; }
     public string? GhConfigDir { get; init; }
     public IReadOnlyList<PiDockerCallbackPort> CallbackPorts { get; init; } = [];
+    public string? WorkerRole { get; init; }
+    public string? WorkerRunId { get; init; }
+    public int? PromptPacketMessageId { get; init; }
+    public string? StateFileRef { get; init; }
+    public string? StartupPrompt { get; init; }
+    public int? TimeoutSeconds { get; init; }
 }
 
 public sealed class PiDockerCallbackPort
@@ -86,6 +92,12 @@ public sealed class PiDockerLaunchProfile
     public IReadOnlyList<string> RequiredHostPaths { get; init; } = [];
     public IReadOnlyList<string> Warnings { get; init; } = [];
     public IReadOnlyList<string> KnownLimitations { get; init; } = [];
+    public string? WorkerRole { get; init; }
+    public string? WorkerRunId { get; init; }
+    public int? PromptPacketMessageId { get; init; }
+    public string? StateFileRef { get; init; }
+    public string? StartupPrompt { get; init; }
+    public int? TimeoutSeconds { get; init; }
 }
 
 public sealed class PiDockerVolumeMount

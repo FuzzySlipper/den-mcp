@@ -78,6 +78,12 @@ public sealed class PiSessionService : IPiSessionService
             SshDir = request.SshDir,
             GhConfigDir = request.GhConfigDir,
             CallbackPorts = request.CallbackPorts,
+            WorkerRole = request.ToolProfile,
+            WorkerRunId = request.RunId,
+            PromptPacketMessageId = request.PromptPacketMessageId,
+            StateFileRef = request.StateFileRef,
+            StartupPrompt = request.StartupPrompt,
+            TimeoutSeconds = request.TimeoutSeconds,
         });
 
         var launchCommand = BuildLaunchCommand(_options.DockerExecutable, profile);

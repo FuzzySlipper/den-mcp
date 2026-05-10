@@ -39,6 +39,7 @@ public interface IPiSessionRepository
     Task<PiSessionRecord> MarkTerminationRequestedAsync(string projectId, string sessionId, string requestedBy, string? reason);
     Task<PiSessionRecord> MarkCleanupRequestedAsync(string projectId, string sessionId, string requestedBy, string? reason);
     Task<PiSessionRecord> MarkCleanupCompletedAsync(string projectId, string sessionId, string? stateReason = null);
+    Task<PiSessionRecord> MarkCompletionObservedAsync(string projectId, string sessionId, string stateReason, DateTime? lastActivityAt = null);
     Task<PiSessionEvent> AppendEventAsync(PiSessionEvent evt);
 }
 
@@ -295,6 +296,27 @@ public sealed class PiSessionRepository : IPiSessionRepository
         cmd.Parameters.AddWithValue("@sessionId", sessionId.Trim());
         cmd.Parameters.AddWithValue("@completedAt", ToDbTime(now));
         cmd.Parameters.AddWithValue("@stateReason", NullIfWhiteSpace(stateReason));
+        cmd.Parameters.AddWithValue("@updatedAt", ToDbTime(now));
+        return await ExecuteReturningRecordAsync(cmd, sessionId);
+    }
+
+    public async Task<PiSessionRecord> MarkCompletionObservedAsync(string projectId, string sessionId, string stateReason, DateTime? lastActivityAt = null)
+    {
+        var now = _utcNow();
+        await using var conn = await _db.CreateConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"""
+            UPDATE pi_sessions
+            SET state_reason = @stateReason,
+                last_activity_at = COALESCE(@lastActivityAt, last_activity_at),
+                updated_at = @updatedAt
+            WHERE project_id = @projectId AND session_id = @sessionId
+            RETURNING {Columns}
+            """;
+        cmd.Parameters.AddWithValue("@projectId", projectId.Trim());
+        cmd.Parameters.AddWithValue("@sessionId", sessionId.Trim());
+        cmd.Parameters.AddWithValue("@stateReason", stateReason.Trim());
+        cmd.Parameters.AddWithValue("@lastActivityAt", ToDbTimeOrNull(lastActivityAt));
         cmd.Parameters.AddWithValue("@updatedAt", ToDbTime(now));
         return await ExecuteReturningRecordAsync(cmd, sessionId);
     }

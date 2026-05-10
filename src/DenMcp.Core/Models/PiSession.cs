@@ -44,6 +44,10 @@ public sealed class PiSessionLaunchRequest
     public string? SshDir { get; init; }
     public string? GhConfigDir { get; init; }
     public IReadOnlyList<PiDockerCallbackPort> CallbackPorts { get; init; } = [];
+    public int? PromptPacketMessageId { get; init; }
+    public string? StateFileRef { get; init; }
+    public string? StartupPrompt { get; init; }
+    public int? TimeoutSeconds { get; init; }
 }
 
 public sealed class PiSessionControlRequest
