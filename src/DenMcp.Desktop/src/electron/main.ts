@@ -20,7 +20,7 @@ import * as crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
-import { SidecarSupervisor, buildDevSidecarLaunchConfig } from './sidecarSupervisor.ts';
+import { SidecarSupervisor, buildDevSidecarLaunchConfig, buildPublishedSidecarLaunchConfig } from './sidecarSupervisor.ts';
 import {
   assertBridgeSchemaBundle,
   createCheckedBridgeClient,
@@ -40,6 +40,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AUTH_TOKEN = crypto.randomUUID();
 const SIDECAR_PROJECT_PATH = path.resolve(__dirname, '../../DenMcp.Desktop.Sidecar/DenMcp.Desktop.Sidecar.csproj');
 const SIDECAR_CONFIG_PATH = path.resolve(app.getPath('userData'), 'sidecar');
+const SIDECAR_RELEASE_PATH = process.env.DEN_DESKTOP_SIDECAR_PATH;
+const RELEASE_ROOT = process.env.DEN_DESKTOP_RELEASE_ROOT;
+const RELEASE_COMMIT = process.env.DEN_DESKTOP_RELEASE_COMMIT;
+const APP_VERSION = RELEASE_COMMIT ? `0.1.0+${RELEASE_COMMIT.slice(0, 12)}` : '0.1.0-dev';
 const SIDECAR_READY_TIMEOUT_MS = 30_000;
 
 // ── State ──
@@ -61,7 +65,9 @@ const IPC_SIDECAR_UNSUBSCRIBE = 'den-desktop:sidecar-unsubscribe';
 // When bundled into electron-dist/, __dirname is src/DenMcp.Desktop/electron-dist/.
 // The testdata fixture lives at the repo root: <repo>/testdata/...
 // So from electron-dist we need ../../../testdata (up to src/DenMcp.Desktop, src, repo root).
-const bundlePath = path.resolve(__dirname, '../../../testdata/den-desktop-sidecar/sidecar-wire-fixture.json');
+const bundlePath = RELEASE_ROOT
+  ? path.resolve(RELEASE_ROOT, 'testdata/den-desktop-sidecar/sidecar-wire-fixture.json')
+  : path.resolve(__dirname, '../../../testdata/den-desktop-sidecar/sidecar-wire-fixture.json');
 
 function loadSchemaBundle() {
   try {
@@ -75,12 +81,21 @@ function loadSchemaBundle() {
 // ── Sidecar lifecycle ──
 
 async function launchSidecar(): Promise<void> {
-  const launchConfig = buildDevSidecarLaunchConfig({
-    projectPath: SIDECAR_PROJECT_PATH,
-    configPath: SIDECAR_CONFIG_PATH,
-    authToken: AUTH_TOKEN,
-    port: 0,
-  });
+  const launchConfig = SIDECAR_RELEASE_PATH
+    ? buildPublishedSidecarLaunchConfig({
+        sidecarPath: SIDECAR_RELEASE_PATH,
+        configPath: SIDECAR_CONFIG_PATH,
+        authToken: AUTH_TOKEN,
+        appVersion: APP_VERSION,
+        port: 0,
+      })
+    : buildDevSidecarLaunchConfig({
+        projectPath: SIDECAR_PROJECT_PATH,
+        configPath: SIDECAR_CONFIG_PATH,
+        authToken: AUTH_TOKEN,
+        appVersion: APP_VERSION,
+        port: 0,
+      });
 
   supervisor = new SidecarSupervisor({
     launchConfig,
@@ -388,6 +403,9 @@ function createWindow(): BrowserWindow {
 
 app.whenReady().then(async () => {
   try {
+    if (RELEASE_COMMIT) {
+      console.log(`[DenDesktop] Starting release ${RELEASE_COMMIT}`);
+    }
     await launchSidecar();
     await connectBridge();
     setupIpcBridge();

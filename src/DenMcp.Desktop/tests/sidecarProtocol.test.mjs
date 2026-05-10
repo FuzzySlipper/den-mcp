@@ -17,7 +17,7 @@ import {
   sidecarCommands,
   sidecarEvents,
 } from '../src/electron/sidecarProtocol.ts';
-import { SidecarSupervisor, buildDevSidecarLaunchConfig } from '../src/electron/sidecarSupervisor.ts';
+import { SidecarSupervisor, buildDevSidecarLaunchConfig, buildPublishedSidecarLaunchConfig } from '../src/electron/sidecarSupervisor.ts';
 import { normalizeAppAgentSelection } from '../src/desktop/appAgentSelection.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -527,6 +527,32 @@ test('preload sidecar API exposes no generic dispatch, token, endpoint, or node 
   assert.equal(api.endpoint, undefined);
   assert.equal(api.fs, undefined);
   assert.equal(events[0].phase, 'starting');
+});
+
+test('published sidecar launch config runs executable or dll without exposing token in args', () => {
+  const executableConfig = buildPublishedSidecarLaunchConfig({
+    sidecarPath: '/opt/den-desktop/current/sidecar/DenMcp.Desktop.Sidecar',
+    configPath: '/tmp/den-desktop/config',
+    authToken: 'secret-token',
+    appVersion: '0.1.0+abc123',
+    port: 0,
+  });
+  assert.equal(executableConfig.command, '/opt/den-desktop/current/sidecar/DenMcp.Desktop.Sidecar');
+  assert.equal(executableConfig.args[0], '--app-id');
+  assert.equal(executableConfig.env.DEN_DESKTOP_BRIDGE_TOKEN, 'secret-token');
+  assert.doesNotMatch(executableConfig.args.join(' '), /secret-token/);
+  assert.match(executableConfig.args.join(' '), /0\.1\.0\+abc123/);
+
+  const dllConfig = buildPublishedSidecarLaunchConfig({
+    sidecarPath: '/opt/den-desktop/current/sidecar/DenMcp.Desktop.Sidecar.dll',
+    configPath: '/tmp/den-desktop/config',
+    authToken: 'secret-token',
+    port: 0,
+  });
+  assert.equal(dllConfig.command, 'dotnet');
+  assert.equal(dllConfig.args[0], '/opt/den-desktop/current/sidecar/DenMcp.Desktop.Sidecar.dll');
+  assert.equal(dllConfig.env.DEN_DESKTOP_BRIDGE_TOKEN, 'secret-token');
+  assert.doesNotMatch(dllConfig.args.join(' '), /secret-token/);
 });
 
 test('sidecar supervisor recognizes ready sentinel split across stdout chunks', () => {

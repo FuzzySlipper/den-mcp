@@ -45,6 +45,65 @@ npm run electron:dev:hot
 
 The renderer communicates with the sidecar exclusively through `window.denDesktopSidecar`, exposed by the preload via `contextBridge`. No raw token, endpoint URL, Node APIs, or shell access are available to the renderer.
 
+## Local release/update workflow
+
+For a simple one-user local install on the desktop machine, use the repo script:
+
+```bash
+# From any checkout of den-mcp, or after copying the script to ~/bin:
+scripts/update-den-desktop
+# or
+update-den-desktop
+```
+
+The updater is intentionally local and deliberate rather than a GitHub Release/installer flow. It:
+
+1. Ensures a local checkout exists at `${DEN_DESKTOP_REPO_DIR:-~/dev/den-mcp}`.
+2. Fails closed if the checkout has uncommitted or untracked changes.
+3. Fetches and fast-forwards `${DEN_DESKTOP_BRANCH:-main}` from origin.
+4. Runs `npm ci` in `src/DenMcp.Desktop` only when `package.json`/`package-lock.json` changed or `node_modules` is missing.
+5. Builds the renderer and Electron bundles with `npm run ui:build` and `npm run electron:build`.
+6. Publishes the .NET sidecar into a commit-addressed release directory.
+7. Copies `dist/`, `electron-dist/`, `node_modules/`, package metadata, and the sidecar schema fixture into that release.
+8. Atomically updates `${DEN_DESKTOP_INSTALL_DIR:-~/.local/opt/den-desktop}/current`.
+9. Writes a stable launcher at `${DEN_DESKTOP_BIN_DIR:-~/.local/bin}/den-desktop`.
+
+Default paths:
+
+```text
+~/dev/den-mcp                                      local source checkout
+~/.local/opt/den-desktop/releases/<commit>/        installed releases
+~/.local/opt/den-desktop/current -> releases/...   active release symlink
+~/.local/bin/den-desktop                           stable launcher
+```
+
+Launch the current release with:
+
+```bash
+den-desktop
+```
+
+The launcher prints the release commit and exports it to Electron as `DEN_DESKTOP_RELEASE_COMMIT`; the Electron main process also logs `[DenDesktop] Starting release <commit>` on startup. The same launcher points Electron at the published sidecar via `DEN_DESKTOP_SIDECAR_PATH`, so release mode does not depend on the dev `.csproj` path.
+
+Rollback is a symlink change. The updater prints the previous release path when it replaces an existing `current` link; to roll back manually:
+
+```bash
+previous="$HOME/.local/opt/den-desktop/releases/<previous-commit>"
+ln -sfn "$previous" "$HOME/.local/opt/den-desktop/current.tmp"
+mv -Tf "$HOME/.local/opt/den-desktop/current.tmp" "$HOME/.local/opt/den-desktop/current"
+```
+
+Path overrides are available for testing or non-default installs:
+
+```bash
+DEN_DESKTOP_REPO_DIR="$HOME/apps/den-mcp" \
+DEN_DESKTOP_INSTALL_DIR="$HOME/.local/opt/den-desktop" \
+DEN_DESKTOP_BIN_DIR="$HOME/.local/bin" \
+scripts/update-den-desktop
+```
+
+The existing `npm run electron:dev` and `npm run electron:dev:hot` workflows remain the active-development path and still launch the sidecar from the source project.
+
 ## First-slice behavior
 
 - Loads local settings from the platform app config directory.

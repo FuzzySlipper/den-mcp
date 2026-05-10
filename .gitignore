@@ -93,6 +93,7 @@ src/DenMcp.Server/wwwroot/
 src/DenMcp.Server/ClientApp/node_modules/
 src/DenMcp.Desktop/node_modules/
 src/DenMcp.Desktop/dist/
+src/DenMcp.Desktop/electron-dist/
 src/DenMcp.Desktop/src-tauri/target/
 src/DenMcp.Desktop/src-tauri/gen/
 .codex

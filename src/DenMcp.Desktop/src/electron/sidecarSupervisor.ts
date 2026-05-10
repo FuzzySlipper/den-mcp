@@ -259,9 +259,7 @@ export class SidecarSupervisor<TConnection = unknown> {
   }
 }
 
-export function buildDevSidecarLaunchConfig(options: {
-  dotnet?: string;
-  projectPath: string;
+interface CommonSidecarLaunchOptions {
   appId?: string;
   appVersion?: string;
   configPath: string;
@@ -269,12 +267,10 @@ export function buildDevSidecarLaunchConfig(options: {
   authToken: string;
   port?: number;
   endpointPath?: string;
-}): SidecarLaunchConfig {
+}
+
+function buildSidecarAppArgs(options: CommonSidecarLaunchOptions): string[] {
   const args = [
-    'run',
-    '--project',
-    options.projectPath,
-    '--',
     '--app-id',
     options.appId ?? 'den-desktop',
     '--app-version',
@@ -290,9 +286,39 @@ export function buildDevSidecarLaunchConfig(options: {
     args.push('--log-path', options.logPath);
   }
 
+  return args;
+}
+
+export function buildDevSidecarLaunchConfig(options: CommonSidecarLaunchOptions & {
+  dotnet?: string;
+  projectPath: string;
+}): SidecarLaunchConfig {
   return {
     command: options.dotnet ?? 'dotnet',
-    args,
+    args: [
+      'run',
+      '--project',
+      options.projectPath,
+      '--',
+      ...buildSidecarAppArgs(options),
+    ],
+    env: {
+      DEN_DESKTOP_BRIDGE_TOKEN: options.authToken,
+    },
+  };
+}
+
+export function buildPublishedSidecarLaunchConfig(options: CommonSidecarLaunchOptions & {
+  dotnet?: string;
+  sidecarPath: string;
+}): SidecarLaunchConfig {
+  const runsViaDotnet = options.sidecarPath.endsWith('.dll');
+  return {
+    command: runsViaDotnet ? (options.dotnet ?? 'dotnet') : options.sidecarPath,
+    args: [
+      ...(runsViaDotnet ? [options.sidecarPath] : []),
+      ...buildSidecarAppArgs(options),
+    ],
     env: {
       DEN_DESKTOP_BRIDGE_TOKEN: options.authToken,
     },
