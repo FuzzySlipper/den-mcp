@@ -5,6 +5,7 @@ using DenMcp.Core.Data;
 using DenMcp.Core.Llm;
 using DenMcp.Core.Models;
 using DenMcp.Core.Services;
+using DenMcp.Server.Tools;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -44,6 +45,102 @@ public sealed class PiSessionApiTests : IAsyncLifetime
         _client.Dispose();
         _factory.Dispose();
         return Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task LaunchWorkerTool_CreatesIdempotentRawWorkerRunWithContractMetadata()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IPiSessionService>();
+
+        var first = await WorkerTools.LaunchPiWorker(service,
+            project_id: ProjectId,
+            requested_by: "hermes",
+            role: "raw",
+            task_id: _task.Id,
+            prompt_packet_message_id: 12345,
+            workspace_id: "workspace-worker",
+            branch: "task/1239-worker-tools",
+            base_branch: "main",
+            base_commit: "base123",
+            model_hint: "test-model",
+            session_mode: "fresh",
+            timeout_seconds: 3600,
+            dedupe_key: "worker-dedupe-a",
+            callback_ports: "[{\"host_port\":21459,\"container_port\":1455}]",
+            verbose: true);
+
+        using var firstJson = JsonDocument.Parse(first);
+        var worker = firstJson.RootElement.GetProperty("worker_run");
+        Assert.Equal("created", firstJson.RootElement.GetProperty("idempotency").GetProperty("status").GetString());
+        Assert.Equal("raw", worker.GetProperty("role").GetString());
+        Assert.Equal("raw", worker.GetProperty("worker_identity").GetString());
+        Assert.Equal("running", worker.GetProperty("status").GetString());
+        Assert.Equal("running", worker.GetProperty("state").GetString());
+        Assert.Equal("fresh", worker.GetProperty("session_mode").GetString());
+        Assert.Equal("task/1239-worker-tools", worker.GetProperty("requested_repo").GetProperty("branch").GetString());
+        Assert.Equal("base123", worker.GetProperty("requested_repo").GetProperty("base_commit").GetString());
+        Assert.Equal("host-test", worker.GetProperty("session").GetProperty("host_id").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(worker.GetProperty("session").GetProperty("tmux_session").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(worker.GetProperty("session").GetProperty("container_name").GetString()));
+        Assert.Contains(worker.GetProperty("artifact_handles").EnumerateArray(), h => h.GetProperty("name").GetString() == "status");
+        Assert.Equal(12345, worker.GetProperty("prompt_ref").GetProperty("message_id").GetInt32());
+
+        var second = await WorkerTools.LaunchPiWorker(service,
+            project_id: ProjectId,
+            requested_by: "hermes",
+            role: "raw",
+            task_id: _task.Id,
+            prompt_packet_message_id: 12345,
+            dedupe_key: "worker-dedupe-a",
+            callback_ports: "[{\"host_port\":21459,\"container_port\":1455}]",
+            verbose: true);
+
+        using var secondJson = JsonDocument.Parse(second);
+        Assert.Equal("existing", secondJson.RootElement.GetProperty("idempotency").GetProperty("status").GetString());
+        Assert.Equal(worker.GetProperty("run_id").GetString(), secondJson.RootElement.GetProperty("worker_run").GetProperty("run_id").GetString());
+        Assert.Single(_factory.FakeHost.Launches);
+    }
+
+    [Fact]
+    public async Task WorkerTools_QueryAbortAndRerun_SurfaceRawLifecycleControls()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IPiSessionService>();
+
+        var launched = await WorkerTools.LaunchPiWorker(service,
+            project_id: ProjectId,
+            requested_by: "hermes",
+            role: "raw",
+            task_id: _task.Id,
+            prompt_packet_message_id: 12346,
+            session_id: "worker-control-a",
+            dedupe_key: "worker-control-a",
+            callback_ports: "[{\"host_port\":21460,\"container_port\":1455}]",
+            verbose: true);
+        using var launchedJson = JsonDocument.Parse(launched);
+        var runId = launchedJson.RootElement.GetProperty("worker_run").GetProperty("run_id").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(runId));
+
+        var get = await WorkerTools.GetWorkerRun(service, ProjectId, runId!, verbose: true);
+        using var getJson = JsonDocument.Parse(get);
+        Assert.Equal("worker-control-a", getJson.RootElement.GetProperty("worker_run").GetProperty("session_id").GetString());
+
+        var list = await WorkerTools.ListWorkerRuns(service, ProjectId, task_id: _task.Id, role: "raw", verbose: true);
+        using var listJson = JsonDocument.Parse(list);
+        Assert.Contains(listJson.RootElement.GetProperty("worker_runs").EnumerateArray(), r => r.GetProperty("run_id").GetString() == runId);
+
+        var aborted = await WorkerTools.AbortWorkerRun(service, ProjectId, runId!, requested_by: "hermes", reason: "test abort", verbose: true);
+        using var abortedJson = JsonDocument.Parse(aborted);
+        Assert.Equal("aborted", abortedJson.RootElement.GetProperty("worker_run").GetProperty("status").GetString());
+        Assert.Equal("aborted", abortedJson.RootElement.GetProperty("worker_run").GetProperty("failure_category").GetString());
+
+        var rerun = await WorkerTools.RerunWorkerRun(service, ProjectId, runId!, requested_by: "hermes", reason: "test rerun", verbose: true);
+        using var rerunJson = JsonDocument.Parse(rerun);
+        Assert.Equal("created", rerunJson.RootElement.GetProperty("idempotency").GetProperty("status").GetString());
+        var rerunWorker = rerunJson.RootElement.GetProperty("worker_run");
+        Assert.NotEqual(runId, rerunWorker.GetProperty("run_id").GetString());
+        Assert.Equal(runId, rerunWorker.GetProperty("rerun_of_run_id").GetString());
     }
 
     [Fact]
