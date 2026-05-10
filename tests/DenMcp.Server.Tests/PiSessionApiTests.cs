@@ -144,6 +144,114 @@ public sealed class PiSessionApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CompletionTools_PostCompletion_IsIdempotentAndUpdatesWorkerStatus()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IPiSessionService>();
+        var sessions = scope.ServiceProvider.GetRequiredService<IPiSessionRepository>();
+        var messages = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+
+        var launched = await WorkerTools.LaunchPiWorker(service,
+            project_id: ProjectId,
+            requested_by: "hermes",
+            role: "coder",
+            task_id: _task.Id,
+            prompt_packet_message_id: 1241,
+            session_id: "worker-complete-a",
+            run_id: "run-complete-a",
+            callback_ports: "[{\"host_port\":21461,\"container_port\":1455}]",
+            verbose: true);
+        using var launchedJson = JsonDocument.Parse(launched);
+        Assert.Equal("running", launchedJson.RootElement.GetProperty("worker_run").GetProperty("status").GetString());
+
+        var completion = await CompletionTools.PostWorkerCompletionPacket(
+            service,
+            sessions,
+            messages,
+            ProjectId,
+            run_id: "run-complete-a",
+            requested_by: "pi-worker",
+            status: "completed",
+            role: "coder",
+            packet_type: "implementation_packet",
+            summary: "Implemented the packet flow.",
+            branch: "task/1241-worker-completion-status",
+            head_commit: "abc999",
+            tests_run: "[\"dotnet build\"]",
+            dedupe_key: "completion-a",
+            verbose: true);
+        using var completionJson = JsonDocument.Parse(completion);
+        var packet = completionJson.RootElement.GetProperty("completion");
+        Assert.Equal("created", completionJson.RootElement.GetProperty("idempotency").GetProperty("status").GetString());
+        Assert.Equal("completed", packet.GetProperty("status").GetString());
+        Assert.Equal("implementation_packet", packet.GetProperty("packet_type").GetString());
+        Assert.Equal("abc999", packet.GetProperty("final_repo").GetProperty("head_commit").GetString());
+        var messageId = packet.GetProperty("message_id").GetInt32();
+
+        var duplicate = await CompletionTools.PostWorkerCompletionPacket(
+            service,
+            sessions,
+            messages,
+            ProjectId,
+            run_id: "run-complete-a",
+            requested_by: "pi-worker",
+            status: "completed",
+            role: "coder",
+            packet_type: "implementation_packet",
+            summary: "Duplicate should return existing.",
+            dedupe_key: "completion-a",
+            verbose: true);
+        using var duplicateJson = JsonDocument.Parse(duplicate);
+        Assert.Equal("existing", duplicateJson.RootElement.GetProperty("idempotency").GetProperty("status").GetString());
+        Assert.Equal(messageId, duplicateJson.RootElement.GetProperty("completion").GetProperty("message_id").GetInt32());
+
+        var worker = await WorkerTools.GetWorkerRun(service, ProjectId, "run-complete-a", verbose: true);
+        using var workerJson = JsonDocument.Parse(worker);
+        Assert.Equal("completed", workerJson.RootElement.GetProperty("worker_run").GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task CompletionTools_GetLatestCompletion_ReportsMissingAndMalformedStates()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IPiSessionService>();
+        var sessions = scope.ServiceProvider.GetRequiredService<IPiSessionRepository>();
+        var messages = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+
+        await WorkerTools.LaunchPiWorker(service,
+            project_id: ProjectId,
+            requested_by: "hermes",
+            role: "reviewer",
+            task_id: _task.Id,
+            prompt_packet_message_id: 1242,
+            session_id: "worker-missing-a",
+            run_id: "run-missing-a",
+            callback_ports: "[{\"host_port\":21462,\"container_port\":1455}]",
+            verbose: true);
+
+        var missing = await CompletionTools.GetLatestWorkerCompletion(messages, ProjectId, run_id: "run-missing-a", task_id: _task.Id, role: "reviewer", verbose: true);
+        using var missingJson = JsonDocument.Parse(missing);
+        Assert.Equal("missing_packet", missingJson.RootElement.GetProperty("completion_state").GetString());
+
+        var malformed = await CompletionTools.PostWorkerCompletionPacket(
+            service,
+            sessions,
+            messages,
+            ProjectId,
+            run_id: "run-missing-a",
+            requested_by: "pi-worker",
+            status: "wat",
+            role: "reviewer",
+            packet_type: "review_findings_packet",
+            summary: "Bad status",
+            verbose: true);
+        using var malformedJson = JsonDocument.Parse(malformed);
+        Assert.Equal("malformed", malformedJson.RootElement.GetProperty("completion_state").GetString());
+        Assert.Equal("malformed", malformedJson.RootElement.GetProperty("completion").GetProperty("status").GetString());
+        Assert.Equal("malformed_packet", malformedJson.RootElement.GetProperty("completion").GetProperty("failure_category").GetString());
+    }
+
+    [Fact]
     public async Task Launch_List_Status_AndAttach_ReturnDurableSessionMetadata()
     {
         var response = await _client.PostAsJsonAsync($"/api/projects/{ProjectId}/pi-sessions", new
