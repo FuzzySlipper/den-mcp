@@ -48,6 +48,81 @@ public sealed class PiSessionApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RoleWorkerTools_LaunchCoderWorker_PreparesPacketAndLaunchesCoderRole()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var tasks = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+        var messages = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+        var service = scope.ServiceProvider.GetRequiredService<IPiSessionService>();
+
+        var json = await RoleWorkerTools.LaunchCoderWorker(
+            tasks,
+            messages,
+            service,
+            ProjectId,
+            _task.Id,
+            requested_by: "hermes",
+            branch: "task/1255-role-worker-launch-adapters",
+            base_branch: "main",
+            base_commit: "base1255",
+            allowed_scope: "src/DenMcp.Server/Tools",
+            session_id: "coder-role-a",
+            run_id: "coder-run-a",
+            callback_ports: "[{\"host_port\":21463,\"container_port\":1455}]",
+            verbose: true);
+
+        using var doc = JsonDocument.Parse(json);
+        var worker = doc.RootElement.GetProperty("worker_run");
+        Assert.Equal("coder", worker.GetProperty("role").GetString());
+        Assert.Equal("coder", worker.GetProperty("worker_identity").GetString());
+        Assert.Equal("running", worker.GetProperty("status").GetString());
+        Assert.Equal("coder-run-a", worker.GetProperty("run_id").GetString());
+        var packetRef = worker.GetProperty("prompt_ref").GetProperty("message_id").GetInt32();
+        Assert.True(packetRef > 0);
+        Assert.Equal(packetRef, doc.RootElement.GetProperty("packet_ref").GetProperty("message_id").GetInt32());
+        Assert.Equal("coder_context_packet", doc.RootElement.GetProperty("packet_ref").GetProperty("packet_type").GetString());
+        Assert.Equal("task/1255-role-worker-launch-adapters", worker.GetProperty("requested_repo").GetProperty("branch").GetString());
+
+        var packet = await messages.GetByIdAsync(packetRef);
+        Assert.NotNull(packet);
+        Assert.Equal("coder_context_packet", packet!.Metadata?.GetProperty("type").GetString());
+    }
+
+    [Fact]
+    public async Task RoleWorkerTools_LaunchReviewerWorker_PreparesReviewerPacketAndRoleDefaults()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var tasks = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+        var messages = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+        var service = scope.ServiceProvider.GetRequiredService<IPiSessionService>();
+
+        var json = await RoleWorkerTools.LaunchReviewerWorker(
+            tasks,
+            messages,
+            service,
+            ProjectId,
+            _task.Id,
+            requested_by: "hermes",
+            review_round_id: 42,
+            branch: "task/review-target",
+            base_branch: "main",
+            head_commit: "head1255",
+            session_id: "reviewer-role-a",
+            run_id: "reviewer-run-a",
+            callback_ports: "[{\"host_port\":21464,\"container_port\":1455}]",
+            verbose: true);
+
+        using var doc = JsonDocument.Parse(json);
+        var worker = doc.RootElement.GetProperty("worker_run");
+        Assert.Equal("reviewer", worker.GetProperty("role").GetString());
+        Assert.Equal("reviewer", worker.GetProperty("worker_identity").GetString());
+        Assert.Equal("reviewer-run-a", worker.GetProperty("run_id").GetString());
+        Assert.Equal("reviewer_context_packet", doc.RootElement.GetProperty("packet_ref").GetProperty("packet_type").GetString());
+        Assert.Equal(42, doc.RootElement.GetProperty("packet_ref").GetProperty("review_round_id").GetInt32());
+        Assert.Contains(worker.GetProperty("artifact_handles").EnumerateArray(), h => h.GetProperty("name").GetString() == "status");
+    }
+
+    [Fact]
     public async Task LaunchWorkerTool_CreatesIdempotentRawWorkerRunWithContractMetadata()
     {
         using var scope = _factory.Services.CreateScope();
