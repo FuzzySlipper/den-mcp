@@ -48,6 +48,60 @@ public sealed class PiSessionApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ReviewerPathTools_StartAndVerify_UseDenReviewCompletionState()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var tasks = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+        var messages = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+        var service = scope.ServiceProvider.GetRequiredService<IPiSessionService>();
+        var sessions = scope.ServiceProvider.GetRequiredService<IPiSessionRepository>();
+
+        var started = await ReviewerPathTools.StartReviewerWorkerPath(
+            tasks,
+            messages,
+            service,
+            ProjectId,
+            _task.Id,
+            requested_by: "hermes",
+            review_round_id: 125,
+            branch: "task/1243-reviewer-worker-path",
+            base_branch: "main",
+            base_commit: "base1243",
+            head_commit: "head1243",
+            session_id: "reviewer-path-a",
+            run_id: "reviewer-path-run-a",
+            callback_ports: "[{\"host_port\":21466,\"container_port\":1455}]",
+            verbose: true);
+        using var startedJson = JsonDocument.Parse(started);
+        Assert.Equal("launched", startedJson.RootElement.GetProperty("path_state").GetString());
+        Assert.Equal("reviewer", startedJson.RootElement.GetProperty("worker_run").GetProperty("role").GetString());
+        Assert.Equal("den-mcp-runner-reviewer", startedJson.RootElement.GetProperty("reviewer_identity").GetString());
+
+        await CompletionTools.PostWorkerCompletionPacket(
+            service,
+            sessions,
+            messages,
+            ProjectId,
+            run_id: "reviewer-path-run-a",
+            requested_by: "den-mcp-runner-reviewer",
+            status: "completed",
+            role: "reviewer",
+            packet_type: "review_findings_packet",
+            summary: "Looks good.",
+            branch: "task/1243-reviewer-worker-path",
+            head_commit: "head1243",
+            review_round_id: 125,
+            tests_run: "[\"dotnet build\"]",
+            verbose: true);
+
+        var verified = await ReviewerPathTools.VerifyReviewerWorkerCompletion(messages, ProjectId, run_id: "reviewer-path-run-a", task_id: _task.Id, verbose: true);
+        using var verifiedJson = JsonDocument.Parse(verified);
+        Assert.Equal("review_recorded", verifiedJson.RootElement.GetProperty("verdict").GetString());
+        Assert.True(verifiedJson.RootElement.GetProperty("checks").GetProperty("review_findings_packet_exists").GetBoolean());
+        Assert.True(verifiedJson.RootElement.GetProperty("checks").GetProperty("review_round_id_reported").GetBoolean());
+    }
+
+    [Fact]
     public async Task CoderPathTools_StartAndVerify_UseDenPacketLaunchAndCompletionState()
     {
         using var scope = _factory.Services.CreateScope();
