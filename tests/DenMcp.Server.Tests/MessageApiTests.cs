@@ -296,6 +296,100 @@ public class MessageApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task PacketTools_PrepareCoderContextPacket_StoresSearchableTaskMessage()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var tasks = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+        var messages = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+        var task = await tasks.CreateAsync(new ProjectTask
+        {
+            ProjectId = ProjectId,
+            Title = "Implement packet flow",
+            Description = "Acceptance: bounded references only",
+            Tags = ["prompt-packets"]
+        });
+        await messages.CreateAsync(new Message
+        {
+            ProjectId = ProjectId,
+            TaskId = task.Id,
+            Sender = "planner",
+            Content = "Use references, not process args.",
+            Intent = MessageIntent.Handoff
+        });
+
+        var json = await PacketTools.PrepareCoderContextPacket(
+            tasks,
+            messages,
+            ProjectId,
+            task.Id,
+            requested_by: "hermes",
+            branch: "task/1240-prompt-packet-reference-flow",
+            base_branch: "main",
+            base_commit: "abc123",
+            allowed_scope: "src/DenMcp.Server/Tools, tests/DenMcp.Server.Tests",
+            verbose: true);
+
+        using var doc = JsonDocument.Parse(json);
+        var packet = doc.RootElement.GetProperty("packet");
+        Assert.Equal("coder_context_packet", packet.GetProperty("type").GetString());
+        Assert.Equal("coder", packet.GetProperty("role").GetString());
+        var messageId = packet.GetProperty("message_id").GetInt32();
+        Assert.True(messageId > 0);
+        Assert.Contains("Implement packet flow", packet.GetProperty("content").GetString());
+        Assert.Contains("bounded references", packet.GetProperty("content").GetString());
+        Assert.Contains("Prompt-injection", packet.GetProperty("content").GetString());
+
+        var latestJson = await PacketTools.GetLatestTaskPacket(messages, ProjectId, task.Id, packet_type: "coder_context_packet", verbose: true);
+        using var latestDoc = JsonDocument.Parse(latestJson);
+        var latest = latestDoc.RootElement.GetProperty("packet");
+        Assert.Equal(messageId, latest.GetProperty("message_id").GetInt32());
+        Assert.Equal("coder_context_packet", latest.GetProperty("metadata").GetProperty("type").GetString());
+        Assert.Equal("task/1240-prompt-packet-reference-flow", latest.GetProperty("metadata").GetProperty("branch").GetString());
+
+        var threadMessages = await messages.GetMessagesAsync(ProjectId, taskId: task.Id, limit: 10);
+        var stored = Assert.Single(threadMessages, m => m.Id == messageId);
+        Assert.Equal(MessageIntent.Handoff, stored.Intent);
+        Assert.Equal("coder_context_packet", stored.Metadata?.GetProperty("type").GetString());
+    }
+
+    [Fact]
+    public async Task PacketTools_RenderWorkerPrompt_UsesPacketReferenceNotPacketBody()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var tasks = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+        var messages = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+        var task = await tasks.CreateAsync(new ProjectTask
+        {
+            ProjectId = ProjectId,
+            Title = "Long prompt task",
+            Description = new string('x', 5000)
+        });
+
+        var packetJson = await PacketTools.PrepareReviewerContextPacket(
+            tasks,
+            messages,
+            ProjectId,
+            task.Id,
+            requested_by: "hermes",
+            review_round_id: 77,
+            branch: "task/review-me",
+            head_commit: "def456",
+            verbose: true);
+        using var packetDoc = JsonDocument.Parse(packetJson);
+        var messageId = packetDoc.RootElement.GetProperty("packet").GetProperty("message_id").GetInt32();
+
+        var promptJson = await PacketTools.RenderWorkerPrompt(messages, ProjectId, messageId, role: "reviewer", verbose: true);
+        using var promptDoc = JsonDocument.Parse(promptJson);
+        var prompt = promptDoc.RootElement.GetProperty("prompt").GetString();
+        Assert.NotNull(prompt);
+        Assert.Contains($"message #{messageId}", prompt);
+        Assert.Contains("get_thread", prompt);
+        Assert.Contains("reviewer_context_packet", prompt);
+        Assert.DoesNotContain(new string('x', 100), prompt);
+        Assert.True(prompt!.Length < 1600);
+    }
+
+    [Fact]
     public async Task McpMessageTools_SendUserNotification_CreatesNotificationMessage()
     {
         using var scope = _factory.Services.CreateScope();
