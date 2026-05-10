@@ -21,7 +21,7 @@ public sealed class WorkerTools
         IPiSessionService service,
         [Description("Project ID.")] string project_id,
         [Description("Agent/user launching the worker.")] string requested_by,
-        [Description("Worker role. Raw lifecycle layer accepts raw, coder, reviewer, validator, or drift_sentinel.")] string role = "raw",
+        [Description("Worker role. Raw lifecycle layer accepts raw, coder, reviewer, validator, drift_checker, packet_auditor, or drift_sentinel alias.")] string role = "raw",
         [Description("Optional Den task id.")] int? task_id = null,
         [Description("Optional Den task-thread prompt packet message id. Prefer this or state_file_ref over large prompt args.")] int? prompt_packet_message_id = null,
         [Description("Optional Den-managed state file reference. Prefer this or prompt_packet_message_id over large prompt args.")] string? state_file_ref = null,
@@ -399,7 +399,8 @@ public sealed class WorkerTools
         var normalized = string.IsNullOrWhiteSpace(role) ? "raw" : role.Trim().ToLowerInvariant().Replace('-', '_');
         return normalized switch
         {
-            "raw" or "coder" or "reviewer" or "validator" or "drift_sentinel" => normalized,
+            "drift_sentinel" => "drift_checker",
+            "raw" or "coder" or "reviewer" or "validator" or "drift_checker" or "packet_auditor" => normalized,
             _ => throw new ArgumentException($"Unsupported worker role '{role}'."),
         };
     }

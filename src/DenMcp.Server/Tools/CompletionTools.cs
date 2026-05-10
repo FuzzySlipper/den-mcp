@@ -23,7 +23,7 @@ public sealed class CompletionTools
 
     private static readonly HashSet<string> ValidPacketTypes = new(StringComparer.Ordinal)
     {
-        "implementation_packet", "review_findings_packet", "validation_packet", "worker_failure_packet"
+        "implementation_packet", "review_findings_packet", "validation_packet", "drift_check_packet", "packet_audit_packet", "worker_failure_packet"
     };
 
     [McpServerTool(Name = "post_worker_completion_packet"), Description("Post an idempotent structured Den Pi worker completion packet and update the durable worker/session status.")]
@@ -36,7 +36,7 @@ public sealed class CompletionTools
         [Description("Agent/user posting completion.")] string requested_by,
         [Description("Completion status: completed, blocked, failed, needs_input, or incomplete. Invalid values are recorded as malformed.")] string status,
         [Description("Worker role.")] string role,
-        [Description("Packet type: implementation_packet, review_findings_packet, validation_packet, or worker_failure_packet.")] string packet_type,
+        [Description("Packet type: implementation_packet, review_findings_packet, validation_packet, drift_check_packet, packet_audit_packet, or worker_failure_packet.")] string packet_type,
         [Description("Safe human-readable summary. Must not contain secrets.")] string summary,
         [Description("Optional branch reported by worker.")] string? branch = null,
         [Description("Optional head commit reported by worker.")] string? head_commit = null,

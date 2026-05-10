@@ -98,6 +98,62 @@ public sealed class PacketTools
         return SerializePacketResult(created, "reviewer", "created", verbose);
     }
 
+
+
+    [McpServerTool(Name = "prepare_validator_context_packet"), Description("Create and store a bounded Den task-thread validator context packet for a deterministic Pi worker.")]
+    public static async Task<string> PrepareValidatorContextPacket(
+        ITaskRepository tasks,
+        IMessageRepository messages,
+        [Description("Project ID.")] string project_id,
+        [Description("Task ID.")] int task_id,
+        [Description("Agent/user creating the packet.")] string requested_by,
+        [Description("Optional implementation branch/worktree guidance.")] string? branch = null,
+        [Description("Optional base branch.")] string? base_branch = null,
+        [Description("Optional base commit.")] string? base_commit = null,
+        [Description("Optional head commit under validation.")] string? head_commit = null,
+        [Description("Optional allowed scope guidance.")] string? allowed_scope = null,
+        [Description("Optional additional instructions to include in the packet.")] string? notes = null,
+        [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
+    {
+        return await PrepareSpecializedWorkerPacket(tasks, messages, project_id, task_id, requested_by, "validator", "validator_context_packet", branch, base_branch, base_commit, head_commit, null, allowed_scope, notes, verbose).ConfigureAwait(false);
+    }
+
+    [McpServerTool(Name = "prepare_drift_checker_context_packet"), Description("Create and store a bounded Den task-thread drift-checker context packet for comparing task intent, packet claims, diff, and review state.")]
+    public static async Task<string> PrepareDriftCheckerContextPacket(
+        ITaskRepository tasks,
+        IMessageRepository messages,
+        [Description("Project ID.")] string project_id,
+        [Description("Task ID.")] int task_id,
+        [Description("Agent/user creating the packet.")] string requested_by,
+        [Description("Optional implementation branch/worktree guidance.")] string? branch = null,
+        [Description("Optional base branch.")] string? base_branch = null,
+        [Description("Optional base commit.")] string? base_commit = null,
+        [Description("Optional head commit under drift check.")] string? head_commit = null,
+        [Description("Optional allowed scope guidance.")] string? allowed_scope = null,
+        [Description("Optional additional instructions to include in the packet.")] string? notes = null,
+        [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
+    {
+        return await PrepareSpecializedWorkerPacket(tasks, messages, project_id, task_id, requested_by, "drift_checker", "drift_checker_context_packet", branch, base_branch, base_commit, head_commit, null, allowed_scope, notes, verbose).ConfigureAwait(false);
+    }
+
+    [McpServerTool(Name = "prepare_packet_auditor_context_packet"), Description("Create and store a bounded Den task-thread packet-auditor context packet for checking worker packet claims against Den and repo state.")]
+    public static async Task<string> PreparePacketAuditorContextPacket(
+        ITaskRepository tasks,
+        IMessageRepository messages,
+        [Description("Project ID.")] string project_id,
+        [Description("Task ID.")] int task_id,
+        [Description("Agent/user creating the packet.")] string requested_by,
+        [Description("Optional implementation branch/worktree guidance.")] string? branch = null,
+        [Description("Optional base branch.")] string? base_branch = null,
+        [Description("Optional base commit.")] string? base_commit = null,
+        [Description("Optional head commit under packet audit.")] string? head_commit = null,
+        [Description("Optional allowed scope guidance.")] string? allowed_scope = null,
+        [Description("Optional additional instructions to include in the packet.")] string? notes = null,
+        [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
+    {
+        return await PrepareSpecializedWorkerPacket(tasks, messages, project_id, task_id, requested_by, "packet_auditor", "packet_auditor_context_packet", branch, base_branch, base_commit, head_commit, null, allowed_scope, notes, verbose).ConfigureAwait(false);
+    }
+
     [McpServerTool(Name = "get_latest_task_packet"), Description("Get the latest task-thread packet by packet metadata type/role. Returns the exact message reference for worker launch.")]
     public static async Task<string> GetLatestTaskPacket(
         IMessageRepository messages,
@@ -157,6 +213,41 @@ public sealed class PacketTools
                 role = normalizedRole
             }
         }, JsonOptions);
+    }
+
+
+
+    private static async Task<string> PrepareSpecializedWorkerPacket(
+        ITaskRepository tasks,
+        IMessageRepository messages,
+        string projectId,
+        int taskId,
+        string requestedBy,
+        string role,
+        string packetType,
+        string? branch,
+        string? baseBranch,
+        string? baseCommit,
+        string? headCommit,
+        int? reviewRoundId,
+        string? allowedScope,
+        string? notes,
+        bool verbose)
+    {
+        var detail = await tasks.GetDetailAsync(taskId).ConfigureAwait(false);
+        ValidateProject(detail, projectId);
+        var content = BuildPacketContent(detail, role, packetType, branch, baseBranch, baseCommit, headCommit, reviewRoundId, allowedScope, notes);
+        var metadata = BuildMetadata(packetType, role, taskId, branch, baseBranch, baseCommit, headCommit, reviewRoundId, allowedScope);
+        var created = await messages.CreateAsync(new Message
+        {
+            ProjectId = projectId,
+            TaskId = taskId,
+            Sender = requestedBy,
+            Content = content,
+            Intent = MessageIntent.Handoff,
+            Metadata = metadata
+        }).ConfigureAwait(false);
+        return SerializePacketResult(created, role, "created", verbose);
     }
 
     private static string BuildPacketContent(
@@ -221,6 +312,21 @@ public sealed class PacketTools
         {
             sb.AppendLine("- Post structured review findings with category, summary, notes, file references, and test commands.");
             sb.AppendLine("- Set or recommend a verdict: `looks_good`, `changes_requested`, `follow_up_needed`, or `blocked_by_dependency`.");
+        }
+        else if (role == "validator")
+        {
+            sb.AppendLine("- Run deterministic build/test/lint checks only; do not make creative code changes.");
+            sb.AppendLine("- Post a `validation_packet` with status, branch, head commit, exact commands/results, and skipped-check rationale.");
+        }
+        else if (role == "drift_checker")
+        {
+            sb.AppendLine("- Compare task intent, allowed scope, implementation packet, diff metadata, tests, and review state for scope drift.");
+            sb.AppendLine("- Post a `drift_check_packet` with severity, blocking signals, supported claims, and next-action recommendation.");
+        }
+        else if (role == "packet_auditor")
+        {
+            sb.AppendLine("- Check that worker packet claims are supported by Den messages, review records, and repo branch/head metadata.");
+            sb.AppendLine("- Post a `packet_audit_packet` with pass/fail checks and fail-closed diagnostics for unsupported claims.");
         }
         else
         {
