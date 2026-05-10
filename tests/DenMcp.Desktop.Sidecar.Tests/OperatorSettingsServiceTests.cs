@@ -28,8 +28,12 @@ public class OperatorSettingsServiceTests
         Assert.Equal("Desk", loaded.SourceDisplayName);
         Assert.Equal(OperatorSettings.MinPollIntervalSeconds, loaded.PollIntervalSeconds);
         Assert.Equal(OperatorSettings.MaxChangedFilesLimit, loaded.MaxChangedFiles);
+        Assert.True(loaded.IncludeHiddenSpaces);
+        Assert.True(loaded.IncludeArchivedSpaces);
         Assert.Contains("\"denBaseUrl\"", json, StringComparison.Ordinal);
         Assert.Contains("\"sourceInstanceId\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"includeHiddenSpaces\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"includeArchivedSpaces\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("den_base_url", json, StringComparison.Ordinal);
         Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(path)!, "*.tmp"));
     }
@@ -47,6 +51,8 @@ public class OperatorSettingsServiceTests
         Assert.Equal(OperatorSettings.DefaultDenBaseUrl, first.DenBaseUrl);
         Assert.Equal("den-desktop-generated-once", first.SourceInstanceId);
         Assert.Equal(OperatorSettings.DefaultSourceDisplayName, first.SourceDisplayName);
+        Assert.True(first.IncludeHiddenSpaces);
+        Assert.True(first.IncludeArchivedSpaces);
         Assert.Equal(first.SourceInstanceId, second.SourceInstanceId);
         Assert.Equal(first, second);
     }
@@ -66,6 +72,31 @@ public class OperatorSettingsServiceTests
         Assert.Equal(OperatorSettings.DefaultSourceDisplayName, settings.SourceDisplayName);
         Assert.Equal(OperatorSettings.DefaultPollIntervalSeconds, settings.PollIntervalSeconds);
         Assert.Equal(OperatorSettings.DefaultMaxChangedFiles, settings.MaxChangedFiles);
+        Assert.True(settings.IncludeHiddenSpaces);
+        Assert.True(settings.IncludeArchivedSpaces);
+    }
+
+    [Fact]
+    public void Load_ExistingSettingsWithoutVisibilityPolicyUsesSafeDefaults()
+    {
+        var path = TempSettingsPath();
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, """
+            {
+              "denBaseUrl": "http://den.test",
+              "sourceInstanceId": "stable-source",
+              "sourceDisplayName": "Desk",
+              "pollIntervalSeconds": 30,
+              "maxChangedFiles": 200
+            }
+            """);
+        var service = Service(path, "unused-source");
+
+        var settings = service.Load();
+
+        Assert.Equal("http://den.test", settings.DenBaseUrl);
+        Assert.True(settings.IncludeHiddenSpaces);
+        Assert.True(settings.IncludeArchivedSpaces);
     }
 
     [Fact]
@@ -85,6 +116,8 @@ public class OperatorSettingsServiceTests
         Assert.Null(normalized.SourceDisplayName);
         Assert.Equal(OperatorSettings.MaxPollIntervalSeconds, normalized.PollIntervalSeconds);
         Assert.Equal(OperatorSettings.MinChangedFiles, normalized.MaxChangedFiles);
+        Assert.True(normalized.IncludeHiddenSpaces);
+        Assert.True(normalized.IncludeArchivedSpaces);
     }
 
     [Fact]
@@ -99,6 +132,8 @@ public class OperatorSettingsServiceTests
             SourceDisplayName = "Old",
             PollIntervalSeconds = 45,
             MaxChangedFiles = 300,
+            IncludeHiddenSpaces = false,
+            IncludeArchivedSpaces = true,
         });
 
         var saved = service.Save(new SaveOperatorSettingsRequest
@@ -106,6 +141,7 @@ public class OperatorSettingsServiceTests
             DenBaseUrl = " http://new/ ",
             SourceDisplayName = "   ",
             MaxChangedFiles = 4_000,
+            IncludeArchivedSpaces = false,
         });
 
         Assert.Equal("stable-source", saved.SourceInstanceId);
@@ -113,6 +149,8 @@ public class OperatorSettingsServiceTests
         Assert.Null(saved.SourceDisplayName);
         Assert.Equal(45, saved.PollIntervalSeconds);
         Assert.Equal(OperatorSettings.MaxChangedFilesLimit, saved.MaxChangedFiles);
+        Assert.False(saved.IncludeHiddenSpaces);
+        Assert.False(saved.IncludeArchivedSpaces);
 
         using var document = JsonDocument.Parse(File.ReadAllText(path));
         Assert.True(document.RootElement.TryGetProperty("sourceDisplayName", out var sourceDisplayName));

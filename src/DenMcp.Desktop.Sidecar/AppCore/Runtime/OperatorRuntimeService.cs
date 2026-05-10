@@ -628,7 +628,10 @@ public sealed class OperatorRuntimeService : IAsyncDisposable, IDisposable
         {
             try
             {
-                spaces = await _den.ListSpacesAsync(settings.DenBaseUrl, cancellationToken).ConfigureAwait(false);
+                spaces = await _den.ListSpacesAsync(
+                    settings.DenBaseUrl,
+                    DenSpaceListOptions.FromSettings(settings),
+                    cancellationToken).ConfigureAwait(false);
             }
             catch (DenHttpClientException ex)
             {

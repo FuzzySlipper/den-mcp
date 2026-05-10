@@ -40,7 +40,11 @@ public class DenHttpClientTests
             """));
         var client = new DenHttpClient(new HttpClient(handler));
 
-        var spaces = await client.ListSpacesAsync("http://den.test");
+        var spaces = await client.ListSpacesAsync("http://den.test", new DenSpaceListOptions
+        {
+            IncludeHidden = true,
+            IncludeArchived = true,
+        });
 
         Assert.Equal(2, spaces.Count);
         Assert.Equal("personal-1", spaces[0].Id);
@@ -49,6 +53,21 @@ public class DenHttpClientTests
         Assert.Equal("assistant", spaces[1].Kind);
         Assert.Equal("GET", handler.Requests[0].Method);
         Assert.Equal("http://den.test/api/spaces?includeHidden=true&includeArchived=true", handler.Requests[0].Uri);
+    }
+
+    [Fact]
+    public async Task ListSpaces_UsesExplicitVisibilityPolicyInQuery()
+    {
+        var handler = new RecordingHandler(JsonResponse("[]"));
+        var client = new DenHttpClient(new HttpClient(handler));
+
+        await client.ListSpacesAsync("http://den.test", new DenSpaceListOptions
+        {
+            IncludeHidden = false,
+            IncludeArchived = true,
+        });
+
+        Assert.Equal("http://den.test/api/spaces?includeHidden=false&includeArchived=true", handler.Requests[0].Uri);
     }
 
     [Fact]

@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   isMultiWorkspaceProject,
+  projectRowTitle,
   projectRows,
   spaceRows,
   workspaceRowLabel,
   workspaceRowsForProject,
+  workspaceToggleLabel,
 } from '../src/railView.ts';
 
 function space(overrides = {}) {
@@ -147,6 +149,17 @@ test('isMultiWorkspaceProject returns true for multi-workspace projects', () => 
 test('isMultiWorkspaceProject returns false for single-workspace projects', () => {
   const snapshots = [snapshot()];
   assert.equal(isMultiWorkspaceProject(snapshots, 'den-mcp'), false);
+});
+
+test('workspaceToggleLabel describes explicit expand and collapse controls', () => {
+  assert.equal(workspaceToggleLabel('Den MCP', false), 'Expand Den MCP workspaces');
+  assert.equal(workspaceToggleLabel('Den MCP', true), 'Collapse Den MCP workspaces');
+});
+
+test('projectRowTitle documents that multi-workspace rows select while the chevron expands', () => {
+  const row = { name: 'Den MCP', subtitle: 'project · 2 workspaces' };
+  assert.equal(projectRowTitle(row, false), 'Den MCP · project · 2 workspaces');
+  assert.match(projectRowTitle(row, true), /row selects the space; adjacent chevron toggles workspaces/);
 });
 
 test('workspaceRowsForProject returns sorted workspace rows', () => {

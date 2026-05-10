@@ -235,7 +235,37 @@ public class OperatorRuntimeServiceTests
         Assert.Contains(status.Spaces, s => s.Id == "assistant-1" && s.Kind == "assistant");
         Assert.Contains(status.Spaces, s => s.Id == "den-mcp" && s.Kind == "project");
         Assert.Equal(3, spaces.Count);
-        Assert.Contains(service.Http.Requests, request => request.Uri.Contains("/api/spaces", StringComparison.Ordinal) && request.Uri.Contains("includeHidden=true", StringComparison.Ordinal));
+        Assert.Contains(service.Http.Requests, request =>
+            request.Uri.Contains("/api/spaces", StringComparison.Ordinal)
+            && request.Uri.Contains("includeHidden=true", StringComparison.Ordinal)
+            && request.Uri.Contains("includeArchived=true", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RefreshAsync_AppliesConfiguredSpaceVisibilityPolicy()
+    {
+        using var temp = TempDirectory.Create();
+        var service = CreateService(
+            temp,
+            new QueueHandler(
+                JsonResponse("""
+                    {"status":"healthy","version":"1.0"}
+                    """),
+                JsonResponse("[]"),
+                JsonResponse("[]"),
+                JsonResponse("[]")),
+            new FakeGitRunner(),
+            settings: OperatorSettings.CreateDefault(() => "desktop-test") with
+            {
+                IncludeHiddenSpaces = false,
+                IncludeArchivedSpaces = false,
+            });
+
+        await service.Runtime.StartAsync(runInitialRefresh: false, startBackgroundLoop: false);
+        await service.Runtime.RefreshAsync();
+
+        Assert.Contains(service.Http.Requests, request =>
+            request.Uri == "http://localhost:5199/api/spaces?includeHidden=false&includeArchived=false");
     }
 
     [Fact]

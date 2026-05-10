@@ -71,6 +71,17 @@ are labeled with their `kind`, `visibility`, and root-path capability so they ar
 not presented as code projects unless they have a meaningful `root_path` or local
 workspace snapshot.
 
+In Den Desktop's left rail, clicking a project/space row selects that space. For
+projects with multiple local workspaces, expansion is a separate adjacent chevron
+control with an explicit expand/collapse label; selecting the row does not
+implicitly expand or collapse workspace children.
+
+Den Desktop includes hidden and archived spaces in switcher queries by default so
+operators can see and distinguish their visibility labels. This is an explicit
+operator policy controlled by `includeHiddenSpaces` and `includeArchivedSpaces` in
+operator settings, not an authorization bypass; Den API/server authorization
+remains responsible for deciding which spaces a caller may receive.
+
 ## Boundaries and non-goals
 
 - **No automatic cross-space search.** Agents must query each space explicitly.

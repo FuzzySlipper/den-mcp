@@ -180,6 +180,22 @@ export function isMultiWorkspaceProject(snapshots: LocalGitSnapshot[], projectId
 }
 
 /**
+ * Build the accessible label for the explicit workspace expand/collapse control.
+ * Project row clicks select the space; this separate control manages the child workspace list.
+ */
+export function workspaceToggleLabel(projectName: string, expanded: boolean): string {
+  return `${expanded ? 'Collapse' : 'Expand'} ${projectName} workspaces`;
+}
+
+/**
+ * Build the project-row title text shown in the rail.
+ */
+export function projectRowTitle(row: Pick<ProjectRailRow, 'name' | 'subtitle'>, hasWorkspaceToggle: boolean): string {
+  const base = `${row.name} · ${row.subtitle}`;
+  return hasWorkspaceToggle ? `${base} · row selects the space; adjacent chevron toggles workspaces` : base;
+}
+
+/**
  * Build workspace rows for a given project from the snapshot list.
  * Each snapshot under the project becomes a selectable workspace row.
  * Rows are sorted by workspace ID (nulls last), then by task ID.

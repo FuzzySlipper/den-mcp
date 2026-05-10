@@ -4,6 +4,22 @@ using System.Text.Json.Serialization;
 
 namespace DenMcp.Desktop.Sidecar;
 
+public sealed record DenSpaceListOptions
+{
+    public bool IncludeHidden { get; init; }
+    public bool IncludeArchived { get; init; }
+
+    public static DenSpaceListOptions FromSettings(OperatorSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        return new DenSpaceListOptions
+        {
+            IncludeHidden = settings.IncludeHiddenSpaces,
+            IncludeArchived = settings.IncludeArchivedSpaces,
+        };
+    }
+}
+
 public sealed class DenHttpClient
 {
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(8);
@@ -64,15 +80,19 @@ public sealed class DenHttpClient
         }
     }
 
-    public async Task<IReadOnlyList<DenSpace>> ListSpacesAsync(string baseUrl, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<DenSpace>> ListSpacesAsync(
+        string baseUrl,
+        DenSpaceListOptions options,
+        CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(options);
         var url = BuildUrl(
             baseUrl,
             "/api/spaces",
             new[]
             {
-                new QueryParameter("includeHidden", "true"),
-                new QueryParameter("includeArchived", "true"),
+                new QueryParameter("includeHidden", options.IncludeHidden ? "true" : "false"),
+                new QueryParameter("includeArchived", options.IncludeArchived ? "true" : "false"),
             });
         var response = await SendAsync(
             () => new HttpRequestMessage(HttpMethod.Get, url),

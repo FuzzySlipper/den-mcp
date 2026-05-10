@@ -13,6 +13,8 @@ export function ConnectionPanel({ status, settings, onRefresh, onSaveSettings, s
   const [denBaseUrl, setDenBaseUrl] = useState('http://localhost:5199');
   const [displayName, setDisplayName] = useState('');
   const [pollInterval, setPollInterval] = useState(30);
+  const [includeHiddenSpaces, setIncludeHiddenSpaces] = useState(true);
+  const [includeArchivedSpaces, setIncludeArchivedSpaces] = useState(true);
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -21,6 +23,8 @@ export function ConnectionPanel({ status, settings, onRefresh, onSaveSettings, s
     setDenBaseUrl(settings.denBaseUrl);
     setDisplayName(settings.sourceDisplayName ?? '');
     setPollInterval(settings.pollIntervalSeconds);
+    setIncludeHiddenSpaces(settings.includeHiddenSpaces);
+    setIncludeArchivedSpaces(settings.includeArchivedSpaces);
   }, [settings]);
 
   const submit = async (event: FormEvent) => {
@@ -31,6 +35,8 @@ export function ConnectionPanel({ status, settings, onRefresh, onSaveSettings, s
         denBaseUrl,
         sourceDisplayName: displayName || null,
         pollIntervalSeconds: pollInterval,
+        includeHiddenSpaces,
+        includeArchivedSpaces,
       });
     } finally {
       setSaving(false);
@@ -87,6 +93,23 @@ export function ConnectionPanel({ status, settings, onRefresh, onSaveSettings, s
               onChange={(event) => setPollInterval(Number(event.target.value))}
             />
           </label>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={includeHiddenSpaces}
+              onChange={(event) => setIncludeHiddenSpaces(event.target.checked)}
+            />
+            <span>Include hidden spaces in switchers</span>
+          </label>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={includeArchivedSpaces}
+              onChange={(event) => setIncludeArchivedSpaces(event.target.checked)}
+            />
+            <span>Include archived spaces in switchers</span>
+          </label>
+          <p className="form-hint">Space visibility inclusion is an explicit operator policy; returned hidden/archived spaces are labeled in the switcher.</p>
           <div className="button-row">
             <button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</button>
             <button type="button" className="secondary" disabled={refreshing} onClick={refresh}>

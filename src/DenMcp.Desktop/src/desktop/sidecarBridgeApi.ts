@@ -117,6 +117,8 @@ export interface OperatorSettings {
   sourceDisplayName: string | null;
   pollIntervalSeconds: number;
   maxChangedFiles: number;
+  includeHiddenSpaces: boolean;
+  includeArchivedSpaces: boolean;
 }
 
 export interface SaveOperatorSettingsRequest {
@@ -124,6 +126,8 @@ export interface SaveOperatorSettingsRequest {
   sourceDisplayName: string | null;
   pollIntervalSeconds?: number;
   maxChangedFiles?: number;
+  includeHiddenSpaces?: boolean;
+  includeArchivedSpaces?: boolean;
 }
 
 export interface DiagnosticEntry {

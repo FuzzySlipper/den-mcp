@@ -8,6 +8,8 @@ public sealed record OperatorSettings
     public const string DefaultSourceDisplayName = "Den Desktop";
     public const int DefaultPollIntervalSeconds = 30;
     public const int DefaultMaxChangedFiles = 200;
+    public const bool DefaultIncludeHiddenSpaces = true;
+    public const bool DefaultIncludeArchivedSpaces = true;
     public const int MinPollIntervalSeconds = 5;
     public const int MaxPollIntervalSeconds = 3600;
     public const int MinChangedFiles = 25;
@@ -32,6 +34,12 @@ public sealed record OperatorSettings
     [JsonPropertyName("maxChangedFiles")]
     public int MaxChangedFiles { get; init; } = DefaultMaxChangedFiles;
 
+    [JsonPropertyName("includeHiddenSpaces")]
+    public bool IncludeHiddenSpaces { get; init; } = DefaultIncludeHiddenSpaces;
+
+    [JsonPropertyName("includeArchivedSpaces")]
+    public bool IncludeArchivedSpaces { get; init; } = DefaultIncludeArchivedSpaces;
+
     public static OperatorSettings CreateDefault(Func<string>? sourceInstanceIdFactory = null)
     {
         return new OperatorSettings
@@ -41,6 +49,8 @@ public sealed record OperatorSettings
             SourceDisplayName = DefaultSourceDisplayName,
             PollIntervalSeconds = DefaultPollIntervalSeconds,
             MaxChangedFiles = DefaultMaxChangedFiles,
+            IncludeHiddenSpaces = DefaultIncludeHiddenSpaces,
+            IncludeArchivedSpaces = DefaultIncludeArchivedSpaces,
         };
     }
 
@@ -83,6 +93,8 @@ public sealed record OperatorSettings
             SourceDisplayName = TrimToOption(request.SourceDisplayName),
             PollIntervalSeconds = request.PollIntervalSeconds ?? current.PollIntervalSeconds,
             MaxChangedFiles = request.MaxChangedFiles ?? current.MaxChangedFiles,
+            IncludeHiddenSpaces = request.IncludeHiddenSpaces ?? current.IncludeHiddenSpaces,
+            IncludeArchivedSpaces = request.IncludeArchivedSpaces ?? current.IncludeArchivedSpaces,
         }.Normalized(sourceInstanceIdFactory);
     }
 
@@ -120,4 +132,10 @@ public sealed record SaveOperatorSettingsRequest
 
     [JsonPropertyName("maxChangedFiles")]
     public int? MaxChangedFiles { get; init; }
+
+    [JsonPropertyName("includeHiddenSpaces")]
+    public bool? IncludeHiddenSpaces { get; init; }
+
+    [JsonPropertyName("includeArchivedSpaces")]
+    public bool? IncludeArchivedSpaces { get; init; }
 }
