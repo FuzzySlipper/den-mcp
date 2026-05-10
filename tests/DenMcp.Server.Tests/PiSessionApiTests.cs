@@ -48,6 +48,129 @@ public sealed class PiSessionApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task StagedSmoke_CoderReviewerFullLoop_UsesDenStateAndBoundedReferences()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var tasks = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+        var messages = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+        var service = scope.ServiceProvider.GetRequiredService<IPiSessionService>();
+        var sessions = scope.ServiceProvider.GetRequiredService<IPiSessionRepository>();
+
+        var longDescription = new string('z', 5000);
+        var smokeTask = await tasks.CreateAsync(new ProjectTask
+        {
+            ProjectId = ProjectId,
+            Title = "Smoke Den Pi worker loop",
+            Description = longDescription,
+            Status = DenMcp.Core.Models.TaskStatus.InProgress,
+            Tags = ["smoke-test"]
+        });
+
+        // Stage 1: coder-only smoke: packet -> coder launch -> implementation packet -> branch/head/test verification.
+        var coderStart = await CoderPathTools.StartCoderWorkerPath(
+            tasks,
+            messages,
+            service,
+            ProjectId,
+            smokeTask.Id,
+            requested_by: "hermes",
+            branch: "task/1247-smoke-coder",
+            base_branch: "main",
+            base_commit: "base-smoke",
+            session_id: "smoke-coder",
+            run_id: "smoke-coder-run",
+            callback_ports: "[{\"host_port\":21467,\"container_port\":1455}]",
+            verbose: true);
+        using var coderStartJson = JsonDocument.Parse(coderStart);
+        var coderWorker = coderStartJson.RootElement.GetProperty("worker_run");
+        var coderPacketId = coderStartJson.RootElement.GetProperty("packet_ref").GetProperty("message_id").GetInt32();
+        Assert.Equal("coder", coderWorker.GetProperty("role").GetString());
+        Assert.False(coderWorker.GetProperty("prompt_ref").GetRawText().Contains(longDescription, StringComparison.Ordinal));
+        Assert.False(_factory.FakeHost.Launches.Last().Record.LaunchCommandDisplay.Contains(longDescription, StringComparison.Ordinal));
+        Assert.False(string.IsNullOrWhiteSpace(coderWorker.GetProperty("session").GetProperty("tmux_session").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(coderWorker.GetProperty("session").GetProperty("container_name").GetString()));
+
+        await CompletionTools.PostWorkerCompletionPacket(
+            service,
+            sessions,
+            messages,
+            ProjectId,
+            run_id: "smoke-coder-run",
+            requested_by: "pi-coder",
+            status: "completed",
+            role: "coder",
+            packet_type: "implementation_packet",
+            summary: "Smoke implementation completed.",
+            branch: "task/1247-smoke-coder",
+            head_commit: "smoke-head-coder",
+            tests_run: "[\"dotnet build tests/DenMcp.Server.Tests/DenMcp.Server.Tests.csproj --no-restore\"]",
+            verbose: true);
+        var coderVerify = await CoderPathTools.VerifyCoderWorkerCompletion(messages, ProjectId, run_id: "smoke-coder-run", task_id: smokeTask.Id, verbose: true);
+        using var coderVerifyJson = JsonDocument.Parse(coderVerify);
+        Assert.Equal("ready_for_review", coderVerifyJson.RootElement.GetProperty("verdict").GetString());
+
+        // Stage 2: reviewer smoke: implementation/review context -> reviewer launch -> findings/verdict packet.
+        var reviewerStart = await ReviewerPathTools.StartReviewerWorkerPath(
+            tasks,
+            messages,
+            service,
+            ProjectId,
+            smokeTask.Id,
+            requested_by: "hermes",
+            review_round_id: 247,
+            branch: "task/1247-smoke-coder",
+            base_branch: "main",
+            base_commit: "base-smoke",
+            head_commit: "smoke-head-coder",
+            session_id: "smoke-reviewer",
+            run_id: "smoke-reviewer-run",
+            callback_ports: "[{\"host_port\":21468,\"container_port\":1455}]",
+            verbose: true);
+        using var reviewerStartJson = JsonDocument.Parse(reviewerStart);
+        Assert.Equal("reviewer", reviewerStartJson.RootElement.GetProperty("worker_run").GetProperty("role").GetString());
+
+        await CompletionTools.PostWorkerCompletionPacket(
+            service,
+            sessions,
+            messages,
+            ProjectId,
+            run_id: "smoke-reviewer-run",
+            requested_by: "den-mcp-runner-reviewer",
+            status: "completed",
+            role: "reviewer",
+            packet_type: "review_findings_packet",
+            summary: "Smoke reviewer verdict: looks_good.",
+            branch: "task/1247-smoke-coder",
+            head_commit: "smoke-head-coder",
+            review_round_id: 247,
+            finding_ids: "[]",
+            tests_run: "[\"dotnet build tests/DenMcp.Server.Tests/DenMcp.Server.Tests.csproj --no-restore\"]",
+            verbose: true);
+        var reviewerVerify = await ReviewerPathTools.VerifyReviewerWorkerCompletion(messages, ProjectId, run_id: "smoke-reviewer-run", task_id: smokeTask.Id, verbose: true);
+        using var reviewerVerifyJson = JsonDocument.Parse(reviewerVerify);
+        Assert.Equal("review_recorded", reviewerVerifyJson.RootElement.GetProperty("verdict").GetString());
+
+        // Stage 3: full-loop smoke: orchestrator next-action decision + cleanup/status handles.
+        var coderStatus = await WorkerTools.GetWorkerRun(service, ProjectId, "smoke-coder-run", verbose: true);
+        var reviewerStatus = await WorkerTools.GetWorkerRun(service, ProjectId, "smoke-reviewer-run", verbose: true);
+        using var coderStatusJson = JsonDocument.Parse(coderStatus);
+        using var reviewerStatusJson = JsonDocument.Parse(reviewerStatus);
+        Assert.Equal("completed", coderStatusJson.RootElement.GetProperty("worker_run").GetProperty("status").GetString());
+        Assert.Equal("completed", reviewerStatusJson.RootElement.GetProperty("worker_run").GetProperty("status").GetString());
+        Assert.Equal("request_review_or_mark_done", DecideNextAction(coderVerifyJson.RootElement.GetProperty("verdict").GetString(), reviewerVerifyJson.RootElement.GetProperty("verdict").GetString()));
+
+        var coderPacket = await messages.GetByIdAsync(coderPacketId);
+        Assert.Equal("coder_context_packet", coderPacket!.Metadata?.GetProperty("type").GetString());
+        Assert.DoesNotContain(longDescription, _factory.FakeHost.Launches[0].Record.LaunchCommandDisplay, StringComparison.Ordinal);
+        Assert.True(_factory.FakeHost.Launches.Count >= 2);
+    }
+
+    private static string DecideNextAction(string? coderVerdict, string? reviewerVerdict) =>
+        coderVerdict == "ready_for_review" && reviewerVerdict == "review_recorded"
+            ? "request_review_or_mark_done"
+            : "wait_or_recover";
+
+    [Fact]
     public async Task ReviewerPathTools_StartAndVerify_UseDenReviewCompletionState()
     {
         using var scope = _factory.Services.CreateScope();
