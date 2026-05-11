@@ -606,7 +606,8 @@ public sealed class WorkerTools
             2. Treat the referenced Den packet/state file as authoritative task context.
             3. This startup prompt is intentionally bounded; do not expect large prompt bodies in process args.
             4. Keep secrets and raw reasoning out of logs and completion packets.
-            5. Post a structured Den worker completion packet when finished or blocked.
+            5. On completion/block/failure, call MCP tool `post_worker_completion_packet` as the tracked worker completion record; do not rely on `send_message` alone.
+            6. Use literal runtime environment values for identity: pass `run_id` = value of `DEN_WORKER_RUN_ID`, `project_id` = `DEN_WORKER_PROJECT_ID`, and `role` = `DEN_WORKER_ROLE`; use `DEN_WORKER_TASK_ID` only to verify you are completing the expected task. Never pass placeholder text like `(literal DEN_WORKER_RUN_ID)` or `$DEN_WORKER_RUN_ID`.
 
             Packet reference:
             - project_id: `{projectId}`

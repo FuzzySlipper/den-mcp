@@ -66,6 +66,9 @@ public class WorkerObservabilityToolsTests
         Assert.Contains("DEN_WORKER_STARTUP_PROMPT", worker.GetProperty("startup_contract").GetProperty("environment_keys").EnumerateArray().Select(e => e.GetString()));
         Assert.NotNull(service.CapturedRequest);
         Assert.Contains("prompt_packet_message_id: `5549`", service.CapturedRequest!.StartupPrompt);
+        Assert.Contains("post_worker_completion_packet", service.CapturedRequest!.StartupPrompt);
+        Assert.Contains("DEN_WORKER_RUN_ID", service.CapturedRequest!.StartupPrompt);
+        Assert.Contains("send_message", service.CapturedRequest!.StartupPrompt);
     }
 
     [Fact]

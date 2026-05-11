@@ -338,6 +338,10 @@ public class MessageApiTests : IAsyncLifetime
         Assert.Contains("Implement packet flow", packet.GetProperty("content").GetString());
         Assert.Contains("bounded references", packet.GetProperty("content").GetString());
         Assert.Contains("Prompt-injection", packet.GetProperty("content").GetString());
+        Assert.Contains("post_worker_completion_packet", packet.GetProperty("content").GetString());
+        Assert.Contains("Do not use `send_message`", packet.GetProperty("content").GetString());
+        Assert.Contains("DEN_WORKER_RUN_ID", packet.GetProperty("content").GetString());
+        Assert.Contains("Never invent, template, shell-expand", packet.GetProperty("content").GetString());
 
         var latestJson = await PacketTools.GetLatestTaskPacket(messages, ProjectId, task.Id, packet_type: "coder_context_packet", verbose: true);
         using var latestDoc = JsonDocument.Parse(latestJson);
@@ -385,8 +389,11 @@ public class MessageApiTests : IAsyncLifetime
         Assert.Contains($"message #{messageId}", prompt);
         Assert.Contains("get_thread", prompt);
         Assert.Contains("reviewer_context_packet", prompt);
+        Assert.Contains("post_worker_completion_packet", prompt);
+        Assert.Contains("DEN_WORKER_RUN_ID", prompt);
+        Assert.Contains("send_message", prompt);
         Assert.DoesNotContain(new string('x', 100), prompt);
-        Assert.True(prompt!.Length < 1600);
+        Assert.True(prompt!.Length < 2200);
     }
 
     [Fact]
