@@ -39,6 +39,7 @@ public sealed class DatabaseInitializer
         await RunMigrationsAsync(connection);
 
         await EnsureGlobalProjectAsync(connection);
+        await EnsureProjectChannelsAsync(connection);
 
         _logger.LogInformation("Database initialized at {ConnectionString}", _connectionString);
     }
@@ -467,6 +468,97 @@ public sealed class DatabaseInitializer
         CREATE INDEX IF NOT EXISTS idx_agent_stream_recipient_instance_created
             ON agent_stream_entries(recipient_instance_id, created_at DESC, id DESC)
             WHERE recipient_instance_id IS NOT NULL;
+
+        ------------------------------------------------------------
+        -- CHANNELS
+        ------------------------------------------------------------
+        CREATE TABLE IF NOT EXISTS channels (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            slug          TEXT NOT NULL UNIQUE,
+            display_name  TEXT NOT NULL,
+            kind          TEXT NOT NULL
+                          CHECK (kind IN ('project_default', 'project_activity', 'task_room', 'ad_hoc', 'system', 'dm', 'small_group')),
+            project_id    TEXT REFERENCES projects(id) ON DELETE CASCADE,
+            space_id      TEXT REFERENCES projects(id) ON DELETE SET NULL,
+            created_by    TEXT NOT NULL DEFAULT 'system',
+            visibility    TEXT NOT NULL DEFAULT 'normal'
+                          CHECK (visibility IN ('normal', 'private', 'archived')),
+            settings_json TEXT,
+            created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+            archived_at   TEXT
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_channels_project_default_unique
+            ON channels(project_id)
+            WHERE project_id IS NOT NULL AND kind = 'project_default';
+        CREATE INDEX IF NOT EXISTS idx_channels_project_kind
+            ON channels(project_id, kind);
+
+        CREATE TABLE IF NOT EXISTS channel_messages (
+            id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+            channel_id             INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+            sender_type            TEXT NOT NULL
+                                   CHECK (sender_type IN ('user', 'agent', 'system', 'bridge')),
+            sender_identity        TEXT NOT NULL,
+            body                   TEXT NOT NULL,
+            message_kind           TEXT NOT NULL DEFAULT 'human_text'
+                                   CHECK (message_kind IN ('human_text', 'agent_text', 'system_event', 'mirror_summary', 'command', 'command_result')),
+            source_kind            TEXT
+                                   CHECK (source_kind IS NULL OR source_kind IN ('task_message', 'agent_stream_entry', 'notification', 'worker_run', 'review_round', 'review_finding', 'wake_event', 'external_adapter_message')),
+            source_id              TEXT,
+            summary                TEXT,
+            deep_link              TEXT,
+            thread_root_message_id INTEGER REFERENCES channel_messages(id) ON DELETE SET NULL,
+            reply_to_message_id    INTEGER REFERENCES channel_messages(id) ON DELETE SET NULL,
+            metadata_json          TEXT,
+            created_at             TEXT NOT NULL DEFAULT (datetime('now')),
+            edited_at              TEXT,
+            deleted_at             TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_channel_messages_channel_created
+            ON channel_messages(channel_id, created_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_channel_messages_source
+            ON channel_messages(source_kind, source_id)
+            WHERE source_kind IS NOT NULL AND source_id IS NOT NULL;
+
+        CREATE TABLE IF NOT EXISTS channel_memberships (
+            id                            INTEGER PRIMARY KEY AUTOINCREMENT,
+            channel_id                    INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+            member_type                   TEXT NOT NULL
+                                          CHECK (member_type IN ('user', 'agent', 'role', 'group')),
+            member_identity               TEXT NOT NULL,
+            membership_status             TEXT NOT NULL DEFAULT 'active'
+                                          CHECK (membership_status IN ('active', 'muted', 'left', 'banned')),
+            wake_policy                   TEXT NOT NULL DEFAULT 'mentions_only'
+                                          CHECK (wake_policy IN ('never', 'mentions_only', 'direct_questions_only', 'substantive_digest', 'all_human_messages', 'all_messages_except_self')),
+            can_send                      INTEGER NOT NULL DEFAULT 1 CHECK (can_send IN (0, 1)),
+            can_react                     INTEGER NOT NULL DEFAULT 1 CHECK (can_react IN (0, 1)),
+            can_invite                    INTEGER NOT NULL DEFAULT 0 CHECK (can_invite IN (0, 1)),
+            cooldown_seconds              INTEGER NOT NULL DEFAULT 0 CHECK (cooldown_seconds >= 0),
+            max_auto_replies_per_window   INTEGER NOT NULL DEFAULT 0 CHECK (max_auto_replies_per_window >= 0),
+            settings_json                 TEXT,
+            created_at                    TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at                    TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(channel_id, member_type, member_identity)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_channel_memberships_member
+            ON channel_memberships(member_type, member_identity, membership_status);
+
+        CREATE TABLE IF NOT EXISTS channel_reactions (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            channel_message_id    INTEGER NOT NULL REFERENCES channel_messages(id) ON DELETE CASCADE,
+            reactor_type          TEXT NOT NULL CHECK (reactor_type IN ('user', 'agent', 'system', 'bridge')),
+            reactor_identity      TEXT NOT NULL,
+            reaction_key          TEXT NOT NULL,
+            created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(channel_message_id, reactor_type, reactor_identity, reaction_key)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_channel_reactions_message
+            ON channel_reactions(channel_message_id);
 
         ------------------------------------------------------------
         -- AGENT RUNS
@@ -979,6 +1071,8 @@ public sealed class DatabaseInitializer
         await TryAddColumnAsync(connection, "projects", "owner", "TEXT");
         await TryAddColumnAsync(connection, "projects", "settings_json", "TEXT");
         await BackfillProjectSpaceMetadataAsync(connection);
+        await EnsureChannelSchemaAsync(connection);
+        await EnsureProjectChannelsAsync(connection);
         await EnsureIndexAsync(connection, "idx_messages_project_intent",
             "CREATE INDEX IF NOT EXISTS idx_messages_project_intent ON messages(project_id, intent)");
         await EnsureIndexAsync(connection, "idx_agent_bindings_project_status",
@@ -1784,6 +1878,121 @@ public sealed class DatabaseInitializer
         cmd.CommandText = """
             INSERT OR IGNORE INTO projects (id, name, kind, visibility, description)
             VALUES ('_global', 'Global', 'system', 'hidden', 'Cross-project documents and discussions')
+            """;
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    private static async Task EnsureChannelSchemaAsync(SqliteConnection connection)
+    {
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            CREATE TABLE IF NOT EXISTS channels (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                slug          TEXT NOT NULL UNIQUE,
+                display_name  TEXT NOT NULL,
+                kind          TEXT NOT NULL
+                              CHECK (kind IN ('project_default', 'project_activity', 'task_room', 'ad_hoc', 'system', 'dm', 'small_group')),
+                project_id    TEXT REFERENCES projects(id) ON DELETE CASCADE,
+                space_id      TEXT REFERENCES projects(id) ON DELETE SET NULL,
+                created_by    TEXT NOT NULL DEFAULT 'system',
+                visibility    TEXT NOT NULL DEFAULT 'normal'
+                              CHECK (visibility IN ('normal', 'private', 'archived')),
+                settings_json TEXT,
+                created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+                archived_at   TEXT
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_channels_project_default_unique
+                ON channels(project_id)
+                WHERE project_id IS NOT NULL AND kind = 'project_default';
+            CREATE INDEX IF NOT EXISTS idx_channels_project_kind
+                ON channels(project_id, kind);
+
+            CREATE TABLE IF NOT EXISTS channel_messages (
+                id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+                channel_id             INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+                sender_type            TEXT NOT NULL
+                                       CHECK (sender_type IN ('user', 'agent', 'system', 'bridge')),
+                sender_identity        TEXT NOT NULL,
+                body                   TEXT NOT NULL,
+                message_kind           TEXT NOT NULL DEFAULT 'human_text'
+                                       CHECK (message_kind IN ('human_text', 'agent_text', 'system_event', 'mirror_summary', 'command', 'command_result')),
+                source_kind            TEXT
+                                       CHECK (source_kind IS NULL OR source_kind IN ('task_message', 'agent_stream_entry', 'notification', 'worker_run', 'review_round', 'review_finding', 'wake_event', 'external_adapter_message')),
+                source_id              TEXT,
+                summary                TEXT,
+                deep_link              TEXT,
+                thread_root_message_id INTEGER REFERENCES channel_messages(id) ON DELETE SET NULL,
+                reply_to_message_id    INTEGER REFERENCES channel_messages(id) ON DELETE SET NULL,
+                metadata_json          TEXT,
+                created_at             TEXT NOT NULL DEFAULT (datetime('now')),
+                edited_at              TEXT,
+                deleted_at             TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_channel_messages_channel_created
+                ON channel_messages(channel_id, created_at DESC, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_channel_messages_source
+                ON channel_messages(source_kind, source_id)
+                WHERE source_kind IS NOT NULL AND source_id IS NOT NULL;
+
+            CREATE TABLE IF NOT EXISTS channel_memberships (
+                id                            INTEGER PRIMARY KEY AUTOINCREMENT,
+                channel_id                    INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+                member_type                   TEXT NOT NULL
+                                              CHECK (member_type IN ('user', 'agent', 'role', 'group')),
+                member_identity               TEXT NOT NULL,
+                membership_status             TEXT NOT NULL DEFAULT 'active'
+                                              CHECK (membership_status IN ('active', 'muted', 'left', 'banned')),
+                wake_policy                   TEXT NOT NULL DEFAULT 'mentions_only'
+                                              CHECK (wake_policy IN ('never', 'mentions_only', 'direct_questions_only', 'substantive_digest', 'all_human_messages', 'all_messages_except_self')),
+                can_send                      INTEGER NOT NULL DEFAULT 1 CHECK (can_send IN (0, 1)),
+                can_react                     INTEGER NOT NULL DEFAULT 1 CHECK (can_react IN (0, 1)),
+                can_invite                    INTEGER NOT NULL DEFAULT 0 CHECK (can_invite IN (0, 1)),
+                cooldown_seconds              INTEGER NOT NULL DEFAULT 0 CHECK (cooldown_seconds >= 0),
+                max_auto_replies_per_window   INTEGER NOT NULL DEFAULT 0 CHECK (max_auto_replies_per_window >= 0),
+                settings_json                 TEXT,
+                created_at                    TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at                    TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(channel_id, member_type, member_identity)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_channel_memberships_member
+                ON channel_memberships(member_type, member_identity, membership_status);
+
+            CREATE TABLE IF NOT EXISTS channel_reactions (
+                id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                channel_message_id    INTEGER NOT NULL REFERENCES channel_messages(id) ON DELETE CASCADE,
+                reactor_type          TEXT NOT NULL CHECK (reactor_type IN ('user', 'agent', 'system', 'bridge')),
+                reactor_identity      TEXT NOT NULL,
+                reaction_key          TEXT NOT NULL,
+                created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(channel_message_id, reactor_type, reactor_identity, reaction_key)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_channel_reactions_message
+                ON channel_reactions(channel_message_id);
+
+            CREATE TRIGGER IF NOT EXISTS projects_ai_default_channel
+            AFTER INSERT ON projects
+            WHEN new.kind = 'project'
+            BEGIN
+                INSERT OR IGNORE INTO channels (slug, display_name, kind, project_id, created_by, settings_json)
+                VALUES ('project-' || new.id, new.name, 'project_default', new.id, 'system', '{}');
+            END;
+            """;
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    private static async Task EnsureProjectChannelsAsync(SqliteConnection connection)
+    {
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            INSERT OR IGNORE INTO channels (slug, display_name, kind, project_id, created_by, settings_json)
+            SELECT 'project-' || id, name, 'project_default', id, 'system', '{}'
+            FROM projects
+            WHERE kind = 'project'
             """;
         await cmd.ExecuteNonQueryAsync();
     }

@@ -53,6 +53,208 @@ public class DatabaseInitializerTests : IDisposable
         Assert.Contains("consolidation_topics", tables);
         Assert.Contains("topic_clip_queue_items", tables);
         Assert.Contains("curation_decisions", tables);
+        Assert.Contains("channels", tables);
+        Assert.Contains("channel_messages", tables);
+        Assert.Contains("channel_memberships", tables);
+        Assert.Contains("channel_reactions", tables);
+    }
+
+    [Fact]
+    public async Task InitializeAsync_CreatesChannelMessageSourcePointerColumns()
+    {
+        var initializer = new DatabaseInitializer(_dbPath, NullLogger<DatabaseInitializer>.Instance);
+        await initializer.InitializeAsync();
+
+        await using var conn = new SqliteConnection(initializer.ConnectionString);
+        await conn.OpenAsync();
+
+        var columns = new List<string>();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "PRAGMA table_info(channel_messages)";
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            columns.Add(reader.GetString(1));
+
+        Assert.Contains("source_kind", columns);
+        Assert.Contains("source_id", columns);
+        Assert.Contains("deep_link", columns);
+        Assert.Contains("metadata_json", columns);
+    }
+
+    [Fact]
+    public async Task ChannelMessages_CanStoreCanonicalSourcePointers()
+    {
+        var initializer = new DatabaseInitializer(_dbPath, NullLogger<DatabaseInitializer>.Instance);
+        await initializer.InitializeAsync();
+
+        await using var conn = new SqliteConnection(initializer.ConnectionString);
+        await conn.OpenAsync();
+
+        await using var insertChannel = conn.CreateCommand();
+        insertChannel.CommandText = """
+            INSERT INTO channels (slug, display_name, kind, created_by)
+            VALUES ('system-test', 'System Test', 'system', 'test')
+            RETURNING id
+            """;
+        var channelId = (long)(await insertChannel.ExecuteScalarAsync())!;
+
+        await using var insertMessage = conn.CreateCommand();
+        insertMessage.CommandText = """
+            INSERT INTO channel_messages (
+                channel_id, sender_type, sender_identity, body, message_kind,
+                source_kind, source_id, deep_link, metadata_json
+            ) VALUES (
+                @channelId, 'system', 'router', 'Task #42 updated', 'mirror_summary',
+                'task_message', '42', 'den://project/den-mcp/message/42', '{"summary":true}'
+            )
+            RETURNING source_kind, source_id, deep_link, metadata_json
+            """;
+        insertMessage.Parameters.AddWithValue("@channelId", channelId);
+        await using var reader = await insertMessage.ExecuteReaderAsync();
+
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal("task_message", reader.GetString(0));
+        Assert.Equal("42", reader.GetString(1));
+        Assert.Equal("den://project/den-mcp/message/42", reader.GetString(2));
+        Assert.Equal("{\"summary\":true}", reader.GetString(3));
+    }
+
+    [Fact]
+    public async Task ChannelSchema_RejectsInvalidKindsAndDuplicateProjectDefaults()
+    {
+        var initializer = new DatabaseInitializer(_dbPath, NullLogger<DatabaseInitializer>.Instance);
+        await initializer.InitializeAsync();
+
+        await using var conn = new SqliteConnection(initializer.ConnectionString);
+        await conn.OpenAsync();
+
+        await using var invalidChannel = conn.CreateCommand();
+        invalidChannel.CommandText = """
+            INSERT INTO channels (slug, display_name, kind, created_by)
+            VALUES ('bad-kind', 'Bad Kind', 'not_a_channel_kind', 'test')
+            """;
+        await Assert.ThrowsAsync<SqliteException>(() => invalidChannel.ExecuteNonQueryAsync());
+
+        await using var insertProject = conn.CreateCommand();
+        insertProject.CommandText = "INSERT INTO projects (id, name, kind) VALUES ('dup', 'Duplicate Default', 'project')";
+        await insertProject.ExecuteNonQueryAsync();
+
+        await using var duplicateDefault = conn.CreateCommand();
+        duplicateDefault.CommandText = """
+            INSERT INTO channels (slug, display_name, kind, project_id, created_by)
+            VALUES ('project-dup-second', 'Duplicate Default 2', 'project_default', 'dup', 'test')
+            """;
+        await Assert.ThrowsAsync<SqliteException>(() => duplicateDefault.ExecuteNonQueryAsync());
+    }
+
+    [Fact]
+    public async Task ChannelMessageSchema_RejectsInvalidSourceKinds()
+    {
+        var initializer = new DatabaseInitializer(_dbPath, NullLogger<DatabaseInitializer>.Instance);
+        await initializer.InitializeAsync();
+
+        await using var conn = new SqliteConnection(initializer.ConnectionString);
+        await conn.OpenAsync();
+
+        await using var insertChannel = conn.CreateCommand();
+        insertChannel.CommandText = """
+            INSERT INTO channels (slug, display_name, kind, created_by)
+            VALUES ('constraint-test', 'Constraint Test', 'system', 'test')
+            RETURNING id
+            """;
+        var channelId = (long)(await insertChannel.ExecuteScalarAsync())!;
+
+        await using var invalidMessage = conn.CreateCommand();
+        invalidMessage.CommandText = """
+            INSERT INTO channel_messages (
+                channel_id, sender_type, sender_identity, body, source_kind
+            ) VALUES (
+                @channelId, 'system', 'router', 'Bad source', 'not_a_source_kind'
+            )
+            """;
+        invalidMessage.Parameters.AddWithValue("@channelId", channelId);
+        await Assert.ThrowsAsync<SqliteException>(() => invalidMessage.ExecuteNonQueryAsync());
+    }
+
+    [Fact]
+    public async Task InitializeAsync_EnsuresExistingProjectDefaultChannelsIdempotently()
+    {
+        await using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            await conn.OpenAsync();
+            await using var seed = conn.CreateCommand();
+            seed.CommandText = """
+                CREATE TABLE projects (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    root_path TEXT,
+                    description TEXT,
+                    kind TEXT NOT NULL DEFAULT 'project',
+                    visibility TEXT NOT NULL DEFAULT 'normal'
+                );
+                INSERT INTO projects (id, name, kind) VALUES ('alpha', 'Alpha Project', 'project');
+                INSERT INTO projects (id, name, kind) VALUES ('assistant-space', 'Assistant Space', 'assistant');
+                """;
+            await seed.ExecuteNonQueryAsync();
+        }
+
+        var initializer = new DatabaseInitializer(_dbPath, NullLogger<DatabaseInitializer>.Instance);
+        await initializer.InitializeAsync();
+        await initializer.InitializeAsync();
+
+        await using var verify = new SqliteConnection(initializer.ConnectionString);
+        await verify.OpenAsync();
+
+        await using var channelCmd = verify.CreateCommand();
+        channelCmd.CommandText = """
+            SELECT slug, display_name, kind, created_by, COUNT(*) OVER ()
+            FROM channels
+            WHERE project_id = 'alpha' AND kind = 'project_default'
+            """;
+        await using var channelReader = await channelCmd.ExecuteReaderAsync();
+        Assert.True(await channelReader.ReadAsync());
+        Assert.Equal("project-alpha", channelReader.GetString(0));
+        Assert.Equal("Alpha Project", channelReader.GetString(1));
+        Assert.Equal("project_default", channelReader.GetString(2));
+        Assert.Equal("system", channelReader.GetString(3));
+        Assert.Equal(1, channelReader.GetInt32(4));
+        Assert.False(await channelReader.ReadAsync());
+
+        await using var spaceCmd = verify.CreateCommand();
+        spaceCmd.CommandText = "SELECT COUNT(*) FROM channels WHERE project_id = 'assistant-space'";
+        Assert.Equal(0L, await spaceCmd.ExecuteScalarAsync());
+    }
+
+    [Fact]
+    public async Task ProjectRepositoryCreateAsync_AutoCreatesDefaultProjectChannel()
+    {
+        var initializer = new DatabaseInitializer(_dbPath, NullLogger<DatabaseInitializer>.Instance);
+        await initializer.InitializeAsync();
+
+        var repo = new ProjectRepository(new DbConnectionFactory(initializer.ConnectionString));
+        await repo.CreateAsync(new DenMcp.Core.Models.Project
+        {
+            Id = "den-mcp",
+            Name = "Den MCP",
+            Kind = "project",
+            Visibility = "normal"
+        });
+
+        await using var conn = new SqliteConnection(initializer.ConnectionString);
+        await conn.OpenAsync();
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT slug, display_name, kind
+            FROM channels
+            WHERE project_id = 'den-mcp' AND kind = 'project_default'
+            """;
+        await using var reader = await cmd.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal("project-den-mcp", reader.GetString(0));
+        Assert.Equal("Den MCP", reader.GetString(1));
+        Assert.Equal("project_default", reader.GetString(2));
+        Assert.False(await reader.ReadAsync());
     }
 
     [Fact]
