@@ -1,3 +1,0 @@
-[submodule "external/den-bridge"]
-	path = external/den-bridge
-	url = git@github.com:FuzzySlipper/den-bridge.git
