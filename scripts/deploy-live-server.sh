@@ -18,6 +18,7 @@ done
 PI_DOCKER_SOURCE="${PI_DOCKER_SOURCE:-$DEFAULT_PI_DOCKER_SOURCE}"
 REMOTE_PI_DOCKER_DIR="${REMOTE_PI_DOCKER_DIR:-/data/services/den-mcp/pi-docker}"
 REMOTE_PI_STATE_ROOT="${REMOTE_PI_STATE_ROOT:-/data/services/den-mcp/pi-sessions}"
+REMOTE_PI_WORKSPACE_ROOT="${REMOTE_PI_WORKSPACE_ROOT:-/data/services/den-mcp/pi-workspaces}"
 REMOTE_PI_CREDENTIAL_FALLBACK_ROOT="${REMOTE_PI_CREDENTIAL_FALLBACK_ROOT:-/data/services/den-mcp/pi-credential-fallbacks}"
 REMOTE_DEV_ROOT="${REMOTE_DEV_ROOT:-/data/dev}"
 SKIP_RESTART=0
@@ -53,7 +54,8 @@ Options:
 Environment overrides:
   DEPLOY_MODE, PUBLISH_DIR, SSH_TARGET, SERVICE_NAME, REMOTE_SERVER_ROOT,
   REMOTE_STAGE_DIR, PI_DOCKER_SOURCE, REMOTE_PI_DOCKER_DIR,
-  REMOTE_PI_STATE_ROOT, REMOTE_PI_CREDENTIAL_FALLBACK_ROOT, REMOTE_DEV_ROOT
+  REMOTE_PI_STATE_ROOT, REMOTE_PI_WORKSPACE_ROOT,
+  REMOTE_PI_CREDENTIAL_FALLBACK_ROOT, REMOTE_DEV_ROOT
 
 PI_DOCKER_SOURCE defaults to a sibling pi-docker checkout when one is found at
 ../pi-docker or ../linux/pi-docker relative to this repository. Set it explicitly
@@ -181,13 +183,17 @@ cleanup() {
 
 publish_server() {
   echo "Publishing DenMcp.Server ..."
-  dotnet publish "$REPO_ROOT/src/DenMcp.Server/DenMcp.Server.csproj" \
-    -c Release \
-    -r linux-x64 \
-    --self-contained \
-    -p:PublishSingleFile=true \
-    -p:IncludeNativeLibrariesForSelfExtract=true \
-    -o "$PUBLISH_DIR/"
+  env \
+    GIT_CONFIG_COUNT="${GIT_CONFIG_COUNT:-1}" \
+    GIT_CONFIG_KEY_0="${GIT_CONFIG_KEY_0:-safe.directory}" \
+    GIT_CONFIG_VALUE_0="${GIT_CONFIG_VALUE_0:-$REPO_ROOT}" \
+    dotnet publish "$REPO_ROOT/src/DenMcp.Server/DenMcp.Server.csproj" \
+      -c Release \
+      -r linux-x64 \
+      --self-contained \
+      -p:PublishSingleFile=true \
+      -p:IncludeNativeLibrariesForSelfExtract=true \
+      -o "$PUBLISH_DIR/"
 }
 
 sudo_local() {
@@ -244,6 +250,7 @@ sync_pi_docker_assets_local() {
   sudo_local chmod -R u=rwX,go=rX "$REMOTE_PI_DOCKER_DIR"
   sudo_local install -d -o den-mcp -g 166535 -m 2771 \
     "$REMOTE_PI_STATE_ROOT" \
+    "$REMOTE_PI_WORKSPACE_ROOT" \
     "$REMOTE_PI_CREDENTIAL_FALLBACK_ROOT" \
     "$REMOTE_PI_CREDENTIAL_FALLBACK_ROOT/ssh" \
     "$REMOTE_PI_CREDENTIAL_FALLBACK_ROOT/gh"
@@ -266,6 +273,7 @@ sync_pi_docker_assets_remote() {
     sudo chmod -R u=rwX,go=rX '$REMOTE_PI_DOCKER_DIR' &&
     sudo install -d -o den-mcp -g 166535 -m 2771 \
       '$REMOTE_PI_STATE_ROOT' \
+      '$REMOTE_PI_WORKSPACE_ROOT' \
       '$REMOTE_PI_CREDENTIAL_FALLBACK_ROOT' \
       '$REMOTE_PI_CREDENTIAL_FALLBACK_ROOT/ssh' \
       '$REMOTE_PI_CREDENTIAL_FALLBACK_ROOT/gh' &&

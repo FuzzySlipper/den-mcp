@@ -86,6 +86,16 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
     public async Task<PiSessionHostLaunchResult> LaunchAsync(PiSessionLaunchPlan plan, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(plan);
+        var workspaceError = await ProvisionWorkspaceAsync(plan.LaunchProfile, cancellationToken).ConfigureAwait(false);
+        if (workspaceError is not null)
+        {
+            return new PiSessionHostLaunchResult
+            {
+                State = PiSessionStates.Failed,
+                StateReason = workspaceError,
+            };
+        }
+
         var provisioningError = ProvisionPiState(plan.LaunchProfile);
         if (provisioningError is not null)
         {
@@ -514,6 +524,107 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
         return normalized.Length > 0
             ? normalized
             : PiDockerLaunchProfileDefaults.TmuxShellCommand;
+    }
+
+    private async Task<string?> ProvisionWorkspaceAsync(PiDockerLaunchProfile profile, CancellationToken cancellationToken)
+    {
+        var sourceDir = NormalizeText(profile.WorkspaceSourceProjectDir);
+        if (sourceDir is null)
+            return null;
+
+        try
+        {
+            if (!Directory.Exists(sourceDir))
+                return $"Workspace source project dir '{sourceDir}' does not exist.";
+
+            var targetProjectDir = Path.Combine(profile.DevDir, profile.ProjectId);
+            if (Directory.Exists(Path.Combine(targetProjectDir, ".git")))
+            {
+                NormalizeWorkspacePermissions(profile.DevDir);
+                return null;
+            }
+
+            Directory.CreateDirectory(profile.DevDir);
+            if (Directory.Exists(targetProjectDir))
+                Directory.Delete(targetProjectDir, recursive: true);
+
+            var branch = NormalizeText(profile.WorkspaceBranch) ?? "main";
+            var bundlePath = Path.Combine(profile.DevDir, $".den-source-{profile.SessionId}.bundle");
+            if (File.Exists(bundlePath))
+                File.Delete(bundlePath);
+
+            var safeEnvironment = BuildGitSafeDirectoryEnvironment(sourceDir);
+            var bundle = await _runner.RunAsync(
+                "git",
+                ["-C", sourceDir, "bundle", "create", bundlePath, $"refs/heads/{branch}"],
+                TimeSpan.FromSeconds(120),
+                cancellationToken,
+                safeEnvironment).ConfigureAwait(false);
+            if (!bundle.Succeeded)
+                return $"Workspace provisioning failed while bundling '{sourceDir}' branch '{branch}': {TrimError(bundle.Stderr)}";
+
+            var clone = await _runner.RunAsync(
+                "git",
+                ["clone", "-b", branch, bundlePath, targetProjectDir],
+                TimeSpan.FromSeconds(120),
+                cancellationToken).ConfigureAwait(false);
+            if (!clone.Succeeded)
+                return $"Workspace provisioning failed while cloning bundle for '{sourceDir}': {TrimError(clone.Stderr)}";
+
+            var remoteUrl = await _runner.RunAsync(
+                "git",
+                ["-C", sourceDir, "remote", "get-url", "origin"],
+                TimeSpan.FromSeconds(15),
+                cancellationToken,
+                safeEnvironment).ConfigureAwait(false);
+            if (remoteUrl.Succeeded && NormalizeText(remoteUrl.Stdout) is { } origin)
+            {
+                await _runner.RunAsync(
+                    "git",
+                    ["-C", targetProjectDir, "remote", "set-url", "origin", origin],
+                    TimeSpan.FromSeconds(15),
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            File.Delete(bundlePath);
+            NormalizeWorkspacePermissions(profile.DevDir);
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return $"Workspace for DEV_DIR '{profile.DevDir}' could not be provisioned from '{sourceDir}': {ex.Message}";
+        }
+    }
+
+    private static IReadOnlyDictionary<string, string> BuildGitSafeDirectoryEnvironment(string sourceDir)
+    {
+        var gitDir = Path.Combine(sourceDir, ".git");
+        return new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["GIT_CONFIG_COUNT"] = "2",
+            ["GIT_CONFIG_KEY_0"] = "safe.directory",
+            ["GIT_CONFIG_VALUE_0"] = sourceDir,
+            ["GIT_CONFIG_KEY_1"] = "safe.directory",
+            ["GIT_CONFIG_VALUE_1"] = gitDir,
+        };
+    }
+
+    private static void NormalizeWorkspacePermissions(string devDir)
+    {
+        if (!OperatingSystem.IsLinux() || !Directory.Exists(devDir))
+            return;
+
+        SetDirectoryMode(devDir);
+        foreach (var directory in Directory.EnumerateDirectories(devDir, "*", SearchOption.AllDirectories))
+            SetDirectoryMode(directory);
+        foreach (var file in Directory.EnumerateFiles(devDir, "*", SearchOption.AllDirectories))
+        {
+            var mode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite;
+            var current = File.GetUnixFileMode(file);
+            if ((current & UnixFileMode.UserExecute) != 0)
+                mode |= UnixFileMode.UserExecute | UnixFileMode.GroupExecute;
+            File.SetUnixFileMode(file, mode);
+        }
     }
 
     private string? ProvisionPiState(PiDockerLaunchProfile profile)

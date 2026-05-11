@@ -10,6 +10,8 @@ public sealed class PiDockerLaunchProfileOptions
     public string ComposeFile { get; set; } = "/data/services/den-mcp/pi-docker/compose.yaml";
     public string Service { get; set; } = "pi";
     public string DevDir { get; set; } = "/data/dev";
+    public bool UsePerSessionWorkspace { get; set; } = true;
+    public string WorkspaceRootDir { get; set; } = "/data/services/den-mcp/pi-workspaces";
     public string PiStateRootDir { get; set; } = "/data/services/den-mcp/pi-sessions";
     public string? PiStateSourceDir { get; set; } = "/data/services/pi";
     public string Image { get; set; } = "pi-sandbox:latest";
@@ -40,6 +42,7 @@ public sealed class PiDockerLaunchRenderRequest
     public string? WorkspaceId { get; init; }
     public string? Title { get; init; }
     public string? DevDir { get; init; }
+    public string? WorkspaceRootDir { get; init; }
     public string? PiStateDir { get; init; }
     public string? PiStateSourceDir { get; init; }
     public string? ComposeFile { get; init; }
@@ -78,6 +81,8 @@ public sealed class PiDockerLaunchProfile
     public required string ComposeFile { get; init; }
     public required string Service { get; init; }
     public required string DevDir { get; init; }
+    public string? WorkspaceSourceProjectDir { get; init; }
+    public string? WorkspaceBranch { get; init; }
     public required string PiStateDir { get; init; }
     public string? PiStateSourceDir { get; init; }
     public required string Image { get; init; }

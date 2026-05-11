@@ -24,7 +24,17 @@ public sealed class PiDockerLaunchProfileRenderer(PiDockerLaunchProfileOptions o
         var sessionId = RequireIdentifier(request.SessionId, "session_id");
         var composeFile = ResolveConfiguredPath(request.ComposeFile, options.ComposeFile, "compose_file");
         var service = RequireIdentifier(request.Service ?? options.Service, "service");
-        var devDir = ResolveConfiguredPath(request.DevDir, options.DevDir, "dev_dir");
+        var sourceDevDir = ResolveConfiguredPath(request.DevDir, options.DevDir, "dev_dir");
+        var workspaceRoot = ResolveOptionalPath(request.WorkspaceRootDir ?? options.WorkspaceRootDir);
+        var usePerSessionWorkspace = options.UsePerSessionWorkspace
+            && request.DevDir is null
+            && workspaceRoot is not null;
+        var devDir = usePerSessionWorkspace
+            ? Path.Combine(workspaceRoot!, sessionId, "dev")
+            : sourceDevDir;
+        var workspaceSourceProjectDir = usePerSessionWorkspace
+            ? Path.Combine(sourceDevDir, projectId)
+            : null;
         var piStateDir = ResolveStateDir(request.PiStateDir, sessionId);
         var piStateSourceDir = ResolveOptionalPath(request.PiStateSourceDir ?? options.PiStateSourceDir);
         var image = RequireNonEmpty(request.Image ?? options.Image, "image");
@@ -165,6 +175,8 @@ public sealed class PiDockerLaunchProfileRenderer(PiDockerLaunchProfileOptions o
             ComposeFile = composeFile,
             Service = service,
             DevDir = devDir,
+            WorkspaceSourceProjectDir = workspaceSourceProjectDir,
+            WorkspaceBranch = usePerSessionWorkspace ? "main" : null,
             PiStateDir = piStateDir,
             PiStateSourceDir = piStateSourceDir,
             Image = image,
@@ -184,7 +196,9 @@ public sealed class PiDockerLaunchProfileRenderer(PiDockerLaunchProfileOptions o
             KnownLimitations = [
                 "session_id must be unique for each live launch; reusing a session_id intentionally reuses Compose names and PI_STATE_DIR.",
                 "The renderer validates loopback binding and duplicate ports in a single profile, but it does not probe or reserve host ports; the lifecycle API must allocate unique host callback ports before launch.",
-                "The first Den-managed profile intentionally preserves broad DEV_DIR read-write access and does not enforce per-repository file restrictions."
+                usePerSessionWorkspace
+                    ? "DEV_DIR is a per-session workspace provisioned from the source project before launch; worker writes do not modify the shared source checkout directly."
+                    : "DEV_DIR uses the configured broad dev directory directly; host permissions must allow the container user to write if worker code changes are expected."
             ],
             WorkerRole = NullIfWhiteSpace(request.WorkerRole),
             WorkerRunId = NullIfWhiteSpace(request.WorkerRunId),

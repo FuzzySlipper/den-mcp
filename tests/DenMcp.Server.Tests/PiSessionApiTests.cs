@@ -1009,6 +1009,7 @@ public sealed class PiSessionApiTests : IAsyncLifetime
                     ["DenMcp:Llm:Model"] = "test-model",
                     ["DenMcp:PiSessionHost:ComposeFile"] = "/opt/pi-docker/compose.yaml",
                     ["DenMcp:PiSessionHost:DevDir"] = "/srv/dev",
+                    ["DenMcp:PiSessionHost:UsePerSessionWorkspace"] = "false",
                     ["DenMcp:PiSessionHost:PiStateRootDir"] = "/srv/pi-state",
                     ["DenMcp:PiSessionHost:Image"] = "pi-sandbox:test",
                     ["DenMcp:PiSessionHost:PiVersion"] = "0.71.0",
@@ -1037,6 +1038,7 @@ public sealed class PiSessionApiTests : IAsyncLifetime
                 {
                     ComposeFile = "/opt/pi-docker/compose.yaml",
                     DevDir = "/srv/dev",
+                    UsePerSessionWorkspace = false,
                     PiStateRootDir = "/srv/pi-state",
                     Image = "pi-sandbox:test",
                     PiVersion = "0.71.0",

@@ -12,6 +12,8 @@ public sealed class PiDockerLaunchProfileRendererTests
 
         Assert.Equal("/data/services/den-mcp/pi-docker/compose.yaml", options.ComposeFile);
         Assert.Equal("/data/dev", options.DevDir);
+        Assert.True(options.UsePerSessionWorkspace);
+        Assert.Equal("/data/services/den-mcp/pi-workspaces", options.WorkspaceRootDir);
         Assert.Equal("/data/services/den-mcp/pi-sessions", options.PiStateRootDir);
         Assert.Equal("/data/services/pi", options.PiStateSourceDir);
         Assert.Equal("/data/services/den-mcp/pi-credential-fallbacks", options.CredentialFallbackRootDir);
@@ -32,6 +34,7 @@ public sealed class PiDockerLaunchProfileRendererTests
         {
             ComposeFile = "/opt/pi-docker/compose.yaml",
             DevDir = "/home/patch/dev",
+            UsePerSessionWorkspace = false,
             PiStateRootDir = "/var/lib/den/pi-state",
             Image = "pi-sandbox:test",
             PiVersion = "0.71.0",
@@ -90,6 +93,7 @@ public sealed class PiDockerLaunchProfileRendererTests
         {
             ComposeFile = "/opt/pi-docker/compose.yaml",
             DevDir = "/home/patch/dev",
+            UsePerSessionWorkspace = false,
             PiStateRootDir = "/var/lib/den/pi-state",
             ProviderSecretEnvironmentVariables = ["OPENAI_API_KEY", "AWS_REGION"],
         });
@@ -114,6 +118,7 @@ public sealed class PiDockerLaunchProfileRendererTests
         {
             ComposeFile = "/opt/pi-docker/compose.yaml",
             DevDir = "/home/patch/dev",
+            UsePerSessionWorkspace = false,
             PiStateRootDir = Path.Combine(Path.GetTempPath(), "den-mcp", "missing-pi-state-root"),
             RequiredPiStatePaths = ["agent/settings.json"],
         });
@@ -138,6 +143,7 @@ public sealed class PiDockerLaunchProfileRendererTests
         {
             ComposeFile = "/opt/pi-docker/compose.yaml",
             DevDir = "/home/patch/dev",
+            UsePerSessionWorkspace = false,
         });
 
         var ex = Assert.Throws<InvalidOperationException>(() => renderer.Render(new PiDockerLaunchRenderRequest
@@ -156,6 +162,7 @@ public sealed class PiDockerLaunchProfileRendererTests
         {
             ComposeFile = "/opt/pi-docker/compose.yaml",
             DevDir = "/home/patch/dev",
+            UsePerSessionWorkspace = false,
         });
 
         var ex = Assert.Throws<InvalidOperationException>(() => renderer.Render(new PiDockerLaunchRenderRequest
@@ -175,6 +182,7 @@ public sealed class PiDockerLaunchProfileRendererTests
         {
             ComposeFile = "/opt/pi-docker/compose.yaml",
             DevDir = "/home/patch/dev",
+            UsePerSessionWorkspace = false,
             PiStateRootDir = "/var/lib/den/pi-state",
         });
 
@@ -198,12 +206,38 @@ public sealed class PiDockerLaunchProfileRendererTests
     }
 
     [Fact]
+    public void Render_UsesPerSessionWorkspaceByDefault()
+    {
+        var renderer = new PiDockerLaunchProfileRenderer(new PiDockerLaunchProfileOptions
+        {
+            DevDir = "/data/dev",
+            WorkspaceRootDir = "/data/services/den-mcp/pi-workspaces",
+            PiStateRootDir = "/data/services/den-mcp/pi-sessions",
+        });
+
+        var profile = renderer.Render(new PiDockerLaunchRenderRequest
+        {
+            ProjectId = "den-mcp",
+            SessionId = "session-a",
+            CallbackPorts = [new() { HostPort = 21455, ContainerPort = 1455 }],
+        });
+
+        Assert.Equal("/data/services/den-mcp/pi-workspaces/session-a/dev", profile.DevDir);
+        Assert.Equal("/data/services/den-mcp/pi-workspaces/session-a/dev", profile.Environment["DEV_DIR"]);
+        Assert.Equal("/data/dev/den-mcp", profile.WorkspaceSourceProjectDir);
+        Assert.Equal("main", profile.WorkspaceBranch);
+        Assert.Contains(profile.VolumeMounts, m => m.Source == "/data/services/den-mcp/pi-workspaces/session-a/dev" && m.Target == "/home/pi/dev" && !m.ReadOnly);
+        Assert.Contains(profile.KnownLimitations, value => value.Contains("per-session workspace", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Render_PassesWorkerEnvironmentAndUsesPrintModeWhenStartupPromptIsPresent()
     {
         var renderer = new PiDockerLaunchProfileRenderer(new PiDockerLaunchProfileOptions
         {
             ComposeFile = "/opt/pi-docker/compose.yaml",
             DevDir = "/home/patch/dev",
+            UsePerSessionWorkspace = false,
             PiStateRootDir = "/var/lib/den/pi-state",
         });
 
