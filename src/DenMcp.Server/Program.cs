@@ -27,6 +27,9 @@ if (builder.Configuration["db-path"] is { } dbPathOverride)
 
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton(options.PiSessionHost);
+var trustedPublisherOptions = new TrustedPublisherOptions();
+builder.Configuration.GetSection("DenMcp:TrustedPublisher").Bind(trustedPublisherOptions);
+builder.Services.AddSingleton(trustedPublisherOptions);
 
 // LLM (librarian)
 var llmConfig = new LlmConfig();
@@ -97,6 +100,7 @@ builder.Services.AddSingleton<IAgentStreamMessageService, AgentStreamMessageServ
 builder.Services.AddSingleton<ISubagentRunService, SubagentRunService>();
 builder.Services.AddSingleton<IAttentionService, AttentionService>();
 builder.Services.AddSingleton<IGitInspectionService, GitInspectionService>();
+builder.Services.AddSingleton<ITrustedPublisherService, TrustedPublisherService>();
 builder.Services.AddSingleton<IPiDockerLaunchProfileRenderer, PiDockerLaunchProfileRenderer>();
 builder.Services.AddSingleton<IProcessRunner, SystemProcessRunner>();
 builder.Services.AddSingleton<IPiSessionHost, TmuxDockerPiSessionHost>();
