@@ -1,6 +1,6 @@
 # den-mcp
 
-Den MCP is the shared control plane for multi-agent software projects. It provides a centralized MCP/REST server, CLI/dashboard, Den web/operator workflow support, and the Den Desktop operator app for tasks, messages, review loops, agent-stream observability, and project documents.
+Den MCP is the shared control plane for multi-agent software projects. It provides a centralized MCP/REST server, CLI/dashboard, Den web/operator workflow support, and APIs for tasks, messages, review loops, agent-stream observability, project documents, and desktop/operator clients.
 
 Tasks for this repository are tracked in Den under project ID `den-mcp`.
 
@@ -14,7 +14,7 @@ Tasks for this repository are tracked in Den under project ID `den-mcp`.
 - **Shared blackboard** — cross-project scratch/handoff Markdown entries with optional idle TTL.
 - **MCP + REST APIs** — MCP tools for agents and REST endpoints for CLI/web/desktop clients.
 - **CLI + TUI dashboard** — terminal commands and a Terminal.Gui dashboard.
-- **Den Desktop** — TypeScript/React/Electron operator UI backed by a .NET sidecar.
+- **Desktop/operator APIs** — REST/MCP surfaces consumed by the standalone `den-desktop` app.
 
 ## Repository Layout
 
@@ -22,13 +22,10 @@ Tasks for this repository are tracked in Den under project ID `den-mcp`.
 src/DenMcp.Core/                  Models, SQLite repositories, domain services
 src/DenMcp.Server/                ASP.NET Core MCP + REST server
 src/DenMcp.Cli/                   CLI commands + Terminal.Gui dashboard
-src/DenMcp.Desktop/               Den Desktop TypeScript/React/Electron UI
-src/DenMcp.Desktop.Sidecar/       Den-specific .NET desktop sidecar/app-core
 external/den-bridge/              Git submodule: reusable generic bridge foundation
 
 tests/DenMcp.Core.Tests/          Core integration tests
 tests/DenMcp.Server.Tests/        Server/API tests
-tests/DenMcp.Desktop.Sidecar.Tests/ Den Desktop sidecar tests
 tests/Architecture.Tests/         Dependency boundary tests
 external/den-bridge/tests/Den.Bridge.Tests/ Generic bridge tests
 ```
@@ -52,8 +49,7 @@ Boundary split:
 - **`Den.Bridge`** is generic bridge infrastructure: .NET abstractions, protocol frames, JSON/schema/registry, transports, host integration, and test harnesses.
 - **Generic TS/web bridge code** should live in the same `den-bridge` repo under a package boundary such as `packages/den-bridge` when extracted.
 - **`Den.Bridge.Electron`** should be an Electron-specific package boundary such as `packages/den-bridge-electron` in the same repo, unless it later needs an independent repo/release lifecycle.
-- **`DenMcp.Desktop.Sidecar`** stays Den-specific: Den DTOs, Den API clients, task/message/document/session/terminal/app-agent handlers, settings, and runtime composition.
-- **`DenMcp.Desktop`** stays the Den Desktop product UI; reusable TS helpers can be extracted later, but Den-specific protocol/API surfaces stay here.
+- **Den Desktop** now lives in the standalone `den-desktop` repository. This repo owns server-side Den APIs/contracts; the desktop repo owns the Electron UI and sidecar runtime.
 
 See `docs/bridge-submodule-boundary.md` for the detailed boundary, test matrix, and submodule update workflow.
 
@@ -114,18 +110,7 @@ The dashboard shows projects, tasks, docs, and messages with keyboard-driven nav
 
 ## Den Desktop
 
-Den Desktop is the local operator UI in `src/DenMcp.Desktop`.
-
-Common commands:
-
-```bash
-npm --prefix src/DenMcp.Desktop install
-npm --prefix src/DenMcp.Desktop run test:helpers
-npm --prefix src/DenMcp.Desktop run ui:build
-npm --prefix src/DenMcp.Desktop run electron:dev
-```
-
-The Electron shell launches `src/DenMcp.Desktop.Sidecar`, connects over the typed bridge, and exposes a constrained preload API to the renderer. The renderer should not receive raw Den tokens, endpoint internals, Node APIs, or shell access.
+Den Desktop has moved to the standalone `den-desktop` repository. Do not add desktop UI, sidecar runtime, Electron packaging, or desktop-only fixtures back to this repo. Den MCP keeps the server-side REST/MCP API surface that desktop clients consume.
 
 ## Validation Commands
 
@@ -137,21 +122,20 @@ dotnet build den-mcp.slnx
 dotnet test den-mcp.slnx
 ```
 
-Bridge / desktop validation:
+Bridge validation:
 
 ```bash
 dotnet test external/den-bridge/tests/Den.Bridge.Tests/Den.Bridge.Tests.csproj
-dotnet test tests/DenMcp.Desktop.Sidecar.Tests/DenMcp.Desktop.Sidecar.Tests.csproj
-npm --prefix src/DenMcp.Desktop run test:helpers
-npm --prefix src/DenMcp.Desktop run ui:build
 ```
+
+Desktop UI/sidecar validation now happens in the standalone `den-desktop` repository.
 
 ## Architecture And Boundary Rules
 
 - `DenMcp.Core` has no dependency on ASP.NET, Terminal.Gui, or desktop UI packages.
 - `DenMcp.Server` references Core and hosts MCP + REST endpoints.
 - `DenMcp.Cli` communicates through the API/CLI layer and does not become server infrastructure.
-- `DenMcp.Desktop.Sidecar` references `DenMcp.Core` and `Den.Bridge`, but must not reference Electron/Tauri/WebView packages.
+- Desktop UI and sidecar code live in the standalone `den-desktop` repository; keep this repo focused on Den core/server/CLI surfaces.
 - `external/den-bridge` must stay product-neutral and must not reference `DenMcp.*` assemblies or Den-specific fixtures/DTOs/command names.
 - SQL must be parameterized; do not interpolate SQL strings.
 - Use explicit DI registration; do not add auto-scanning.
@@ -195,3 +179,4 @@ Signal/Telegram mobile bridge integrations are retired. Current operator workflo
 ## License
 
 MIT
+
