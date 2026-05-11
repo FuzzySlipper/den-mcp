@@ -26,6 +26,7 @@ public sealed class PiDockerLaunchProfileRenderer(PiDockerLaunchProfileOptions o
         var service = RequireIdentifier(request.Service ?? options.Service, "service");
         var devDir = ResolveConfiguredPath(request.DevDir, options.DevDir, "dev_dir");
         var piStateDir = ResolveStateDir(request.PiStateDir, sessionId);
+        var piStateSourceDir = ResolveOptionalPath(request.PiStateSourceDir ?? options.PiStateSourceDir);
         var image = RequireNonEmpty(request.Image ?? options.Image, "image");
         var piVersion = RequireNonEmpty(request.PiVersion ?? options.PiVersion, "pi_version");
         var nodeVersion = RequireNonEmpty(request.NodeVersion ?? options.NodeVersion, "node_version");
@@ -106,14 +107,26 @@ public sealed class PiDockerLaunchProfileRenderer(PiDockerLaunchProfileOptions o
 
         var configArgs = composePrefix.Concat(["config"]).ToList();
         var buildArgs = composePrefix.Concat(["build", service]).ToList();
-        var runArgs = composePrefix.Concat(["run", "--rm", "--name", $"{composeProjectName}-{service}"]).ToList();
+        var runArgs = composePrefix.Concat(["run", "--name", $"{composeProjectName}-{service}"]).ToList();
         foreach (var port in callbackPorts)
         {
             runArgs.Add("--publish");
             runArgs.Add($"{port.BindAddress}:{port.HostPort}:{port.ContainerPort}");
         }
 
+        foreach (var pair in environment.Where(pair => pair.Key.StartsWith("DEN_WORKER_", StringComparison.Ordinal)))
+        {
+            runArgs.Add("--env");
+            runArgs.Add(pair.Key);
+        }
+
         runArgs.Add(service);
+        if (startupPrompt is not null)
+        {
+            runArgs.Add("/bin/sh");
+            runArgs.Add("-lc");
+            runArgs.Add("exec pi -p \"$DEN_WORKER_STARTUP_PROMPT\"");
+        }
 
         var warnings = new List<string>();
         if (request.PiStateDir is null)
@@ -153,6 +166,7 @@ public sealed class PiDockerLaunchProfileRenderer(PiDockerLaunchProfileOptions o
             Service = service,
             DevDir = devDir,
             PiStateDir = piStateDir,
+            PiStateSourceDir = piStateSourceDir,
             Image = image,
             PiVersion = piVersion,
             NodeVersion = nodeVersion,

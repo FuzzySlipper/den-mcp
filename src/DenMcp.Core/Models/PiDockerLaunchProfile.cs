@@ -11,6 +11,7 @@ public sealed class PiDockerLaunchProfileOptions
     public string Service { get; set; } = "pi";
     public string DevDir { get; set; } = "/data/dev";
     public string PiStateRootDir { get; set; } = "/data/services/den-mcp/pi-sessions";
+    public string? PiStateSourceDir { get; set; } = "/data/services/pi";
     public string Image { get; set; } = "pi-sandbox:latest";
     public string PiVersion { get; set; } = "0.71.0";
     public string NodeVersion { get; set; } = "22";
@@ -40,6 +41,7 @@ public sealed class PiDockerLaunchRenderRequest
     public string? Title { get; init; }
     public string? DevDir { get; init; }
     public string? PiStateDir { get; init; }
+    public string? PiStateSourceDir { get; init; }
     public string? ComposeFile { get; init; }
     public string? Service { get; init; }
     public string? Image { get; init; }
@@ -77,6 +79,7 @@ public sealed class PiDockerLaunchProfile
     public required string Service { get; init; }
     public required string DevDir { get; init; }
     public required string PiStateDir { get; init; }
+    public string? PiStateSourceDir { get; init; }
     public required string Image { get; init; }
     public required string PiVersion { get; init; }
     public required string NodeVersion { get; init; }

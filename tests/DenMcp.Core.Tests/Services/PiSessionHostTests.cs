@@ -172,6 +172,43 @@ public sealed class PiSessionHostTests
     }
 
     [Fact]
+    public async Task Launch_ProvisionsMissingPiStateFromConfiguredSourceBeforeValidation()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "den-mcp", $"pi-provision-{Guid.NewGuid():N}");
+        var sourceDir = Path.Combine(root, "source");
+        var piStateDir = Path.Combine(root, "session-a");
+        Directory.CreateDirectory(Path.Combine(sourceDir, "agent"));
+        await File.WriteAllTextAsync(Path.Combine(sourceDir, "agent", "settings.json"), "{\"provider\":\"test\"}");
+        try
+        {
+            var runner = new FakeProcessRunner(string.Empty);
+            var host = new TmuxDockerPiSessionHost(new PiDockerLaunchProfileOptions
+            {
+                RequiredPiStatePaths = ["agent/settings.json"],
+            }, runner, delayAsync: NoDelay);
+
+            var result = await host.LaunchAsync(new PiSessionLaunchPlan
+            {
+                Record = Session(),
+                LaunchProfile = Profile(piStateDir, new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["PI_STATE_DIR"] = piStateDir,
+                }, [], piStateSourceDir: sourceDir),
+                LaunchCommand = ["docker", "compose", "run", "pi"],
+            });
+
+            Assert.Equal(PiSessionStates.Running, result.State);
+            Assert.True(File.Exists(Path.Combine(piStateDir, "agent", "settings.json")));
+            Assert.NotEmpty(runner.Calls);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Launch_MarksFailedWhenDockerFailureAppearsDuringLaunchPolling()
     {
         var piStateDir = Path.Combine(Path.GetTempPath(), "den-mcp", $"pi-state-{Guid.NewGuid():N}");
@@ -346,7 +383,8 @@ public sealed class PiSessionHostTests
         string piStateDir,
         IReadOnlyDictionary<string, string> environment,
         IReadOnlyList<string> scrubbedEnvironmentVariables,
-        IReadOnlyList<string>? dockerComposeRunArgs = null) => new()
+        IReadOnlyList<string>? dockerComposeRunArgs = null,
+        string? piStateSourceDir = null) => new()
     {
         ProfileId = "profile-a",
         ProjectId = "den-mcp",
@@ -356,6 +394,7 @@ public sealed class PiSessionHostTests
         Service = "pi",
         DevDir = "/tmp/den-mcp/dev",
         PiStateDir = piStateDir,
+        PiStateSourceDir = piStateSourceDir,
         Image = "pi-sandbox:test",
         PiVersion = "0.71.0",
         NodeVersion = "22",

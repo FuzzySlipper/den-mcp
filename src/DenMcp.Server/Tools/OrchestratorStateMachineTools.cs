@@ -69,7 +69,7 @@ public sealed class OrchestratorStateMachineTools
         }
         else if (implementation is null)
         {
-            decision = new Decision("launch_coder", "missing_implementation", "No implementation packet is present for this task.", "Launch coder worker with a coder_context_packet.");
+            decision = RetryOrEscalate(attempts.coder, max_attempts, "launch_coder", "missing_implementation", "No implementation packet is present for this task.", "Launch coder worker with a coder_context_packet, including any failed worker-run diagnostics.");
         }
         else if (!CompletionSucceeded(implementation))
         {
@@ -216,8 +216,11 @@ public sealed class OrchestratorStateMachineTools
 
     private static int CountCompletions(IReadOnlyList<Message> messages, string role)
     {
-        return messages.Count(m => IsCompletion(m) && string.Equals(MetadataString(m, "role"), role, StringComparison.Ordinal));
+        return messages.Count(m => IsWorkerAttempt(m) && string.Equals(MetadataString(m, "role"), role, StringComparison.Ordinal));
     }
+
+    private static bool IsWorkerAttempt(Message message) =>
+        IsCompletion(message) || string.Equals(MetadataString(message, "type"), "worker_failure_packet", StringComparison.Ordinal);
 
     private static bool CompletionSucceeded(Message packet) =>
         string.Equals(MetadataString(packet, "status"), "completed", StringComparison.Ordinal)

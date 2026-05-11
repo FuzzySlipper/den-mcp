@@ -50,6 +50,23 @@ public class OrchestratorStateMachineToolsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task DetermineNextAction_NoImplementationButFailedWorkerRunsRespectRetryCap()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var task = await CreateTaskAsync(scope, "Coder keeps failing before packet");
+        await CreateWorkerFailureAsync(scope, task.Id, "coder");
+        await CreateWorkerFailureAsync(scope, task.Id, "coder");
+        await CreateWorkerFailureAsync(scope, task.Id, "coder");
+
+        var json = await DetermineAsync(scope, task.Id, maxAttempts: 3);
+        using var doc = JsonDocument.Parse(json);
+
+        Assert.Equal("escalate", doc.RootElement.GetProperty("decision").GetProperty("next_action").GetString());
+        Assert.Equal("missing_implementation_retry_cap", doc.RootElement.GetProperty("decision").GetProperty("reason").GetString());
+        Assert.Equal(3, doc.RootElement.GetProperty("attempts").GetProperty("coder").GetInt32());
+    }
+
+    [Fact]
     public async Task DetermineNextAction_CompleteImplementationWithoutHead_EscalatesFailClosed()
     {
         using var scope = _factory.Services.CreateScope();
@@ -156,7 +173,7 @@ public class OrchestratorStateMachineToolsTests : IAsyncLifetime
         Assert.Equal("changes_requested", doc.RootElement.GetProperty("decision").GetProperty("reason").GetString());
     }
 
-    private static async Task<string> DetermineAsync(IServiceScope scope, int taskId)
+    private static async Task<string> DetermineAsync(IServiceScope scope, int taskId, int maxAttempts = 3)
     {
         return await OrchestratorStateMachineTools.DetermineOrchestratorNextAction(
             scope.ServiceProvider.GetRequiredService<ITaskRepository>(),
@@ -165,6 +182,7 @@ public class OrchestratorStateMachineToolsTests : IAsyncLifetime
             scope.ServiceProvider.GetRequiredService<IReviewFindingRepository>(),
             ProjectId,
             taskId,
+            max_attempts: maxAttempts,
             verbose: true);
     }
 
@@ -234,6 +252,31 @@ public class OrchestratorStateMachineToolsTests : IAsyncLifetime
             Sender = role,
             Intent = packetType == "review_findings_packet" ? MessageIntent.ReviewFeedback : MessageIntent.StatusUpdate,
             Content = $"# {packetType}",
+            Metadata = metadata
+        });
+    }
+
+    private static async Task CreateWorkerFailureAsync(IServiceScope scope, int taskId, string role)
+    {
+        var messages = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+        var metadata = JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+        {
+            ["type"] = "worker_failure_packet",
+            ["packet_kind"] = "worker_failure_packet",
+            ["role"] = role,
+            ["project_id"] = ProjectId,
+            ["task_id"] = taskId,
+            ["run_id"] = $"run-failure-{role}-{Guid.NewGuid():N}",
+            ["status"] = "failed",
+        }, new JsonSerializerOptions(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
+
+        await messages.CreateAsync(new Message
+        {
+            ProjectId = ProjectId,
+            TaskId = taskId,
+            Sender = role,
+            Intent = MessageIntent.StatusUpdate,
+            Content = "# worker_failure_packet",
             Metadata = metadata
         });
     }

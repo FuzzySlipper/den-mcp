@@ -13,6 +13,7 @@ public sealed class PiDockerLaunchProfileRendererTests
         Assert.Equal("/data/services/den-mcp/pi-docker/compose.yaml", options.ComposeFile);
         Assert.Equal("/data/dev", options.DevDir);
         Assert.Equal("/data/services/den-mcp/pi-sessions", options.PiStateRootDir);
+        Assert.Equal("/data/services/pi", options.PiStateSourceDir);
         Assert.Equal("/data/services/den-mcp/pi-credential-fallbacks", options.CredentialFallbackRootDir);
         Assert.Equal("/usr/bin/tmux", options.TmuxExecutable);
         Assert.Equal("/usr/bin/docker", options.DockerExecutable);
@@ -72,6 +73,7 @@ public sealed class PiDockerLaunchProfileRendererTests
         Assert.Contains(profile.VolumeMounts, m => m.Purpose == "gh_credentials" && m.ReadOnly);
         Assert.All(profile.CallbackPorts, p => Assert.Equal("127.0.0.1", p.BindAddress));
         Assert.Contains("--publish", profile.DockerComposeRunArgs);
+        Assert.DoesNotContain("--rm", profile.DockerComposeRunArgs);
         Assert.Contains("127.0.0.1:21455:1455", profile.DockerComposeRunArgs);
         Assert.Contains("127.0.0.1:28085:8085", profile.DockerComposeRunArgs);
         Assert.StartsWith("den-pi-den-mcp-session-a-", profile.ComposeProjectName);
@@ -193,5 +195,37 @@ public sealed class PiDockerLaunchProfileRendererTests
         Assert.NotEqual(first.PiStateDir, second.PiStateDir);
         Assert.NotEqual(first.CacheVolumeNames[0], second.CacheVolumeNames[0]);
         Assert.Contains(first.KnownLimitations, value => value.Contains("does not probe or reserve host ports", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Render_PassesWorkerEnvironmentAndUsesPrintModeWhenStartupPromptIsPresent()
+    {
+        var renderer = new PiDockerLaunchProfileRenderer(new PiDockerLaunchProfileOptions
+        {
+            ComposeFile = "/opt/pi-docker/compose.yaml",
+            DevDir = "/home/patch/dev",
+            PiStateRootDir = "/var/lib/den/pi-state",
+        });
+
+        var profile = renderer.Render(new PiDockerLaunchRenderRequest
+        {
+            ProjectId = "den-mcp",
+            SessionId = "session-a",
+            CallbackPorts = [new() { HostPort = 21455, ContainerPort = 1455 }],
+            WorkerRole = "coder",
+            WorkerRunId = "run-a",
+            PromptPacketMessageId = 123,
+            StateFileRef = "state.md",
+            StartupPrompt = "do the work",
+        });
+
+        Assert.Contains("--env", profile.DockerComposeRunArgs);
+        Assert.Contains("DEN_WORKER_ROLE", profile.DockerComposeRunArgs);
+        Assert.Contains("DEN_WORKER_RUN_ID", profile.DockerComposeRunArgs);
+        Assert.Contains("DEN_WORKER_PROMPT_PACKET_MESSAGE_ID", profile.DockerComposeRunArgs);
+        Assert.Contains("DEN_WORKER_STATE_FILE_REF", profile.DockerComposeRunArgs);
+        Assert.Contains("DEN_WORKER_STARTUP_PROMPT", profile.DockerComposeRunArgs);
+        Assert.DoesNotContain(profile.DockerComposeRunArgs, arg => arg.Contains("do the work", StringComparison.Ordinal));
+        Assert.Equal(["pi", "/bin/sh", "-lc", "exec pi -p \"$DEN_WORKER_STARTUP_PROMPT\""], profile.DockerComposeRunArgs.TakeLast(4).ToArray());
     }
 }

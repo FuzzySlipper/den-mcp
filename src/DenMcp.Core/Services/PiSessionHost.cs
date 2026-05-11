@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Runtime.Versioning;
 using DenMcp.Core.Models;
 
 namespace DenMcp.Core.Services;
@@ -85,6 +86,16 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
     public async Task<PiSessionHostLaunchResult> LaunchAsync(PiSessionLaunchPlan plan, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(plan);
+        var provisioningError = ProvisionPiState(plan.LaunchProfile);
+        if (provisioningError is not null)
+        {
+            return new PiSessionHostLaunchResult
+            {
+                State = PiSessionStates.Failed,
+                StateReason = provisioningError,
+            };
+        }
+
         var piStateValidationError = ValidatePiState(plan.LaunchProfile);
         if (piStateValidationError is not null)
         {
@@ -94,9 +105,6 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
                 StateReason = piStateValidationError,
             };
         }
-
-        if (!Directory.Exists(plan.LaunchProfile.PiStateDir))
-            Directory.CreateDirectory(plan.LaunchProfile.PiStateDir);
 
         var newSessionArgs = new List<string> { "new-session", "-d", "-s", plan.Record.TmuxSessionName };
         if (!string.IsNullOrWhiteSpace(plan.LaunchProfile.DevDir))
@@ -500,14 +508,85 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
     private static IReadOnlyList<string> NormalizeTmuxShellCommand(IEnumerable<string>? values)
     {
         var normalized = values?
-            .Select(value => value?.Trim() ?? string.Empty)
             .Where(value => !string.IsNullOrWhiteSpace(value))
-            .ToArray();
-
-        return normalized is { Length: > 0 }
+            .Select(value => value.Trim())
+            .ToArray() ?? [];
+        return normalized.Length > 0
             ? normalized
             : PiDockerLaunchProfileDefaults.TmuxShellCommand;
     }
+
+    private string? ProvisionPiState(PiDockerLaunchProfile profile)
+    {
+        try
+        {
+            Directory.CreateDirectory(profile.PiStateDir);
+
+            var requiredPaths = NormalizeRequiredPiStatePaths(_options.RequiredPiStatePaths);
+            var missingRequired = requiredPaths
+                .Where(path => !File.Exists(Path.Combine(profile.PiStateDir, path)) && !Directory.Exists(Path.Combine(profile.PiStateDir, path)))
+                .ToList();
+            if (missingRequired.Count > 0)
+            {
+                var sourceDir = NormalizeText(profile.PiStateSourceDir);
+                if (sourceDir is not null && Directory.Exists(sourceDir) && !SameDirectory(sourceDir, profile.PiStateDir))
+                {
+                    CopyDirectoryContents(sourceDir, profile.PiStateDir);
+                }
+            }
+
+            NormalizePiStatePermissions(profile.PiStateDir);
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return $"PI_STATE_DIR '{profile.PiStateDir}' could not be provisioned from configured source '{profile.PiStateSourceDir ?? "<none>"}': {ex.Message}";
+        }
+    }
+
+    private static void CopyDirectoryContents(string sourceDir, string targetDir)
+    {
+        foreach (var directory in Directory.EnumerateDirectories(sourceDir, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(sourceDir, directory);
+            Directory.CreateDirectory(Path.Combine(targetDir, relative));
+        }
+
+        foreach (var file in Directory.EnumerateFiles(sourceDir, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(sourceDir, file);
+            var target = Path.Combine(targetDir, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            if (!File.Exists(target))
+                File.Copy(file, target);
+        }
+    }
+
+    private static void NormalizePiStatePermissions(string piStateDir)
+    {
+        if (!OperatingSystem.IsLinux())
+            return;
+
+        SetDirectoryMode(piStateDir);
+        foreach (var directory in Directory.EnumerateDirectories(piStateDir, "*", SearchOption.AllDirectories))
+            SetDirectoryMode(directory);
+        foreach (var file in Directory.EnumerateFiles(piStateDir, "*", SearchOption.AllDirectories))
+            File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite);
+    }
+
+    [SupportedOSPlatform("linux")]
+    private static void SetDirectoryMode(string directory) =>
+        File.SetUnixFileMode(directory,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+            UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute |
+            UnixFileMode.OtherExecute |
+            UnixFileMode.SetGroup);
+
+    private static bool SameDirectory(string left, string right) =>
+        string.Equals(
+            Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar),
+            Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar),
+            StringComparison.Ordinal);
 
     private string? ValidatePiState(PiDockerLaunchProfile profile)
     {
