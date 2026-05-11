@@ -160,7 +160,7 @@ public sealed class TaskTools
         [Description("Optional count of task-local commits on top of inherited work.")] int? task_local_commit_count = null,
         [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
-        var parsedTests = tests_run is not null ? JsonSerializer.Deserialize<List<string>>(tests_run) : null;
+        var parsedTests = ParseStringListArgument(tests_run, "tests_run");
         var round = await repo.CreateAsync(new CreateReviewRoundInput
         {
             TaskId = task_id,
@@ -379,7 +379,7 @@ public sealed class TaskTools
         [Description("Optional sub-agent run ID for audit traceability.")] string? run_id = null,
         [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
-        var parsedTests = tests_run is not null ? JsonSerializer.Deserialize<List<string>>(tests_run) : null;
+        var parsedTests = ParseStringListArgument(tests_run, "tests_run");
         var result = await workflow.RequestReviewAsync(project_id, new RequestReviewInput
         {
             TaskId = task_id,
@@ -510,6 +510,65 @@ public sealed class TaskTools
         return verbose
             ? JsonSerializer.Serialize(result, JsonOpts.Default)
             : ConciseResponse.SplitReviewFindingsToFollowUp(result);
+    }
+
+    private static List<string>? ParseStringListArgument(string? value, string fieldName)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(value);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array)
+                throw new InvalidOperationException($"{fieldName} must be a JSON array.");
+
+            var parsed = new List<string>();
+            foreach (var item in doc.RootElement.EnumerateArray())
+            {
+                switch (item.ValueKind)
+                {
+                    case JsonValueKind.String:
+                        var text = item.GetString();
+                        if (!string.IsNullOrWhiteSpace(text))
+                            parsed.Add(text);
+                        break;
+                    case JsonValueKind.Object:
+                        parsed.Add(FormatStructuredStringListItem(item));
+                        break;
+                    default:
+                        throw new InvalidOperationException(
+                            $"{fieldName} entries must be strings or objects with command/result fields; found {item.ValueKind}.");
+                }
+            }
+
+            return parsed.Count > 0 ? parsed : null;
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException(
+                $"{fieldName} must be valid JSON array of strings, or objects with command/result fields.", ex);
+        }
+    }
+
+    private static string FormatStructuredStringListItem(JsonElement item)
+    {
+        var command = item.TryGetProperty("command", out var commandElement) &&
+            commandElement.ValueKind == JsonValueKind.String
+            ? commandElement.GetString()
+            : null;
+        var result = item.TryGetProperty("result", out var resultElement) &&
+            resultElement.ValueKind == JsonValueKind.String
+            ? resultElement.GetString()
+            : null;
+
+        return (command, result) switch
+        {
+            ({ Length: > 0 }, { Length: > 0 }) => $"{command}: {result}",
+            ({ Length: > 0 }, _) => command,
+            (_, { Length: > 0 }) => result,
+            _ => item.GetRawText()
+        };
     }
 
     private static void ValidateFollowUpStatusCombination(ReviewFindingStatus? status, int? followUpTaskId)

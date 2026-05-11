@@ -249,6 +249,11 @@ public sealed class ReviewRoundRepository : IReviewRoundRepository
 
     private static void ValidateCreateInput(CreateReviewRoundInput input)
     {
+        ValidateRequired(input.RequestedBy, "requested_by");
+        ValidateRequired(input.Branch, "branch");
+        ValidateRequired(input.BaseBranch, "base_branch");
+        ValidateRequired(input.BaseCommit, "base_commit");
+        ValidateRequired(input.HeadCommit, "head_commit");
         ValidateNonNegative(input.CommitsSinceLastReview, nameof(input.CommitsSinceLastReview));
         ValidateNonNegative(input.InheritedCommitCount, nameof(input.InheritedCommitCount));
         ValidateNonNegative(input.TaskLocalCommitCount, nameof(input.TaskLocalCommitCount));
@@ -262,6 +267,12 @@ public sealed class ReviewRoundRepository : IReviewRoundRepository
             throw new InvalidOperationException(
                 "alternate_diff_base_ref is required when alternate diff metadata is supplied.");
         }
+    }
+
+    private static void ValidateRequired(string? value, string name)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            throw new InvalidOperationException($"{name} is required and must be a non-empty string.");
     }
 
     private static void ValidateNonNegative(int? value, string name)

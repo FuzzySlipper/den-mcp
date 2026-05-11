@@ -517,6 +517,30 @@ public class ConciseResponseTests : IAsyncLifetime
         Assert.True(root.TryGetProperty("packet", out _));
     }
 
+    [Fact]
+    public async Task RequestReview_AcceptsStructuredTestRunObjects()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var taskRepo = scope.ServiceProvider.GetRequiredService<ITaskRepository>();
+        var workflow = scope.ServiceProvider.GetRequiredService<IReviewWorkflowService>();
+
+        var task = await taskRepo.CreateAsync(new ProjectTask { ProjectId = ProjectId, Title = "Structured tests request" });
+
+        var json = await TaskTools.RequestReview(
+            workflow,
+            ProjectId, task.Id, "codex",
+            branch: "task/999-test",
+            base_branch: "main",
+            base_commit: "aaa111",
+            head_commit: "bbb222",
+            tests_run: "[{\"command\":\"dotnet test --no-restore\",\"result\":\"passed\"}]",
+            verbose: true);
+
+        using var doc = JsonDocument.Parse(json);
+        var tests = doc.RootElement.GetProperty("review_round").GetProperty("tests_run");
+        Assert.Equal("dotnet test --no-restore: passed", tests[0].GetString());
+    }
+
     // ─── Post review findings ─────────────────────────────────────────────
 
     [Fact]

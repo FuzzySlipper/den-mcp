@@ -185,6 +185,25 @@ public class ReviewRoundRepositoryTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CreateAsync_MissingRequiredString_ThrowsActionableFieldError()
+    {
+        var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Missing commit" });
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => _repo.CreateAsync(new CreateReviewRoundInput
+        {
+            TaskId = task.Id,
+            RequestedBy = "claude-code",
+            Branch = "task/596",
+            BaseBranch = "main",
+            BaseCommit = null!,
+            HeadCommit = "def456"
+        }));
+
+        Assert.Contains("base_commit is required", ex.Message);
+        Assert.DoesNotContain("Value must be set", ex.Message);
+    }
+
+    [Fact]
     public async Task CreateAsync_NegativeCommitCounts_Throws()
     {
         var task = await _tasks.CreateAsync(new ProjectTask { ProjectId = "proj", Title = "Invalid counts" });
