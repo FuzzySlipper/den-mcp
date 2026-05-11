@@ -527,15 +527,18 @@ public sealed class PiSessionService : IPiSessionService
     private static List<string> BuildLaunchCommand(string dockerExecutable, PiDockerLaunchProfile profile)
     {
         var command = new List<string>();
-        var environmentAssignments = new List<string>();
+        var environmentAssignments = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (var pair in profile.Environment)
+            environmentAssignments[pair.Key] = pair.Value;
         if (!string.IsNullOrWhiteSpace(profile.DockerHost))
-            environmentAssignments.Add($"DOCKER_HOST={profile.DockerHost.Trim()}");
-        environmentAssignments.AddRange(profile.ScrubbedEnvironmentVariables.Select(name => $"{name}="));
+            environmentAssignments["DOCKER_HOST"] = profile.DockerHost.Trim();
+        foreach (var name in profile.ScrubbedEnvironmentVariables)
+            environmentAssignments[name] = string.Empty;
 
         if (environmentAssignments.Count > 0)
         {
             command.Add("env");
-            command.AddRange(environmentAssignments);
+            command.AddRange(environmentAssignments.Select(pair => $"{pair.Key}={pair.Value}"));
         }
         command.Add(dockerExecutable);
         command.AddRange(profile.DockerComposeRunArgs);

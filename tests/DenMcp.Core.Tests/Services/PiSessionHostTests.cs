@@ -7,7 +7,7 @@ namespace DenMcp.Core.Tests.Services;
 public sealed class PiSessionHostTests
 {
     [Fact]
-    public async Task Launch_BlanksProviderSecretsInTmuxEnvironmentAndCommand()
+    public async Task Launch_BlanksProviderSecretsInCommandWithoutSeedingTmuxEnvironment()
     {
         var piStateDir = Path.Combine(Path.GetTempPath(), "den-mcp", $"pi-state-{Guid.NewGuid():N}");
         Directory.CreateDirectory(Path.Combine(piStateDir, "agent"));
@@ -37,11 +37,15 @@ public sealed class PiSessionHostTests
             });
 
             Assert.Equal(PiSessionStates.Running, result.State);
-            var newSessionArgs = Assert.Single(runner.Calls, args => args.Count > 0 && args[0] == "new-session");
+            var newSessionArgs = Assert.Single(runner.Calls, args => TmuxCommand(args) == "new-session");
+            AssertTmuxSocket(newSessionArgs, "session-a");
             Assert.Equal("/bin/sh -i", newSessionArgs[^1]);
-            Assert.Contains("OPENAI_API_KEY=", newSessionArgs);
+            var newSessionEnvironment = runner.Environments[runner.Calls.IndexOf(newSessionArgs)];
+            Assert.Equal("/bin/sh", newSessionEnvironment["SHELL"]);
+            Assert.DoesNotContain("-e", newSessionArgs);
+            Assert.DoesNotContain(newSessionArgs, value => value.Contains("OPENAI_API_KEY=", StringComparison.Ordinal));
             Assert.DoesNotContain(newSessionArgs, value => value.Contains("server-secret", StringComparison.Ordinal));
-            var sendKeysArgs = Assert.Single(runner.Calls, args => args.Count > 0 && args[0] == "send-keys" && args.Contains("-l"));
+            var sendKeysArgs = Assert.Single(runner.Calls, args => TmuxCommand(args) == "send-keys" && args.Contains("-l"));
             Assert.Contains(sendKeysArgs, value => value.Contains("OPENAI_API_KEY=", StringComparison.Ordinal));
             Assert.DoesNotContain(sendKeysArgs, value => value.Contains("server-secret", StringComparison.Ordinal));
         }
@@ -81,7 +85,8 @@ public sealed class PiSessionHostTests
             });
 
             Assert.Equal(PiSessionStates.Running, result.State);
-            var newSessionArgs = Assert.Single(runner.Calls, args => args.Count > 0 && args[0] == "new-session");
+            var newSessionArgs = Assert.Single(runner.Calls, args => TmuxCommand(args) == "new-session");
+            AssertTmuxSocket(newSessionArgs, "session-a");
             Assert.Equal("/bin/bash -i", newSessionArgs[^1]);
         }
         finally
@@ -135,7 +140,8 @@ public sealed class PiSessionHostTests
             });
 
             Assert.Equal(PiSessionStates.Running, result.State);
-            var newSessionArgs = Assert.Single(runner.Calls, args => args.Count > 0 && args[0] == "new-session");
+            var newSessionArgs = Assert.Single(runner.Calls, args => TmuxCommand(args) == "new-session");
+            AssertTmuxSocket(newSessionArgs, "session-a");
             Assert.Equal(expectedShellCommand, newSessionArgs[^1]);
         }
         finally
@@ -237,7 +243,7 @@ public sealed class PiSessionHostTests
             Assert.Equal(PiSessionStates.Failed, result.State);
             Assert.Contains("Docker launch command failed", result.StateReason);
             Assert.Equal("container-a", result.ContainerName);
-            Assert.True(runner.Calls.Count(args => args.Count > 0 && args[0] == "capture-pane") >= 2);
+            Assert.True(runner.Calls.Count(args => TmuxCommand(args) == "capture-pane") >= 2);
         }
         finally
         {
@@ -359,7 +365,7 @@ public sealed class PiSessionHostTests
         Assert.Equal(PiSessionStates.Running, status.State);
         Assert.False(status.OutputTailTruncated);
         Assert.Equal(80, status.OutputTail!.Split('\n').Length);
-        var captureArgs = Assert.Single(runner.Calls, args => args.Count > 0 && args[0] == "capture-pane");
+        var captureArgs = Assert.Single(runner.Calls, args => TmuxCommand(args) == "capture-pane");
         var startIndex = captureArgs.ToList().IndexOf("-S");
         Assert.Equal("-81", captureArgs[startIndex + 1]);
     }
@@ -425,6 +431,20 @@ public sealed class PiSessionHostTests
 
     private static string Lines(int count) => string.Join("\n", Enumerable.Range(1, count).Select(i => $"line-{i}"));
 
+    private static string? TmuxCommand(IReadOnlyList<string> args)
+    {
+        if (args.Count >= 3 && args[0] == "-L")
+            return args[2];
+        return args.Count > 0 ? args[0] : null;
+    }
+
+    private static void AssertTmuxSocket(IReadOnlyList<string> args, string sessionId)
+    {
+        Assert.True(args.Count >= 3, "tmux args should include -L <socket> before the command");
+        Assert.Equal("-L", args[0]);
+        Assert.Equal($"den-mcp-{sessionId}", args[1]);
+    }
+
     private sealed class FakeProcessRunner : IProcessRunner
     {
         private readonly Queue<string> _capturedOutputs;
@@ -456,7 +476,8 @@ public sealed class PiSessionHostTests
             Environments.Add(environment is null
                 ? new Dictionary<string, string>(StringComparer.Ordinal)
                 : new Dictionary<string, string>(environment, StringComparer.Ordinal));
-            if (args.Count > 0 && args[0] == "list-sessions")
+            var command = TmuxCommand(args);
+            if (command == "list-sessions")
             {
                 return Task.FromResult(new ProcessRunResult
                 {
@@ -465,7 +486,7 @@ public sealed class PiSessionHostTests
                 });
             }
 
-            if (args.Count > 0 && args[0] == "capture-pane")
+            if (command == "capture-pane")
             {
                 var capturedOutput = _capturedOutputs.Count > 1 ? _capturedOutputs.Dequeue() : _capturedOutputs.Peek();
                 return Task.FromResult(new ProcessRunResult
@@ -492,7 +513,7 @@ public sealed class PiSessionHostTests
                 });
             }
 
-            if (args.Count > 0 && (args[0] == "new-session" || args[0] == "set-option" || args[0] == "send-keys"))
+            if (command is "new-session" or "set-option" or "send-keys")
             {
                 return Task.FromResult(new ProcessRunResult
                 {

@@ -122,14 +122,13 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
             newSessionArgs.Add("-c");
             newSessionArgs.Add(plan.LaunchProfile.DevDir);
         }
-        foreach (var pair in plan.LaunchProfile.Environment)
-        {
-            newSessionArgs.Add("-e");
-            newSessionArgs.Add($"{pair.Key}={pair.Value}");
-        }
+        // Keep tmux session creation minimal and deterministic. The Docker launch command
+        // is rendered as an explicit `env KEY=VALUE ... docker compose ...` shell line below,
+        // so duplicating launch-profile environment through `tmux new-session -e` is redundant
+        // and can make the tmux server fragile when provider/config environment grows large.
         newSessionArgs.Add(RenderShellCommand(NormalizeTmuxShellCommand(_options.TmuxShellCommand)));
 
-        var create = await RunTmuxAsync(newSessionArgs, cancellationToken).ConfigureAwait(false);
+        var create = await RunTmuxAsync(plan.Record, newSessionArgs, cancellationToken).ConfigureAwait(false);
         if (!create.Succeeded)
         {
             return new PiSessionHostLaunchResult
@@ -142,7 +141,7 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
         await SetMetadataAsync(plan, cancellationToken).ConfigureAwait(false);
 
         var commandLine = RenderShellCommand(plan.LaunchCommand);
-        var send = await RunTmuxAsync(["send-keys", "-t", plan.Record.TmuxSessionName, "-l", "--", commandLine], cancellationToken).ConfigureAwait(false);
+        var send = await RunTmuxAsync(plan.Record, ["send-keys", "-t", plan.Record.TmuxSessionName, "-l", "--", commandLine], cancellationToken).ConfigureAwait(false);
         if (!send.Succeeded)
         {
             return new PiSessionHostLaunchResult
@@ -152,7 +151,7 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
             };
         }
 
-        var enter = await RunTmuxAsync(["send-keys", "-t", plan.Record.TmuxSessionName, "Enter"], cancellationToken).ConfigureAwait(false);
+        var enter = await RunTmuxAsync(plan.Record, ["send-keys", "-t", plan.Record.TmuxSessionName, "Enter"], cancellationToken).ConfigureAwait(false);
         if (!enter.Succeeded)
         {
             return new PiSessionHostLaunchResult
@@ -185,7 +184,7 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
 
     public async Task<PiSessionHostStatus> GetStatusAsync(PiSessionRecord session, CancellationToken cancellationToken = default)
     {
-        var list = await RunTmuxAsync([
+        var list = await RunTmuxAsync(session, [
             "list-sessions",
             "-F",
             "#{session_name}\t#{session_created}\t#{session_activity}"
@@ -232,7 +231,7 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
 
     public async Task<PiSessionHostControlResult> TerminateAsync(PiSessionRecord session, CancellationToken cancellationToken = default)
     {
-        var result = await RunTmuxAsync(["kill-session", "-t", session.TmuxSessionName], cancellationToken).ConfigureAwait(false);
+        var result = await RunTmuxAsync(session, ["kill-session", "-t", session.TmuxSessionName], cancellationToken).ConfigureAwait(false);
         if (!result.Succeeded && !TrimError(result.Stderr).Contains("can't find", StringComparison.OrdinalIgnoreCase))
         {
             return new PiSessionHostControlResult
@@ -314,7 +313,7 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
         {
             if (string.IsNullOrWhiteSpace(pair.Value))
                 continue;
-            await RunTmuxAsync(["set-option", "-t", plan.Record.TmuxSessionName, LabelPrefix + pair.Key, pair.Value], cancellationToken).ConfigureAwait(false);
+            await RunTmuxAsync(plan.Record, ["set-option", "-t", plan.Record.TmuxSessionName, LabelPrefix + pair.Key, pair.Value], cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -357,7 +356,7 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
 
     private async Task<PiSessionOutputTail?> CaptureOutputTailAsync(PiSessionRecord session, CancellationToken cancellationToken)
     {
-        var capture = await RunTmuxAsync([
+        var capture = await RunTmuxAsync(session, [
             "capture-pane",
             "-p",
             "-t", session.TmuxSessionName,
@@ -512,8 +511,38 @@ public sealed class TmuxDockerPiSessionHost : IPiSessionHost
         return failureLine is null ? null : TrimError($"Docker launch command failed: {failureLine}");
     }
 
-    private Task<ProcessRunResult> RunTmuxAsync(IReadOnlyList<string> args, CancellationToken cancellationToken) =>
-        _runner.RunAsync(_options.TmuxExecutable, args, _commandTimeout, cancellationToken);
+    private Task<ProcessRunResult> RunTmuxAsync(PiSessionRecord session, IReadOnlyList<string> args, CancellationToken cancellationToken)
+    {
+        var tmuxArgs = new List<string>(args.Count + 2)
+        {
+            "-L",
+            TmuxSocketName(session),
+        };
+        tmuxArgs.AddRange(args);
+        return _runner.RunAsync(_options.TmuxExecutable, tmuxArgs, _commandTimeout, cancellationToken, BuildTmuxProcessEnvironment());
+    }
+
+    private static IReadOnlyDictionary<string, string> BuildTmuxProcessEnvironment() =>
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            // den-mcp/docker-rt are service accounts with /usr/sbin/nologin shells.
+            // tmux derives its default shell from SHELL/passwd and may use it to
+            // start pane commands; force a real shell for deterministic detached sessions.
+            ["SHELL"] = "/bin/sh",
+        };
+
+    private static string TmuxSocketName(PiSessionRecord session)
+    {
+        var source = string.IsNullOrWhiteSpace(session.SessionId)
+            ? session.TmuxSessionName
+            : session.SessionId;
+        var builder = new StringBuilder("den-mcp-");
+        foreach (var ch in source)
+        {
+            builder.Append(char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_' ? ch : '-');
+        }
+        return builder.ToString();
+    }
 
     private static IReadOnlyList<string> NormalizeTmuxShellCommand(IEnumerable<string>? values)
     {
