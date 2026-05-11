@@ -563,7 +563,283 @@ public sealed class PiSessionApiTests : IAsyncLifetime
         using var malformedJson = JsonDocument.Parse(malformed);
         Assert.Equal("malformed", malformedJson.RootElement.GetProperty("completion_state").GetString());
         Assert.Equal("malformed", malformedJson.RootElement.GetProperty("completion").GetProperty("status").GetString());
-        Assert.Equal("malformed_packet", malformedJson.RootElement.GetProperty("completion").GetProperty("failure_category").GetString());
+        Assert.Equal("malformed_completion", malformedJson.RootElement.GetProperty("completion").GetProperty("failure_category").GetString());
+    }
+
+    [Fact]
+    public async Task CompletionTools_PostCompletedImplementationWithoutBranchHeadTests_MarksMalformed()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IPiSessionService>();
+        var sessions = scope.ServiceProvider.GetRequiredService<IPiSessionRepository>();
+        var messages = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+
+        await WorkerTools.LaunchPiWorker(service,
+            project_id: ProjectId,
+            requested_by: "hermes",
+            role: "coder",
+            task_id: _task.Id,
+            prompt_packet_message_id: 1279,
+            session_id: "worker-impl-missing-metadata",
+            run_id: "piw_20260511040000_missingmeta",
+            callback_ports: "[{\"host_port\":21463,\"container_port\":1455}]",
+            verbose: true);
+
+        var completion = await CompletionTools.PostWorkerCompletionPacket(
+            service,
+            sessions,
+            messages,
+            ProjectId,
+            run_id: "piw_20260511040000_missingmeta",
+            requested_by: "pi-coder",
+            status: "completed",
+            role: "coder",
+            packet_type: "implementation_packet",
+            summary: "Claimed implementation without required repo/test metadata.",
+            verbose: true);
+
+        using var completionJson = JsonDocument.Parse(completion);
+        Assert.Equal("malformed", completionJson.RootElement.GetProperty("completion_state").GetString());
+        Assert.Equal("malformed", completionJson.RootElement.GetProperty("completion").GetProperty("status").GetString());
+        Assert.Equal("malformed_completion", completionJson.RootElement.GetProperty("completion").GetProperty("failure_category").GetString());
+        Assert.Contains("missing branch", completionJson.RootElement.GetProperty("completion").GetProperty("recovery_guidance").GetString());
+    }
+
+    [Fact]
+    public async Task CompletionTools_PostShellExpressionRunId_ReturnsMalformedIdentityDiagnostic()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IPiSessionService>();
+        var sessions = scope.ServiceProvider.GetRequiredService<IPiSessionRepository>();
+        var messages = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+
+        var completion = await CompletionTools.PostWorkerCompletionPacket(
+            service,
+            sessions,
+            messages,
+            ProjectId,
+            run_id: "piw_$(date +%Y%m%d%H%M%S)_$(head -c 8 /dev/urandom | xxd -p)",
+            requested_by: "pi-coder",
+            status: "completed",
+            role: "coder",
+            packet_type: "implementation_packet",
+            summary: "Bad run id.",
+            verbose: true);
+
+        using var completionJson = JsonDocument.Parse(completion);
+        Assert.Equal("malformed", completionJson.RootElement.GetProperty("completion_state").GetString());
+        Assert.Equal("malformed_completion", completionJson.RootElement.GetProperty("failure_category").GetString());
+        Assert.Contains("shell syntax", completionJson.RootElement.GetProperty("diagnostics")[0].GetString());
+    }
+
+    [Fact]
+    public async Task CompletionTools_PostMissingRunId_ReturnsMalformedIdentityDiagnostic()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IPiSessionService>();
+        var sessions = scope.ServiceProvider.GetRequiredService<IPiSessionRepository>();
+        var messages = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+
+        var completion = await CompletionTools.PostWorkerCompletionPacket(
+            service,
+            sessions,
+            messages,
+            ProjectId,
+            run_id: " ",
+            requested_by: "pi-coder",
+            status: "completed",
+            role: "coder",
+            packet_type: "implementation_packet",
+            summary: "Missing run id.",
+            verbose: true);
+
+        using var completionJson = JsonDocument.Parse(completion);
+        Assert.Equal("malformed", completionJson.RootElement.GetProperty("completion_state").GetString());
+        Assert.Equal("malformed_completion", completionJson.RootElement.GetProperty("failure_category").GetString());
+        Assert.Contains("DEN_WORKER_RUN_ID", completionJson.RootElement.GetProperty("diagnostics")[0].GetString());
+    }
+
+    [Fact]
+    public async Task CompletionTools_PostWrongWellFormedRunId_ReturnsMissingRunDiagnostic()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IPiSessionService>();
+        var sessions = scope.ServiceProvider.GetRequiredService<IPiSessionRepository>();
+        var messages = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+
+        await WorkerTools.LaunchPiWorker(service,
+            project_id: ProjectId,
+            requested_by: "hermes",
+            role: "coder",
+            task_id: _task.Id,
+            prompt_packet_message_id: 1279,
+            session_id: "worker-actual-run-id",
+            run_id: "piw_20260511040200_actual",
+            callback_ports: "[{\"host_port\":21464,\"container_port\":1455}]",
+            verbose: true);
+
+        var completion = await CompletionTools.PostWorkerCompletionPacket(
+            service,
+            sessions,
+            messages,
+            ProjectId,
+            run_id: "piw_20260511040200_wrong",
+            requested_by: "pi-coder",
+            status: "completed",
+            role: "coder",
+            packet_type: "implementation_packet",
+            summary: "Wrong but shaped run id.",
+            verbose: true);
+
+        using var completionJson = JsonDocument.Parse(completion);
+        Assert.Equal("missing_run", completionJson.RootElement.GetProperty("completion_state").GetString());
+        Assert.Equal("missing_worker_run", completionJson.RootElement.GetProperty("failure_category").GetString());
+        Assert.Contains("not found", completionJson.RootElement.GetProperty("diagnostics")[0].GetString());
+    }
+
+    [Fact]
+    public async Task CompletionTools_PostWrongRoleForKnownRun_MarksMalformedAndUsesDurableRole()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IPiSessionService>();
+        var sessions = scope.ServiceProvider.GetRequiredService<IPiSessionRepository>();
+        var messages = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+
+        await WorkerTools.LaunchPiWorker(service,
+            project_id: ProjectId,
+            requested_by: "hermes",
+            role: "coder",
+            task_id: _task.Id,
+            prompt_packet_message_id: 1279,
+            session_id: "worker-role-mismatch",
+            run_id: "piw_20260511040300_rolemismatch",
+            callback_ports: "[{\"host_port\":21465,\"container_port\":1455}]",
+            verbose: true);
+
+        var completion = await CompletionTools.PostWorkerCompletionPacket(
+            service,
+            sessions,
+            messages,
+            ProjectId,
+            run_id: "piw_20260511040300_rolemismatch",
+            requested_by: "pi-coder",
+            status: "completed",
+            role: "reviewer",
+            packet_type: "review_findings_packet",
+            summary: "Wrong role claim for a coder run.",
+            branch: "task/1279-harden-worker-completion-packets",
+            head_commit: "90b971b57e36757860854e6dded4867a6c0a1f39",
+            verbose: true);
+
+        using var completionJson = JsonDocument.Parse(completion);
+        Assert.Equal("malformed", completionJson.RootElement.GetProperty("completion_state").GetString());
+        var packet = completionJson.RootElement.GetProperty("completion");
+        Assert.Equal("malformed", packet.GetProperty("status").GetString());
+        Assert.Equal("coder", packet.GetProperty("role").GetString());
+        Assert.Equal("reviewer", packet.GetProperty("supplied_role").GetString());
+        Assert.Equal("malformed_completion", packet.GetProperty("failure_category").GetString());
+        Assert.Contains("role mismatch", packet.GetProperty("recovery_guidance").GetString());
+    }
+
+    [Fact]
+    public async Task CompletionTools_PostRawRoleForKnownRun_RemainsRawAndPresent()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IPiSessionService>();
+        var sessions = scope.ServiceProvider.GetRequiredService<IPiSessionRepository>();
+        var messages = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+
+        await WorkerTools.LaunchPiWorker(service,
+            project_id: ProjectId,
+            requested_by: "hermes",
+            role: "raw",
+            task_id: _task.Id,
+            prompt_packet_message_id: 1279,
+            session_id: "worker-raw-role",
+            run_id: "piw_20260511040400_rawrole",
+            callback_ports: "[{\"host_port\":21466,\"container_port\":1455}]",
+            verbose: true);
+
+        var completion = await CompletionTools.PostWorkerCompletionPacket(
+            service,
+            sessions,
+            messages,
+            ProjectId,
+            run_id: "piw_20260511040400_rawrole",
+            requested_by: "pi-raw",
+            status: "completed",
+            role: "raw",
+            packet_type: "validation_packet",
+            summary: "Raw worker completed.",
+            verbose: true);
+
+        using var completionJson = JsonDocument.Parse(completion);
+        Assert.Equal("present", completionJson.RootElement.GetProperty("completion_state").GetString());
+        var packet = completionJson.RootElement.GetProperty("completion");
+        Assert.Equal("completed", packet.GetProperty("status").GetString());
+        Assert.Equal("raw", packet.GetProperty("role").GetString());
+        Assert.Equal("raw", packet.GetProperty("supplied_role").GetString());
+    }
+
+    [Fact]
+    public async Task CompletionTools_GetLatestCompletion_DiagnosesMalformedSameTaskCandidates()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var messages = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
+
+        await messages.CreateAsync(new Message
+        {
+            ProjectId = ProjectId,
+            TaskId = _task.Id,
+            Sender = "pi-coder",
+            Content = "bad raw worker packet",
+            Intent = MessageIntent.StatusUpdate,
+            Metadata = JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+            {
+                ["type"] = "implementation_packet",
+                ["schema"] = "den_worker_completion",
+                ["completion_packet"] = true,
+                ["malformed"] = true,
+                ["status"] = "completed",
+                ["role"] = "coder",
+                ["run_id"] = "piw_$(date +%Y%m%d%H%M%S)_$(head -c 8 /dev/urandom | xxd -p)",
+                ["task_id"] = _task.Id,
+                ["failure_category"] = "malformed_completion"
+            })
+        });
+
+        await messages.CreateAsync(new Message
+        {
+            ProjectId = ProjectId,
+            TaskId = _task.Id,
+            Sender = "pi-reviewer",
+            Content = "wrong role worker packet",
+            Intent = MessageIntent.ReviewFeedback,
+            Metadata = JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+            {
+                ["type"] = "review_findings_packet",
+                ["schema"] = "den_worker_completion",
+                ["completion_packet"] = true,
+                ["status"] = "completed",
+                ["role"] = "reviewer",
+                ["run_id"] = "piw_20260511040100_wrongrole",
+                ["task_id"] = _task.Id
+            })
+        });
+
+        var missing = await CompletionTools.GetLatestWorkerCompletion(
+            messages,
+            ProjectId,
+            run_id: "piw_20260511040100_expected",
+            task_id: _task.Id,
+            role: "coder",
+            verbose: true);
+
+        using var missingJson = JsonDocument.Parse(missing);
+        Assert.Equal("missing_packet", missingJson.RootElement.GetProperty("completion_state").GetString());
+        var diagnostics = missingJson.RootElement.GetProperty("diagnostics").EnumerateArray().Select(v => v.GetString()).ToList();
+        Assert.Contains(diagnostics, value => value!.Contains("malformed same-task completion candidate", StringComparison.Ordinal));
+        Assert.Contains(diagnostics, value => value!.Contains("role mismatch", StringComparison.Ordinal));
     }
 
     [Fact]

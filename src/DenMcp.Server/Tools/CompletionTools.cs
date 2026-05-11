@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using DenMcp.Core.Data;
 using DenMcp.Core.Models;
 using DenMcp.Core.Services;
@@ -26,6 +27,8 @@ public sealed class CompletionTools
         "implementation_packet", "review_findings_packet", "validation_packet", "drift_check_packet", "packet_audit_packet", "worker_failure_packet"
     };
 
+    private static readonly Regex ShellSyntaxPattern = new(@"(\$\(|`|\$\{|\bdate\b|\burandom\b|\bxxd\b)", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     [McpServerTool(Name = "post_worker_completion_packet"), Description("Post an idempotent structured Den Pi worker completion packet and update the durable worker/session status.")]
     public static async Task<string> PostWorkerCompletionPacket(
         IPiSessionService service,
@@ -49,17 +52,32 @@ public sealed class CompletionTools
         [Description("Optional idempotency key for retry-safe completion posting.")] string? dedupe_key = null,
         [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
+        var identityDiagnostics = ValidateSubmittedRunId(run_id);
+        if (identityDiagnostics.Count > 0)
+            return SerializeRejectedCompletion("malformed", "malformed_completion", identityDiagnostics);
+
         var detail = await FindByRunOrSessionAsync(service, project_id, run_id).ConfigureAwait(false);
         if (detail is null)
-            return Error($"Worker run {run_id} not found in project {project_id}.");
+            return SerializeRejectedCompletion("missing_run", "missing_worker_run", [$"Worker run/session '{run_id}' was not found in project '{project_id}'."]);
 
         var normalizedRole = NormalizeRole(role);
+        var durableRole = DurableRole(detail);
+        var roleDiagnostics = new List<string>();
+        if (durableRole is not null && !string.Equals(normalizedRole, durableRole, StringComparison.Ordinal))
+        {
+            roleDiagnostics.Add($"Worker completion role mismatch: supplied role '{normalizedRole}' does not match durable worker role '{durableRole}'.");
+            normalizedRole = durableRole;
+        }
         var normalizedStatus = NormalizeStatus(status);
         var normalizedPacketType = NormalizePacketType(packet_type);
-        var isMalformed = normalizedStatus is null || normalizedPacketType is null;
-        normalizedStatus ??= "malformed";
+        var packetDiagnostics = ValidatePacketClaims(normalizedStatus, normalizedPacketType, branch, head_commit, tests_run);
+        packetDiagnostics.AddRange(roleDiagnostics);
+        var isMalformed = normalizedStatus is null || normalizedPacketType is null || packetDiagnostics.Count > 0;
+        normalizedStatus = isMalformed ? "malformed" : normalizedStatus;
         normalizedPacketType ??= "worker_failure_packet";
-        var resolvedFailure = ResolveFailureCategory(normalizedStatus, failure_category, isMalformed);
+        var resolvedFailure = ResolveFailureCategory(normalizedStatus!, failure_category, isMalformed);
+        if (packetDiagnostics.Count > 0)
+            recovery_guidance = AppendRecoveryGuidance(recovery_guidance, string.Join(" ", packetDiagnostics));
 
         var existing = !string.IsNullOrWhiteSpace(dedupe_key)
             ? await FindExistingCompletionAsync(messages, project_id, detail.Session.TaskId, dedupe_key: dedupe_key).ConfigureAwait(false)
@@ -67,15 +85,15 @@ public sealed class CompletionTools
         if (existing is not null)
             return SerializeCompletionResult(existing, "existing", isMalformed ? "malformed" : "present", verbose);
 
-        var content = BuildCompletionContent(detail, normalizedRole, normalizedStatus, normalizedPacketType, summary, branch, head_commit, base_commit, tests_run, review_round_id, finding_ids, resolvedFailure, recovery_guidance, isMalformed);
-        var metadata = BuildMetadata(detail, normalizedRole, normalizedStatus, normalizedPacketType, branch, head_commit, base_commit, tests_run, review_round_id, finding_ids, resolvedFailure, recovery_guidance, dedupe_key, isMalformed);
+        var content = BuildCompletionContent(detail, normalizedRole, normalizedStatus!, normalizedPacketType, summary, branch, head_commit, base_commit, tests_run, review_round_id, finding_ids, resolvedFailure, recovery_guidance, isMalformed);
+        var metadata = BuildMetadata(detail, normalizedRole, normalizedStatus!, normalizedPacketType, run_id, role, branch, head_commit, base_commit, tests_run, review_round_id, finding_ids, resolvedFailure, recovery_guidance, dedupe_key, isMalformed);
         var message = await messages.CreateAsync(new Message
         {
             ProjectId = project_id,
             TaskId = detail.Session.TaskId,
             Sender = requested_by,
             Content = content,
-            Intent = CompletionIntent(normalizedStatus, normalizedPacketType),
+            Intent = CompletionIntent(normalizedStatus!, normalizedPacketType),
             Metadata = metadata,
         }).ConfigureAwait(false);
 
@@ -100,14 +118,16 @@ public sealed class CompletionTools
         [Description("Optional role filter.")] string? role = null,
         [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
-        var found = await FindLatestCompletionAsync(messages, project_id, run_id, task_id, role).ConfigureAwait(false);
+        var candidates = await messages.GetMessagesAsync(project_id, taskId: task_id, limit: 100).ConfigureAwait(false);
+        var found = FindLatestCompletion(candidates, run_id, role);
         if (found is null)
         {
             return JsonSerializer.Serialize(new
             {
                 completion_state = "missing_packet",
-                summary = "no worker completion packet found",
-                query = new { project_id, run_id, task_id, role }
+                summary = "no matching worker completion packet found",
+                query = new { project_id, run_id, task_id, role },
+                diagnostics = BuildLookupDiagnostics(candidates, run_id, role)
             }, JsonOptions);
         }
         var state = MetadataBool(found, "malformed") ? "malformed" : "present";
@@ -134,14 +154,37 @@ public sealed class CompletionTools
         return candidates.FirstOrDefault(m => IsCompletion(m) && string.Equals(MetadataString(m, "dedupe_key"), dedupe_key, StringComparison.Ordinal));
     }
 
-    private static async Task<Message?> FindLatestCompletionAsync(IMessageRepository messages, string projectId, string? runId, int? taskId, string? role)
+    private static Message? FindLatestCompletion(IEnumerable<Message> candidates, string? runId, string? role)
     {
-        var candidates = await messages.GetMessagesAsync(projectId, taskId: taskId, limit: 100).ConfigureAwait(false);
         var normalizedRole = string.IsNullOrWhiteSpace(role) ? null : NormalizeRole(role);
         return candidates.FirstOrDefault(m =>
             IsCompletion(m)
             && (string.IsNullOrWhiteSpace(runId) || string.Equals(MetadataString(m, "run_id"), runId, StringComparison.Ordinal) || string.Equals(MetadataString(m, "session_id"), runId, StringComparison.Ordinal))
             && (normalizedRole is null || string.Equals(MetadataString(m, "role"), normalizedRole, StringComparison.Ordinal)));
+    }
+
+    private static List<string> BuildLookupDiagnostics(IEnumerable<Message> candidates, string? runId, string? role)
+    {
+        var diagnostics = new List<string>();
+        var normalizedRole = string.IsNullOrWhiteSpace(role) ? null : NormalizeRole(role);
+        foreach (var candidate in candidates.Where(IsCompletion).Take(10))
+        {
+            var candidateRun = MetadataString(candidate, "run_id");
+            var candidateSession = MetadataString(candidate, "session_id");
+            var candidateRole = MetadataString(candidate, "role");
+            if (MetadataBool(candidate, "malformed") || IsSuspiciousRunId(candidateRun) || IsSuspiciousRunId(candidateSession))
+                diagnostics.Add($"malformed same-task completion candidate message #{candidate.Id}: run_id='{candidateRun ?? "<missing>"}', role='{candidateRole ?? "<missing>"}'.");
+            if (!string.IsNullOrWhiteSpace(runId) &&
+                !string.Equals(candidateRun, runId, StringComparison.Ordinal) &&
+                !string.Equals(candidateSession, runId, StringComparison.Ordinal))
+                diagnostics.Add($"run mismatch for same-task completion candidate message #{candidate.Id}: expected '{runId}', found run_id='{candidateRun ?? "<missing>"}', session_id='{candidateSession ?? "<missing>"}'.");
+            if (normalizedRole is not null && !string.Equals(candidateRole, normalizedRole, StringComparison.Ordinal))
+                diagnostics.Add($"role mismatch for same-task completion candidate message #{candidate.Id}: expected '{normalizedRole}', found '{candidateRole ?? "<missing>"}'.");
+        }
+
+        if (diagnostics.Count == 0)
+            diagnostics.Add("No completion packets were found for the supplied task/query scope.");
+        return diagnostics;
     }
 
     private static string BuildCompletionContent(
@@ -208,6 +251,8 @@ public sealed class CompletionTools
         string role,
         string status,
         string packetType,
+        string suppliedRunOrSessionId,
+        string suppliedRole,
         string? branch,
         string? headCommit,
         string? baseCommit,
@@ -229,6 +274,7 @@ public sealed class CompletionTools
             ["malformed"] = malformed,
             ["status"] = status,
             ["role"] = role,
+            ["supplied_role"] = NormalizeRole(suppliedRole),
             ["project_id"] = detail.Session.ProjectId,
             ["task_id"] = detail.Session.TaskId,
             ["run_id"] = RunId(detail.Session),
@@ -242,6 +288,9 @@ public sealed class CompletionTools
             ["failure_category"] = NullIfWhiteSpace(failureCategory),
             ["recovery_guidance"] = NullIfWhiteSpace(recoveryGuidance),
             ["dedupe_key"] = NullIfWhiteSpace(dedupeKey),
+            ["identity_provenance"] = "server_derived_from_worker_run",
+            ["identity_validation"] = "matched_worker_run_record",
+            ["provided_run_or_session_id"] = suppliedRunOrSessionId,
         };
         return JsonSerializer.SerializeToElement(obj, JsonOptions);
     }
@@ -261,6 +310,7 @@ public sealed class CompletionTools
                 run_id = MetadataString(message, "run_id"),
                 session_id = MetadataString(message, "session_id"),
                 role = MetadataString(message, "role"),
+                supplied_role = MetadataString(message, "supplied_role"),
                 status = MetadataString(message, "status"),
                 packet_type = MetadataString(message, "type"),
                 failure_category = MetadataString(message, "failure_category"),
@@ -303,11 +353,19 @@ public sealed class CompletionTools
     }
 
     private static string NormalizeRole(string? value) => NormalizeToken(value) ?? "worker";
+
+    private static string? DurableRole(PiSessionDetail detail)
+    {
+        var role = NormalizeToken(detail.Session.ToolProfile)
+            ?? NormalizeToken(detail.LaunchProfile?.WorkerRole);
+        return role;
+    }
+
     private static string? NormalizeToken(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim().ToLowerInvariant().Replace('-', '_');
     private static string? ResolveFailureCategory(string status, string? provided, bool malformed)
     {
         if (malformed)
-            return "malformed_packet";
+            return "malformed_completion";
         if (!string.IsNullOrWhiteSpace(provided))
             return NormalizeToken(provided);
         return status switch
@@ -320,6 +378,49 @@ public sealed class CompletionTools
             _ => "malformed_packet",
         };
     }
+
+    private static List<string> ValidateSubmittedRunId(string? runId)
+    {
+        var diagnostics = new List<string>();
+        if (string.IsNullOrWhiteSpace(runId))
+        {
+            diagnostics.Add("run_id/session_id is required; workers must pass DEN_WORKER_RUN_ID exactly when available.");
+            return diagnostics;
+        }
+
+        if (IsSuspiciousRunId(runId))
+            diagnostics.Add("run_id/session_id contains shell syntax or placeholder text; read DEN_WORKER_RUN_ID literally and do not invent or template run ids.");
+        return diagnostics;
+    }
+
+    private static List<string> ValidatePacketClaims(string? status, string? packetType, string? branch, string? headCommit, string? testsRun)
+    {
+        var diagnostics = new List<string>();
+        if (status == "completed" && packetType == "implementation_packet")
+        {
+            var missing = new List<string>();
+            if (string.IsNullOrWhiteSpace(branch)) missing.Add("branch");
+            if (string.IsNullOrWhiteSpace(headCommit)) missing.Add("head_commit");
+            if (string.IsNullOrWhiteSpace(testsRun)) missing.Add("tests_run");
+            if (missing.Count > 0)
+                diagnostics.Add($"Completed implementation packets are missing {string.Join(", ", missing)} metadata; report exact branch, head commit, and test/validation results.");
+        }
+        return diagnostics;
+    }
+
+    private static bool IsSuspiciousRunId(string? runId) => !string.IsNullOrWhiteSpace(runId) && ShellSyntaxPattern.IsMatch(runId);
+
+    private static string AppendRecoveryGuidance(string? existing, string addition) =>
+        string.IsNullOrWhiteSpace(existing) ? addition : $"{existing.Trim()} {addition}";
+
+    private static string SerializeRejectedCompletion(string completionState, string failureCategory, IReadOnlyList<string> diagnostics) =>
+        JsonSerializer.Serialize(new
+        {
+            summary = diagnostics.FirstOrDefault() ?? "worker completion rejected",
+            completion_state = completionState,
+            failure_category = failureCategory,
+            diagnostics
+        }, JsonOptions);
 
     private static object? ParseJsonOrString(string? value)
     {
