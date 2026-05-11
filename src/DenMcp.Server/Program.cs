@@ -6,6 +6,7 @@ using DenMcp.Core.Llm;
 using DenMcp.Core.Models;
 using DenMcp.Core.Services;
 using DenMcp.Server;
+using DenMcp.Server.CoreClient;
 using DenMcp.Server.Realtime;
 using DenMcp.Server.Routes;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -27,6 +28,15 @@ if (builder.Configuration["db-path"] is { } dbPathOverride)
 
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton(options.PiSessionHost);
+var denCoreOptions = new DenCoreOptions();
+builder.Configuration.GetSection("DenCore").Bind(denCoreOptions);
+if (builder.Configuration["den-core-url"] is { } denCoreUrl)
+    denCoreOptions.BaseUrl = denCoreUrl;
+if (builder.Configuration["den-core-timeout-seconds"] is { } denCoreTimeout &&
+    int.TryParse(denCoreTimeout, out var parsedDenCoreTimeout))
+    denCoreOptions.TimeoutSeconds = parsedDenCoreTimeout;
+builder.Services.AddSingleton(denCoreOptions);
+builder.Services.AddHttpClient<DenCoreClient>();
 var trustedPublisherOptions = new TrustedPublisherOptions();
 builder.Configuration.GetSection("DenMcp:TrustedPublisher").Bind(trustedPublisherOptions);
 builder.Services.AddSingleton(trustedPublisherOptions);
@@ -131,13 +141,36 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 
 // Health check
-app.MapGet("/health", () => Results.Ok(new
+app.MapGet("/health", async (DenCoreClient coreClient) =>
 {
-    status = "healthy",
-    version = BuildInfo.Version,
-    informationalVersion = BuildInfo.InformationalVersion,
-    commit = BuildInfo.Commit
-}));
+    object coreStatus;
+    try
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        coreStatus = new
+        {
+            status = "healthy",
+            response = await coreClient.GetHealthAsync(cts.Token)
+        };
+    }
+    catch (DenCoreException ex)
+    {
+        coreStatus = DenCoreToolError.FromException(ex);
+    }
+
+    return Results.Ok(new
+    {
+        status = "healthy",
+        adapter = new
+        {
+            status = "healthy",
+            version = BuildInfo.Version,
+            informationalVersion = BuildInfo.InformationalVersion,
+            commit = BuildInfo.Commit
+        },
+        denCore = coreStatus
+    });
+});
 
 // REST API
 app.MapProjectRoutes();

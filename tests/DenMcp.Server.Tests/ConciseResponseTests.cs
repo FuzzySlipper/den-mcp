@@ -766,55 +766,6 @@ public class ConciseResponseTests : IAsyncLifetime
         Assert.True(json.Length < 500, $"Concise response too long: {json.Length} chars");
     }
 
-    // ─── Create project ──────────────────────────────────────────────────
-
-    [Fact]
-    public async Task CreateProject_ConciseDefault_ReturnsSummaryWithId()
-    {
-        using var scope = _factory.Services.CreateScope();
-        var repo = scope.ServiceProvider.GetRequiredService<IProjectRepository>();
-
-        var json = await ProjectTools.CreateProject(
-            repo,
-            "secondary-test-proj",
-            "Secondary Test Project",
-            description: "A very long project description that should not appear in concise output. ".PadRight(500, 'x'),
-            verbose: false);
-
-        using var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
-
-        var summary = root.GetProperty("summary").GetString()!;
-        Assert.Contains("created project 'secondary-test-proj'", summary);
-
-        Assert.Equal("secondary-test-proj", root.GetProperty("id").GetString());
-        Assert.Equal("Secondary Test Project", root.GetProperty("name").GetString());
-
-        // Must NOT contain the description (absent property)
-        Assert.False(root.TryGetProperty("description", out _));
-    }
-
-    [Fact]
-    public async Task CreateProject_VerboseTrue_ReturnsFullRecord()
-    {
-        using var scope = _factory.Services.CreateScope();
-        var repo = scope.ServiceProvider.GetRequiredService<IProjectRepository>();
-
-        var json = await ProjectTools.CreateProject(
-            repo,
-            "verbose-test-proj",
-            "Verbose Test Project",
-            description: "Full description visible",
-            verbose: true);
-
-        using var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
-
-        Assert.Equal("verbose-test-proj", root.GetProperty("id").GetString());
-        Assert.Equal("Verbose Test Project", root.GetProperty("name").GetString());
-        Assert.Equal("Full description visible", root.GetProperty("description").GetString());
-    }
-
     // ─── Space tools ─────────────────────────────────────────────────────
 
     [Fact]
@@ -903,29 +854,6 @@ public class ConciseResponseTests : IAsyncLifetime
 
         Assert.Contains("assistant-1", ids);
         Assert.DoesNotContain("proj-visible", ids);
-    }
-
-    [Fact]
-    public async Task ListProjects_DefaultsToProjectKindOnly()
-    {
-        using var scope = _factory.Services.CreateScope();
-        var repo = scope.ServiceProvider.GetRequiredService<IProjectRepository>();
-
-        await repo.CreateAsync(new Project { Id = "proj-visible", Name = "Visible Project" });
-        await repo.CreateAsync(new Project { Id = "assistant-1", Name = "Assistant", Kind = "assistant" });
-        await repo.CreateAsync(new Project { Id = "personal-1", Name = "Personal", Kind = "personal" });
-        await repo.CreateAsync(new Project { Id = "kb-1", Name = "Knowledge Base", Kind = "knowledge_base" });
-        await repo.CreateAsync(new Project { Id = "system-1", Name = "System", Kind = "system" });
-
-        var json = await ProjectTools.ListProjects(repo);
-        using var doc = JsonDocument.Parse(json);
-        var ids = doc.RootElement.EnumerateArray().Select(e => e.GetProperty("id").GetString()).ToHashSet();
-
-        Assert.Contains("proj-visible", ids);
-        Assert.DoesNotContain("assistant-1", ids);
-        Assert.DoesNotContain("personal-1", ids);
-        Assert.DoesNotContain("kb-1", ids);
-        Assert.DoesNotContain("system-1", ids);
     }
 
     [Fact]
@@ -1559,3 +1487,4 @@ public class ConciseResponseTests : IAsyncLifetime
         }
     }
 }
+

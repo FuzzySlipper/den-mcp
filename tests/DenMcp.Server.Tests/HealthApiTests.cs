@@ -35,9 +35,10 @@ public sealed class HealthApiTests : IAsyncLifetime
         var root = json.RootElement;
 
         Assert.Equal("healthy", root.GetProperty("status").GetString());
-        Assert.Equal(BuildInfo.Version, root.GetProperty("version").GetString());
-        Assert.Equal(BuildInfo.InformationalVersion, root.GetProperty("informational_version").GetString());
-        Assert.Equal(BuildInfo.Commit, root.GetProperty("commit").GetString());
+        Assert.Equal(BuildInfo.Version, root.GetProperty("adapter").GetProperty("version").GetString());
+        Assert.Equal(BuildInfo.InformationalVersion, root.GetProperty("adapter").GetProperty("informational_version").GetString());
+        Assert.Equal(BuildInfo.Commit, root.GetProperty("adapter").GetProperty("commit").GetString());
+        Assert.True(root.TryGetProperty("den_core", out _));
     }
 
     private sealed class HealthAppFactory : WebApplicationFactory<Program>
