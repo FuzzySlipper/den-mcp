@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+using System.Net;
 using DenMcp.Core.Llm;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -28,17 +28,11 @@ public class DashboardAssetSmokeTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task DashboardBundle_IncludesAgentStreamSurface()
+    public async Task Root_NoLongerServesDashboardFromMcpAdapter()
     {
-        var html = await _client.GetStringAsync("/");
-        var match = Regex.Match(html, @"src=""(?<path>/assets/index-[^""]+\.js)");
+        using var response = await _client.GetAsync("/");
 
-        Assert.True(match.Success, "Expected dashboard HTML to reference the built JavaScript asset.");
-
-        var bundle = await _client.GetStringAsync(match.Groups["path"].Value);
-        Assert.Contains("Agent Stream", bundle, StringComparison.Ordinal);
-        Assert.Contains("No agent stream entries.", bundle, StringComparison.Ordinal);
-        Assert.Contains("Open dispatch #", bundle, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     private sealed class DashboardAppFactory : WebApplicationFactory<Program>

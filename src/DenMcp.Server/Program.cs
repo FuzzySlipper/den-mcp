@@ -148,10 +148,6 @@ var app = builder.Build();
 if (initializer is not null)
     await initializer.InitializeAsync();
 
-// Static files (web frontend)
-app.UseDefaultFiles();
-app.UseStaticFiles();
-
 // Health check
 app.MapGet("/health", async (DenCoreClient coreClient) =>
 {
@@ -221,9 +217,6 @@ else
 {
     MapDenCoreMcpProxy(app);
 }
-
-// SPA fallback — serves index.html for unmatched routes
-app.MapFallbackToFile("index.html");
 
 static void MapDenCoreMcpProxy(WebApplication app)
 {
