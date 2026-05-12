@@ -37,6 +37,7 @@ if (builder.Configuration["den-core-timeout-seconds"] is { } denCoreTimeout &&
     denCoreOptions.TimeoutSeconds = parsedDenCoreTimeout;
 builder.Services.AddSingleton(denCoreOptions);
 builder.Services.AddHttpClient<DenCoreClient>();
+builder.Services.AddHttpClient("DenCoreMcpProxy");
 var trustedPublisherOptions = new TrustedPublisherOptions();
 builder.Configuration.GetSection("DenMcp:TrustedPublisher").Bind(trustedPublisherOptions);
 builder.Services.AddSingleton(trustedPublisherOptions);
@@ -70,71 +71,82 @@ builder.Services.ConfigureHttpJsonOptions(o =>
     o.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
 });
 
-// Database
-var dbPath = options.GetResolvedDatabasePath();
-var initializer = new DatabaseInitializer(dbPath, NullLogger<DatabaseInitializer>.Instance);
-builder.Services.AddSingleton(new DbConnectionFactory(initializer.ConnectionString));
+// Database-backed legacy services. In deployed MCP-adapter mode, Den Core is the
+// sole SQLite owner/writer and converted MCP tools call Core over HTTP instead.
+DatabaseInitializer? initializer = null;
+if (options.LocalDatabaseEnabled)
+{
+    var dbPath = options.GetResolvedDatabasePath();
+    initializer = new DatabaseInitializer(dbPath, NullLogger<DatabaseInitializer>.Instance);
+    builder.Services.AddSingleton(new DbConnectionFactory(initializer.ConnectionString));
 
-// Repositories
-builder.Services.AddSingleton<IProjectRepository, ProjectRepository>();
-builder.Services.AddSingleton<ITopicRepository, TopicRepository>();
-builder.Services.AddSingleton<ITopicClipQueueRepository, TopicClipQueueRepository>();
-builder.Services.AddSingleton<ITaskRepository, TaskRepository>();
-builder.Services.AddSingleton<IReviewRoundRepository, ReviewRoundRepository>();
-builder.Services.AddSingleton<IReviewFindingRepository, ReviewFindingRepository>();
-builder.Services.AddSingleton<IMessageRepository, MessageRepository>();
-builder.Services.AddSingleton<IDocumentRepository, DocumentRepository>();
-builder.Services.AddSingleton<IBlackboardRepository, BlackboardRepository>();
-builder.Services.AddSingleton<IAgentGuidanceRepository, AgentGuidanceRepository>();
-builder.Services.AddSingleton<IAgentSessionRepository, AgentSessionRepository>();
-builder.Services.AddSingleton<IAgentInstanceBindingRepository, AgentInstanceBindingRepository>();
-builder.Services.AddSingleton<DispatchRepository>();
-builder.Services.AddSingleton<IAgentStreamRepository, AgentStreamRepository>();
-builder.Services.AddSingleton<IAgentRunRepository, AgentRunRepository>();
-builder.Services.AddSingleton<IAgentWorkspaceRepository, AgentWorkspaceRepository>();
-builder.Services.AddSingleton<IPiSessionRepository, PiSessionRepository>();
-builder.Services.AddSingleton<IDesktopSnapshotRepository, DesktopSnapshotRepository>();
-builder.Services.AddSingleton<IDesktopSessionEventRepository, DesktopSessionEventRepository>();
-builder.Services.AddSingleton<ICollaborationRepository, CollaborationRepository>();
-builder.Services.AddSingleton<AgentStreamRealtimeHub>();
-builder.Services.AddSingleton<INotificationChannel, NoOpNotificationChannel>();
-builder.Services.AddSingleton<IAgentStreamOpsService, AgentStreamOpsService>();
-builder.Services.AddSingleton<IDispatchRepository>(services =>
-    new AgentStreamDispatchRepository(
-        services.GetRequiredService<DispatchRepository>(),
-        services.GetRequiredService<IAgentStreamOpsService>()));
-builder.Services.AddSingleton<IReviewWorkflowService, ReviewWorkflowService>();
-builder.Services.AddSingleton<IReviewFindingTriageService, ReviewFindingTriageService>();
-builder.Services.AddSingleton<IAgentRecipientResolver, AgentRecipientResolver>();
-builder.Services.AddSingleton<IAgentStreamMessageService, AgentStreamMessageService>();
-builder.Services.AddSingleton<ISubagentRunService, SubagentRunService>();
-builder.Services.AddSingleton<IAttentionService, AttentionService>();
-builder.Services.AddSingleton<IGitInspectionService, GitInspectionService>();
-builder.Services.AddSingleton<ITrustedPublisherService, TrustedPublisherService>();
-builder.Services.AddSingleton<IPiDockerLaunchProfileRenderer, PiDockerLaunchProfileRenderer>();
-builder.Services.AddSingleton<IProcessRunner, SystemProcessRunner>();
-builder.Services.AddSingleton<IPiSessionHost, TmuxDockerPiSessionHost>();
-builder.Services.AddSingleton<IPiSessionService, PiSessionService>();
+    // Repositories
+    builder.Services.AddSingleton<IProjectRepository, ProjectRepository>();
+    builder.Services.AddSingleton<ITopicRepository, TopicRepository>();
+    builder.Services.AddSingleton<ITopicClipQueueRepository, TopicClipQueueRepository>();
+    builder.Services.AddSingleton<ITaskRepository, TaskRepository>();
+    builder.Services.AddSingleton<IReviewRoundRepository, ReviewRoundRepository>();
+    builder.Services.AddSingleton<IReviewFindingRepository, ReviewFindingRepository>();
+    builder.Services.AddSingleton<IMessageRepository, MessageRepository>();
+    builder.Services.AddSingleton<IDocumentRepository, DocumentRepository>();
+    builder.Services.AddSingleton<IBlackboardRepository, BlackboardRepository>();
+    builder.Services.AddSingleton<IAgentGuidanceRepository, AgentGuidanceRepository>();
+    builder.Services.AddSingleton<IAgentSessionRepository, AgentSessionRepository>();
+    builder.Services.AddSingleton<IAgentInstanceBindingRepository, AgentInstanceBindingRepository>();
+    builder.Services.AddSingleton<DispatchRepository>();
+    builder.Services.AddSingleton<IAgentStreamRepository, AgentStreamRepository>();
+    builder.Services.AddSingleton<IAgentRunRepository, AgentRunRepository>();
+    builder.Services.AddSingleton<IAgentWorkspaceRepository, AgentWorkspaceRepository>();
+    builder.Services.AddSingleton<IPiSessionRepository, PiSessionRepository>();
+    builder.Services.AddSingleton<IDesktopSnapshotRepository, DesktopSnapshotRepository>();
+    builder.Services.AddSingleton<IDesktopSessionEventRepository, DesktopSessionEventRepository>();
+    builder.Services.AddSingleton<ICollaborationRepository, CollaborationRepository>();
+    builder.Services.AddSingleton<AgentStreamRealtimeHub>();
+    builder.Services.AddSingleton<INotificationChannel, NoOpNotificationChannel>();
+    builder.Services.AddSingleton<IAgentStreamOpsService, AgentStreamOpsService>();
+    builder.Services.AddSingleton<IDispatchRepository>(services =>
+        new AgentStreamDispatchRepository(
+            services.GetRequiredService<DispatchRepository>(),
+            services.GetRequiredService<IAgentStreamOpsService>()));
+    builder.Services.AddSingleton<IReviewWorkflowService, ReviewWorkflowService>();
+    builder.Services.AddSingleton<IReviewFindingTriageService, ReviewFindingTriageService>();
+    builder.Services.AddSingleton<IAgentRecipientResolver, AgentRecipientResolver>();
+    builder.Services.AddSingleton<IAgentStreamMessageService, AgentStreamMessageService>();
+    builder.Services.AddSingleton<ISubagentRunService, SubagentRunService>();
+    builder.Services.AddSingleton<IAttentionService, AttentionService>();
+    builder.Services.AddSingleton<IGitInspectionService, GitInspectionService>();
+    builder.Services.AddSingleton<ITrustedPublisherService, TrustedPublisherService>();
+    builder.Services.AddSingleton<IPiDockerLaunchProfileRenderer, PiDockerLaunchProfileRenderer>();
+    builder.Services.AddSingleton<IProcessRunner, SystemProcessRunner>();
+    builder.Services.AddSingleton<IPiSessionHost, TmuxDockerPiSessionHost>();
+    builder.Services.AddSingleton<IPiSessionService, PiSessionService>();
 
-// Dispatch
-builder.Services.AddSingleton<IRoutingService, RoutingService>();
-builder.Services.AddSingleton<IPromptGenerationService, PromptGenerationService>();
-builder.Services.AddSingleton<IDispatchContextService, DispatchContextService>();
-builder.Services.AddSingleton<IDispatchDetectionService, DispatchDetectionService>();
+    // Dispatch
+    builder.Services.AddSingleton<IRoutingService, RoutingService>();
+    builder.Services.AddSingleton<IPromptGenerationService, PromptGenerationService>();
+    builder.Services.AddSingleton<IDispatchContextService, DispatchContextService>();
+    builder.Services.AddSingleton<IDispatchDetectionService, DispatchDetectionService>();
 
-// Librarian
-builder.Services.AddSingleton<LibrarianGatherer>();
-builder.Services.AddSingleton<LibrarianService>();
+    // Librarian
+    builder.Services.AddSingleton<LibrarianGatherer>();
+    builder.Services.AddSingleton<LibrarianService>();
+}
 
-// MCP
-builder.Services.AddMcpServer()
-    .WithHttpTransport()
-    .WithToolsFromAssembly();
+// MCP. Legacy/local mode hosts tools in-process. Adapter mode proxies the
+// stable public /mcp endpoint to Den Core so the full tool surface stays
+// available while den-mcp itself does not open canonical SQLite.
+if (options.LocalDatabaseEnabled)
+{
+    builder.Services.AddMcpServer()
+        .WithHttpTransport()
+        .WithToolsFromAssembly();
+}
 
 var app = builder.Build();
 
 // Initialize database on startup
-await initializer.InitializeAsync();
+if (initializer is not null)
+    await initializer.InitializeAsync();
 
 // Static files (web frontend)
 app.UseDefaultFiles();
@@ -172,35 +184,97 @@ app.MapGet("/health", async (DenCoreClient coreClient) =>
     });
 });
 
-// REST API
-app.MapProjectRoutes();
-app.MapSpaceRoutes();
-app.MapTopicRoutes();
-app.MapTopicClipQueueRoutes();
-app.MapTaskRoutes();
-app.MapMessageRoutes();
-app.MapDocumentRoutes();
-app.MapBlackboardRoutes();
-app.MapAgentGuidanceRoutes();
-app.MapAgentRoutes();
-app.MapDispatchRoutes();
-app.MapAgentStreamRoutes();
-app.MapSubagentRunRoutes();
-app.MapAgentWorkspaceRoutes();
-app.MapDesktopSnapshotRoutes();
-app.MapDesktopSessionEventRoutes();
-app.MapCollaborationRoutes();
-app.MapAttentionRoutes();
-app.MapGitInspectionRoutes();
-app.MapPiLaunchProfileRoutes();
-app.MapPiSessionRoutes();
-app.MapLibrarianRoutes();
+// REST API. These routes are legacy DB-backed surfaces; in adapter mode they are
+// intentionally not mapped so den-mcp can run without SQLite access.
+if (options.LocalDatabaseEnabled)
+{
+    app.MapProjectRoutes();
+    app.MapSpaceRoutes();
+    app.MapTopicRoutes();
+    app.MapTopicClipQueueRoutes();
+    app.MapTaskRoutes();
+    app.MapMessageRoutes();
+    app.MapDocumentRoutes();
+    app.MapBlackboardRoutes();
+    app.MapAgentGuidanceRoutes();
+    app.MapAgentRoutes();
+    app.MapDispatchRoutes();
+    app.MapAgentStreamRoutes();
+    app.MapSubagentRunRoutes();
+    app.MapAgentWorkspaceRoutes();
+    app.MapDesktopSnapshotRoutes();
+    app.MapDesktopSessionEventRoutes();
+    app.MapCollaborationRoutes();
+    app.MapAttentionRoutes();
+    app.MapGitInspectionRoutes();
+    app.MapPiLaunchProfileRoutes();
+    app.MapPiSessionRoutes();
+    app.MapLibrarianRoutes();
+}
 
 // MCP endpoint
-app.MapMcp("/mcp");
+if (options.LocalDatabaseEnabled)
+{
+    app.MapMcp("/mcp");
+}
+else
+{
+    MapDenCoreMcpProxy(app);
+}
 
 // SPA fallback — serves index.html for unmatched routes
 app.MapFallbackToFile("index.html");
+
+static void MapDenCoreMcpProxy(WebApplication app)
+{
+    var methods = new[] { "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS" };
+    app.MapMethods("/mcp", methods, ProxyMcpToDenCoreAsync);
+    app.MapMethods("/mcp/{**path}", methods, ProxyMcpToDenCoreAsync);
+}
+
+static async Task ProxyMcpToDenCoreAsync(HttpContext context, IHttpClientFactory httpClientFactory, DenCoreOptions coreOptions)
+{
+    using var request = new HttpRequestMessage(new HttpMethod(context.Request.Method), BuildDenCoreMcpUri(coreOptions, context.Request));
+
+    if (context.Request.ContentLength is > 0 || context.Request.Headers.ContainsKey("Transfer-Encoding"))
+    {
+        request.Content = new StreamContent(context.Request.Body);
+        foreach (var header in context.Request.Headers)
+        {
+            if (!header.Key.StartsWith("Content-", StringComparison.OrdinalIgnoreCase))
+                continue;
+            request.Content.Headers.TryAddWithoutValidation(header.Key, header.Value.ToArray());
+        }
+    }
+
+    foreach (var header in context.Request.Headers)
+    {
+        if (header.Key.Equals("Host", StringComparison.OrdinalIgnoreCase) ||
+            header.Key.StartsWith("Content-", StringComparison.OrdinalIgnoreCase))
+            continue;
+        request.Headers.TryAddWithoutValidation(header.Key, header.Value.ToArray());
+    }
+
+    var client = httpClientFactory.CreateClient("DenCoreMcpProxy");
+    using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted);
+
+    context.Response.StatusCode = (int)response.StatusCode;
+    foreach (var header in response.Headers)
+        context.Response.Headers[header.Key] = header.Value.ToArray();
+    foreach (var header in response.Content.Headers)
+        context.Response.Headers[header.Key] = header.Value.ToArray();
+    context.Response.Headers.Remove("transfer-encoding");
+
+    await response.Content.CopyToAsync(context.Response.Body, context.RequestAborted);
+}
+
+static Uri BuildDenCoreMcpUri(DenCoreOptions coreOptions, HttpRequest request)
+{
+    var baseUrl = string.IsNullOrWhiteSpace(coreOptions.BaseUrl)
+        ? "http://localhost:5299"
+        : coreOptions.BaseUrl.TrimEnd('/');
+    return new Uri(baseUrl + request.Path + request.QueryString);
+}
 
 static void PreparePiSessionHostArraysForBinding(PiDockerLaunchProfileOptions options)
 {

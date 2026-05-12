@@ -3,6 +3,7 @@ using System.Text.Json;
 using DenMcp.Core.Data;
 using DenMcp.Core.Models;
 using DenMcp.Core.Services;
+using DenMcp.Server.CoreClient;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 
@@ -13,9 +14,7 @@ public sealed class MessageTools
 {
     [McpServerTool(Name = "send_message"), Description("Send a message in a project. Can be project-level, attached to a task, or a reply in a thread.")]
     public static async Task<string> SendMessage(
-        IMessageRepository repo,
-        IDispatchDetectionService detection,
-        ILogger<MessageTools> logger,
+        DenCoreClient coreClient,
         [Description("Project ID.")] string project_id,
         [Description("Your agent identity, e.g. 'pi' or another manual agent identity.")] string sender,
         [Description("Message body (markdown).")] string content,
@@ -26,25 +25,22 @@ public sealed class MessageTools
         [Description("If true, return full JSON record instead of concise summary.")] bool verbose = false)
     {
         var parsedIntent = ParseIntent(intent);
-        var msg = new Message
-        {
-            ProjectId = project_id,
-            Sender = sender,
-            Content = content,
-            TaskId = task_id,
-            ThreadId = thread_id,
-            Intent = parsedIntent,
-            Metadata = NormalizeMetadata(metadata)
-        };
-
-        var created = await repo.CreateAsync(msg);
+        Message created;
         try
         {
-            await detection.OnMessageCreatedAsync(created);
+            created = await coreClient.SendMessageAsync(project_id, new
+            {
+                sender,
+                content,
+                task_id,
+                thread_id,
+                intent = parsedIntent,
+                metadata = NormalizeMetadata(metadata)
+            });
         }
-        catch (Exception ex)
+        catch (DenCoreException ex)
         {
-            logger.LogError(ex, "Dispatch detection failed for message {MessageId}", created.Id);
+            return DenCoreToolErrorFormatter.Format(ex);
         }
         return verbose
             ? JsonSerializer.Serialize(created, JsonOpts.Default)
@@ -58,9 +54,7 @@ public sealed class MessageTools
         "Notifications appear prominently in the Den Desktop Messages tab." +
         "Prefer this over send_message when the message is specifically for the user rather than general task tracking.")]
     public static async Task<string> SendUserNotification(
-        IMessageRepository repo,
-        IDispatchDetectionService detection,
-        ILogger<MessageTools> logger,
+        DenCoreClient coreClient,
         [Description("Project ID.")] string project_id,
         [Description("Your agent identity, e.g. 'pi' or another manual agent identity.")] string sender,
         [Description("Notification body (markdown). Keep it concise and actionable.")] string content,
@@ -78,24 +72,21 @@ public sealed class MessageTools
 
         var mergedMetadata = MergeUrgencyIntoMetadata(NormalizeMetadata(metadata), normalizedUrgency, sender);
 
-        var msg = new Message
-        {
-            ProjectId = project_id,
-            Sender = sender,
-            Content = content,
-            TaskId = task_id,
-            Intent = MessageIntent.Notification,
-            Metadata = mergedMetadata
-        };
-
-        var created = await repo.CreateAsync(msg);
+        Message created;
         try
         {
-            await detection.OnMessageCreatedAsync(created);
+            created = await coreClient.SendMessageAsync(project_id, new
+            {
+                sender,
+                content,
+                task_id,
+                intent = MessageIntent.Notification,
+                metadata = mergedMetadata
+            });
         }
-        catch (Exception ex)
+        catch (DenCoreException ex)
         {
-            logger.LogError(ex, "Dispatch detection failed for notification {MessageId}", created.Id);
+            return DenCoreToolErrorFormatter.Format(ex);
         }
         return verbose
             ? JsonSerializer.Serialize(created, JsonOpts.Default)
@@ -104,7 +95,7 @@ public sealed class MessageTools
 
     [McpServerTool(Name = "get_messages"), Description("Get messages in a project, with optional filters. Returns newest first.")]
     public static async Task<string> GetMessages(
-        IMessageRepository repo,
+        DenCoreClient coreClient,
         [Description("Project ID.")] string project_id,
         [Description("Filter to messages on a specific task.")] int? task_id = null,
         [Description("ISO datetime — only messages after this time.")] string? since = null,
@@ -112,10 +103,15 @@ public sealed class MessageTools
         [Description("Max messages to return. Default 20, max 100.")] int limit = 20,
         [Description("Optional canonical intent filter.")] string? intent = null)
     {
-        DateTime? sinceDate = since is not null ? DateTime.Parse(since) : null;
-        var parsedIntent = ParseIntent(intent);
-        var messages = await repo.GetMessagesAsync(project_id, task_id, sinceDate, unread_for, limit, parsedIntent);
-        return JsonSerializer.Serialize(messages, JsonOpts.Default);
+        try
+        {
+            var messages = await coreClient.GetMessagesAsync(project_id, task_id, since, unread_for, limit, intent);
+            return JsonSerializer.Serialize(messages, JsonOpts.Default);
+        }
+        catch (DenCoreException ex)
+        {
+            return DenCoreToolErrorFormatter.Format(ex);
+        }
     }
 
     [McpServerTool(Name = "get_thread"), Description("Get a complete message thread — the root message plus all replies in chronological order.")]
@@ -129,12 +125,98 @@ public sealed class MessageTools
 
     [McpServerTool(Name = "mark_read"), Description("Mark messages as read for an agent.")]
     public static async Task<string> MarkRead(
-        IMessageRepository repo,
+        DenCoreClient coreClient,
         [Description("Your agent identity.")] string agent,
         [Description("Comma-separated message IDs to mark as read.")] string message_ids)
     {
         var ids = message_ids.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(int.Parse).ToArray();
+        try
+        {
+            var result = await coreClient.MarkReadAsync(agent, ids);
+            return JsonSerializer.Serialize(result, JsonOpts.Default);
+        }
+        catch (DenCoreException ex)
+        {
+            return DenCoreToolErrorFormatter.Format(ex);
+        }
+    }
+
+    public static async Task<string> SendMessage(
+        IMessageRepository repo,
+        IDispatchDetectionService detection,
+        ILogger<MessageTools> logger,
+        string project_id,
+        string sender,
+        string content,
+        int? task_id = null,
+        int? thread_id = null,
+        JsonElement? metadata = null,
+        string? intent = null,
+        bool verbose = false)
+    {
+        var parsedIntent = ParseIntent(intent);
+        var created = await repo.CreateAsync(new Message
+        {
+            ProjectId = project_id,
+            Sender = sender,
+            Content = content,
+            TaskId = task_id,
+            ThreadId = thread_id,
+            Intent = parsedIntent,
+            Metadata = NormalizeMetadata(metadata)
+        });
+        try { await detection.OnMessageCreatedAsync(created); }
+        catch (Exception ex) { logger.LogError(ex, "Dispatch detection failed for message {MessageId}", created.Id); }
+        return verbose ? JsonSerializer.Serialize(created, JsonOpts.Default) : ConciseResponse.SentMessage(created);
+    }
+
+    public static async Task<string> SendUserNotification(
+        IMessageRepository repo,
+        IDispatchDetectionService detection,
+        ILogger<MessageTools> logger,
+        string project_id,
+        string sender,
+        string content,
+        int? task_id = null,
+        JsonElement? metadata = null,
+        string? urgency = null,
+        bool verbose = false)
+    {
+        var normalizedUrgency = urgency?.ToLowerInvariant() switch { "low" => "low", "high" => "high", _ => "normal" };
+        var mergedMetadata = MergeUrgencyIntoMetadata(NormalizeMetadata(metadata), normalizedUrgency, sender);
+        var created = await repo.CreateAsync(new Message
+        {
+            ProjectId = project_id,
+            Sender = sender,
+            Content = content,
+            TaskId = task_id,
+            Intent = MessageIntent.Notification,
+            Metadata = mergedMetadata
+        });
+        try { await detection.OnMessageCreatedAsync(created); }
+        catch (Exception ex) { logger.LogError(ex, "Dispatch detection failed for notification {MessageId}", created.Id); }
+        return verbose ? JsonSerializer.Serialize(created, JsonOpts.Default) : ConciseResponse.SentMessage(created);
+    }
+
+    public static async Task<string> GetMessages(
+        IMessageRepository repo,
+        string project_id,
+        int? task_id = null,
+        string? since = null,
+        string? unread_for = null,
+        int limit = 20,
+        string? intent = null)
+    {
+        DateTime? sinceDate = since is not null ? DateTime.Parse(since) : null;
+        var parsedIntent = ParseIntent(intent);
+        var messages = await repo.GetMessagesAsync(project_id, task_id, sinceDate, unread_for, limit, parsedIntent);
+        return JsonSerializer.Serialize(messages, JsonOpts.Default);
+    }
+
+    public static async Task<string> MarkRead(IMessageRepository repo, string agent, string message_ids)
+    {
+        var ids = message_ids.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(int.Parse).ToArray();
         var count = await repo.MarkReadAsync(agent, ids);
         return JsonSerializer.Serialize(new { marked = count }, JsonOpts.Default);
     }
