@@ -41,7 +41,56 @@ public sealed class DenCoreClient
     public async Task<JsonElement> GetHealthAsync(CancellationToken cancellationToken = default) =>
         await SendAsync<JsonElement>(HttpMethod.Get, "/health", "core_health", body: null, cancellationToken);
 
-    private async Task<T> SendAsync<T>(HttpMethod method, string path, string operation, object? body, CancellationToken cancellationToken)
+    public Task<Document> StoreDocumentAsync(string projectId, object body, CancellationToken cancellationToken = default) =>
+        SendAsync<Document>(HttpMethod.Post, $"/api/projects/{Uri.EscapeDataString(projectId)}/documents/", "store_document", body, cancellationToken);
+
+    public Task<JsonElement> GetDocumentAsync(string projectId, string slug, CancellationToken cancellationToken = default) =>
+        SendAsync<JsonElement>(HttpMethod.Get, $"/api/projects/{Uri.EscapeDataString(projectId)}/documents/{Uri.EscapeDataString(slug)}", "get_document", body: null, cancellationToken);
+
+    public Task<JsonElement> ListDocumentsAsync(string? projectId = null, string? docType = null, string? tags = null, CancellationToken cancellationToken = default)
+    {
+        var query = BuildQuery([
+            ("projectId", projectId),
+            ("doc_type", docType),
+            ("tags", tags)
+        ]);
+        return SendAsync<JsonElement>(HttpMethod.Get, $"/api/documents{query}", "list_documents", body: null, cancellationToken);
+    }
+
+    public Task<JsonElement> SearchDocumentsAsync(string query, string? projectId = null, CancellationToken cancellationToken = default)
+    {
+        var qs = BuildQuery([
+            ("query", query),
+            ("projectId", projectId)
+        ]);
+        return SendAsync<JsonElement>(HttpMethod.Get, $"/api/documents/search{qs}", "search_documents", body: null, cancellationToken);
+    }
+
+    public Task<JsonElement> DeleteDocumentAsync(string projectId, string slug, CancellationToken cancellationToken = default) =>
+        SendAsync<JsonElement>(HttpMethod.Delete, $"/api/projects/{Uri.EscapeDataString(projectId)}/documents/{Uri.EscapeDataString(slug)}", "delete_document", body: null, cancellationToken);
+
+    public Task<Message> SendMessageAsync(string projectId, object body, CancellationToken cancellationToken = default) =>
+        SendAsync<Message>(HttpMethod.Post, $"/api/projects/{Uri.EscapeDataString(projectId)}/messages/", "send_message", body, cancellationToken);
+
+    public Task<JsonElement> GetMessagesAsync(string projectId, int? taskId = null, string? since = null, string? unreadFor = null, int? limit = null, string? intent = null, CancellationToken cancellationToken = default)
+    {
+        var query = BuildQuery([
+            ("taskId", taskId?.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+            ("since", since),
+            ("unreadFor", unreadFor),
+            ("limit", limit?.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+            ("intent", intent)
+        ]);
+        return SendAsync<JsonElement>(HttpMethod.Get, $"/api/projects/{Uri.EscapeDataString(projectId)}/messages/{query}", "get_messages", body: null, cancellationToken);
+    }
+
+    public Task<JsonElement> GetThreadAsync(string projectId, int threadId, CancellationToken cancellationToken = default) =>
+        SendAsync<JsonElement>(HttpMethod.Get, $"/api/projects/{Uri.EscapeDataString(projectId)}/messages/thread/{threadId}", "get_thread", body: null, cancellationToken);
+
+    public Task<JsonElement> MarkReadAsync(string agent, int[] messageIds, CancellationToken cancellationToken = default) =>
+        SendAsync<JsonElement>(HttpMethod.Post, "/api/messages/mark-read", "mark_read", new { agent, message_ids = messageIds }, cancellationToken);
+
+    public async Task<T> SendAsync<T>(HttpMethod method, string path, string operation, object? body, CancellationToken cancellationToken = default)
     {
         using var request = new HttpRequestMessage(method, path);
         if (body is not null)
@@ -105,6 +154,15 @@ public sealed class DenCoreClient
 
     private static string NormalizeBaseUrl(string baseUrl) =>
         string.IsNullOrWhiteSpace(baseUrl) ? "http://localhost:5199" : baseUrl.TrimEnd('/');
+
+    private static string BuildQuery(IEnumerable<(string Key, string? Value)> values)
+    {
+        var parts = values
+            .Where(pair => !string.IsNullOrWhiteSpace(pair.Value))
+            .Select(pair => $"{Uri.EscapeDataString(pair.Key)}={Uri.EscapeDataString(pair.Value!)}")
+            .ToArray();
+        return parts.Length == 0 ? string.Empty : "?" + string.Join("&", parts);
+    }
 
     private static string Truncate(string value, int maxLength) =>
         value.Length <= maxLength ? value : value[..maxLength] + "…";

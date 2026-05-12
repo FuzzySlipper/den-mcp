@@ -6,6 +6,7 @@ public sealed class DenMcpOptions
 {
     public string DatabasePath { get; set; } = "";
     public string ListenUrl { get; set; } = "http://localhost:5199";
+    public bool LocalDatabaseEnabled { get; set; } = true;
     public PiDockerLaunchProfileOptions PiSessionHost { get; set; } = new();
 
     public string GetResolvedDatabasePath()
