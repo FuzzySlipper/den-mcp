@@ -7,6 +7,11 @@ set -euo pipefail
 # and still allow the model turn to complete without check-in/project errors.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEN_PI_DIR="${DEN_PI_DIR:-/home/dev/den-pi}"
+if [ ! -d "$DEN_PI_DIR" ]; then
+  echo "den-pi checkout not found at $DEN_PI_DIR; set DEN_PI_DIR to the den-pi repo path" >&2
+  exit 1
+fi
 MODEL="${PI_SMOKE_MODEL:-openai-codex/gpt-5.5}"
 BASE_URL="${DEN_MCP_URL:-${DEN_MCP_BASE_URL:-http://192.168.1.10:5199}}"
 TMP_DIR="$(mktemp -d)"
@@ -18,8 +23,8 @@ unset DEN_PI_PROJECT_ID
 (
   cd "$TMP_DIR"
   DEN_MCP_URL="$BASE_URL" pi \
-    -e "$ROOT_DIR/pi-dev/extensions/den.ts" \
-    -e "$ROOT_DIR/pi-dev/extensions/den-subagent.ts" \
+    -e "$DEN_PI_DIR/extensions/den.ts" \
+    -e "$DEN_PI_DIR/extensions/den-subagent.ts" \
     --model "$MODEL" \
     --mode json \
     -p 'Reply with exactly: ok'
