@@ -6,7 +6,7 @@ PUBLISH_DIR="${PUBLISH_DIR:-}"
 DEPLOY_MODE="${DEPLOY_MODE:-auto}"
 SSH_TARGET="${SSH_TARGET:-patch@192.168.1.10}"
 SERVICE_NAME="${SERVICE_NAME:-den-mcp.service}"
-REMOTE_SERVER_ROOT="${REMOTE_SERVER_ROOT:-/data/services/den-mcp/server}"
+REMOTE_SERVER_ROOT="${REMOTE_SERVER_ROOT:-/data/services/den-mcp/app}"
 REMOTE_STAGE_DIR="${REMOTE_STAGE_DIR:-/tmp/den-mcp-live-publish}"
 DEFAULT_PI_DOCKER_SOURCE=""
 for candidate in "$REPO_ROOT/../pi-docker" "$REPO_ROOT/../linux/pi-docker"; do
@@ -34,7 +34,7 @@ runtime state, then optionally restart the live systemd service.
 
 Modes:
   local   Run on den-srv from /data/dev/den-mcp and install directly into
-          /data/services/den-mcp. Preferred for agent/orchestrator deployment.
+          /data/services/den-mcp/app. Preferred for agent/orchestrator deployment.
   remote  Run from a workstation and upload to SSH_TARGET first.
 
 DEPLOY_MODE defaults to auto. Auto selects local when the script appears to be
@@ -105,7 +105,7 @@ resolve_deploy_mode() {
     local|remote)
       ;;
     auto)
-      if [[ "$REPO_ROOT" == /data/dev/den-mcp* ]] && [[ -d /data/services/den-mcp/server ]]; then
+      if [[ "$REPO_ROOT" == /data/dev/den-mcp* ]] && [[ -d /data/services/den-mcp/app ]]; then
         DEPLOY_MODE=local
       else
         DEPLOY_MODE=remote

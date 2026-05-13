@@ -90,7 +90,7 @@ The pi-docker callback container ports are currently `1455`, `53692`, `8085`, an
 
 ## den-srv deployment paths
 
-The live den-srv systemd service runs as Unix user `den-mcp` with HOME under `/data/services/den-mcp/server`. Do not point the deployed `PiSessionHost` at `/home/patch` or `~` paths: `/home/patch` is not traversable by the service user, and `~` expands to the service HOME.
+The live den-srv systemd service runs as Unix user `den-mcp` from `/data/services/den-mcp/app`. Do not point the deployed `PiSessionHost` at `/home/patch` or `~` paths: `/home/patch` is not traversable by the service user, and `~` expands to the service HOME.
 
 Docker access is intentionally through a dedicated rootless runtime user, not through `/var/run/docker.sock` and not through the rootful `docker` group. The recommended live shape is:
 
@@ -109,9 +109,9 @@ Use `scripts/deploy-live-server.sh` to deploy compose assets along with the serv
 - `/data/services/den-mcp/pi-credential-fallbacks/ssh` and `/data/services/den-mcp/pi-credential-fallbacks/gh` as empty credential fallback directories;
 - `/data/dev` as the service-traversable development root mounted at `/home/pi/dev`.
 
-The live deploy script intentionally preserves `/data/services/den-mcp/server/appsettings.json`. Before restarting, `scripts/deploy-live-server.sh` now preflights the preserved live `DenMcp:PiSessionHost` section and fails if deployed runtime paths still point at `/home/patch`, another `/home/<user>` tree, or an unexpanded `~`. The same preflight verifies the den-srv path conventions it will deploy: `ComposeFile` under `/data/services/den-mcp/pi-docker`, `DevDir` at `/data/dev`, `PiStateRootDir` under `/data/services/den-mcp/pi-sessions`, and `CredentialFallbackRootDir` under `/data/services/den-mcp/pi-credential-fallbacks` unless the deploy is run with matching `REMOTE_*` overrides.
+The live deploy script intentionally preserves `/data/services/den-mcp/app/appsettings.json`. Before restarting, `scripts/deploy-live-server.sh` now preflights the preserved live `DenMcp:PiSessionHost` section and fails if deployed runtime paths still point at `/home/patch`, another `/home/<user>` tree, or an unexpanded `~`. The same preflight verifies the den-srv path conventions it will deploy: `ComposeFile` under `/data/services/den-mcp/pi-docker`, `DevDir` at `/data/dev`, `PiStateRootDir` under `/data/services/den-mcp/pi-sessions`, and `CredentialFallbackRootDir` under `/data/services/den-mcp/pi-credential-fallbacks` unless the deploy is run with matching `REMOTE_*` overrides.
 
-Manual migration step for existing live installs: edit the preserved deployed config (for example `ssh den-srv` then `sudoedit /data/services/den-mcp/server/appsettings.json`) and apply the explicit JSON above before rerunning the deploy/restart. Also validate the same environment the service will use before launching a session:
+Manual migration step for existing live installs: edit the preserved deployed config (for example `ssh den-srv` then `sudoedit /data/services/den-mcp/app/appsettings.json`) and apply the explicit JSON above before rerunning the deploy/restart. Also validate the same environment the service will use before launching a session:
 
 ```bash
 sudo -u den-mcp env DOCKER_HOST=unix:///run/den-mcp/docker-rt/docker.sock docker version

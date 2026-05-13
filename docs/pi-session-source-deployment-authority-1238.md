@@ -47,7 +47,7 @@ The live `/data/...` den-srv paths are not mounted in this temporary environment
 
 - `/data/dev/den-mcp`
 - `/data/services/den-mcp/repo`
-- `/data/services/den-mcp/server`
+- `/data/services/den-mcp/app`
 - `/data/services/den-mcp-backup/repo`
 - `/home/patch/dev/den-mcp`
 
@@ -92,13 +92,13 @@ This confirms the temp clone includes the Pi session substrate and is safe to us
 The repo deploy script and docs identify the intended live deployment path:
 
 - `scripts/deploy-live-server.sh`
-  - local mode is explicitly described as running on den-srv from `/data/dev/den-mcp` and installing into `/data/services/den-mcp`.
-  - auto mode selects local when the repository path is under `/data/dev/den-mcp` and `/data/services/den-mcp/server` exists.
+  - local mode is explicitly described as running on den-srv from `/data/dev/den-mcp` and installing into `/data/services/den-mcp/app`.
+  - auto mode selects local when the repository path is under `/data/dev/den-mcp` and `/data/services/den-mcp/app` exists.
   - remote mode can upload/publish from another workstation, defaulting to `patch@192.168.1.10`.
-  - deploy preserves `/data/services/den-mcp/server/appsettings.json`.
+  - deploy preserves `/data/services/den-mcp/app/appsettings.json`.
   - deploy syncs pi-docker assets to `/data/services/den-mcp/pi-docker`, creates `/data/services/den-mcp/pi-sessions`, credential fallback directories, and `/data/dev`.
 - `docs/den-pi-docker-launch-profile-1188.md`
-  - states live den-srv systemd service runs as user `den-mcp` with HOME under `/data/services/den-mcp/server`.
+  - states live den-srv systemd service runs as user `den-mcp` from `/data/services/den-mcp/app`.
   - warns not to point deployed `PiSessionHost` at `/home/patch` or `~` paths.
   - identifies `scripts/deploy-live-server.sh` as the deployment path.
 - `docs/den-owned-pi-host-security-1191.md`
@@ -111,7 +111,7 @@ When changes are ready to deploy to live den-srv:
 1. Treat `/data/dev/den-mcp` as the canonical live dev checkout.
 2. Treat `/data/services/den-mcp` as runtime/deployment output, not source.
 3. Use `scripts/deploy-live-server.sh --local` from `/data/dev/den-mcp` on den-srv when doing the preferred local deploy.
-4. Preserve deployed `/data/services/den-mcp/server/appsettings.json`; do not overwrite Pi-session host config with workstation defaults.
+4. Preserve deployed `/data/services/den-mcp/app/appsettings.json`; do not overwrite Pi-session host config with workstation defaults.
 5. Do not inspect or edit `/data/services/den-mcp/repo` as if it were current source unless a separate cleanup task proves it contains unique work.
 6. For the current temp workflow, implement and validate in `/home/dev/den-mcp`, then reconcile/push/apply through the normal repo/deploy path rather than copying edits into service artifacts.
 
@@ -128,4 +128,4 @@ That is sufficient to unblock #1239 for the temp `/home/dev/den-mcp` implementat
 
 ## Decision
 
-#1239+ should proceed in `/home/dev/den-mcp` for this session. For live den-srv deployment, the intended canonical source remains `/data/dev/den-mcp` and the deploy target remains `/data/services/den-mcp` via `scripts/deploy-live-server.sh`.
+#1239+ should proceed in `/home/dev/den-mcp` for this session. For live den-srv deployment, the intended canonical source remains `/data/dev/den-mcp` and the deploy target remains `/data/services/den-mcp/app` via `scripts/deploy-live-server.sh`.
