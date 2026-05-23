@@ -10,7 +10,7 @@ namespace DenMcp.Server.Tools;
 [McpServerToolType]
 public sealed class DispatchTools
 {
-    [McpServerTool(Name = "list_dispatches"), Description("List dispatch entries with optional filters. Returns newest first.")]
+    [McpServerTool(Name = "legacy_list_dispatches"), Description("LEGACY / ADMIN ONLY: List dispatch entries with optional filters. Returns newest first.")]
     public static async Task<string> ListDispatches(
         IDispatchRepository repo,
         [Description("Filter by project ID.")] string? project_id = null,
@@ -31,7 +31,7 @@ public sealed class DispatchTools
         return JsonSerializer.Serialize(entries, JsonOpts.Default);
     }
 
-    [McpServerTool(Name = "get_dispatch"), Description("Get a dispatch entry by ID with full details including generated prompt.")]
+    [McpServerTool(Name = "legacy_get_dispatch"), Description("LEGACY / ADMIN ONLY: Get a dispatch entry by ID with full details including generated prompt.")]
     public static async Task<string> GetDispatch(
         IDispatchRepository repo,
         [Description("Dispatch entry ID.")] int dispatch_id)
@@ -42,7 +42,7 @@ public sealed class DispatchTools
             : JsonSerializer.Serialize(new { error = $"Dispatch {dispatch_id} not found" }, JsonOpts.Default);
     }
 
-    [McpServerTool(Name = "get_dispatch_context"), Description("Get the structured handoff context for a dispatch entry. This is the machine-oriented source of truth for targeted wake-ups.")]
+    [McpServerTool(Name = "legacy_get_dispatch_context"), Description("LEGACY / ADMIN ONLY: Get the structured handoff context for a dispatch entry.")]
     public static async Task<string> GetDispatchContext(
         IDispatchContextService contexts,
         [Description("Dispatch entry ID.")] int dispatch_id)
@@ -53,7 +53,7 @@ public sealed class DispatchTools
             : JsonSerializer.Serialize(new { error = $"Dispatch {dispatch_id} not found" }, JsonOpts.Default);
     }
 
-    [McpServerTool(Name = "approve_dispatch"), Description("Approve a pending dispatch entry. The target agent will be able to pick it up.")]
+    [McpServerTool(Name = "legacy_approve_dispatch"), Description("LEGACY / ADMIN ONLY: Approve a pending dispatch entry. The target agent will be able to pick it up.")]
     public static async Task<string> ApproveDispatch(
         IDispatchRepository repo,
         [Description("Dispatch entry ID to approve.")] int dispatch_id,
@@ -73,7 +73,7 @@ public sealed class DispatchTools
         }
     }
 
-    [McpServerTool(Name = "reject_dispatch"), Description("Reject a pending dispatch entry.")]
+    [McpServerTool(Name = "legacy_reject_dispatch"), Description("LEGACY / ADMIN ONLY: Reject a pending dispatch entry.")]
     public static async Task<string> RejectDispatch(
         IDispatchRepository repo,
         [Description("Dispatch entry ID to reject.")] int dispatch_id,
@@ -93,7 +93,7 @@ public sealed class DispatchTools
         }
     }
 
-    [McpServerTool(Name = "complete_dispatch"), Description("Mark an approved dispatch as completed by the agent.")]
+    [McpServerTool(Name = "legacy_complete_dispatch"), Description("LEGACY / ADMIN ONLY: Mark an approved dispatch as completed by the agent.")]
     public static async Task<string> CompleteDispatch(
         IDispatchRepository repo,
         [Description("Dispatch entry ID to complete.")] int dispatch_id,

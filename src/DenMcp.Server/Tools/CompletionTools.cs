@@ -29,7 +29,7 @@ public sealed class CompletionTools
 
     private static readonly Regex ShellSyntaxPattern = new(@"(\$\(|`|\$\{|\bdate\b|\burandom\b|\bxxd\b)", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    [McpServerTool(Name = "post_worker_completion_packet"), Description("Post an idempotent structured Den Pi worker completion packet and update the durable worker/session status.")]
+    [McpServerTool(Name = "post_worker_completion_packet"), Description("Post an idempotent structured Den worker completion packet and update the durable worker/session status.")]
     public static async Task<string> PostWorkerCompletionPacket(
         IPiSessionService service,
         IPiSessionRepository sessions,

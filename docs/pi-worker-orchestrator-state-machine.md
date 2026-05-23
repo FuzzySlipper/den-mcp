@@ -2,6 +2,8 @@
 
 Task: #1244 — validator/drift worker roles and explicit orchestrator decisions.
 
+> **Quarantine notice (Task #1552):** Pi-specific role launch tools in this historical design note are quarantined with `legacy_` prefixes and marked LEGACY / ADMIN ONLY. Modern workflows use `register_worker_run`, `post_worker_completion_packet`, standard packet tools, and Den task/review/message/document tools; do not use these Pi launch helpers for normal Runner work.
+
 ## Worker roles
 
 The Pi worker lifecycle accepts these role profiles through Den MCP worker tools:

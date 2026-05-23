@@ -1,5 +1,7 @@
 # Hermes-launched Den Pi Worker Smoke Tests — Task #1247
 
+> **Quarantine notice (Task #1552):** The Pi-specific path tools `start_coder_worker_path` and `start_reviewer_worker_path` are quarantined with `legacy_` prefixes and marked LEGACY / ADMIN ONLY. Modern workflows use `register_worker_run`, standard packet tools, and Den task/review APIs.
+
 This document records the staged smoke coverage added for the Hermes → Den MCP → Den Pi worker migration.
 
 ## Automated smoke coverage
@@ -15,8 +17,10 @@ In this temporary clone, `dotnet build tests/DenMcp.Server.Tests/DenMcp.Server.T
 
 ## Stages covered
 
+The stage descriptions below are historical smoke coverage notes from the Pi migration. Tool names named here now resolve as `legacy_*` MCP tools and are admin-only, not normal Runner workflow guidance.
+
 1. **Coder-only smoke**
-   - Start through `start_coder_worker_path`.
+   - Historically started through `start_coder_worker_path` (now `legacy_start_coder_worker_path`).
    - Prepare a Den `coder_context_packet`.
    - Launch a coder worker through Den worker state.
    - Verify tmux/container/status handles are discoverable from Den worker status.
@@ -24,7 +28,7 @@ In this temporary clone, `dotnet build tests/DenMcp.Server.Tests/DenMcp.Server.T
    - Verify `verify_coder_worker_completion` returns `ready_for_review` only after branch/head/tests metadata exists.
 
 2. **Reviewer smoke**
-   - Start through `start_reviewer_worker_path`.
+   - Historically started through `start_reviewer_worker_path` (now `legacy_start_reviewer_worker_path`).
    - Prepare a Den `reviewer_context_packet`.
    - Launch a reviewer worker through Den worker state.
    - Post a `review_findings_packet` tied to review round metadata.

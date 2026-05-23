@@ -1,5 +1,13 @@
 # Den Pi Worker Contract and MCP API Surface — Task #1254
 
+> **Quarantine notice (Task #1552):** The following tools are quarantined with `legacy_` prefixes and marked LEGACY / ADMIN ONLY. Do not use them as normal workflow primitives:
+> - `launch_pi_worker`, `launch_coder_worker`, `launch_reviewer_worker`, `launch_validator_worker`, `launch_drift_checker_worker`, `launch_packet_auditor_worker`
+> - `start_coder_worker_path`, `start_reviewer_worker_path`
+> - `list_dispatches`, `get_dispatch`, `approve_dispatch`, `reject_dispatch`, `complete_dispatch`
+> - `publish_worker_branch`, `publish_reviewed_branch`
+>
+> Modern workflows should use: `register_worker_run`, `get_worker_run`, `list_worker_runs`, `get_worker_run_status`, `cleanup_worker_run`, `abort_worker_run`, `rerun_worker_run`, `post_worker_completion_packet`, `prepare_coder_context_packet`, `prepare_reviewer_context_packet`, and standard task/review/message/document tools.
+
 Date: 2026-05-10
 Project: `den-mcp`
 Parent task: #1237 — Convert orchestrator workflow to Hermes-driven Den Pi workers

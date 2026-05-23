@@ -2,6 +2,8 @@
 
 Task: #1246 — final guidance and migration notes for the #1237 worker-orchestration stack.
 
+> **Quarantine notice (Task #1552):** Pi-specific role launch tools (`launch_coder_worker`, `launch_reviewer_worker`, `launch_validator_worker`, `launch_drift_checker_worker`, `launch_packet_auditor_worker`) are quarantined with `legacy_` prefixes and marked LEGACY / ADMIN ONLY. Modern workflows should use `register_worker_run` for tracked non-Pi worker registration, then standard packet and completion tools.
+
 ## Architecture summary
 
 The target workflow is:

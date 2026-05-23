@@ -1,5 +1,7 @@
 # Pi Extension Orchestration Port Audit — Task #1252
 
+> **Quarantine notice (Task #1552):** Pi-specific launch tools (`launch_pi_worker`, `launch_coder_worker`, `launch_reviewer_worker`, etc.), dispatch tools, and Trusted Publisher tools are quarantined with `legacy_` prefixes and marked LEGACY / ADMIN ONLY. Modern workflows use `register_worker_run`, `post_worker_completion_packet`, and standard Den task/review/message/document tools.
+
 Date: 2026-05-10
 Project: `den-mcp`
 Parent task: #1237 — Convert orchestrator workflow to Hermes-driven Den Pi workers

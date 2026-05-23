@@ -17,7 +17,7 @@ public sealed class WorkerTools
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
     };
 
-    [McpServerTool(Name = "launch_pi_worker"), Description("Launch a raw Pi-backed Den worker run using a bounded prompt reference/state-file contract.")]
+    [McpServerTool(Name = "legacy_launch_pi_worker"), Description("LEGACY / ADMIN ONLY: Launch a raw Pi-backed Den worker run using a bounded prompt reference/state-file contract.")]
     public static async Task<string> LaunchPiWorker(
         IPiSessionService service,
         [Description("Project ID.")] string project_id,
@@ -48,7 +48,7 @@ public sealed class WorkerTools
         {
             var normalizedRole = NormalizeRole(role);
             if (prompt_packet_message_id is null && string.IsNullOrWhiteSpace(state_file_ref))
-                return Error("launch_pi_worker requires prompt_packet_message_id or state_file_ref; do not pass raw prompt bodies in process args.");
+                return Error("legacy_launch_pi_worker requires prompt_packet_message_id or state_file_ref; do not pass raw prompt bodies in process args.");
 
             var sessionId = NormalizeIdentifier(session_id) ?? DeriveSessionId(dedupe_key);
             var existing = await TryGetBySessionOrRunAsync(service, project_id, sessionId, run_id, task_id).ConfigureAwait(false);
@@ -87,7 +87,7 @@ public sealed class WorkerTools
         }
     }
 
-    [McpServerTool(Name = "register_worker_run"), Description("Register a tracked non-Pi Den worker run before an external/local substrate posts completion packets.")]
+    [McpServerTool(Name = "register_worker_run"), Description("Register a tracked Den worker run before an external/local substrate posts completion packets.")]
     public static async Task<string> RegisterWorkerRun(
         IPiSessionService service,
         [Description("Project ID.")] string project_id,
@@ -166,7 +166,7 @@ public sealed class WorkerTools
         }
     }
 
-    [McpServerTool(Name = "get_worker_run"), Description("Get a raw Den Pi worker run by run id or session id.")]
+    [McpServerTool(Name = "get_worker_run"), Description("Get a tracked Den worker run by run id or session id.")]
     public static async Task<string> GetWorkerRun(
         IPiSessionService service,
         [Description("Project ID.")] string project_id,
@@ -179,7 +179,7 @@ public sealed class WorkerTools
         return Serialize(new { worker_run = ToWorkerRun(detail), summary = $"worker {RunId(detail.Session)} is {ToWorkerStatus(detail.Session)}" }, verbose);
     }
 
-    [McpServerTool(Name = "list_worker_runs"), Description("List raw Den Pi worker runs with optional filters.")]
+    [McpServerTool(Name = "list_worker_runs"), Description("List tracked Den worker runs with optional filters.")]
     public static async Task<string> ListWorkerRuns(
         IPiSessionService service,
         [Description("Project ID.")] string project_id,
@@ -204,7 +204,7 @@ public sealed class WorkerTools
         return Serialize(new { worker_runs = workers, count = workers.Count, summary = $"listed {workers.Count} worker run(s)" }, verbose: true);
     }
 
-    [McpServerTool(Name = "get_worker_run_status"), Description("Get a Den Pi worker run status projection combining runtime state, launch handles, and latest completion-packet state.")]
+    [McpServerTool(Name = "get_worker_run_status"), Description("Get a Den worker run status projection combining runtime state, launch handles, and latest completion-packet state.")]
     public static async Task<string> GetWorkerRunStatus(
         IPiSessionService service,
         IMessageRepository messages,
@@ -232,7 +232,7 @@ public sealed class WorkerTools
         }, verbose: true);
     }
 
-    [McpServerTool(Name = "cleanup_worker_run"), Description("Idempotently cleanup a terminal Den Pi worker run and report cleanup lifecycle state.")]
+    [McpServerTool(Name = "cleanup_worker_run"), Description("Idempotently cleanup a terminal Den worker run and report cleanup lifecycle state.")]
     public static async Task<string> CleanupWorkerRun(
         IPiSessionService service,
         [Description("Project ID.")] string project_id,
@@ -282,7 +282,7 @@ public sealed class WorkerTools
         }
     }
 
-    [McpServerTool(Name = "abort_worker_run"), Description("Request cancellation of a raw Den Pi worker run. Current substrate maps this to Pi session termination.")]
+    [McpServerTool(Name = "abort_worker_run"), Description("Request cancellation of a Den worker run. Maps to the underlying session termination mechanism.")]
     public static async Task<string> AbortWorkerRun(
         IPiSessionService service,
         [Description("Project ID.")] string project_id,
@@ -324,7 +324,7 @@ public sealed class WorkerTools
         }
     }
 
-    [McpServerTool(Name = "rerun_worker_run"), Description("Rerun a raw Den Pi worker using the stored Pi launch profile where available.")]
+    [McpServerTool(Name = "rerun_worker_run"), Description("Rerun a Den worker using the stored launch profile where available.")]
     public static async Task<string> RerunWorkerRun(
         IPiSessionService service,
         [Description("Project ID.")] string project_id,
