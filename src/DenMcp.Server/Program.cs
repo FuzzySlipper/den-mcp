@@ -215,58 +215,7 @@ if (options.LocalDatabaseEnabled)
 }
 else
 {
-    MapDenCoreMcpProxy(app);
-}
-
-static void MapDenCoreMcpProxy(WebApplication app)
-{
-    var methods = new[] { "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS" };
-    app.MapMethods("/mcp", methods, ProxyMcpToDenCoreAsync);
-    app.MapMethods("/mcp/{**path}", methods, ProxyMcpToDenCoreAsync);
-}
-
-static async Task ProxyMcpToDenCoreAsync(HttpContext context, IHttpClientFactory httpClientFactory, DenCoreOptions coreOptions)
-{
-    using var request = new HttpRequestMessage(new HttpMethod(context.Request.Method), BuildDenCoreMcpUri(coreOptions, context.Request));
-
-    if (context.Request.ContentLength is > 0 || context.Request.Headers.ContainsKey("Transfer-Encoding"))
-    {
-        request.Content = new StreamContent(context.Request.Body);
-        foreach (var header in context.Request.Headers)
-        {
-            if (!header.Key.StartsWith("Content-", StringComparison.OrdinalIgnoreCase))
-                continue;
-            request.Content.Headers.TryAddWithoutValidation(header.Key, header.Value.ToArray());
-        }
-    }
-
-    foreach (var header in context.Request.Headers)
-    {
-        if (header.Key.Equals("Host", StringComparison.OrdinalIgnoreCase) ||
-            header.Key.StartsWith("Content-", StringComparison.OrdinalIgnoreCase))
-            continue;
-        request.Headers.TryAddWithoutValidation(header.Key, header.Value.ToArray());
-    }
-
-    var client = httpClientFactory.CreateClient("DenCoreMcpProxy");
-    using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted);
-
-    context.Response.StatusCode = (int)response.StatusCode;
-    foreach (var header in response.Headers)
-        context.Response.Headers[header.Key] = header.Value.ToArray();
-    foreach (var header in response.Content.Headers)
-        context.Response.Headers[header.Key] = header.Value.ToArray();
-    context.Response.Headers.Remove("transfer-encoding");
-
-    await response.Content.CopyToAsync(context.Response.Body, context.RequestAborted);
-}
-
-static Uri BuildDenCoreMcpUri(DenCoreOptions coreOptions, HttpRequest request)
-{
-    var baseUrl = string.IsNullOrWhiteSpace(coreOptions.BaseUrl)
-        ? "http://localhost:5299"
-        : coreOptions.BaseUrl.TrimEnd('/');
-    return new Uri(baseUrl + request.Path + request.QueryString);
+    app.MapDenCoreMcpProxy();
 }
 
 static void PreparePiSessionHostArraysForBinding(PiDockerLaunchProfileOptions options)
