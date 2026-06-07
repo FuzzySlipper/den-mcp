@@ -50,7 +50,60 @@ public class OrchestratorStateMachineToolsTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task DetermineNextAction_NoImplementationButFailedWorkerRunsRespectRetryCap()
+    public async Task DetermineNextAction_DefaultRetryCap_AllowsFourthAttemptAfterThreeFailures()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var task = await CreateTaskAsync(scope, "Coder gets a fourth default attempt");
+        await CreateWorkerFailureAsync(scope, task.Id, "coder");
+        await CreateWorkerFailureAsync(scope, task.Id, "coder");
+        await CreateWorkerFailureAsync(scope, task.Id, "coder");
+
+        var json = await DetermineAsync(scope, task.Id);
+        using var doc = JsonDocument.Parse(json);
+
+        Assert.Equal("launch_coder", doc.RootElement.GetProperty("decision").GetProperty("next_action").GetString());
+        Assert.Equal("missing_implementation", doc.RootElement.GetProperty("decision").GetProperty("reason").GetString());
+        Assert.Equal(3, doc.RootElement.GetProperty("attempts").GetProperty("coder").GetInt32());
+    }
+
+    [Fact]
+    public async Task DetermineNextAction_InfrastructureFailures_DoNotConsumeRetryBudget()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var task = await CreateTaskAsync(scope, "Infrastructure failures do not spend coder attempts");
+        await CreateWorkerFailureAsync(scope, task.Id, "coder", failureCategory: "infrastructure");
+        await CreateWorkerFailureAsync(scope, task.Id, "coder", failureCategory: "no_capacity");
+        await CreateWorkerFailureAsync(scope, task.Id, "coder", failureCategory: "auth_expired");
+        await CreateWorkerFailureAsync(scope, task.Id, "coder", failureCategory: "channel_membership_missing");
+
+        var json = await DetermineAsync(scope, task.Id);
+        using var doc = JsonDocument.Parse(json);
+
+        Assert.Equal("launch_coder", doc.RootElement.GetProperty("decision").GetProperty("next_action").GetString());
+        Assert.Equal("missing_implementation", doc.RootElement.GetProperty("decision").GetProperty("reason").GetString());
+        Assert.Equal(0, doc.RootElement.GetProperty("attempts").GetProperty("coder").GetInt32());
+    }
+
+    [Fact]
+    public async Task DetermineNextAction_DefaultRetryCap_EscalatesAfterFourFailures()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var task = await CreateTaskAsync(scope, "Coder hits new default cap");
+        await CreateWorkerFailureAsync(scope, task.Id, "coder");
+        await CreateWorkerFailureAsync(scope, task.Id, "coder");
+        await CreateWorkerFailureAsync(scope, task.Id, "coder");
+        await CreateWorkerFailureAsync(scope, task.Id, "coder");
+
+        var json = await DetermineAsync(scope, task.Id);
+        using var doc = JsonDocument.Parse(json);
+
+        Assert.Equal("escalate", doc.RootElement.GetProperty("decision").GetProperty("next_action").GetString());
+        Assert.Equal("missing_implementation_retry_cap", doc.RootElement.GetProperty("decision").GetProperty("reason").GetString());
+        Assert.Equal(4, doc.RootElement.GetProperty("attempts").GetProperty("coder").GetInt32());
+    }
+
+    [Fact]
+    public async Task DetermineNextAction_ExplicitRetryCapThree_PreservesOldEscalationBoundary()
     {
         using var scope = _factory.Services.CreateScope();
         var task = await CreateTaskAsync(scope, "Coder keeps failing before packet");
@@ -173,8 +226,20 @@ public class OrchestratorStateMachineToolsTests : IAsyncLifetime
         Assert.Equal("changes_requested", doc.RootElement.GetProperty("decision").GetProperty("reason").GetString());
     }
 
-    private static async Task<string> DetermineAsync(IServiceScope scope, int taskId, int maxAttempts = 3)
+    private static async Task<string> DetermineAsync(IServiceScope scope, int taskId, int? maxAttempts = null)
     {
+        if (maxAttempts is null)
+        {
+            return await OrchestratorStateMachineTools.DetermineOrchestratorNextAction(
+                scope.ServiceProvider.GetRequiredService<ITaskRepository>(),
+                scope.ServiceProvider.GetRequiredService<IMessageRepository>(),
+                scope.ServiceProvider.GetRequiredService<IReviewRoundRepository>(),
+                scope.ServiceProvider.GetRequiredService<IReviewFindingRepository>(),
+                ProjectId,
+                taskId,
+                verbose: true);
+        }
+
         return await OrchestratorStateMachineTools.DetermineOrchestratorNextAction(
             scope.ServiceProvider.GetRequiredService<ITaskRepository>(),
             scope.ServiceProvider.GetRequiredService<IMessageRepository>(),
@@ -182,7 +247,7 @@ public class OrchestratorStateMachineToolsTests : IAsyncLifetime
             scope.ServiceProvider.GetRequiredService<IReviewFindingRepository>(),
             ProjectId,
             taskId,
-            max_attempts: maxAttempts,
+            max_attempts: maxAttempts.Value,
             verbose: true);
     }
 
@@ -256,7 +321,7 @@ public class OrchestratorStateMachineToolsTests : IAsyncLifetime
         });
     }
 
-    private static async Task CreateWorkerFailureAsync(IServiceScope scope, int taskId, string role)
+    private static async Task CreateWorkerFailureAsync(IServiceScope scope, int taskId, string role, string? failureCategory = null)
     {
         var messages = scope.ServiceProvider.GetRequiredService<IMessageRepository>();
         var metadata = JsonSerializer.SerializeToElement(new Dictionary<string, object?>
@@ -268,6 +333,7 @@ public class OrchestratorStateMachineToolsTests : IAsyncLifetime
             ["task_id"] = taskId,
             ["run_id"] = $"run-failure-{role}-{Guid.NewGuid():N}",
             ["status"] = "failed",
+            ["failure_category"] = failureCategory,
         }, new JsonSerializerOptions(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
 
         await messages.CreateAsync(new Message
