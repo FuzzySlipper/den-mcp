@@ -164,3 +164,23 @@ public static class MessageIntentCompatibility
     }
 
 }
+
+/// <summary>
+/// Compact result from WaitForMessagesAsync — new message IDs/headers
+/// or a terse timeout/no-messages receipt. Not a full thread dump.
+/// </summary>
+public sealed record WaitForMessagesResult
+{
+    public bool TimedOut { get; init; }
+    public int WaitedMs { get; init; }
+    public List<WaitForMessagesItem> Messages { get; init; } = [];
+}
+
+public sealed record WaitForMessagesItem
+{
+    public int Id { get; init; }
+    public string Sender { get; init; } = "";
+    public int? TaskId { get; init; }
+    public string ContentPreview { get; init; } = "";
+    public string CreatedAt { get; init; } = "";
+}

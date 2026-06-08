@@ -391,6 +391,8 @@ public class WorkerObservabilityToolsTests
         public Task<List<MessageFeedItem>> GetFeedAsync(string projectId, int limit = 20, MessageIntent? intent = null) => throw new NotSupportedException();
         public Task<DenMcp.Core.Models.Thread> GetThreadAsync(int threadId) => throw new NotSupportedException();
         public Task<int> MarkReadAsync(string agent, int[] messageIds) => throw new NotSupportedException();
+        public Task<WaitForMessagesResult> WaitForMessagesAsync(string projectId, string unreadFor, int timeoutMs = 30000, int limit = 20, int? cursorMessageId = null)
+            => Task.FromResult(new WaitForMessagesResult());
     }
 
     private sealed class CapturingPiSessionService : IPiSessionService

@@ -167,6 +167,79 @@ public sealed class DenCoreClientTests
     }
 
     [Fact]
+    public async Task MessageTools_WaitForMessages_GetsCoreWaitEndpointWithBoundedQuery()
+    {
+        var responseBody = new
+        {
+            status = "messages",
+            waited_ms = 12,
+            count = 1,
+            messages = new[]
+            {
+                new
+                {
+                    id = 42,
+                    sender = "coder",
+                    task_id = 1987,
+                    content_preview = "wake up",
+                    created_at = "2026-06-08 12:00:00"
+                }
+            }
+        };
+        var handler = new CaptureJsonResponseHandler<object>(HttpStatusCode.OK, responseBody);
+        using var httpClient = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://den-core.test")
+        };
+        var client = new DenCoreClient(httpClient, new DenCoreOptions { BaseUrl = "http://den-core.test" });
+
+        var result = await MessageTools.WaitForMessages(
+            client,
+            "den-core",
+            "reviewer agent",
+            timeout_ms: 1234,
+            limit: 2,
+            cursor: 41);
+
+        Assert.Equal(HttpMethod.Get, handler.LastMethod);
+        Assert.Equal("/api/projects/den-core/messages/wait?unreadFor=reviewer%20agent&timeoutMs=1234&limit=2&cursor=41", handler.LastRequestUri!.PathAndQuery);
+        Assert.Null(handler.LastRequestBody);
+        using var resultJson = JsonDocument.Parse(result);
+        Assert.Equal("messages", resultJson.RootElement.GetProperty("status").GetString());
+        Assert.Equal(42, resultJson.RootElement.GetProperty("messages")[0].GetProperty("id").GetInt32());
+    }
+
+    [Fact]
+    public async Task MessageTools_WaitForMessages_AllowsCoreLongPollPastDefaultAdapterTimeout()
+    {
+        var responseBody = new
+        {
+            status = "timeout",
+            waited_ms = 1200,
+            messages = Array.Empty<object>(),
+            message = "No new unread messages arrived within the wait window.",
+            guidance = "Stop polling"
+        };
+        var handler = new DelayedJsonResponseHandler<object>(TimeSpan.FromMilliseconds(1200), HttpStatusCode.OK, responseBody);
+        using var httpClient = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://den-core.test")
+        };
+        var client = new DenCoreClient(httpClient, new DenCoreOptions { BaseUrl = "http://den-core.test", TimeoutSeconds = 1 });
+
+        var result = await MessageTools.WaitForMessages(
+            client,
+            "den-core",
+            "reviewer",
+            timeout_ms: 1500,
+            limit: 2);
+
+        using var resultJson = JsonDocument.Parse(result);
+        Assert.Equal("timeout", resultJson.RootElement.GetProperty("status").GetString());
+        Assert.True(handler.Completed);
+    }
+
+    [Fact]
     public async Task AdapterMode_StartsWithoutCreatingLocalDatabaseFile()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"den-mcp-adapter-mode-{Guid.NewGuid()}", "should-not-exist.db");
@@ -208,6 +281,21 @@ public sealed class DenCoreClientTests
             LastRequestUri = request.RequestUri;
             LastMethod = request.Method;
             LastRequestBody = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
+            return new HttpResponseMessage(statusCode)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(body, JsonOpts.Default), Encoding.UTF8, "application/json")
+            };
+        }
+    }
+
+    private sealed class DelayedJsonResponseHandler<T>(TimeSpan delay, HttpStatusCode statusCode, T body) : HttpMessageHandler
+    {
+        public bool Completed { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            await Task.Delay(delay, cancellationToken);
+            Completed = true;
             return new HttpResponseMessage(statusCode)
             {
                 Content = new StringContent(JsonSerializer.Serialize(body, JsonOpts.Default), Encoding.UTF8, "application/json")

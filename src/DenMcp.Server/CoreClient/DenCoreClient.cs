@@ -17,7 +17,7 @@ public sealed class DenCoreClient
         _httpClient = httpClient;
         _options = options;
         _httpClient.BaseAddress ??= new Uri(NormalizeBaseUrl(options.BaseUrl));
-        _httpClient.Timeout = options.Timeout;
+        _httpClient.Timeout = Timeout.InfiniteTimeSpan;
         if (!string.IsNullOrWhiteSpace(options.ServiceToken))
             _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", options.ServiceToken);
     }
@@ -84,14 +84,35 @@ public sealed class DenCoreClient
         return SendAsync<JsonElement>(HttpMethod.Get, $"/api/projects/{Uri.EscapeDataString(projectId)}/messages/{query}", "get_messages", body: null, cancellationToken);
     }
 
+    public Task<JsonElement> WaitForMessagesAsync(string projectId, string unreadFor, int timeoutMs = 30000, int limit = 20, int? cursorMessageId = null, CancellationToken cancellationToken = default)
+    {
+        var boundedTimeoutMs = Math.Clamp(timeoutMs, 500, 60_000);
+        var query = BuildQuery([
+            ("unreadFor", unreadFor),
+            ("timeoutMs", timeoutMs.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+            ("limit", limit.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+            ("cursor", cursorMessageId?.ToString(System.Globalization.CultureInfo.InvariantCulture))
+        ]);
+        return SendAsync<JsonElement>(
+            HttpMethod.Get,
+            $"/api/projects/{Uri.EscapeDataString(projectId)}/messages/wait{query}",
+            "wait_for_messages",
+            body: null,
+            cancellationToken,
+            timeoutOverride: TimeSpan.FromMilliseconds(boundedTimeoutMs + 5_000));
+    }
+
     public Task<JsonElement> GetThreadAsync(string projectId, int threadId, CancellationToken cancellationToken = default) =>
         SendAsync<JsonElement>(HttpMethod.Get, $"/api/projects/{Uri.EscapeDataString(projectId)}/messages/thread/{threadId}", "get_thread", body: null, cancellationToken);
 
     public Task<JsonElement> MarkReadAsync(string agent, int[] messageIds, CancellationToken cancellationToken = default) =>
         SendAsync<JsonElement>(HttpMethod.Post, "/api/messages/mark-read", "mark_read", new { agent, message_ids = messageIds }, cancellationToken);
 
-    public async Task<T> SendAsync<T>(HttpMethod method, string path, string operation, object? body, CancellationToken cancellationToken = default)
+    public async Task<T> SendAsync<T>(HttpMethod method, string path, string operation, object? body, CancellationToken cancellationToken = default, TimeSpan? timeoutOverride = null)
     {
+        var effectiveTimeout = timeoutOverride ?? _options.Timeout;
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(effectiveTimeout);
         using var request = new HttpRequestMessage(method, path);
         if (body is not null)
             request.Content = new StringContent(JsonSerializer.Serialize(body, JsonOpts.Default), Encoding.UTF8, "application/json");
@@ -99,11 +120,11 @@ public sealed class DenCoreClient
         HttpResponseMessage response;
         try
         {
-            response = await _httpClient.SendAsync(request, cancellationToken);
+            response = await _httpClient.SendAsync(request, timeoutCts.Token);
         }
         catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new DenCoreException(operation, CoreUrl, $"Den Core did not respond within {_options.Timeout.TotalSeconds:0.#}s; MCP transport is still alive. Retry after Core is healthy.", retryable: true, innerException: ex);
+            throw new DenCoreException(operation, CoreUrl, $"Den Core did not respond within {effectiveTimeout.TotalSeconds:0.#}s; MCP transport is still alive. Retry after Core is healthy.", retryable: true, innerException: ex);
         }
         catch (HttpRequestException ex)
         {
@@ -114,7 +135,7 @@ public sealed class DenCoreClient
         {
             if (!response.IsSuccessStatusCode)
             {
-                var responseBody = response.Content is null ? null : await response.Content.ReadAsStringAsync(cancellationToken);
+                var responseBody = response.Content is null ? null : await response.Content.ReadAsStringAsync(timeoutCts.Token);
                 throw new DenCoreException(
                     operation,
                     CoreUrl,
@@ -124,7 +145,7 @@ public sealed class DenCoreClient
                     responseBody);
             }
 
-            var result = await response.Content.ReadFromJsonAsync<T>(JsonOpts.Default, cancellationToken);
+            var result = await response.Content.ReadFromJsonAsync<T>(JsonOpts.Default, timeoutCts.Token);
             return result is null
                 ? throw new DenCoreException(operation, CoreUrl, "Den Core returned an empty response.", retryable: true, responseBody: null)
                 : result;

@@ -242,4 +242,52 @@ public class MessageRepositoryTests : IAsyncLifetime
 
         Assert.Contains("conflicts", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task WaitForMessages_ReturnsMessagesThatArriveBeforeTimeout()
+    {
+        var waitTask = _repo.WaitForMessagesAsync("proj", unreadFor: "claude-code", timeoutMs: 1000);
+
+        await Task.Delay(250);
+        var msg = await _repo.CreateAsync(new Message { ProjectId = "proj", Sender = "codex", Content = "Hello from codex!" });
+
+        var result = await waitTask;
+        Assert.False(result.TimedOut);
+        var item = Assert.Single(result.Messages);
+        Assert.Equal(msg.Id, item.Id);
+        Assert.Equal("codex", item.Sender);
+    }
+
+    [Fact]
+    public async Task WaitForMessages_AppliesCursorBeforeLimitWithDeterministicOrder()
+    {
+        var msg1 = await _repo.CreateAsync(new Message { ProjectId = "proj", Sender = "alice", Content = "First" });
+        var msg2 = await _repo.CreateAsync(new Message { ProjectId = "proj", Sender = "bob", Content = "Second" });
+        var msg3 = await _repo.CreateAsync(new Message { ProjectId = "proj", Sender = "carol", Content = "Third" });
+        await ForceSameCreatedAtAsync(msg1.Id, msg2.Id, msg3.Id);
+
+        var result = await _repo.WaitForMessagesAsync(
+            "proj",
+            unreadFor: "agent",
+            timeoutMs: 500,
+            limit: 1,
+            cursorMessageId: msg1.Id);
+
+        Assert.False(result.TimedOut);
+        var item = Assert.Single(result.Messages);
+        Assert.Equal(msg3.Id, item.Id);
+    }
+
+    private async Task ForceSameCreatedAtAsync(params int[] messageIds)
+    {
+        await using var conn = await _testDb.Db.CreateConnectionAsync();
+        foreach (var id in messageIds)
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "UPDATE messages SET created_at = @createdAt WHERE id = @id";
+            cmd.Parameters.AddWithValue("@createdAt", "2026-06-08 12:00:00");
+            cmd.Parameters.AddWithValue("@id", id);
+            await cmd.ExecuteNonQueryAsync();
+        }
+    }
 }

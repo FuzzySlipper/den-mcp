@@ -93,7 +93,7 @@ public sealed class MessageTools
             : ConciseResponse.SentMessage(created);
     }
 
-    [McpServerTool(Name = "get_messages"), Description("Get messages in a project, with optional filters. Returns newest first.")]
+    [McpServerTool(Name = "get_messages"), Description("Get messages in a project, with optional filters. Returns newest first. For waiting on unread work, use wait_for_messages instead; do not tight-loop get_messages after an empty unread result.")]
     public static async Task<string> GetMessages(
         DenCoreClient coreClient,
         [Description("Project ID.")] string project_id,
@@ -107,6 +107,28 @@ public sealed class MessageTools
         {
             var messages = await coreClient.GetMessagesAsync(project_id, task_id, since, unread_for, limit, intent);
             return JsonSerializer.Serialize(messages, JsonOpts.Default);
+        }
+        catch (DenCoreException ex)
+        {
+            return DenCoreToolErrorFormatter.Format(ex);
+        }
+    }
+
+    [McpServerTool(Name = "wait_for_messages"), Description(
+        "Wait for new unread messages with a bounded timeout. Use this instead of polling get_messages. " +
+        "Returns compact headers or timeout receipt. Timeout capped at 60s.")]
+    public static async Task<string> WaitForMessages(
+        DenCoreClient coreClient,
+        [Description("Project ID.")] string project_id,
+        [Description("Agent identity.")] string unread_for,
+        [Description("Max wait ms (500-60000).")] int timeout_ms = 30000,
+        [Description("Max messages.")] int limit = 20,
+        [Description("Cursor message ID.")] int? cursor = null)
+    {
+        try
+        {
+            var result = await coreClient.WaitForMessagesAsync(project_id, unread_for, timeout_ms, limit, cursor);
+            return JsonSerializer.Serialize(result, JsonOpts.Default);
         }
         catch (DenCoreException ex)
         {
