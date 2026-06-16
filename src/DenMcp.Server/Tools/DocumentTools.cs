@@ -61,17 +61,20 @@ public sealed class DocumentTools
         }
     }
 
-    [McpServerTool(Name = "list_documents"), Description("List document summaries (without content). Omit project_id to list across all projects and spaces.")]
+    [McpServerTool(Name = "list_documents"), Description("List document summaries (without content). Excludes archived documents by default. Omit project_id to list across all projects and spaces. Concise by default with slug/title/doc_type/tags/summary; use verbose=true for full document records.")]
     public static async Task<string> ListDocuments(
         DenCoreClient coreClient,
         [Description("Project or space ID. Omit to list across all projects and spaces.")] string? project_id = null,
         [Description("Filter by type: prd, spec, adr, convention, reference, note.")] string? doc_type = null,
-        [Description("Filter by tags (comma-separated). Document must have ALL specified tags.")] string? tags = null)
+        [Description("Filter by tags (comma-separated). Document must have ALL specified tags.")] string? tags = null,
+        [Description("If true, return full JSON records. Default is concise with slug/title/doc_type/tags/summary.")] bool verbose = false)
     {
         try
         {
             var docs = await coreClient.ListDocumentsAsync(project_id, doc_type, tags);
-            return JsonSerializer.Serialize(docs, JsonOpts.Default);
+            return verbose
+                ? JsonSerializer.Serialize(docs, JsonOpts.Default)
+                : ProjectDocumentList(docs);
         }
         catch (DenCoreException ex)
         {
@@ -79,21 +82,88 @@ public sealed class DocumentTools
         }
     }
 
-    [McpServerTool(Name = "search_documents"), Description("Full-text search across documents. Supports AND, OR, NOT, and \"phrase\" queries.")]
+    [McpServerTool(Name = "search_documents"), Description("Full-text search across documents. Excludes archived documents. Supports AND, OR, NOT, and \"phrase\" queries. Concise by default with slug/title/doc_type/snippet; use verbose=true for full results.")]
     public static async Task<string> SearchDocuments(
         DenCoreClient coreClient,
         [Description("FTS5 search query.")] string query,
-        [Description("Scope search to one project or space.")] string? project_id = null)
+        [Description("Scope search to one project or space.")] string? project_id = null,
+        [Description("If true, return full JSON records. Default is concise with slug/title/doc_type/snippet.")] bool verbose = false)
     {
         try
         {
             var results = await coreClient.SearchDocumentsAsync(query, project_id);
-            return JsonSerializer.Serialize(results, JsonOpts.Default);
+            return verbose
+                ? JsonSerializer.Serialize(results, JsonOpts.Default)
+                : ProjectSearchResults(results);
         }
         catch (DenCoreException ex)
         {
             return DenCoreToolErrorFormatter.Format(ex);
         }
+    }
+
+    private static string ProjectDocumentList(JsonElement docs)
+    {
+        var items = new List<object>();
+        if (docs.TryGetProperty("items", out var itemsArray))
+        {
+            foreach (var doc in itemsArray.EnumerateArray())
+            {
+                items.Add(new
+                {
+                    project_id = GetString(doc, "project_id"),
+                    slug = GetString(doc, "slug"),
+                    title = GetString(doc, "title"),
+                    doc_type = GetString(doc, "doc_type"),
+                    visibility = GetString(doc, "visibility"),
+                    tags = GetJsonArray(doc, "tags"),
+                    summary = GetString(doc, "summary"),
+                    updated_at = GetString(doc, "updated_at"),
+                });
+            }
+        }
+        return JsonSerializer.Serialize(new { items, count = items.Count }, JsonOpts.Default);
+    }
+
+    private static string ProjectSearchResults(JsonElement results)
+    {
+        var items = new List<object>();
+        if (results.TryGetProperty("results", out var resultsArray))
+        {
+            foreach (var r in resultsArray.EnumerateArray())
+            {
+                items.Add(new
+                {
+                    project_id = GetString(r, "project_id"),
+                    slug = GetString(r, "slug"),
+                    title = GetString(r, "title"),
+                    doc_type = GetString(r, "doc_type"),
+                    snippet = GetString(r, "snippet") ?? Truncate(GetString(r, "content"), 300),
+                });
+            }
+        }
+        return JsonSerializer.Serialize(new { count = items.Count, results = items }, JsonOpts.Default);
+    }
+
+    private static string? GetString(JsonElement el, string name)
+    {
+        if (el.TryGetProperty(name, out var prop) && prop.ValueKind == JsonValueKind.String)
+            return prop.GetString();
+        return null;
+    }
+
+    private static object? GetJsonArray(JsonElement el, string name)
+    {
+        if (el.TryGetProperty(name, out var prop) && prop.ValueKind == JsonValueKind.Array)
+            return prop;
+        return null;
+    }
+
+    private static string? Truncate(string? value, int maxLen)
+    {
+        if (string.IsNullOrEmpty(value))
+            return null;
+        return value.Length <= maxLen ? value : value[..maxLen] + "…";
     }
 
     [McpServerTool(Name = "delete_document"), Description("Delete a document by project or space ID and slug.")]
