@@ -102,7 +102,7 @@ public sealed class DocumentTools
         }
     }
 
-    private static string ProjectDocumentList(JsonElement docs)
+    internal static string ProjectDocumentList(JsonElement docs)
     {
         var items = new List<object>();
         if (docs.TryGetProperty("items", out var itemsArray))
@@ -125,7 +125,7 @@ public sealed class DocumentTools
         return JsonSerializer.Serialize(new { items, count = items.Count }, JsonOpts.Default);
     }
 
-    private static string ProjectSearchResults(JsonElement results)
+    internal static string ProjectSearchResults(JsonElement results)
     {
         var items = new List<object>();
         if (results.TryGetProperty("results", out var resultsArray))

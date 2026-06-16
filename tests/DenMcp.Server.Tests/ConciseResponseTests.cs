@@ -948,6 +948,121 @@ public class ConciseResponseTests : IAsyncLifetime
         Assert.Equal("verbose-spec", root.GetProperty("slug").GetString());
     }
 
+    // ─── List documents concise ──────────────────────────────────────────
+
+    [Fact]
+    public async Task ListDocuments_ConciseDefault_ReturnsItemsWithCount()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IDocumentRepository>();
+
+        // Prerequisite: store two documents to list
+        await DocumentTools.StoreDocument(
+            repo, ProjectId, "alpha", "Alpha Doc",
+            content: "# Alpha\n\nVery long content that should never appear in concise list output. ".PadRight(1000, 'x'),
+            doc_type: "spec", tags: """["alpha"]""", verbose: true);
+        await DocumentTools.StoreDocument(
+            repo, ProjectId, "beta", "Beta Doc",
+            content: "# Beta\n\n".PadRight(500, 'x'),
+            doc_type: "reference", tags: """["beta"]""", verbose: true);
+
+        // Fetch full results and wrap in Core's response shape
+        var raw = await repo.ListAsync(ProjectId);
+        var wrapper = JsonSerializer.Serialize(new { items = raw, count = raw.Count }, JsonOpts);
+        using var wrapperDoc = JsonDocument.Parse(wrapper);
+
+        var json = DocumentTools.ProjectDocumentList(wrapperDoc.RootElement);
+        using var output = JsonDocument.Parse(json);
+        var root = output.RootElement;
+
+        // Must have items array and count
+        Assert.True(root.TryGetProperty("items", out var items));
+        Assert.Equal(2, items.GetArrayLength());
+        Assert.Equal(2, root.GetProperty("count").GetInt32());
+
+        // Each item must have structured fields, not placeholder text
+        var first = items[0];
+        var slug = first.GetProperty("slug").GetString()!;
+        Assert.Contains(slug, new[] { "alpha", "beta" });
+        Assert.True(first.TryGetProperty("project_id", out _));
+        Assert.True(first.TryGetProperty("title", out _));
+        Assert.True(first.TryGetProperty("doc_type", out _));
+
+        // Must NOT contain full content
+        Assert.False(first.TryGetProperty("content", out _));
+    }
+
+    [Fact]
+    public async Task ListDocuments_ConciseDefault_EmptyListReturnsCountZero()
+    {
+        var json = DocumentTools.ProjectDocumentList(
+            JsonDocument.Parse("""{"items":[],"count":0}""").RootElement);
+
+        using var output = JsonDocument.Parse(json);
+        var root = output.RootElement;
+
+        Assert.Equal(0, root.GetProperty("count").GetInt32());
+        Assert.Empty(root.GetProperty("items").EnumerateArray());
+    }
+
+    // ─── Search documents concise ────────────────────────────────────────
+
+    [Fact]
+    public async Task SearchDocuments_ConciseDefault_ReturnsResultsWithCount()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IDocumentRepository>();
+
+        // Prerequisite: store documents with searchable content
+        await DocumentTools.StoreDocument(
+            repo, ProjectId, "searchable-1", "Searchable One",
+            content: "The quick brown fox jumps over the lazy dog",
+            doc_type: "note", verbose: true);
+        await DocumentTools.StoreDocument(
+            repo, ProjectId, "searchable-2", "Searchable Two",
+            content: "Foxes are quick and lazy dogs sleep all day",
+            doc_type: "reference", verbose: true);
+
+        // Search for "quick" — should match both
+        var raw = await repo.SearchAsync("quick", ProjectId);
+        Assert.NotEmpty(raw);
+
+        var wrapper = JsonSerializer.Serialize(new { results = raw, count = raw.Count }, JsonOpts);
+        using var wrapperDoc = JsonDocument.Parse(wrapper);
+
+        var json = DocumentTools.ProjectSearchResults(wrapperDoc.RootElement);
+        using var output = JsonDocument.Parse(json);
+        var root = output.RootElement;
+
+        // Must have results array and count
+        Assert.True(root.TryGetProperty("results", out var results));
+        Assert.True(root.GetProperty("count").GetInt32() >= 1);
+
+        // Each result must have structured fields
+        var first = results[0];
+        Assert.True(first.TryGetProperty("project_id", out _));
+        Assert.True(first.TryGetProperty("slug", out _));
+        Assert.True(first.TryGetProperty("title", out _));
+        Assert.True(first.TryGetProperty("doc_type", out _));
+        Assert.True(first.TryGetProperty("snippet", out _));
+
+        // Must NOT contain full content
+        Assert.False(first.TryGetProperty("content", out _));
+    }
+
+    [Fact]
+    public async Task SearchDocuments_ConciseDefault_EmptySearchReturnsCountZero()
+    {
+        var json = DocumentTools.ProjectSearchResults(
+            JsonDocument.Parse("""{"results":[],"count":0}""").RootElement);
+
+        using var output = JsonDocument.Parse(json);
+        var root = output.RootElement;
+
+        Assert.Equal(0, root.GetProperty("count").GetInt32());
+        Assert.Empty(root.GetProperty("results").EnumerateArray());
+    }
+
     // ─── Add agent guidance entry ─────────────────────────────────────────
 
     [Fact]
